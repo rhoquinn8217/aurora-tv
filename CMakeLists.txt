@@ -4,7 +4,7 @@ set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
 # Keep the fork's upstream version; CTM changes bump only the build number,
 # shown as "1.1.7 (N)" in the app. appinfo/ipk stay at the numeric version.
 set(MOONLIGHT_VERSION "1.1.7")
-set(CTM_BUILD_NUMBER 7)
+set(CTM_BUILD_NUMBER 8)
 
 project(moonlight VERSION ${MOONLIGHT_VERSION} LANGUAGES C CXX)
 
@@ -93,7 +93,7 @@ if (TARGET_WEBOS)
     set(CMAKE_THREAD_LIBS_INIT "-lpthread" CACHE INTERNAL "webOS pthread")
     set(OS_LINUX TRUE)
 
-    set(WEBOS_APPINFO_ID "com.aurora.gamestream")
+    set(WEBOS_APPINFO_ID "com.aurora.gamestream.rhqn")
     set(CMAKE_INSTALL_RPATH "$ORIGIN/lib/backports:$ORIGIN/../lib/backports:$ORIGIN")
 elseif (TARGET_STEAMLINK)
     set(OS_LINUX TRUE)
