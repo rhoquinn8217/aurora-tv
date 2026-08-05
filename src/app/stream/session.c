@@ -159,6 +159,12 @@ bool session_start_input(session_t *session) {
             // Keep Moonlight's controllers open (UI nav still works); host sends are
             // gated and the controller-arrival is suppressed, so nothing reaches the
             // host. The bridge forwards the plugged controller to the game itself.
+            //
+            // The agent runs on the machine we are streaming from, so hand the
+            // bridge that address rather than letting it broadcast for one: a
+            // broadcast probe never leaves the local network, so a host reached
+            // over the internet is never found.
+            ctm_bridge_set_host(session->server->serverInfo.address, 0);
             ctm_bridge_start();
         }
     }

@@ -13,6 +13,16 @@
 extern "C" {
 #endif
 
+/* Tell the bridge where the Windows CTM agent is, skipping discovery. When: the
+ * host app already knows the address because it is streaming from that same
+ * machine. Call before ctm_bridge_start(). Passing NULL or "" restores
+ * discovery. Port 0 keeps the default agent port.
+ *
+ * Without this, the agent is found by a UDP broadcast probe, which never leaves
+ * the local network -- so a TV streaming from a host elsewhere can never find
+ * it. */
+void ctm_bridge_set_host(const char *host, int port);
+
 /* Start the bridge: discover the Windows CTM agent, enumerate controllers,
  * auto-plug the first one we recognise, and run the stopSniff keep-alive.
  * Idempotent (a second call while active is a no-op). Returns true if a

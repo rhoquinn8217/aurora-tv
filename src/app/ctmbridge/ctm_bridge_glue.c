@@ -15,6 +15,11 @@
 #include "ctm_monitor.h" /* hotplug: connect/disconnect watch thread */
 
 static bool s_active = false;
+
+void ctm_bridge_set_host(const char *host, int port)
+{
+    ctm_bridge_set_agent_host(host, port);
+}
 /* Auto-plug ALL recognised controllers on stream start. The overlay panel can
  * still plug/unplug individually or all at once. */
 static bool s_autoplug = true;
