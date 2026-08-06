@@ -195,6 +195,16 @@ int ctm_bridge_list(ctm_bridge_dev_t *out, int max)
     return n;
 }
 
+bool ctm_bridge_plug_node(const char *node)
+{
+    if (!s_active) return false;
+    ctm_glue_ensure_core();
+    pthread_mutex_lock(&s_dev_mutex);
+    bool ok = plug_in_by_node(node);
+    pthread_mutex_unlock(&s_dev_mutex);
+    return ok;
+}
+
 bool ctm_bridge_plug_index(int index)
 {
     ctm_glue_ensure_core();

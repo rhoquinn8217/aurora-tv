@@ -60,6 +60,11 @@ void ctm_bridge_agent(char *out, size_t out_len);
  * next ctm_bridge_list() call. */
 int ctm_bridge_list(ctm_bridge_dev_t *out, int max);
 
+/* Plug whichever device owns this /dev/hidrawN. When: a local gesture on the
+ * controller itself named a device -- its node is the only identifier that
+ * separates two otherwise identical controllers. Returns true if it plugged. */
+bool ctm_bridge_plug_node(const char *node);
+
 /* Manually plug / unplug the device at the given list index. */
 bool ctm_bridge_plug_index(int index);
 void ctm_bridge_unplug_index(int index);
