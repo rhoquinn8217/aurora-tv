@@ -53,7 +53,7 @@ static Uint32 vmouse_hold_timer_cb(Uint32 interval, void *param);
 static bool stream_input_gamepad_sends_moonlight(const stream_input_t *input,
                                                  const app_gamepad_state_t *gamepad) {
     (void) input;
-    return !input->view_only && gamepad != NULL;
+    return !input->view_only && !input->no_host_gamepad && gamepad != NULL;
 }
 
 static uint16_t stream_input_moonlight_active_mask(const stream_input_t *input)
@@ -334,7 +334,7 @@ void stream_input_handle_jdevice(stream_input_t *input, const SDL_JoyDeviceEvent
             return;
         }
         gamepad = app_input_gamepad_state_by_instance_id(input->input, instance_id);
-        if (gamepad == NULL || input->view_only) {
+        if (gamepad == NULL || input->view_only || input->no_host_gamepad) {
             return;
         }
         stream_input_send_gamepad_arrive(input, gamepad);
@@ -343,7 +343,7 @@ void stream_input_handle_jdevice(stream_input_t *input, const SDL_JoyDeviceEvent
 #endif
     } else if (event->type == SDL_JOYDEVICEREMOVED) {
         gamepad = app_input_gamepad_state_by_instance_id(input->input, event->which);
-        if (gamepad == NULL || input->view_only) {
+        if (gamepad == NULL || input->view_only || input->no_host_gamepad) {
             return;
         }
         if (!stream_input_gamepad_sends_moonlight(input, gamepad)) {
@@ -425,7 +425,7 @@ void stream_input_send_gamepad_arrive(stream_input_t *input, app_gamepad_state_t
 }
 
 void stream_input_send_gamepad_remove(stream_input_t *input, app_gamepad_state_t *gamepad) {
-    if (input->view_only || gamepad == NULL) {
+    if (input->view_only || input->no_host_gamepad || gamepad == NULL) {
         return;
     }
     if ((input->announcedGamepadMask & (1 << gamepad->gs_id)) == 0) {
@@ -439,7 +439,7 @@ void stream_input_send_gamepad_remove(stream_input_t *input, app_gamepad_state_t
 }
 
 static void stream_input_send_unannounced_gamepads(stream_input_t *input) {
-    if (input->view_only) {
+    if (input->view_only || input->no_host_gamepad) {
         return;
     }
     for (int i = 0, j = app_input_get_max_gamepads(input->input); i < j; ++i) {

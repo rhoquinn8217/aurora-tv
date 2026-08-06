@@ -62,6 +62,11 @@ typedef struct session_config_t {
     STREAM_CONFIGURATION stream;
     bool sops;
     bool view_only;
+    /* Suppress moonlight's OWN gamepad announcements and input to the host,
+     * while leaving keyboard, mouse and touch working. Set when the CTM bridge
+     * is forwarding the physical controller itself, so the host would otherwise
+     * see it twice. Distinct from view_only, which silences ALL input. */
+    bool no_host_gamepad;
     bool ctm_bridge;
     bool local_audio;
     bool hardware_mouse;

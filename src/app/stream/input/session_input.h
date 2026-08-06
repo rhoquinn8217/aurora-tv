@@ -43,7 +43,7 @@ typedef struct stream_input_t {
     uint32_t pointerGesturePressTime;
     int pointerGestureStartX;
     int pointerGestureStartY;
-    bool view_only, no_sdl_mouse;
+    bool view_only, no_sdl_mouse, no_host_gamepad;
     uint8_t stick_deadzone;
     session_input_vmouse_t vmouse;
 #if FEATURE_INPUT_EVMOUSE

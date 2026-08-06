@@ -293,7 +293,11 @@ void session_config_init(app_t *app, session_config_t *config, const SERVER_DATA
     config->vmouse = app_config->virtual_mouse;
     config->hardware_mouse = app_config->hardware_mouse;
     config->local_audio = app_config->localaudio;
-    config->view_only = app_config->viewonly || app_config->ctm_bridge;
+    config->view_only = app_config->viewonly;
+    /* The bridge forwards the physical controller itself, so moonlight must not
+     * also present it -- but only the GAMEPAD conflicts. Keyboard, mouse and
+     * touch have no bridged counterpart and stay working. */
+    config->no_host_gamepad = app_config->ctm_bridge;
     config->ctm_bridge = app_config->ctm_bridge;
     config->sops = app_config->sops;
     if (app_config->stick_deadzone < 0) {

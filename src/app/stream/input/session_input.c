@@ -38,6 +38,7 @@ void session_input_init(stream_input_t *input, session_t *session, app_input_t *
     input->pointerGestureStartX = 0;
     input->pointerGestureStartY = 0;
     input->view_only = config->view_only;
+    input->no_host_gamepad = config->no_host_gamepad;
     input->stick_deadzone = config->stick_deadzone;
     input->no_sdl_mouse = config->hardware_mouse;
 #if FEATURE_INPUT_EVMOUSE
@@ -68,7 +69,7 @@ void session_input_interrupt(stream_input_t *input) {
 
 void session_input_started(stream_input_t *input) {
     input->started = true;
-    if (input->view_only) {
+    if (input->view_only || input->no_host_gamepad) {
         // CTM bridge / view-only: don't announce controllers to the host (this is
         // what created the phantom ViGEmBus pad). Moonlight still reads them locally.
         return;
