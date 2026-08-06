@@ -665,7 +665,10 @@ static const char *ctm_audio_name_ds4(int m) {
 }
 
 static const char *ctm_kind_title(const char *kind) {
-    if (strcmp(kind, "ds5") == 0)  return "Sony DualSense (DS5)";
+    if (strcmp(kind, "ds5") == 0 || strcmp(kind, "ds5_usb") == 0)
+        return "Sony DualSense (DS5)";
+    if (strcmp(kind, "ds5e") == 0 || strcmp(kind, "ds5e_usb") == 0)
+        return "Sony DualSense Edge";
     if (strcmp(kind, "ds4") == 0)  return "Sony DualShock 4 (DS4)";
     if (strcmp(kind, "puck") == 0) return "Steam Controller";
     if (strcmp(kind, "xbox") == 0) return "Xbox Controller";
@@ -1035,7 +1038,8 @@ static void ctm_nav_cancel_cb(lv_event_t *e) {
 
 /* Short sidebar label: kind badge for known controllers, device name for HID. */
 static const char *ctm_dev_label(const ctm_bridge_dev_t *d) {
-    if (strcmp(d->kind, "ds5") == 0)  return "DS5";
+    if (strcmp(d->kind, "ds5") == 0 || strcmp(d->kind, "ds5_usb") == 0)  return "DS5";
+    if (strcmp(d->kind, "ds5e") == 0 || strcmp(d->kind, "ds5e_usb") == 0) return "DS5 Edge";
     if (strcmp(d->kind, "ds4") == 0)  return "DS4";
     if (strcmp(d->kind, "puck") == 0) return "Steam Puck";
     if (strcmp(d->kind, "xbox") == 0) return "Xbox";
