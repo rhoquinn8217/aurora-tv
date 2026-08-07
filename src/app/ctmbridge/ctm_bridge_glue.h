@@ -60,6 +60,11 @@ void ctm_bridge_agent(char *out, size_t out_len);
  * next ctm_bridge_list() call. */
 int ctm_bridge_list(ctm_bridge_dev_t *out, int max);
 
+/* Is the controller behind this hidraw node already bridged? A plug attempt
+ * cannot answer this -- it returns false both when already plugged and when
+ * genuinely refused. */
+bool ctm_bridge_node_is_plugged(const char *node);
+
 /* Plug whichever device owns this /dev/hidrawN. When: a local gesture on the
  * controller itself named a device -- its node is the only identifier that
  * separates two otherwise identical controllers. Returns true if it plugged. */

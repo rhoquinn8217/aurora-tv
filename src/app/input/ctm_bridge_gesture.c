@@ -384,6 +384,21 @@ static bool gesture_poll_one(SDL_GameController *controller, SDL_JoystickID id) 
         gesture_log("fired, but no hidraw node behind %s", dev_path);
         return false;
     }
+    /* Already bridged: stand down rather than ask again.
+     *
+     * Without this the watcher tries to plug a controller that is already
+     * plugged, is refused, and flashes the refusal pattern -- a failure shown
+     * for something that did not fail. It also made the unplug gesture look
+     * broken, because the flash lands during the same hold that is on its way
+     * to unplugging.
+     *
+     * Asked here rather than while the hold runs: fired is already set above,
+     * so this costs one lookup per gesture instead of one per report. */
+    if (ctm_bridge_node_is_plugged(node)) {
+        gesture_log("%s is already plugged -- standing down", node);
+        return false;
+    }
+
     bool ok = ctm_bridge_plug_node(node);
     gesture_log("fired on %s -> %s : %s", dev_path, node, ok ? "plugged" : "refused");
     if (!ok) {

@@ -225,6 +225,44 @@ int ctm_bridge_list(ctm_bridge_dev_t *out, int max)
     return n;
 }
 
+/* Is the controller behind this hidraw node already bridged?
+ *
+ * The same lookup a plug does, asked as a question instead. It exists because
+ * a plug attempt cannot answer it: plugging something already plugged comes
+ * back false, exactly like a genuine failure, so the gesture watcher showed a
+ * refusal for something that had not failed.
+ *
+ * Answered here rather than in the bridge core deliberately -- the behaviour
+ * being fixed is this app's, and the core is the part heading upstream.
+ *
+ * When: the gesture watcher, once, at the moment it would otherwise plug. */
+bool ctm_bridge_node_is_plugged(const char *node)
+{
+    if (!node || !node[0]) {
+        return false;
+    }
+    ctm_glue_ensure_core();
+    pthread_mutex_lock(&s_dev_mutex);
+    ctm_glue_enumerate();
+    bool plugged = false;
+    for (int i = 0; i < g_devices.count && !plugged; ++i) {
+        logical_device_t *item = &g_devices.items[i];
+        for (int k = 0; k < item->device_count; ++k) {
+            int j = item->device_indices[k];
+            if (j < 0 || j >= g_scan.count) {
+                continue;
+            }
+            if (strcmp(g_scan.devices[j].node, node) != 0) {
+                continue;
+            }
+            plugged = (session_index_for_key(item->key) >= 0);
+            break;
+        }
+    }
+    pthread_mutex_unlock(&s_dev_mutex);
+    return plugged;
+}
+
 bool ctm_bridge_plug_node(const char *node)
 {
     if (!s_active) return false;
