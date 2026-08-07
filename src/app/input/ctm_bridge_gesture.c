@@ -24,10 +24,15 @@
 #if defined(TARGET_WEBOS)
 
 #include "ctm_bridge_glue.h"
+#include "app_input.h"
+#include "input_gamepad.h"
 #include "logging.h"
 
 #include <dirent.h>
+#include <fcntl.h>
+#include <sys/ioctl.h>
 #include <limits.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -37,6 +42,25 @@
  * still there if it is missed. */
 #define GESTURE_PLUG_HOLD_MS 2000
 
+/* The app's own log is not readable on webOS -- there is no journal and no
+ * /var/log -- so gesture activity goes to a file of its own, beside the ones
+ * the bridge core writes. Without it a failure here is completely silent,
+ * which cost a build cycle to learn. */
+#define GESTURE_LOG "/tmp/ctm-gesture.log"
+
+static void gesture_log(const char *fmt, ...) {
+    FILE *f = fopen(GESTURE_LOG, "a");
+    if (!f) {
+        return;
+    }
+    va_list ap;
+    va_start(ap, fmt);
+    vfprintf(f, fmt, ap);
+    va_end(ap);
+    fputc('\n', f);
+    fclose(f);
+}
+
 /* One entry per controller being watched. Deliberately keyed by SDL's own
  * instance id rather than by position: controllers come and go. */
 #define MAX_WATCHED 8
@@ -45,7 +69,47 @@ typedef struct {
     SDL_JoystickID id;
     uint32_t since;      /* SDL ticks when the gesture began; 0 = not held */
     bool fired;          /* already acted on this hold */
+    bool asked_full;     /* full-report request already sent for this connection */
 } watched_t;
+
+#ifndef HIDIOCGFEATURE
+#define HIDIOCGFEATURE(len) _IOC(_IOC_READ | _IOC_WRITE, 'H', 0x07, len)
+#endif
+
+/* Ask a DualSense for its full input report.
+ *
+ * Over Bluetooth the controller sends a REDUCED ten-byte report -- sticks and
+ * some buttons, no touchpad at all -- until a host reads the calibration
+ * feature report (0x05). Reading it is what makes the controller start sending
+ * the full 78-byte report instead. Documented for the DualShock 4 by the Game
+ * Controller Collective Wiki and defined identically for the DualSense in the
+ * kernel's hid-playstation driver.
+ *
+ * Nothing on this TV does that read: dmesg shows the controller bound to
+ * hid-generic, so hid-playstation -- which would read calibration on probe --
+ * never runs. SDL's own PlayStation driver reads it when it opens a controller,
+ * but measured 2026-08-06 that does not reliably happen again after a Bluetooth
+ * reconnect, leaving the controller in reduced mode with no touchpad for the
+ * gesture to see.
+ *
+ * Harmless when it is not needed: over USB the controller already sends the
+ * full report, and reading calibration changes nothing. */
+static void request_full_report(const char *dev_path) {
+    if (!dev_path || strncmp(dev_path, "/dev/hidraw", 11) != 0) {
+        return;
+    }
+    int fd = open(dev_path, O_RDWR);
+    if (fd < 0) {
+        gesture_log("full-report request: cannot open %s", dev_path);
+        return;
+    }
+    uint8_t feature[64];
+    memset(feature, 0, sizeof(feature));
+    feature[0] = 0x05;
+    bool ok = ioctl(fd, HIDIOCGFEATURE(sizeof(feature)), feature) >= 0;
+    close(fd);
+    gesture_log("full-report request on %s: %s", dev_path, ok ? "sent" : "failed");
+}
 
 static watched_t s_watched[MAX_WATCHED];
 
@@ -108,6 +172,16 @@ static bool sys_input_dir_for_event(const char *dev_path, char *out, size_t out_
  * underneath it. The interface is the input device's parent's parent, matching
  * the layout confirmed on hardware. */
 static bool hidraw_node_for_event(const char *dev_path, char *out, size_t out_len) {
+    /* On webOS, SDL opens the controller through hidraw and hands that node
+     * straight back -- which is the thing we are looking for. Measured on C3,
+     * 2026-08-06: SDL_GameControllerPath returned "/dev/hidraw0". Everything
+     * below is the fallback for a build whose SDL reports an evdev node
+     * instead, which is what upstream Linux typically does. */
+    if (strncmp(dev_path, "/dev/hidraw", 11) == 0) {
+        snprintf(out, out_len, "%s", dev_path);
+        return true;
+    }
+
     char sys_input[PATH_MAX];
     if (!sys_input_dir_for_event(dev_path, sys_input, sizeof(sys_input))) {
         return false;
@@ -163,43 +237,86 @@ void ctm_bridge_gesture_reset(SDL_JoystickID id) {
     }
 }
 
-void ctm_bridge_gesture_poll(SDL_GameController *controller, SDL_JoystickID id) {
+/* Returns true if the controller was just handed to the bridge. */
+static bool gesture_poll_one(SDL_GameController *controller, SDL_JoystickID id) {
     watched_t *w = watched_for(id);
     if (!w) {
-        return;
+        return false;
+    }
+
+    /* Once per connection, before anything else: make sure the controller is
+     * sending its full report, or there is no touchpad to read. */
+    if (!w->asked_full) {
+        w->asked_full = true;
+        request_full_report(SDL_GameControllerPath(controller));
     }
 
     if (!gesture_held(controller)) {
         w->since = 0;
         w->fired = false;
-        return;
+        return false;
     }
     if (w->fired) {
-        return;   /* wait for the fingers to lift */
+        return false;   /* wait for the fingers to lift */
     }
 
     uint32_t now = SDL_GetTicks();
     if (w->since == 0) {
         w->since = now ? now : 1;
-        return;
+        gesture_log("gesture started on controller %d", (int)id);
+        return false;
     }
     if (now - w->since < GESTURE_PLUG_HOLD_MS) {
-        return;
+        return false;
     }
     w->fired = true;
 
     const char *dev_path = SDL_GameControllerPath(controller);
     if (!dev_path || !dev_path[0]) {
-        commons_log_warn("CTMGesture", "plug gesture: SDL gave no device path");
-        return;
+        gesture_log("fired, but SDL gave no device path");
+        return false;
     }
     char node[64];
     if (!hidraw_node_for_event(dev_path, node, sizeof(node))) {
-        commons_log_warn("CTMGesture", "plug gesture: no hidraw node behind %s", dev_path);
+        gesture_log("fired, but no hidraw node behind %s", dev_path);
+        return false;
+    }
+    bool ok = ctm_bridge_plug_node(node);
+    gesture_log("fired on %s -> %s : %s", dev_path, node, ok ? "plugged" : "refused");
+
+    return ok;
+}
+
+
+void ctm_bridge_gesture_tick(struct app_input_t *input) {
+    if (!input) {
         return;
     }
-    commons_log_info("CTMGesture", "plug gesture on %s -> %s", dev_path, node);
-    ctm_bridge_plug_node(node);
+    app_input_t *in = (app_input_t *)input;
+    int n = (int)app_input_get_max_gamepads(in);
+    for (int i = 0; i < n; ++i) {
+        SDL_GameController *gc = in->gamepads[i].controller;
+        if (!gc) {
+            continue;
+        }
+        SDL_Joystick *js = SDL_GameControllerGetJoystick(gc);
+        if (!js) {
+            continue;
+        }
+        /* Moonlight deliberately KEEPS the controller open after bridging.
+         *
+         * Releasing it was tried on 2026-08-06 and reverted the same evening.
+         * The theory was that SDL's own PlayStation driver contends with the
+         * bridge for the device -- but the evidence was thin (the bridge was
+         * reading reports perfectly well either way), and the real cause of
+         * that session's trouble turned out to be a wedged Bluetooth link,
+         * cleared by power-cycling the controller.
+         *
+         * Releasing also STRANDS the controller: nothing gives it back on
+         * unbridge, so the gesture -- which needs moonlight to see the pad --
+         * can never fire again. Three attempts failed until a power cycle. */
+        (void)gesture_poll_one(gc, SDL_JoystickInstanceID(js));
+    }
 }
 
 #endif /* TARGET_WEBOS */

@@ -6,6 +6,7 @@
 #include "lvgl/util/lv_app_utils.h"
 
 #include "app.h"
+#include "input/ctm_bridge_gesture.h"
 #include "config.h"
 
 #include "logging.h"
@@ -70,6 +71,14 @@ int app_init(app_t *app, app_settings_loader *settings_loader, int argc, char *a
     SDL_SetHint(SDL_HINT_WEBOS_CURSOR_FREQUENCY, "60");
     SDL_SetHint(SDL_HINT_WEBOS_CURSOR_CALIBRATION_DISABLE, "true");
     SDL_SetHint(SDL_HINT_WEBOS_HIDAPI_IGNORE_BLUETOOTH_DEVICES, "0x057e/0x0000");
+    /* Ask PlayStation controllers for their full input report rather than
+     * waiting for a reason to. Over Bluetooth a DualSense sends a cut-down
+     * report -- sticks and buttons, ten bytes, no touchpad at all -- until a
+     * host asks for more. Without this the touchpad gesture that bridges a
+     * controller has nothing to read, so it can only ever work on a cable.
+     * Measured 2026-08-06 on the rooted monitor. */
+    SDL_SetHint(SDL_HINT_JOYSTICK_HIDAPI_PS5, "1");
+    SDL_SetHint(SDL_HINT_JOYSTICK_HIDAPI_PS5_RUMBLE, "1");
     if (app->settings.syskey_capture) {
         SDL_SetHint(SDL_HINT_WEBOS_ACCESS_POLICY_KEYS_HOME, "true");
         SDL_SetHint(SDL_HINT_WEBOS_ACCESS_POLICY_RIBBON, "false");
@@ -288,6 +297,7 @@ static int app_event_filter(void *userdata, SDL_Event *event) {
 void app_process_events(app_t *app) {
     SDL_PumpEvents();
     SDL_FilterEvents(app_event_filter, app);
+    ctm_bridge_gesture_tick(&app->input);
 }
 
 void app_quit_confirm() {
