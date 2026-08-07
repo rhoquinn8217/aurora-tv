@@ -27,22 +27,6 @@ void app_input_handle_event(app_input_t *input, const SDL_Event *event) {
         app_input_close_gamepad(input, event->cdevice.which);
     } else if (event->type == SDL_CONTROLLERDEVICEREMAPPED) {
         commons_log_debug("Input", "SDL_CONTROLLERDEVICEREMAPPED");
-    } else if (event->type == SDL_CONTROLLERBUTTONDOWN ||
-               event->type == SDL_CONTROLLERBUTTONUP ||
-               event->type == SDL_CONTROLLERTOUCHPADDOWN ||
-               event->type == SDL_CONTROLLERTOUCHPADMOTION ||
-               event->type == SDL_CONTROLLERTOUCHPADUP) {
-        /* Watch for the plug gesture. Driven by events moonlight already
-         * receives, so an idle controller costs nothing. Touchpad motion keeps
-         * arriving while fingers rest on the pad, which is what lets a hold be
-         * timed without a poll of our own. */
-        SDL_JoystickID id = (event->type == SDL_CONTROLLERBUTTONDOWN ||
-                             event->type == SDL_CONTROLLERBUTTONUP)
-                            ? event->cbutton.which : event->ctouchpad.which;
-        SDL_GameController *gc = SDL_GameControllerFromInstanceID(id);
-        if (gc) {
-            ctm_bridge_gesture_poll(gc, id);
-        }
     } else if (event->type == SDL_USEREVENT) {
         if (event->user.code == USER_INPUT_CONTROLLERDB_UPDATED) {
             app_input_reload_gamepad_mapping(input);
