@@ -70,6 +70,8 @@ typedef struct {
     uint32_t since;      /* SDL ticks when the gesture began; 0 = not held */
     bool fired;          /* already acted on this hold */
     bool asked_full;     /* full-report request already sent for this connection */
+    uint8_t flash_left;  /* half-steps of the refusal flash still to show */
+    uint32_t flash_next; /* SDL ticks when the next half-step is due */
 } watched_t;
 
 #ifndef HIDIOCGFEATURE
@@ -155,6 +157,60 @@ static bool gesture_held(SDL_GameController *controller) {
         }
     }
     return down >= 2;
+}
+
+/* Tell the user, on the controller itself, that a bridge attempt was refused.
+ *
+ * Three short YELLOW flashes. Two reasons it is not red. Red is the DualSense's
+ * PLAYER TWO colour -- blue, red, green, purple in order -- so a red lightbar
+ * already means something specific to anyone who has played a multiplayer game.
+ * And a refused plug is a warning rather than a fault: it almost always means
+ * the listener is not running, which is something to go and start, not
+ * something broken. Amber says that everywhere else, and it leaves red free in
+ * case something genuinely bad ever needs saying.
+ *
+ * Three flashes is clearly deliberate rather than a glitch.
+ *
+ * This is the one signal with nothing to compete against. A SUCCESSFUL bridge
+ * is announced by the controller's own connect behaviour -- it lights up by
+ * itself, and an attempt to say the same thing over the top was abandoned on
+ * 2026-08-06 after it lost every fight with the host, and turned out to be
+ * killing Bluetooth sessions by writing a wired report over a Bluetooth link.
+ * A REFUSAL has no such signal: nothing connected, so nothing lit up, and
+ * nothing else is writing to the controller.
+ *
+ * Written straight to the device, the same way the full-report request is: the
+ * refusal happens here, and the bridge cannot say anything about a controller
+ * it never took.
+ *
+ * WIRED ONLY, for the reason the light show learned the hard way: this is the
+ * wired output report, and Bluetooth expects its own format with a checksum. */
+#define REFUSED_FLASHES   3
+#define REFUSED_ON_MS     120
+#define REFUSED_OFF_MS    120
+
+/* One step of the flash.
+ *
+ * Set through SDL rather than by writing a report ourselves. Two reasons, both
+ * learned the hard way on 2026-08-06:
+ *
+ * SDL's own PlayStation driver is enabled here (it is what makes a Bluetooth
+ * controller send its touchpad at all), and that driver writes output reports
+ * including the lightbar. A raw write is simply overwritten by it -- the light
+ * went straight to whatever SDL wanted and our colour was never seen.
+ *
+ * And SDL builds the right report for whichever transport the controller is
+ * on, checksum included. Writing the wired report over a Bluetooth link was
+ * killing sessions, which is why the earlier confirmation light had to be
+ * gated to wired. Going through SDL removes that limit entirely.
+ *
+ * Deliberately NOT a loop with sleeps in it: this runs on the app's main loop,
+ * and sleeping here would freeze the interface for the length of the signal.
+ * The loop's own passes are the clock, exactly as the gesture hold is timed. */
+static void flash_write(SDL_GameController *controller, uint8_t r, uint8_t g, uint8_t b) {
+    if (controller) {
+        SDL_GameControllerSetLED(controller, r, g, b);
+    }
 }
 
 /* /dev/input/eventN -> the sysfs input directory that describes it. */
@@ -244,6 +300,53 @@ static bool gesture_poll_one(SDL_GameController *controller, SDL_JoystickID id) 
         return false;
     }
 
+    /* A refusal flash in progress: one half-step per pass, no sleeping. */
+    if (w->flash_left > 0) {
+        uint32_t now_ticks = SDL_GetTicks();
+        if (now_ticks >= w->flash_next) {
+            --w->flash_left;
+            if (w->flash_left == 0) {
+                /* Put the PLAYER colour back.
+                 *
+                 * The lightbar is the player indicator -- blue, red, green,
+                 * purple for players one to four -- and moonlight assigns an
+                 * index to every controller. Writing a fixed blue told a second
+                 * controller it was player one: worse than leaving the light
+                 * alone, because it is a meaningful colour stated wrongly.
+                 *
+                 * Re-setting the index it already has does not work either:
+                 * SDL sees the same value and repaints nothing, so the light
+                 * stayed yellow. Measured 2026-08-06 on both transports. So the
+                 * colour is set directly, from the index SDL is already
+                 * holding. */
+                static const uint8_t player_rgb[4][3] = {
+                    { 0x00, 0x00, 0xff },   /* 1: blue   */
+                    { 0xff, 0x00, 0x00 },   /* 2: red    */
+                    { 0x00, 0xff, 0x00 },   /* 3: green  */
+                    { 0xff, 0x00, 0xff },   /* 4: purple */
+                };
+                int slot = SDL_GameControllerGetPlayerIndex(controller);
+                if (slot < 0 || slot > 3) {
+                    slot = 0;
+                }
+                flash_write(controller, player_rgb[slot][0],
+                            player_rgb[slot][1], player_rgb[slot][2]);
+                gesture_log("refusal flash finished, player %d colour restored",
+                            slot + 1);
+            } else {
+                /* Odd counts are the lit ones, so the LAST flash step is lit
+                 * rather than an unlit one nobody sees. */
+                bool lit = (w->flash_left % 2) == 1;
+                flash_write(controller,
+                            lit ? 0xff : 0x00,   /* red   } together: yellow */
+                            lit ? 0xff : 0x00,   /* green } */
+                            0x00);
+                w->flash_next = now_ticks + (lit ? REFUSED_ON_MS : REFUSED_OFF_MS);
+            }
+        }
+        return false;
+    }
+
     /* Once per connection, before anything else: make sure the controller is
      * sending its full report, or there is no touchpad to read. */
     if (!w->asked_full) {
@@ -283,6 +386,13 @@ static bool gesture_poll_one(SDL_GameController *controller, SDL_JoystickID id) 
     }
     bool ok = ctm_bridge_plug_node(node);
     gesture_log("fired on %s -> %s : %s", dev_path, node, ok ? "plugged" : "refused");
+    if (!ok) {
+        /* Works on either transport: SDL builds the right report for the one
+         * the controller is actually on. */
+        w->flash_left = REFUSED_FLASHES * 2 + 1;   /* +1 for the restore */
+        w->flash_next = SDL_GetTicks();
+        gesture_log("refused: flashing yellow on %s", node);
+    }
 
     return ok;
 }
