@@ -164,9 +164,19 @@ bool ctm_bridge_start(void)
         log_append("ctm glue: auto-plug off, use the overlay panel to plug a controller");
     }
 
-    /* Bridge the TV remote as a host mouse too (same policy as the standalone
-     * app: the pointer auto-plugs; the panel row can release/re-plug it). */
-    if (ctm_tv_pointer_plug()) {
+    /* The TV pointer used to be bridged here unconditionally, whatever the
+     * auto-plug setting said -- the third path that claimed a device without
+     * being asked, and the one that kept appearing in the host's log as
+     * ctm-remote.
+     *
+     * It is also redundant now. It existed because enabling the bridge put the
+     * session into view-only, which silenced moonlight's own mouse; bridging
+     * the pointer was the only way to get one to the host. That was fixed on
+     * 2026-08-05 -- moonlight's mouse works with the bridge on -- so this was
+     * claiming a device for a job already done.
+     *
+     * The overlay row still plugs it deliberately for anyone who wants it. */
+    if (s_autoplug && ctm_tv_pointer_plug()) {
         log_append("ctm glue: TV pointer bridged");
     }
 
