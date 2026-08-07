@@ -20,9 +20,17 @@ void ctm_bridge_set_host(const char *host, int port)
 {
     ctm_bridge_set_agent_host(host, port);
 }
-/* Auto-plug ALL recognised controllers on stream start. The overlay panel can
- * still plug/unplug individually or all at once. */
-static bool s_autoplug = true;
+/* Auto-plug ALL recognised controllers on stream start.
+ *
+ * Off. On a TV with one controller, plugging everything is a convenience. On a
+ * hub carrying a keyboard, a mouse and a controller it takes all of them --
+ * bridging claims a device exclusively, so the keyboard and mouse stop working
+ * on the TV, and every session opens with a cascade of connect chimes and a
+ * cleanup. Observed on three TVs.
+ *
+ * Nothing needs it now: a controller is bridged by holding two fingers on its
+ * touchpad and pressing, and the overlay panel still plugs anything by hand. */
+static bool s_autoplug = false;
 
 /* Enumerate + build the logical model + Stage-1 puck enumeration capture. The
  * Steam puck only exposes its full composite if g_puck_enum is cached BEFORE the
@@ -89,6 +97,18 @@ static void glue_hotplug_cb(void *ud, const ctm_controller_dev_t *dev, int prese
 {
     (void) ud; (void) dev; (void) present;
     if (!s_active) {
+        return;
+    }
+    /* Any device appearing or disappearing used to plug EVERYTHING, without
+     * asking whether auto-plug was wanted. Two surprises came from that:
+     * a stream opened with every device on a hub bridged at once, and pulling
+     * an unrelated hub bridged a controller that had been left alone. Bridging
+     * claims a device exclusively, so both took working devices away from the
+     * TV without being asked.
+     *
+     * Noticing a change is still worth doing; acting on it is what the gesture
+     * is for. */
+    if (!s_autoplug) {
         return;
     }
     pthread_mutex_lock(&s_dev_mutex);
