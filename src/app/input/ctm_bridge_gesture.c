@@ -71,6 +71,15 @@ typedef struct {
     bool fired;          /* already acted on this hold */
     bool asked_full;     /* full-report request already sent for this connection */
     uint8_t flash_left;  /* half-steps of the refusal flash still to show */
+    uint8_t prep_left;   /* steps of the pre-plug pulse still to show */
+    uint32_t prep_next;  /* SDL ticks when the next pulse step is due */
+    char prep_node[64];  /* the node to plug once the pulse finishes */
+    bool ours_plugged;   /* we plugged this one and it is still bridged */
+    uint32_t plug_check_next;  /* SDL ticks when to look again */
+    uint8_t bye_left;    /* steps of the post-unplug pulse still to show */
+    uint32_t bye_next;   /* SDL ticks when the next bye step is due */
+    uint32_t bye_started;  /* SDL ticks when the bye pulse began */
+    uint16_t bye_steps;    /* steps actually drawn, for timing the loop */
     uint32_t flash_next; /* SDL ticks when the next half-step is due */
 } watched_t;
 
@@ -185,6 +194,41 @@ static bool gesture_held(SDL_GameController *controller) {
  *
  * WIRED ONLY, for the reason the light show learned the hard way: this is the
  * wired output report, and Bluetooth expects its own format with a checksum. */
+/* The pre-plug pulse: magenta, ramping up and back down over about a second,
+ * immediately before the controller is handed to the host.
+ *
+ * Legitimate at this moment and only this moment. Nothing is bridged yet, so
+ * neither the game, nor Steam, nor Windows has any claim on the light -- the
+ * controller is still ours right up to the instant we give it away. Magenta
+ * because it matches the pairing colour: it reads as "connecting", not as a
+ * status we are asserting.
+ *
+ * The plug is DEFERRED until the pulse ends. Waiting a second here would mean
+ * sleeping on the app's main loop and freezing the interface, so the loop's own
+ * passes are the clock and the plug happens on the last step. */
+#define PREP_STEPS        20
+#define PREP_STEP_MS      50
+#define PREP_STEPS_HALF   (PREP_STEPS / 2)
+
+/* The post-unplug signal: three shorter breaths rather than one long one.
+ * Repetition is what makes it unmistakable, and each breath is brief enough
+ * that three of them still pass in about a second and a half. */
+#define BYE_PULSES          3
+#define BYE_STEPS_PER_PULSE 10
+#define BYE_STEPS           (BYE_PULSES * BYE_STEPS_PER_PULSE)
+
+/* How often to ask whether a controller we plugged is still bridged.
+ *
+ * The app is never told when an unplug finishes -- the teardown happens on the
+ * bridge core's own worker, and the watcher only ever sees the gesture start.
+ * So the transition has to be noticed by asking.
+ *
+ * Twice a second, and only while a controller we plugged is still plugged.
+ * That lookup enumerates devices, which is real work; asking every pass would
+ * put a filesystem scan on the app's main loop. The cheaper fix, when it is
+ * worth doing, is for the core to say so rather than for this to ask. */
+#define PLUG_CHECK_MS     500
+
 #define REFUSED_FLASHES   3
 #define REFUSED_ON_MS     120
 #define REFUSED_OFF_MS    120
@@ -211,6 +255,59 @@ static void flash_write(SDL_GameController *controller, uint8_t r, uint8_t g, ui
     if (controller) {
         SDL_GameControllerSetLED(controller, r, g, b);
     }
+}
+
+/* Leave the light on the controller's player colour.
+ *
+ * The lightbar is the player indicator -- blue, red, green, purple for players
+ * one to four -- and moonlight assigns an index to every controller. A fixed
+ * blue would tell a second controller it was player one: worse than leaving
+ * the light alone, because it is a meaningful colour stated wrongly.
+ *
+ * Set directly rather than by re-applying the index: SDL sees the same value
+ * and repaints nothing, which left the light stuck on the signal colour.
+ * Measured 2026-08-06 on both transports. */
+static void paint_player_colour(SDL_GameController *controller) {
+    static const uint8_t player_rgb[4][3] = {
+        { 0x00, 0x00, 0xff },   /* 1: blue   */
+        { 0xff, 0x00, 0x00 },   /* 2: red    */
+        { 0x00, 0xff, 0x00 },   /* 3: green  */
+        { 0xff, 0x00, 0xff },   /* 4: purple */
+    };
+    int slot = SDL_GameControllerGetPlayerIndex(controller);
+    if (slot < 0 || slot > 3) {
+        slot = 0;
+    }
+    flash_write(controller, player_rgb[slot][0],
+                player_rgb[slot][1], player_rgb[slot][2]);
+}
+
+/* A ramp that rises and falls: bright in the middle, dark at both ends, so it
+ * reads as a breath rather than a blink. For a signal that ends on a colour of
+ * its own, where the last step is not the thing being seen.
+ *
+ * `span` is the length of ONE breath, so a longer count simply repeats it. */
+static uint8_t pulse_level_breath(uint8_t step, uint8_t span) {
+    uint8_t half = span / 2;
+    if (half == 0) {
+        return 0;
+    }
+    uint8_t p = step % span;
+    return (p > half) ? (uint8_t)((span - p) * (255 / half))
+                      : (uint8_t)(p * (255 / half));
+}
+
+/* A ramp that only rises, ending at full brightness.
+ *
+ * For the handover: the light is brightest at the moment control is given
+ * away, and stays lit through the second or so the host takes to enumerate.
+ * Falling instead left it nearly dark for that whole gap, which read as a
+ * stall rather than a handover. */
+static uint8_t pulse_level_rising(uint8_t step) {
+    if (step >= PREP_STEPS) {
+        return 0;
+    }
+    return (uint8_t)(((PREP_STEPS - step) * 255u) / (PREP_STEPS - 1));
 }
 
 /* /dev/input/eventN -> the sysfs input directory that describes it. */
@@ -300,39 +397,88 @@ static bool gesture_poll_one(SDL_GameController *controller, SDL_JoystickID id) 
         return false;
     }
 
+    /* The controller has just come back to us: pulse yellow, then leave it on
+     * its player colour. Runs after an unplug has actually completed, which is
+     * the moment the light stops belonging to the host. */
+    if (w->bye_left > 0) {
+        uint32_t now_ticks = SDL_GetTicks();
+        if (now_ticks >= w->bye_next) {
+            --w->bye_left;
+            if (w->bye_left == 0) {
+                paint_player_colour(controller);
+                /* The step count against the elapsed time says whether the
+                 * app's loop is fast enough to draw the shape intended: the
+                 * loop's passes are the clock, and a slow one stretches every
+                 * pulse into a single fade. */
+                gesture_log("unplug pulse finished, %u steps in %ums, player colour set",
+                            (unsigned)w->bye_steps,
+                            (unsigned)(SDL_GetTicks() - w->bye_started));
+            } else {
+                uint8_t level = pulse_level_breath(w->bye_left, BYE_STEPS_PER_PULSE);
+                flash_write(controller, level, level, 0);   /* red + green = yellow */
+                ++w->bye_steps;
+                w->bye_next = now_ticks + PREP_STEP_MS;
+            }
+        }
+        return false;
+    }
+
+    /* Did a controller we plugged just stop being bridged? Asked on a timer,
+     * never every pass -- see PLUG_CHECK_MS. */
+    if (w->ours_plugged) {
+        uint32_t now_ticks = SDL_GetTicks();
+        if (now_ticks >= w->plug_check_next) {
+            if (!ctm_bridge_node_is_plugged(w->prep_node)) {
+                w->ours_plugged = false;
+                w->bye_left = BYE_STEPS;
+                w->bye_next = now_ticks;
+                w->bye_started = now_ticks;
+                w->bye_steps = 0;
+                gesture_log("%s came back to us -- pulsing yellow", w->prep_node);
+            } else {
+                w->plug_check_next = now_ticks + PLUG_CHECK_MS;
+            }
+        }
+    }
+
+    /* A pre-plug pulse in progress: one step per pass, no sleeping. The plug
+     * itself happens on the final step. */
+    if (w->prep_left > 0) {
+        uint32_t now_ticks = SDL_GetTicks();
+        if (now_ticks >= w->prep_next) {
+            --w->prep_left;
+            if (w->prep_left == 0) {
+                bool ok = ctm_bridge_plug_node(w->prep_node);
+                gesture_log("pulse finished on %s : %s",
+                            w->prep_node, ok ? "plugged" : "refused");
+                if (ok) {
+                    w->ours_plugged = true;
+                    w->plug_check_next = SDL_GetTicks() + PLUG_CHECK_MS;
+                }
+                if (!ok) {
+                    w->flash_left = REFUSED_FLASHES * 2 + 1;   /* +1 for the restore */
+                    w->flash_next = SDL_GetTicks();
+                    gesture_log("refused: flashing yellow on %s", w->prep_node);
+                }
+                return ok;
+            }
+            /* Up then back down: bright in the middle, dark at both ends, so it
+             * reads as a breath rather than a blink. */
+            uint8_t level = pulse_level_rising(w->prep_left);
+            flash_write(controller, level, 0, level);   /* red + blue = magenta */
+            w->prep_next = now_ticks + PREP_STEP_MS;
+        }
+        return false;
+    }
+
     /* A refusal flash in progress: one half-step per pass, no sleeping. */
     if (w->flash_left > 0) {
         uint32_t now_ticks = SDL_GetTicks();
         if (now_ticks >= w->flash_next) {
             --w->flash_left;
             if (w->flash_left == 0) {
-                /* Put the PLAYER colour back.
-                 *
-                 * The lightbar is the player indicator -- blue, red, green,
-                 * purple for players one to four -- and moonlight assigns an
-                 * index to every controller. Writing a fixed blue told a second
-                 * controller it was player one: worse than leaving the light
-                 * alone, because it is a meaningful colour stated wrongly.
-                 *
-                 * Re-setting the index it already has does not work either:
-                 * SDL sees the same value and repaints nothing, so the light
-                 * stayed yellow. Measured 2026-08-06 on both transports. So the
-                 * colour is set directly, from the index SDL is already
-                 * holding. */
-                static const uint8_t player_rgb[4][3] = {
-                    { 0x00, 0x00, 0xff },   /* 1: blue   */
-                    { 0xff, 0x00, 0x00 },   /* 2: red    */
-                    { 0x00, 0xff, 0x00 },   /* 3: green  */
-                    { 0xff, 0x00, 0xff },   /* 4: purple */
-                };
-                int slot = SDL_GameControllerGetPlayerIndex(controller);
-                if (slot < 0 || slot > 3) {
-                    slot = 0;
-                }
-                flash_write(controller, player_rgb[slot][0],
-                            player_rgb[slot][1], player_rgb[slot][2]);
-                gesture_log("refusal flash finished, player %d colour restored",
-                            slot + 1);
+                paint_player_colour(controller);
+                gesture_log("refusal flash finished, player colour set");
             } else {
                 /* Odd counts are the lit ones, so the LAST flash step is lit
                  * rather than an unlit one nobody sees. */
@@ -399,17 +545,13 @@ static bool gesture_poll_one(SDL_GameController *controller, SDL_JoystickID id) 
         return false;
     }
 
-    bool ok = ctm_bridge_plug_node(node);
-    gesture_log("fired on %s -> %s : %s", dev_path, node, ok ? "plugged" : "refused");
-    if (!ok) {
-        /* Works on either transport: SDL builds the right report for the one
-         * the controller is actually on. */
-        w->flash_left = REFUSED_FLASHES * 2 + 1;   /* +1 for the restore */
-        w->flash_next = SDL_GetTicks();
-        gesture_log("refused: flashing yellow on %s", node);
-    }
-
-    return ok;
+    /* Start the pulse and hand over when it ends. The node is kept because it
+     * is resolved now and used a second later. */
+    snprintf(w->prep_node, sizeof(w->prep_node), "%s", node);
+    w->prep_left = PREP_STEPS;
+    w->prep_next = SDL_GetTicks();
+    gesture_log("fired on %s -> %s : pulsing before handover", dev_path, node);
+    return false;
 }
 
 
