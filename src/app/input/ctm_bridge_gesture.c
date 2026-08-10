@@ -78,6 +78,8 @@ typedef struct {
     uint32_t plug_check_next;  /* SDL ticks when to look again */
     uint8_t bye_left;    /* steps of the post-unplug pulse still to show */
     uint32_t bye_next;   /* SDL ticks when the next bye step is due */
+    uint8_t buzz_left;   /* half-steps of the refusal rumble still to run */
+    uint32_t buzz_next;  /* SDL ticks when the next buzz half-step is due */
     uint32_t bye_started;  /* SDL ticks when the bye pulse began */
     uint16_t bye_steps;    /* steps actually drawn, for timing the loop */
     uint32_t flash_next; /* SDL ticks when the next half-step is due */
@@ -228,6 +230,27 @@ static bool gesture_held(SDL_GameController *controller) {
  * put a filesystem scan on the app's main loop. The cheaper fix, when it is
  * worth doing, is for the core to say so rather than for this to ask. */
 #define PLUG_CHECK_MS     500
+
+/* The refusal rumble: three short sharp bursts.
+ *
+ * WHY RUMBLE AND NOT A TONE. A refused plug means no session and no audio
+ * device open, so nothing that needs one can make a sound. SDL still holds
+ * this controller -- it is how the flash above works -- and its rumble call
+ * builds the report itself, so this needs no card, no scan and no guess about
+ * which controller it reaches. It is addressed by device.
+ *
+ * THREE SHORT AND SHARP, against one long soft pulse for success. A rumble on
+ * its own reads as a positive acknowledgement, so the difference has to be the
+ * rhythm rather than the sensation -- the way a phone buzzes once for a
+ * message and repeatedly for an alarm.
+ *
+ * It will also FEEL different from the success signal, which travels through
+ * the audio path rather than the motors. That is useful here rather than a
+ * problem. */
+#define BUZZ_BURSTS       3
+#define BUZZ_ON_MS        90
+#define BUZZ_OFF_MS       70
+#define BUZZ_STRENGTH     0xBFFF     /* firm, and short enough not to nag */
 
 #define REFUSED_FLASHES   3
 #define REFUSED_ON_MS     120
@@ -397,6 +420,28 @@ static bool gesture_poll_one(SDL_GameController *controller, SDL_JoystickID id) 
         return false;
     }
 
+    /* A refusal rumble in progress: alternate on and off, one half-step per
+     * pass, no sleeping. Runs alongside the yellow flash rather than after
+     * it -- they are the same signal in two senses, and a user watching the
+     * light and a user holding the controller should learn at the same
+     * moment. */
+    if (w->buzz_left > 0) {
+        uint32_t now_ticks = SDL_GetTicks();
+        if (now_ticks >= w->buzz_next) {
+            --w->buzz_left;
+            const bool on = (w->buzz_left % 2) == 1;
+            if (controller) {
+                SDL_GameControllerRumble(controller,
+                                         on ? BUZZ_STRENGTH : 0,
+                                         on ? BUZZ_STRENGTH : 0,
+                                         on ? BUZZ_ON_MS : BUZZ_OFF_MS);
+            }
+            w->buzz_next = now_ticks + (on ? BUZZ_ON_MS : BUZZ_OFF_MS);
+        }
+        /* Deliberately does NOT return. The flash runs at the same time, and
+         * stopping here would hold it up for half a second. */
+    }
+
     /* The controller has just come back to us: pulse yellow, then leave it on
      * its player colour. Runs after an unplug has actually completed, which is
      * the moment the light stops belonging to the host. */
@@ -458,7 +503,10 @@ static bool gesture_poll_one(SDL_GameController *controller, SDL_JoystickID id) 
                 if (!ok) {
                     w->flash_left = REFUSED_FLASHES * 2 + 1;   /* +1 for the restore */
                     w->flash_next = SDL_GetTicks();
-                    gesture_log("refused: flashing yellow on %s", w->prep_node);
+                    w->buzz_left = BUZZ_BURSTS * 2;   /* on and off per burst */
+                    w->buzz_next = SDL_GetTicks();
+                    gesture_log("refused: flashing yellow and buzzing on %s",
+                                w->prep_node);
                 }
                 return ok;
             }
