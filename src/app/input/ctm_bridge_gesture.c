@@ -66,6 +66,14 @@ static void gesture_log(const char *fmt, ...) {
 #define MAX_WATCHED 8
 
 typedef struct {
+    /* ZERO IS A VALID SDL ID, so the table cannot use it to mean "empty".
+     *
+     * The first controller on this platform genuinely gets id 0 -- the log
+     * says "gesture started on controller 0" -- and a zeroed table then looks
+     * like it already contains it. watched_for() survived that by accident:
+     * for id 0 it returns the first empty slot, which happens to be right.
+     * Anything that actually asks whether a controller is known did not. */
+    bool in_use;
     SDL_JoystickID id;
     uint32_t since;      /* SDL ticks when the gesture began; 0 = not held */
     bool fired;          /* already acted on this hold */
@@ -126,22 +134,71 @@ static void request_full_report(const char *dev_path) {
 
 static watched_t s_watched[MAX_WATCHED];
 
+/* Is this controller already being watched? Asked before watched_for(), which
+ * claims a slot as a side effect and would make every controller look known. */
+static bool watched_slot_exists(SDL_JoystickID id) {
+    for (int i = 0; i < MAX_WATCHED; ++i) {
+        if (s_watched[i].in_use && s_watched[i].id == id) return true;
+    }
+    return false;
+}
+
 static watched_t *watched_for(SDL_JoystickID id) {
     watched_t *free_slot = NULL;
     for (int i = 0; i < MAX_WATCHED; ++i) {
-        if (s_watched[i].id == id) {
+        if (s_watched[i].in_use && s_watched[i].id == id) {
             return &s_watched[i];
         }
-        if (!free_slot && s_watched[i].id == 0) {
+        if (!free_slot && !s_watched[i].in_use) {
             free_slot = &s_watched[i];
         }
     }
     if (free_slot) {
+        free_slot->in_use = true;
         free_slot->id = id;
         free_slot->since = 0;
         free_slot->fired = false;
     }
     return free_slot;
+}
+
+/* Say everything SDL knows about a controller, once, when it first appears.
+ *
+ * TWO QUESTIONS AT ONCE, and both were open.
+ *
+ * FIRST: whether the app can identify a controller BEFORE it is bridged. It
+ * reads the controller's own address at plug time today, which is too late for
+ * the two features that need it -- retiring the right emulated pad, and
+ * deciding at stream start whether to upgrade this particular controller.
+ * SDL's PlayStation driver reads the same report we do, so it may already have
+ * the answer here. If the serial below is a MAC, identity is available from the
+ * moment the controller appears and neither feature needs anything new.
+ *
+ * SECOND: an arrival trail. There was none, which is why a controller losing
+ * its buttons after a reseat could not be explained by the log.
+ *
+ * The path matters as much as the serial: on webOS SDL returns the hidraw node
+ * directly, and that is what everything else in this project speaks. */
+static void log_controller_identity(SDL_GameController *controller, SDL_JoystickID id) {
+    if (!controller) {
+        gesture_log("controller %d arrived, but SDL has no handle for it", (int)id);
+        return;
+    }
+    SDL_Joystick *joy = SDL_GameControllerGetJoystick(controller);
+    const char *name = SDL_GameControllerName(controller);
+    const char *path = SDL_GameControllerPath(controller);
+    const char *serial = NULL;
+#if SDL_VERSION_ATLEAST(2, 0, 14)
+    serial = SDL_JoystickGetSerial(joy);
+#endif
+    gesture_log("controller %d arrived: name=[%s] path=[%s] serial=[%s] vid=%04x pid=%04x player=%d",
+                (int)id,
+                name ? name : "?",
+                path ? path : "?",
+                (serial && serial[0]) ? serial : "(none)",
+                (unsigned)SDL_JoystickGetVendor(joy),
+                (unsigned)SDL_JoystickGetProduct(joy),
+                SDL_GameControllerGetPlayerIndex(controller));
 }
 
 /* Is the gesture being made right now? Two fingers down AND the touchpad
@@ -406,7 +463,12 @@ static bool hidraw_node_for_event(const char *dev_path, char *out, size_t out_le
 
 void ctm_bridge_gesture_reset(SDL_JoystickID id) {
     for (int i = 0; i < MAX_WATCHED; ++i) {
-        if (s_watched[i].id == id) {
+        if (s_watched[i].in_use && s_watched[i].id == id) {
+            /* The app said nothing at all when a controller arrived or left,
+             * so when its view of controllers went wrong there was no record
+             * of how it got that way. A reseated controller lost its buttons
+             * on 2026-08-09 and a grep for arrivals came back empty. */
+            gesture_log("controller %d gone", (int)id);
             memset(&s_watched[i], 0, sizeof(s_watched[i]));
             return;
         }
@@ -415,7 +477,11 @@ void ctm_bridge_gesture_reset(SDL_JoystickID id) {
 
 /* Returns true if the controller was just handed to the bridge. */
 static bool gesture_poll_one(SDL_GameController *controller, SDL_JoystickID id) {
+    const bool was_known = (watched_slot_exists(id));
     watched_t *w = watched_for(id);
+    if (w && !was_known) {
+        log_controller_identity(controller, id);
+    }
     if (!w) {
         return false;
     }
