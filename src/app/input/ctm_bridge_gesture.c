@@ -327,9 +327,30 @@ static bool gesture_held(SDL_GameController *controller) {
  * It will also FEEL different from the success signal, which travels through
  * the audio path rather than the motors. That is useful here rather than a
  * problem. */
+/* TIMINGS SIZED FOR BLUETOOTH, NOT FOR A CABLE.
+ *
+ * These were 90 ms on / 70 ms off. Over a cable that reads as three crisp
+ * taps. Over Bluetooth it was reported as weak and, more tellingly, as
+ * VARYING in strength -- which is what a smeared pattern feels like rather
+ * than a quiet motor.
+ *
+ * The arithmetic supports that reading. webOS pushes a Bluetooth report
+ * roughly every 30-40 ms, and every half-step here queues one. Six steps in
+ * half a second is a report every 40 ms with nothing to spare, so an "on"
+ * lands late and its "off" lands on top of it.
+ *
+ * At 200/150 each burst gets five or six reports and each gap gets four, so
+ * the shape survives the pacing. Slower on a cable too, but three taps at
+ * this length still read as three taps -- and a signal that is legible
+ * everywhere beats one that is crisp on the transport most people do not
+ * use.
+ *
+ * STRENGTH IS DELIBERATELY UNCHANGED, so the timings could be judged on
+ * their own. Verified over Bluetooth: felt consistently every time, and the
+ * same controller on a cable now feels the same as it does over Bluetooth. */
 #define BUZZ_BURSTS       3
-#define BUZZ_ON_MS        90
-#define BUZZ_OFF_MS       70
+#define BUZZ_ON_MS        200
+#define BUZZ_OFF_MS       150
 #define BUZZ_STRENGTH     0xBFFF     /* firm, and short enough not to nag */
 
 #define REFUSED_FLASHES   3
