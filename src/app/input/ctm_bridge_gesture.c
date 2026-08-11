@@ -19,6 +19,8 @@
  *   /sys/class/input/inputN  ->  .../2-1.3:1.3  ->  .../hidraw/hidrawN
  */
 
+#include <time.h>
+
 #include "ctm_bridge_gesture.h"
 #include "stream/session.h"
 #include "stream/input/session_input.h"
@@ -50,17 +52,36 @@
  * which cost a build cycle to learn. */
 #define GESTURE_LOG "/tmp/ctm-gesture.log"
 
+/* Every line carries the time it was written.
+ *
+ * The lines from the bridge core already do; ours did not, which meant a hang
+ * between two of our own lines could not be measured at all -- only described.
+ * That happened on 2026-08-11: the app froze between "fired on" and "pulse
+ * finished" and the log could not say whether that was one second or ninety.
+ *
+ * Same clock the bridge core uses, so lines from both interleave correctly. */
 static void gesture_log(const char *fmt, ...) {
     FILE *f = fopen(GESTURE_LOG, "a");
     if (!f) {
         return;
     }
+    struct timespec ts;
+    clock_gettime(CLOCK_REALTIME, &ts);
+    fprintf(f, "%lld.%03ld ", (long long)ts.tv_sec, ts.tv_nsec / 1000000L);
     va_list ap;
     va_start(ap, fmt);
     vfprintf(f, fmt, ap);
     va_end(ap);
     fputc('\n', f);
     fclose(f);
+}
+
+/* Monotonic milliseconds, for measuring how long a call took. Separate from
+ * the wall clock above: the wall clock says when, this says how long. */
+static uint64_t gesture_now_ms(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (uint64_t)ts.tv_sec * 1000ull + (uint64_t)(ts.tv_nsec / 1000000L);
 }
 
 /* One entry per controller being watched. Deliberately keyed by SDL's own
@@ -598,9 +619,25 @@ static bool gesture_poll_one(SDL_GameController *controller, SDL_JoystickID id) 
         if (now_ticks >= w->prep_next) {
             --w->prep_left;
             if (w->prep_left == 0) {
+                /* TIMED, because this is the suspect.
+                 *
+                 * This call runs on the app's main loop and talks to the agent
+                 * over the network. If it is slow, everything freezes -- no
+                 * input, no rendering -- which is exactly what was seen on
+                 * 2026-08-11 over Bluetooth: the magenta pulse completed and
+                 * the app stopped responding until it eventually recovered.
+                 *
+                 * The listener was receiving controller input at 400 Hz the
+                 * whole time, so the plug had SUCCEEDED at the far end while
+                 * this side was still waiting -- which points at waiting for a
+                 * reply rather than for a connection. The number below is what
+                 * turns that from a story into a measurement. */
+                uint64_t plug_t0 = gesture_now_ms();
                 bool ok = ctm_bridge_plug_node(w->prep_node);
-                gesture_log("pulse finished on %s : %s",
-                            w->prep_node, ok ? "plugged" : "refused");
+                uint64_t plug_ms = gesture_now_ms() - plug_t0;
+                gesture_log("pulse finished on %s : %s (plug call took %llums)",
+                            w->prep_node, ok ? "plugged" : "refused",
+                            (unsigned long long)plug_ms);
                 if (ok) {
                     w->ours_plugged = true;
                     w->plug_check_next = SDL_GetTicks() + PLUG_CHECK_MS;
