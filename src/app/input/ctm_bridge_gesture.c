@@ -20,6 +20,8 @@
  */
 
 #include "ctm_bridge_gesture.h"
+#include "stream/session.h"
+#include "stream/input/session_input.h"
 
 #if defined(TARGET_WEBOS)
 
@@ -475,6 +477,42 @@ void ctm_bridge_gesture_reset(SDL_JoystickID id) {
     }
 }
 
+/* The stream input for the session currently running, or NULL when none is.
+ *
+ * Set once per pass by the tick. The gesture path needs it to tell moonlight
+ * that a controller has changed hands, and it is threaded from the app rather
+ * than looked up because there is no accessor for "the current session". */
+static stream_input_t *s_stream_input;
+
+/* Hand this controller to the bridge, or take it back, on moonlight's side.
+ *
+ * SEPARATE FROM THE BRIDGE STATE ON PURPOSE. The bridge decides whether a
+ * controller is plugged; this only mirrors that decision into the stream so
+ * the host stops seeing two of the same pad. Asking the bridge from inside
+ * the send path was tried and crashed the app. */
+static void gesture_moonlight_set_excluded(SDL_GameController *controller, bool excluded) {
+    if (!s_stream_input || !controller) {
+        return;
+    }
+    SDL_Joystick *js = SDL_GameControllerGetJoystick(controller);
+    if (!js) {
+        return;
+    }
+    app_gamepad_state_t *gp =
+            app_input_gamepad_state_by_instance_id(s_stream_input->input,
+                                                   SDL_JoystickInstanceID(js));
+    if (!gp) {
+        return;
+    }
+    if (excluded) {
+        stream_input_exclude_gamepad(s_stream_input, gp);
+        gesture_log("moonlight: slot %d handed to the bridge", gp->gs_id);
+    } else {
+        stream_input_restore_gamepad(s_stream_input, gp);
+        gesture_log("moonlight: slot %d back from the bridge", gp->gs_id);
+    }
+}
+
 /* Returns true if the controller was just handed to the bridge. */
 static bool gesture_poll_one(SDL_GameController *controller, SDL_JoystickID id) {
     const bool was_known = (watched_slot_exists(id));
@@ -541,6 +579,7 @@ static bool gesture_poll_one(SDL_GameController *controller, SDL_JoystickID id) 
         if (now_ticks >= w->plug_check_next) {
             if (!ctm_bridge_node_is_plugged(w->prep_node)) {
                 w->ours_plugged = false;
+                gesture_moonlight_set_excluded(controller, false);
                 w->bye_left = BYE_STEPS;
                 w->bye_next = now_ticks;
                 w->bye_started = now_ticks;
@@ -565,6 +604,7 @@ static bool gesture_poll_one(SDL_GameController *controller, SDL_JoystickID id) 
                 if (ok) {
                     w->ours_plugged = true;
                     w->plug_check_next = SDL_GetTicks() + PLUG_CHECK_MS;
+                    gesture_moonlight_set_excluded(controller, true);
                 }
                 if (!ok) {
                     w->flash_left = REFUSED_FLASHES * 2 + 1;   /* +1 for the restore */
@@ -669,7 +709,8 @@ static bool gesture_poll_one(SDL_GameController *controller, SDL_JoystickID id) 
 }
 
 
-void ctm_bridge_gesture_tick(struct app_input_t *input) {
+void ctm_bridge_gesture_tick(struct app_input_t *input, struct session_t *session) {
+    s_stream_input = session ? session_get_input(session) : NULL;
     if (!input) {
         return;
     }

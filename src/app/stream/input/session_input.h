@@ -44,6 +44,13 @@ typedef struct stream_input_t {
     int pointerGestureStartX;
     int pointerGestureStartY;
     bool view_only, no_sdl_mouse, no_host_gamepad;
+    /* Controllers handed to the bridge, by moonlight slot.
+     *
+     * A STORED mask, deliberately, rather than a question asked of the bridge
+     * on every send. Deriving it live meant calling into the bridge from
+     * inside limelight's send path, and that crashed the app. Ported from the
+     * working prototype, which stores it. */
+    uint16_t moonlightExcludedMask;
     uint8_t stick_deadzone;
     session_input_vmouse_t vmouse;
 #if FEATURE_INPUT_EVMOUSE
@@ -72,6 +79,14 @@ void stream_input_flush_pressed_keys(stream_input_t *input);
 void stream_input_send_gamepad_arrive(stream_input_t *input, app_gamepad_state_t *gamepad);
 
 void stream_input_send_gamepad_remove(stream_input_t *input, app_gamepad_state_t *gamepad);
+
+/* Stop and resume forwarding ONE controller to the host.
+ *
+ * Called when a controller is handed to the bridge and when it comes back.
+ * The order inside each is load-bearing -- see the definitions. */
+void stream_input_exclude_gamepad(stream_input_t *input, app_gamepad_state_t *gamepad);
+
+void stream_input_restore_gamepad(stream_input_t *input, app_gamepad_state_t *gamepad);
 
 void stream_input_handle_key(stream_input_t *input, const SDL_KeyboardEvent *event);
 

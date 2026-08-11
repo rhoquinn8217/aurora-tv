@@ -52,8 +52,25 @@ static Uint32 vmouse_hold_timer_cb(Uint32 interval, void *param);
 
 static bool stream_input_gamepad_sends_moonlight(const stream_input_t *input,
                                                  const app_gamepad_state_t *gamepad) {
-    (void) input;
-    return !input->view_only && !input->no_host_gamepad && gamepad != NULL;
+    if (input->view_only || gamepad == NULL) {
+        return false;
+    }
+    /* Per controller, not per session.
+     *
+     * `no_host_gamepad` is set for the whole session when the bridge is
+     * enabled, which switched moonlight's gamepad input off for EVERY
+     * controller -- even ones nobody had upgraded, leaving them unusable for
+     * no reason. GuiDev1994's original has no suppression at all; this is
+     * closer to it.
+     *
+     * Reads a stored mask rather than asking the bridge. Deriving the answer
+     * live meant calling into the bridge from inside limelight's send path,
+     * and that crashed the app on 2026-08-10. */
+    if (gamepad->gs_id >= 0 &&
+        (input->moonlightExcludedMask & (1u << gamepad->gs_id))) {
+        return false;
+    }
+    return true;
 }
 
 static uint16_t stream_input_moonlight_active_mask(const stream_input_t *input)
@@ -334,7 +351,7 @@ void stream_input_handle_jdevice(stream_input_t *input, const SDL_JoyDeviceEvent
             return;
         }
         gamepad = app_input_gamepad_state_by_instance_id(input->input, instance_id);
-        if (gamepad == NULL || input->view_only || input->no_host_gamepad) {
+        if (gamepad == NULL || input->view_only) {
             return;
         }
         stream_input_send_gamepad_arrive(input, gamepad);
@@ -343,7 +360,7 @@ void stream_input_handle_jdevice(stream_input_t *input, const SDL_JoyDeviceEvent
 #endif
     } else if (event->type == SDL_JOYDEVICEREMOVED) {
         gamepad = app_input_gamepad_state_by_instance_id(input->input, event->which);
-        if (gamepad == NULL || input->view_only || input->no_host_gamepad) {
+        if (gamepad == NULL || input->view_only) {
             return;
         }
         if (!stream_input_gamepad_sends_moonlight(input, gamepad)) {
@@ -425,7 +442,10 @@ void stream_input_send_gamepad_arrive(stream_input_t *input, app_gamepad_state_t
 }
 
 void stream_input_send_gamepad_remove(stream_input_t *input, app_gamepad_state_t *gamepad) {
-    if (input->view_only || input->no_host_gamepad || gamepad == NULL) {
+    /* Deliberately does NOT consult the excluded mask: being handed to the
+     * bridge is the commonest REASON to send a remove, and refusing here
+     * would leave the host holding a pad that never sends anything again. */
+    if (input->view_only || gamepad == NULL) {
         return;
     }
     if ((input->announcedGamepadMask & (1 << gamepad->gs_id)) == 0) {
@@ -439,7 +459,7 @@ void stream_input_send_gamepad_remove(stream_input_t *input, app_gamepad_state_t
 }
 
 static void stream_input_send_unannounced_gamepads(stream_input_t *input) {
-    if (input->view_only || input->no_host_gamepad) {
+    if (input->view_only) {
         return;
     }
     for (int i = 0, j = app_input_get_max_gamepads(input->input); i < j; ++i) {

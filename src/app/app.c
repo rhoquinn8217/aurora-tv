@@ -297,7 +297,7 @@ static int app_event_filter(void *userdata, SDL_Event *event) {
 void app_process_events(app_t *app) {
     SDL_PumpEvents();
     SDL_FilterEvents(app_event_filter, app);
-    ctm_bridge_gesture_tick(&app->input);
+    ctm_bridge_gesture_tick(&app->input, app->session);
 }
 
 void app_quit_confirm() {

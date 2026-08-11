@@ -25,7 +25,11 @@ extern "C" {
  * between streaming and not.
  *
  * Cheap: reads state SDL has already collected, no allocation, no blocking. */
-void ctm_bridge_gesture_tick(struct app_input_t *input);
+struct session_t;
+
+/* `session` may be NULL when no stream is running -- the gesture still works,
+ * and the moonlight side simply has nothing to be told. */
+void ctm_bridge_gesture_tick(struct app_input_t *input, struct session_t *session);
 
 /* Forget a controller's gesture progress. When: it is removed, or bridged --
  * once bridged, the bridge core's own gesture takes over. */
@@ -33,7 +37,7 @@ void ctm_bridge_gesture_reset(SDL_JoystickID id);
 
 #else
 
-#define ctm_bridge_gesture_tick(input) ((void)0)
+#define ctm_bridge_gesture_tick(input, session) ((void)0)
 #define ctm_bridge_gesture_reset(id) ((void)0)
 
 #endif

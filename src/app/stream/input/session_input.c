@@ -28,6 +28,7 @@ void session_input_init(stream_input_t *input, session_t *session, app_input_t *
     input->session = session;
     input->input = app_input;
     input->announcedGamepadMask = 0;
+    input->moonlightExcludedMask = 0;
     input->remoteOkPressed = false;
     input->remoteOkPressedAt = 0;
     input->remoteOkModifiers = 0;
@@ -69,14 +70,24 @@ void session_input_interrupt(stream_input_t *input) {
 
 void session_input_started(stream_input_t *input) {
     input->started = true;
-    if (input->view_only || input->no_host_gamepad) {
-        // CTM bridge / view-only: don't announce controllers to the host (this is
-        // what created the phantom ViGEmBus pad). Moonlight still reads them locally.
+    if (input->view_only) {
         return;
     }
+    /* Announce every controller EXCEPT ones already handed to the bridge.
+     *
+     * This returned early whenever the bridge was enabled, announcing nothing
+     * at all -- the comment said that prevented a phantom pad on the host. It
+     * does not. Measured on C1 2026-08-10: with nothing announced, both pads
+     * still appeared in Windows the moment a stick moved, because ordinary
+     * input events carry a mask the host builds pads from. The suppression
+     * removed the announcement and not the pad, and left the pad impossible
+     * to retire, since the remove path only acts on something announced. */
     for (int i = 0, j = app_input_get_max_gamepads(input->input); i < j; ++i) {
         app_gamepad_state_t *gamepad = app_input_gamepad_state_by_index(input->input, i);
         if (gamepad == NULL) {
+            continue;
+        }
+        if (input->moonlightExcludedMask & (1u << gamepad->gs_id)) {
             continue;
         }
         stream_input_send_gamepad_arrive(input, gamepad);
@@ -87,6 +98,7 @@ void session_input_stopped(stream_input_t *input) {
     pointer_gesture_reset(input);
     input->started = false;
     input->announcedGamepadMask = 0;
+    input->moonlightExcludedMask = 0;
     input->remoteOkPressed = false;
     input->remoteOkPressedAt = 0;
     input->remoteOkModifiers = 0;
@@ -109,4 +121,39 @@ void session_input_screen_keyboard_closed(stream_input_t *input) {
     }
 #endif
     stream_input_flush_pressed_keys(input);
+}
+/* --- handing a controller to the bridge, and taking it back ---------------
+ *
+ * THE ORDER IN EACH IS LOAD-BEARING, and doing it the other way round makes
+ * both a no-op: the send paths consult the mask, so a remove sent after the
+ * bit is set would refuse, and an arrive sent before the bit is cleared would
+ * refuse too.
+ *
+ * `started` is checked because a controller can be bridged before a stream
+ * begins. There is nothing to tell the host at that point -- the mask is
+ * enough, and session_input_started() reads it when the stream opens. */
+void stream_input_exclude_gamepad(stream_input_t *input, app_gamepad_state_t *gamepad) {
+    if (input == NULL || gamepad == NULL || gamepad->gs_id < 0) {
+        return;
+    }
+    if (input->moonlightExcludedMask & (1u << gamepad->gs_id)) {
+        return;
+    }
+    if (input->started) {
+        stream_input_send_gamepad_remove(input, gamepad);   /* BEFORE the bit */
+    }
+    input->moonlightExcludedMask |= (uint16_t) (1u << gamepad->gs_id);
+}
+
+void stream_input_restore_gamepad(stream_input_t *input, app_gamepad_state_t *gamepad) {
+    if (input == NULL || gamepad == NULL || gamepad->gs_id < 0) {
+        return;
+    }
+    if ((input->moonlightExcludedMask & (1u << gamepad->gs_id)) == 0) {
+        return;
+    }
+    input->moonlightExcludedMask &= (uint16_t) ~(1u << gamepad->gs_id);   /* BEFORE the arrive */
+    if (input->started) {
+        stream_input_send_gamepad_arrive(input, gamepad);
+    }
 }
