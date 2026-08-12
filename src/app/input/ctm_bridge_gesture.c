@@ -348,6 +348,29 @@ static bool gesture_held(SDL_GameController *controller) {
  * STRENGTH IS DELIBERATELY UNCHANGED, so the timings could be judged on
  * their own. Verified over Bluetooth: felt consistently every time, and the
  * same controller on a cable now feels the same as it does over Bluetooth. */
+/* The confirmation pulse, felt rather than heard.
+ *
+ * WHY IT IS HERE RATHER THAN WITH THE TONE. Over a cable the tone and the
+ * pulse are one buffer written to the controller's audio device. Bluetooth
+ * has no such device, and two ways of reaching the motors there were tried
+ * and abandoned:
+ *
+ *   - The speaker half is Opus-encoded and nothing on this TV can encode it.
+ *   - The haptics half IS raw samples in the output report -- but that block
+ *     is only present when the host is actually sending haptics. Measured on
+ *     C3 2026-08-11: the pulse was armed and never once consumed, because no
+ *     game was running. Which is precisely when a confirmation is wanted.
+ *
+ * SDL's rumble has none of those problems. It builds the right report for
+ * whichever transport the controller is on, needs no codec and no report
+ * format knowledge, and the refusal buzz already proves it reaches a
+ * Bluetooth controller.
+ *
+ * One pulse, longer and gentler than a refusal burst, so the two are told
+ * apart by feel rather than by counting. */
+#define OK_PULSE_MS       260
+#define OK_PULSE_STRENGTH 0x7FFF   /* softer than a refusal: this is good news */
+
 #define BUZZ_BURSTS       3
 #define BUZZ_ON_MS        200
 #define BUZZ_OFF_MS       150
@@ -626,6 +649,11 @@ static bool gesture_poll_one(SDL_GameController *controller, SDL_JoystickID id) 
                 w->bye_next = now_ticks;
                 w->bye_started = now_ticks;
                 w->bye_steps = 0;
+                /* Handed back. The same pulse as the handover: the event is
+                 * "this controller changed hands", and which way is already
+                 * said by the light -- magenta going, yellow returning. */
+                SDL_GameControllerRumble(controller, OK_PULSE_STRENGTH,
+                                         OK_PULSE_STRENGTH, OK_PULSE_MS);
                 gesture_log("%s came back to us -- pulsing yellow", w->prep_node);
             } else {
                 w->plug_check_next = now_ticks + PLUG_CHECK_MS;
@@ -660,6 +688,16 @@ static bool gesture_poll_one(SDL_GameController *controller, SDL_JoystickID id) 
                             w->prep_node, ok ? "plugged" : "refused",
                             (unsigned long long)plug_ms);
                 if (ok) {
+                    /* Bridged. Say so in the hand holding the controller.
+                     *
+                     * Fires on both transports. Over a cable the audio device
+                     * also plays a tone and its own pulse, so this reinforces
+                     * rather than replaces -- judged by feel, and easily
+                     * gated later if it turns out to be too much. */
+                    SDL_GameControllerRumble(controller, OK_PULSE_STRENGTH,
+                                             OK_PULSE_STRENGTH, OK_PULSE_MS);
+                    gesture_log("confirmation pulse on %s: bridged",
+                                w->prep_node);
                     w->ours_plugged = true;
                     w->plug_check_next = SDL_GetTicks() + PLUG_CHECK_MS;
                     gesture_moonlight_set_excluded(controller, true);
