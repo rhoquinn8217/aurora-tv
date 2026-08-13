@@ -295,6 +295,30 @@ bool ctm_bridge_signals_enabled(void)
  * Wired: only once a session exists, because that is what opens the speaker
  * the tone and pulse are written to. So a refused plug on a cable correctly
  * falls back, and a successful one correctly does not. */
+/* Signal a REFUSED plug richly, on whichever transport this is.
+ *
+ * Returns true if it did, false if the caller should fall back to SDL.
+ *
+ * ⭐ A refusal is the moment the user most needs telling, and until now it got
+ * the coarsest signal we had -- because a failed plug leaves no session to
+ * play through. Neither transport actually needs one:
+ *
+ *   Bluetooth: the signal is bytes to a device node, and the node is still
+ *     there. Nothing about it depends on the host, which is the point, since
+ *     the host being unreachable is WHY the plug failed.
+ *
+ *   Wired: the sound card exists because the controller is plugged into the
+ *     TV, not because a bridge succeeded. ⚠️ But with two plugged in there is
+ *     no telling which card is which, so that case declines and falls back. */
+bool ctm_bridge_signal_refused(const char *node)
+{
+    if (!ctm_bridge_signals_enabled()) return false;
+    if (ctm_bridge_node_is_bluetooth(node)) {
+        return ctm_signal_refused_bt(node) == 0;
+    }
+    return ctm_signal_wired_no_session(node, 2 /* BTSIG_REFUSED */) == 0;
+}
+
 bool ctm_bridge_node_signals_itself(const char *node)
 {
     if (!ctm_bridge_signals_enabled()) return false;

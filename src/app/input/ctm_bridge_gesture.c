@@ -390,17 +390,25 @@ static bool gesture_held(SDL_GameController *controller) {
  *
  * One pulse, longer and gentler than a refusal burst, so the two are told
  * apart by feel rather than by counting. */
-#define OK_PULSE_MS       260
+#define OK_PULSE_MS       520   /* doubled; see the refusal timings below */
 #define OK_PULSE_STRENGTH 0x7FFF   /* softer than a refusal: this is good news */
 
 #define BUZZ_BURSTS       3
-#define BUZZ_ON_MS        200
-#define BUZZ_OFF_MS       150
+/* Doubled for the same reason as the flashes above -- long enough to be
+ * noticed and then looked at, rather than felt and missed. */
+#define BUZZ_ON_MS        400
+#define BUZZ_OFF_MS       300
 #define BUZZ_STRENGTH     0xBFFF     /* firm, and short enough not to nag */
 
+/* DOUBLED, so the signal is still going when you look at it.
+ *
+ * ⭐ rhoquinn8217, 2026-08-12: "by the time I notice the rumble to look down, the red
+ * flashes have already passed." A signal you feel before you see is only
+ * useful if it outlasts the reaction it provokes. Three flashes at 120 ms was
+ * over in under a second. */
 #define REFUSED_FLASHES   3
-#define REFUSED_ON_MS     120
-#define REFUSED_OFF_MS    120
+#define REFUSED_ON_MS     240
+#define REFUSED_OFF_MS    240
 
 /* One step of the flash.
  *
@@ -667,7 +675,18 @@ static bool gesture_poll_one(SDL_GameController *controller, SDL_JoystickID id) 
             if (!ctm_bridge_node_is_plugged(w->prep_node)) {
                 w->ours_plugged = false;
                 gesture_moonlight_set_excluded(controller, false);
-                w->bye_left = gesture_signal_here(w->prep_node) ? BYE_STEPS : 0;
+                if (gesture_signal_here(w->prep_node)) {
+                    w->bye_left = BYE_STEPS;
+                } else {
+                    /* The core did the flashes. ⚠️ But it does not put the
+                     * colour back: it releases its claim on the lightbar,
+                     * which only stops it writing -- the last colour it wrote
+                     * is still showing. The player colour belongs to this
+                     * side, and the sequence that normally restores it is the
+                     * one being skipped here, so do it directly. */
+                    w->bye_left = 0;
+                    paint_player_colour(controller);
+                }
                 w->bye_next = now_ticks;
                 w->bye_started = now_ticks;
                 w->bye_steps = 0;
@@ -751,12 +770,39 @@ static bool gesture_poll_one(SDL_GameController *controller, SDL_JoystickID id) 
                      * -- and if signals are off, being told nothing on failure
                      * is what was asked for. */
                     if (ctm_bridge_signals_enabled()) {
-                        w->flash_left = REFUSED_FLASHES * 2 + 1;   /* +1 for the restore */
-                        w->flash_next = SDL_GetTicks();
-                        w->buzz_left = BUZZ_BURSTS * 2;   /* on and off per burst */
-                        w->buzz_next = SDL_GetTicks();
-                        gesture_log("refused: flashing yellow and buzzing on %s",
-                                    w->prep_node);
+                        /* ⭐ THE LIGHT AND THE SOUND ARE TWO DECISIONS, not
+                         * one -- because on a cable they live on different
+                         * devices.
+                         *
+                         * On Bluetooth the core's signal carries both: the
+                         * lightbar and the audio ride the same report. On a
+                         * cable the audio goes to the sound card and the
+                         * lightbar to the HID device, so the core can only do
+                         * the sound and the flashes have to come from here.
+                         *
+                         * Treating it as one decision left a wired refusal
+                         * with two tones and no red at all. */
+                        const bool sounded =
+                            ctm_bridge_signal_refused(w->prep_node);
+                        const bool lit =
+                            sounded && ctm_bridge_node_is_bluetooth(w->prep_node);
+
+                        if (lit) {
+                            /* ⚠️ The core releases its claim on the lightbar
+                             * but does not put the colour back -- releasing
+                             * only stops it writing, and the last colour it
+                             * wrote is still showing. */
+                            paint_player_colour(controller);
+                        } else {
+                            w->flash_left = REFUSED_FLASHES * 2 + 1;   /* +1 for the restore */
+                            w->flash_next = SDL_GetTicks();
+                        }
+                        if (!sounded) {
+                            w->buzz_left = BUZZ_BURSTS * 2;   /* on and off per burst */
+                            w->buzz_next = SDL_GetTicks();
+                        }
+                        gesture_log("refused on %s: core sounded=%d lit=%d",
+                                    w->prep_node, (int)sounded, (int)lit);
                     }
                 }
                 return ok;
@@ -782,9 +828,16 @@ static bool gesture_poll_one(SDL_GameController *controller, SDL_JoystickID id) 
                 /* Odd counts are the lit ones, so the LAST flash step is lit
                  * rather than an unlit one nobody sees. */
                 bool lit = (w->flash_left % 2) == 1;
+                /* RED, not yellow.
+                 *
+                 * Yellow already means "the controller is yours again" -- it
+                 * is the colour of a deliberate unbridge. Using it for a
+                 * refusal made one colour carry two opposite meanings: you
+                 * have it back because you asked, and you still have it
+                 * because the bridge failed. */
                 flash_write(controller,
-                            lit ? 0xff : 0x00,   /* red   } together: yellow */
-                            lit ? 0xff : 0x00,   /* green } */
+                            lit ? 0xff : 0x00,   /* red */
+                            0x00,
                             0x00);
                 w->flash_next = now_ticks + (lit ? REFUSED_ON_MS : REFUSED_OFF_MS);
             }

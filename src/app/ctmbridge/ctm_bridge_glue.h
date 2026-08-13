@@ -76,6 +76,10 @@ bool ctm_bridge_signals_enabled(void);
  * rather than adding a second, coarser signal on top. */
 bool ctm_bridge_node_signals_itself(const char *node);
 
+/* Signal a refused plug richly if this controller can be -- true if it did.
+ * Bluetooth only: a cable needs a session to reach its sound card. */
+bool ctm_bridge_signal_refused(const char *node);
+
 /* Plug whichever device owns this /dev/hidrawN. When: a local gesture on the
  * controller itself named a device -- its node is the only identifier that
  * separates two otherwise identical controllers. Returns true if it plugged. */
