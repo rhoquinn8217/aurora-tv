@@ -65,6 +65,17 @@ int ctm_bridge_list(ctm_bridge_dev_t *out, int max);
  * genuinely refused. */
 bool ctm_bridge_node_is_plugged(const char *node);
 
+/* True for a Bluetooth DualSense. */
+bool ctm_bridge_node_is_bluetooth(const char *node);
+
+/* Confirmation signals, all or nothing -- tone, pulse, lightbar and fallback,
+ * on every transport. */
+bool ctm_bridge_signals_enabled(void);
+
+/* Will the core signal this controller itself? If so the app leaves it alone,
+ * rather than adding a second, coarser signal on top. */
+bool ctm_bridge_node_signals_itself(const char *node);
+
 /* Plug whichever device owns this /dev/hidrawN. When: a local gesture on the
  * controller itself named a device -- its node is the only identifier that
  * separates two otherwise identical controllers. Returns true if it plugged. */

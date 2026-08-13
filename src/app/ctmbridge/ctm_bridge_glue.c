@@ -263,6 +263,73 @@ bool ctm_bridge_node_is_plugged(const char *node)
     return plugged;
 }
 
+/* Is this node a Bluetooth controller rather than a wired one?
+ *
+ * Asked so the app can leave the confirmation signals to the bridge core on
+ * Bluetooth, where it builds the controller's reports itself and can do the
+ * light, the pulse and the tone together. Running the app's own patterns as
+ * well produces two overlapping signals with different characters, which
+ * reads as a controller that does not know what it is doing.
+ *
+ * The distinction is already in the device kind -- "ds5" is the Bluetooth
+ * DualSense, "ds5_usb" the wired one -- so nothing new has to be worked out
+ * to answer it. */
+/* The one switch, asked through the glue because the app cannot see the core's
+ * headers directly. One definition, both sides. */
+bool ctm_bridge_signals_enabled(void)
+{
+    return CTM_SIGNALS_ENABLED ? true : false;
+}
+
+/* Will the bridge core signal this controller itself?
+ *
+ * ⭐ THE RIGHT QUESTION, replacing "is this Bluetooth". Both transports have a
+ * rich signal and a coarse SDL fallback, and running both gives two buzzes of
+ * different characters -- which reads as a controller that does not know what
+ * it is doing. What matters is not which cable it is but whether the rich one
+ * is about to play.
+ *
+ * Bluetooth: always. The core builds the controller's own reports -- light,
+ * felt pulse and tone together -- and needs nothing but a device node.
+ *
+ * Wired: only once a session exists, because that is what opens the speaker
+ * the tone and pulse are written to. So a refused plug on a cable correctly
+ * falls back, and a successful one correctly does not. */
+bool ctm_bridge_node_signals_itself(const char *node)
+{
+    if (!ctm_bridge_signals_enabled()) return false;
+    if (ctm_bridge_node_is_bluetooth(node)) return true;
+    return ctm_bridge_node_is_plugged(node);
+}
+
+bool ctm_bridge_node_is_bluetooth(const char *node)
+{
+    if (!node || !node[0]) {
+        return false;
+    }
+    ctm_glue_ensure_core();
+    pthread_mutex_lock(&s_dev_mutex);
+    ctm_glue_enumerate();
+    bool bt = false;
+    for (int i = 0; i < g_devices.count && !bt; ++i) {
+        logical_device_t *item = &g_devices.items[i];
+        for (int k = 0; k < item->device_count; ++k) {
+            int j = item->device_indices[k];
+            if (j < 0 || j >= g_scan.count) {
+                continue;
+            }
+            if (strcmp(g_scan.devices[j].node, node) != 0) {
+                continue;
+            }
+            const char *kind = bridge_kind_for_item(item);
+            bt = (strcmp(kind, "ds5") == 0) || (strcmp(kind, "ds5e") == 0);
+            break;
+        }
+    }
+    pthread_mutex_unlock(&s_dev_mutex);
+    return bt;
+}
+
 bool ctm_bridge_plug_node(const char *node)
 {
     if (!s_active) return false;

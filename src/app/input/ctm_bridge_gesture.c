@@ -227,6 +227,28 @@ static void log_controller_identity(SDL_GameController *controller, SDL_Joystick
 /* Is the gesture being made right now? Two fingers down AND the touchpad
  * pressed -- the same three facts the bridge core reads out of the raw report,
  * asked of SDL instead. */
+/* Should THIS file produce the signal, or has the core already?
+ *
+ * Both transports have a rich signal -- a tone and a felt pulse through the
+ * controller's audio -- and a coarse SDL fallback. Running both gives two
+ * buzzes of different characters, which reads as a controller that does not
+ * know what it is doing.
+ *
+ * ⭐ So the question is not "which cable is this" but "is the rich one about
+ * to play". On Bluetooth the core always can; on a cable it can once a session
+ * has opened the speaker, which means a refused plug correctly falls back here
+ * and a successful one correctly does not.
+ *
+ * ⚠️ And on Bluetooth there is deliberately NO fallback. The ways that path
+ * can fail take SDL down with it -- a controller that has stopped accepting
+ * reports ignores SDL's just as readily as ours -- so a second signal that
+ * fails in the same conditions is noise, not insurance. */
+static bool gesture_signal_here(const char *node)
+{
+    if (!ctm_bridge_signals_enabled()) return false;
+    return !ctm_bridge_node_signals_itself(node);
+}
+
 static bool gesture_held(SDL_GameController *controller) {
     if (!controller) {
         return false;
@@ -645,15 +667,29 @@ static bool gesture_poll_one(SDL_GameController *controller, SDL_JoystickID id) 
             if (!ctm_bridge_node_is_plugged(w->prep_node)) {
                 w->ours_plugged = false;
                 gesture_moonlight_set_excluded(controller, false);
-                w->bye_left = BYE_STEPS;
+                w->bye_left = gesture_signal_here(w->prep_node) ? BYE_STEPS : 0;
                 w->bye_next = now_ticks;
                 w->bye_started = now_ticks;
                 w->bye_steps = 0;
                 /* Handed back. The same pulse as the handover: the event is
                  * "this controller changed hands", and which way is already
                  * said by the light -- magenta going, yellow returning. */
-                SDL_GameControllerRumble(controller, OK_PULSE_STRENGTH,
-                                         OK_PULSE_STRENGTH, OK_PULSE_MS);
+                /* NOTHING FROM HERE ON THE WAY BACK. The core signals an
+                 * unplug BEFORE it tears the session down, so the felt pulse
+                 * has already played by the time this runs -- on both
+                 * transports.
+                 *
+                 * ⚠️ AND ASKING WOULD GIVE THE WRONG ANSWER. By now the session
+                 * is gone, so "will the core signal this?" answers no, and a
+                 * second coarse buzz fires on top of the rich one that already
+                 * did. The check would be happening after the thing it asks
+                 * about. Measured on a cable, 2026-08-12: two buzzes on every
+                 * unbridge, one rich and one not.
+                 *
+                 * ⓘ The one case this loses is a session that died without a
+                 * clean unplug -- the listener going away -- where the core
+                 * never signalled. That path leaves the host's pad unrestored
+                 * anyway, so it is not worth keeping a buzz for. */
                 gesture_log("%s came back to us -- pulsing yellow", w->prep_node);
             } else {
                 w->plug_check_next = now_ticks + PLUG_CHECK_MS;
@@ -694,8 +730,10 @@ static bool gesture_poll_one(SDL_GameController *controller, SDL_JoystickID id) 
                      * also plays a tone and its own pulse, so this reinforces
                      * rather than replaces -- judged by feel, and easily
                      * gated later if it turns out to be too much. */
-                    SDL_GameControllerRumble(controller, OK_PULSE_STRENGTH,
-                                             OK_PULSE_STRENGTH, OK_PULSE_MS);
+                    if (gesture_signal_here(w->prep_node)) {
+                        SDL_GameControllerRumble(controller, OK_PULSE_STRENGTH,
+                                                 OK_PULSE_STRENGTH, OK_PULSE_MS);
+                    }
                     gesture_log("confirmation pulse on %s: bridged",
                                 w->prep_node);
                     w->ours_plugged = true;
@@ -703,12 +741,23 @@ static bool gesture_poll_one(SDL_GameController *controller, SDL_JoystickID id) 
                     gesture_moonlight_set_excluded(controller, true);
                 }
                 if (!ok) {
-                    w->flash_left = REFUSED_FLASHES * 2 + 1;   /* +1 for the restore */
-                    w->flash_next = SDL_GetTicks();
-                    w->buzz_left = BUZZ_BURSTS * 2;   /* on and off per burst */
-                    w->buzz_next = SDL_GetTicks();
-                    gesture_log("refused: flashing yellow and buzzing on %s",
-                                w->prep_node);
+                    /* A refusal is signalled from here on BOTH transports: the
+                     * plug failed, so on a cable there is no session and no
+                     * speaker to write a richer one to.
+                     *
+                     * ⚠️ The one switch silences this too, deliberately. A
+                     * switch that keeps failures but drops successes sounds
+                     * thoughtful and is really a second thing to reason about
+                     * -- and if signals are off, being told nothing on failure
+                     * is what was asked for. */
+                    if (ctm_bridge_signals_enabled()) {
+                        w->flash_left = REFUSED_FLASHES * 2 + 1;   /* +1 for the restore */
+                        w->flash_next = SDL_GetTicks();
+                        w->buzz_left = BUZZ_BURSTS * 2;   /* on and off per burst */
+                        w->buzz_next = SDL_GetTicks();
+                        gesture_log("refused: flashing yellow and buzzing on %s",
+                                    w->prep_node);
+                    }
                 }
                 return ok;
             }
@@ -798,7 +847,13 @@ static bool gesture_poll_one(SDL_GameController *controller, SDL_JoystickID id) 
     /* Start the pulse and hand over when it ends. The node is kept because it
      * is resolved now and used a second later. */
     snprintf(w->prep_node, sizeof(w->prep_node), "%s", node);
-    w->prep_left = PREP_STEPS;
+    /* The pre-plug pulse runs on BOTH transports: it happens before anything
+     * knows whether the plug will succeed, and it is the only thing marking
+     * the gap between the gesture and the outcome. The core's signal follows
+     * and says which outcome it was.
+     *
+     * Silenced only by the one switch, like everything else. */
+    w->prep_left = ctm_bridge_signals_enabled() ? PREP_STEPS : 0;
     w->prep_next = SDL_GetTicks();
     gesture_log("fired on %s -> %s : pulsing before handover", dev_path, node);
     return false;
