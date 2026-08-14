@@ -4,7 +4,7 @@ set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
 # Keep the fork's upstream version; CTM changes bump only the build number,
 # shown as "1.1.7 (N)" in the app. appinfo/ipk stay at the numeric version.
 set(MOONLIGHT_VERSION "1.1.7")
-set(CTM_BUILD_NUMBER 115)
+set(CTM_BUILD_NUMBER 120)
 
 project(moonlight VERSION ${MOONLIGHT_VERSION} LANGUAGES C CXX)
 
@@ -140,7 +140,9 @@ set(BUILD_SHARED_CORE_LIBS OFF)
 
 if (TARGET_WEBOS)
     set(CMAKE_INSTALL_LIBDIR lib/backports)
-    set(SDL2_BACKPORT_RELEASE "release-2.30.12-webos.5")
+    # Our patched SDL, built once by scripts/build-sdl-fork.sh. See the note
+    # at the top of cmake/ExternalSDL2BackportForWebOS.cmake for why.
+    set(SDL2_BACKPORT_PREBUILT_DIR "/sdl-patched")
     include(ExternalSDL2BackportForWebOS)
     unset(CMAKE_INSTALL_LIBDIR)
 else ()
