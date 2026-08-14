@@ -46,4 +46,22 @@ void ctm_bridge_gesture_reset(SDL_JoystickID id);
 }
 #endif
 
+
+/* ⭐⭐ SILENCE EVERY CONTROLLER'S MICROPHONE, BEFORE SDL OPENS ANY OF THEM.
+ *
+ * Declared here rather than in a bridge-core header because this is the only
+ * one of ours the app already includes -- adding an include to upstream's
+ * app.c for one call would be a wider change than the call itself.
+ *
+ * ⚠️ MUST BE CALLED BEFORE SDL's controller subsystem starts. A DualSense told
+ * to stream microphone audio keeps doing it when a program dies -- it forgets
+ * only when its Bluetooth link drops. An app that crashed while one was
+ * streaming comes back to find SDL reading encoded sound as sticks and
+ * buttons. Measured 2026-08-13; the menus activated themselves until the
+ * controller was powered off.
+ *
+ * Nothing in this app arms a microphone. This exists for the state we cannot
+ * cause and could not otherwise escape. */
+void ctm_mic_safety_disarm_all(void);
+
 #endif /* CTM_BRIDGE_GESTURE_H */

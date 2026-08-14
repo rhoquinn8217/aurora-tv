@@ -43,6 +43,22 @@ int app_init(app_t *app, app_settings_loader *settings_loader, int argc, char *a
     commons_logging_init("aurora");
     SDL_LogSetOutputFunction(commons_sdl_log, NULL);
     SDL_SetAssertionHandler(app_assertion_handler_abort, NULL);
+    /* ⛔⛔ BEFORE SDL TOUCHES ANY CONTROLLER.
+     *
+     * A DualSense told to stream microphone audio keeps doing it when a
+     * program dies -- it only forgets when its Bluetooth link drops. So an app
+     * that crashed while one was streaming comes back to find SDL reading
+     * encoded sound as sticks and buttons, several hundred times a second.
+     *
+     * Measured 2026-08-13: that is exactly what happened. The app crashed,
+     * restarted, and its menus were activated at random until the controller
+     * was powered off.
+     *
+     * ⚠️ MOVING THIS BELOW SDL_Init WOULD QUIETLY REMOVE THE PROTECTION.
+     * Nothing in this app arms a microphone; this is here for the state we
+     * cannot cause and cannot otherwise escape. */
+    ctm_mic_safety_disarm_all();
+
     SDL_Init(0);
     commons_log_info("APP", "Start Aurora. Version %s", APP_VERSION);
     settings_loader(&app->settings);
