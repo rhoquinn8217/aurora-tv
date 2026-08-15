@@ -58,8 +58,22 @@
 #   sh bt_cap_watchdog.sh --off /dev/hidraw0 silence one, once, and exit
 #   sh bt_cap_watchdog.sh --off              silence everything, once, and exit
 #
-# ⭐ Run it in the background with & and it keeps watching while you work:
+# ⭐⭐ RUN THIS FIRST -- BEFORE AURORA, NOT ALONGSIDE IT.
+#
 #   sh bt_cap_watchdog.sh &
+#
+# ⛔ It is not an accompaniment to a capture session. It is the first thing that
+# should be running on the TV and the last thing that should stop.
+#
+# ⭐ The hazard it exists for is a controller armed by something that is NOT
+# this app: a state left behind by an earlier session, another program, or
+# someone experimenting with the controller directly. ⚠️ A controller keeps
+# streaming after the program that asked it is gone, and forgets only when its
+# Bluetooth link drops.
+#
+# ➡️ So the exposure is BEFORE Aurora starts and AFTER it dies -- precisely
+# when nothing else is watching. Start this, leave it running, let it outlive
+# everything else.
 #
 # ⚠️ Written for busybox: no `fold`, no `strtonum` in awk, nothing clever.
 

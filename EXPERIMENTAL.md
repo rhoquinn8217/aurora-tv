@@ -25,11 +25,22 @@ replaceable.
 | ✅ **Aurora open and in front** | **Protected.** Aurora holds the controller and ignores audio reports |
 | ⛔ **Aurora gone** — crashed, switched away from, closed, mid-deploy | **The TV takes the controller back and cannot ignore them.** Measured on a C3: apps launching at random until the controller was powered off |
 
-⭐ **Run the safety net whenever you arm anything:**
+### ⭐⭐ START THE WATCHDOG FIRST — BEFORE AURORA, NOT ALONGSIDE IT
 
 ```
 sh scripts/bt-capture/bt_cap_watchdog.sh &
 ```
+
+⛔ **It is not an accompaniment to a capture session. It is the first thing that
+should be running and the last thing that should stop.**
+
+⭐ **The hazard it exists for is a controller armed by something that is NOT
+this app** — a state left behind by an earlier session, another program, or
+someone experimenting with the controller directly. ⚠️ **That hazard is present
+BEFORE Aurora starts and AFTER it dies**, which is exactly when nothing else is
+watching.
+
+➡️ **Start it, leave it running, and let it outlive everything else on the TV.**
 
 ⚠️ **It is a net, not a guarantee** — up to a second of storm before it fires.
 ⛔ **The reliable stop is the controller's power button, or the TV's remote.**
