@@ -1,4 +1,24 @@
 #!/usr/bin/env bash
+# ⛔⛔⛔ EXPERIMENTAL BRANCH ONLY -- mic-capture-experimental.
+#
+# ⚠️ IF YOU ARE READING THIS AS A MERGE CONFLICT, THE ANSWER IS: KEEP THIS FILE.
+#
+# THE CONFLICT IS DELIBERATE, AND THIS COMMENT IS WHY IT EXISTS.
+#
+# The stable branch DELETED this file (2026-08-15, "Build against the SDL webOS
+# ships, not our own"). Experimental keeps it, because the patched SDL is what
+# stops an armed controller's microphone audio being parsed as sticks and
+# buttons -- and arming only exists on this branch.
+#
+# ⛔ Without this comment the deletion would merge SILENTLY. Git only stops for
+# a modify/delete conflict when BOTH sides touched the file. So this file is
+# modified here on purpose, so that every merge from stable has to STOP and ask
+# rather than quietly removing the thing this branch exists to hold.
+#
+# ➡️ ON A MERGE CONFLICT HERE: `git checkout --ours <this file>` and carry on.
+#
+# ⚠️ IF YOU EVER DELETE THIS COMMENT, the protection goes with it.
+#
 # Build our patched SDL once, and keep the result.
 #
 # ⛔ WHY THIS EXISTS RATHER THAN LETTING CMAKE DO IT.
