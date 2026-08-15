@@ -2,9 +2,13 @@ cmake_minimum_required(VERSION 3.19)
 set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
 
 # Keep the fork's upstream version; CTM changes bump only the build number,
-# shown as "1.1.7 (N)" in the app. appinfo/ipk stay at the numeric version.
+# shown as "1.1.7 (N_EXP)" in the app on this branch. appinfo/ipk stay at the numeric version.
 set(MOONLIGHT_VERSION "1.1.7")
-set(CTM_BUILD_NUMBER 122)
+set(CTM_BUILD_NUMBER 1)
+
+# ⛔ EXPERIMENTAL BRANCH ONLY. Empty on stable, so the two branches can never
+# produce a package or an Info tab that look the same.
+set(CTM_BUILD_SUFFIX "_EXP")
 
 project(moonlight VERSION ${MOONLIGHT_VERSION} LANGUAGES C CXX)
 
@@ -224,7 +228,7 @@ set_target_properties(moonlight-lib PROPERTIES
 target_compile_definitions(moonlight-lib PUBLIC "$<$<CONFIG:DEBUG>:DEBUG>")
 string(LENGTH ${CMAKE_SOURCE_DIR} SOURCE_DIR_LENGTH)
 target_compile_definitions(moonlight-lib PUBLIC SOURCE_DIR_LENGTH=${SOURCE_DIR_LENGTH})
-target_compile_definitions(moonlight-lib PUBLIC "APP_VERSION=\"${PROJECT_VERSION} (${CTM_BUILD_NUMBER})\"" APPLOG_HOST=1)
+target_compile_definitions(moonlight-lib PUBLIC "APP_VERSION=\"${PROJECT_VERSION} (${CTM_BUILD_NUMBER}${CTM_BUILD_SUFFIX})\"" APPLOG_HOST=1)
 target_compile_definitions(moonlight-lib PUBLIC LV_LVGL_H_INCLUDE_SIMPLE=1)
 
 target_include_directories(moonlight-lib PUBLIC ${CMAKE_SOURCE_DIR}/core/libgamestream)
