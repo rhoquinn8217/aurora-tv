@@ -78,16 +78,19 @@ script wipes its build directory every run.
 do for you.** `CMakeLists.txt` sets `SDL2_BACKPORT_PREBUILT_DIR` to
 `/sdl-patched`; something has to put the library there.
 
-⛔ **THE HONEST GAP:** the maintainer's own build script supplies this mount and
-**is not in this repository.** If you are not him, you need to supply it
-yourself — one of:
+✅ **`scripts/bt-capture/build-ipk-experimental.sh` does this for you.** It
+mounts `../sdl-webos-patched` there, and **refuses to build if that folder is
+missing** rather than quietly producing a package without the guard.
 
-- **add `-v "$(pwd)/../sdl-webos-patched:/sdl-patched"`** to your docker
-  invocation of the webOS build, or
-- **pass `-DSDL2_BACKPORT_PREBUILT_DIR=<your path>`** to cmake and skip the
-  container path entirely.
+**3. Build with this branch's own script:**
 
-**3. Build the app as normal.**
+```
+./scripts/bt-capture/build-ipk-experimental.sh
+```
+
+⛔ **NOT `scripts/build-ipk.sh`.** That one is stable's and is inherited here by
+every merge forward. **It does not mount the patched SDL**, so building with it
+on this branch produces a package with no guard in it.
 
 ⭐ **How to tell it worked: the package size.** With the patched SDL linked in
 it is around **4.05 MB**. Without it, around **2.18 MB** — which means you have
