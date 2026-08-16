@@ -44,6 +44,10 @@ typedef struct app_settings_t {
     bool autoresume;
     bool viewonly;
     bool ctm_bridge;
+    /* ⛔ EXPERIMENTAL: Bluetooth microphone capture. Default off, and it stays
+     * off unless the user ticks it and confirms a warning. Sampled once, as
+     * the bridge starts -- a change applies to the next stream. */
+    bool bt_mic_capture;
     bool absmouse;
     bool hardware_mouse;
     bool virtual_mouse;

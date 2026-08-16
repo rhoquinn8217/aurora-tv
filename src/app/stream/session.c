@@ -165,6 +165,7 @@ bool session_start_input(session_t *session) {
             // broadcast probe never leaves the local network, so a host reached
             // over the internet is never found.
             ctm_bridge_set_host(session->server->serverInfo.address, 0);
+            ctm_bridge_set_capture_enabled(app_configuration->bt_mic_capture);
             ctm_bridge_start();
         }
     }

@@ -150,11 +150,27 @@ static void ctm_glue_ensure_core(void)
     s_core_up = true;
 }
 
+/* ⛔ EXPERIMENTAL BRANCH ONLY -- Bluetooth microphone capture.
+ *
+ * ⭐ THE VALUE IS PUSHED IN, NOT READ OUT. The bridge library cannot see the
+ * app's settings header -- it pulls in Limelight and ss4s, which this target
+ * deliberately does not have -- so the caller hands the value over the same way
+ * it hands over the host address, immediately before starting.
+ *
+ * ⚠️ Sampled as the bridge starts, never watched. A change applies to the NEXT
+ * stream: arming a controller in the middle of one is worse than waiting. */
+void ctm_bridge_set_capture_enabled(bool on)
+{
+    ctm_bt_capture_set_enabled(on);
+    log_append("ctm glue: microphone capture %s", on ? "ENABLED" : "disabled");
+}
+
 bool ctm_bridge_start(void)
 {
     if (s_active) {
         return true;
     }
+
     ctm_glue_ensure_core();
 
     if (s_autoplug) {

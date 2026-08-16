@@ -154,6 +154,7 @@ void settings_initialize(app_settings_t *config, char *conf_dir) {
     config->autoresume = false;
     config->viewonly = false;
     config->ctm_bridge = false;
+    config->bt_mic_capture = false;
     config->rotate = 0;
     config->absmouse = true;
     config->virtual_mouse = false;
@@ -217,6 +218,7 @@ bool settings_save(app_settings_t *config) {
     ini_write_bool(fp, "autoresume", config->autoresume);
     ini_write_bool(fp, "viewonly", config->viewonly);
     ini_write_bool(fp, "ctm_bridge", config->ctm_bridge);
+    ini_write_bool(fp, "bt_mic_capture", config->bt_mic_capture);
 
     ini_write_section(fp, "input");
     ini_write_bool(fp, "absmouse", config->absmouse);
@@ -401,6 +403,8 @@ static int settings_parse(app_settings_t *config, const char *section, const cha
         config->viewonly = INI_IS_TRUE(value);
     } else if (INI_NAME_MATCH("ctm_bridge")) {
         config->ctm_bridge = INI_IS_TRUE(value);
+    } else if (INI_NAME_MATCH("bt_mic_capture")) {
+        config->bt_mic_capture = INI_IS_TRUE(value);
     } else if (INI_NAME_MATCH("absmouse")) {
         config->absmouse = INI_IS_TRUE(value);
     } else if (INI_NAME_MATCH("virtual_mouse")) {

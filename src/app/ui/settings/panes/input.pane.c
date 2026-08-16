@@ -19,6 +19,19 @@ typedef struct input_pane_t {
 
 static lv_obj_t *create_obj(lv_fragment_t *self, lv_obj_t *view);
 
+/* ⛔⛔ EXPERIMENTAL BRANCH ONLY -- the microphone-capture confirmation.
+ *
+ * The checkbox itself is an ordinary pref_checkbox, which writes the setting
+ * before this runs -- pref_obj registers its handler first, and LVGL calls them
+ * in order. So by the time we are called the value is already true, and the
+ * dialog's job is to put it back if the answer is no.
+ *
+ * ⭐ TICKING ASKS. UNTICKING NEVER DOES. Turning a hazard off should never have
+ * a step in the way. */
+static void bt_cap_confirm_cb(lv_event_t *e);
+static void bt_cap_answer_cb(lv_event_t *e);
+static lv_obj_t *bt_cap_checkbox = NULL;
+
 static void pane_ctor(lv_fragment_t *self, void *args);
 
 #if FEATURE_INPUT_EVMOUSE
@@ -53,6 +66,12 @@ static lv_obj_t *create_obj(lv_fragment_t *self, lv_obj_t *container) {
 
     pref_checkbox(view, locstr("Use CTM Bridge"), &app_configuration->ctm_bridge, false);
     pref_desc_label(view, locstr("Route all controller input through the CTM bridge instead of Moonlight (disables Moonlight input)."), false);
+
+    /* ⛔ EXPERIMENTAL: microphone capture. See bt_cap_confirm_cb below. */
+    bt_cap_checkbox = pref_checkbox(view, locstr("Bluetooth microphone capture (experimental)"),
+                                    &app_configuration->bt_mic_capture, false);
+    lv_obj_add_event_cb(bt_cap_checkbox, bt_cap_confirm_cb, LV_EVENT_CLICKED, NULL);
+    pref_desc_label(view, locstr("Streams a Bluetooth controller's microphone to the host. Turns off this app's protection against stray controller audio. Applies to the next stream."), false);
 
     pref_checkbox(view, locstr("Capture system keys"), &app_configuration->syskey_capture, false);
     pref_desc_label(view, locstr("Capture and send system keys (e.g. Meta/Win key) to host computer."), false);
@@ -130,4 +149,58 @@ static void update_deadzone_label(input_pane_t *pane) {
 static void on_deadzone_changed(lv_event_t *e) {
     input_pane_t *pane = (input_pane_t *) lv_event_get_user_data(e);
     update_deadzone_label(pane);
+}
+
+/* ⛔⛔ EXPERIMENTAL BRANCH ONLY.
+ *
+ * ⚠️ The wording is deliberate and short. It has to survive being read on a
+ * television, from a sofa, by someone who has already decided to say yes:
+ *
+ *   - the mechanism, in one sentence, because "microphone" alone does not
+ *     explain why it could break the TV;
+ *   - who is protected and who is not, because that is the whole risk;
+ *   - the known crash, because it is the likeliest way to meet the hazard;
+ *   - and how to stop it, LAST, because that is what someone needs when they
+ *     are already in trouble and no longer reading carefully.
+ *
+ * ⛔ The TV's remote is deliberately NOT offered as a second way to stop it.
+ * It works, but two answers in a panic is worse than one that always does. */
+static void bt_cap_confirm_cb(lv_event_t *e) {
+    (void) e;
+    /* Unticking: never ask. */
+    if (!app_configuration->bt_mic_capture) {
+        return;
+    }
+    static const char *btn_txts[] = {"Cancel", "Enable anyway", ""};
+    lv_obj_t *msgbox = lv_msgbox_create(
+            NULL,
+            locstr("Enable microphone capture?"),
+            locstr("The controller sends microphone audio in the same reports it uses for buttons. "
+                   "A tag says which is which, and most software never checks it -- audio then "
+                   "reads as thousands of button presses a second.\n\n"
+                   "This app is patched and ignores them. webOS is not, and cannot be.\n\n"
+                   "So while this app is in front, you are fine. If it closes, crashes, or you "
+                   "switch away, the TV starts pressing its own buttons.\n\n"
+                   "This also turns off the app's own shutdown-on-audio protection.\n\n"
+                   "Known issue: close the bridge panel with the \"x\" -- Circle crashes it.\n\n"
+                   "To stop it: power the controller off."),
+            btn_txts, false);
+    lv_obj_add_event_cb(msgbox, bt_cap_answer_cb, LV_EVENT_VALUE_CHANGED, NULL);
+    lv_obj_center(msgbox);
+}
+
+static void bt_cap_answer_cb(lv_event_t *e) {
+    lv_obj_t *msgbox = lv_event_get_current_target(e);
+    /* Button 0 is Cancel. Anything else is the deliberate yes. */
+    if (lv_msgbox_get_active_btn(msgbox) == 0) {
+        app_configuration->bt_mic_capture = false;
+        if (bt_cap_checkbox) {
+            lv_obj_clear_state(bt_cap_checkbox, LV_STATE_CHECKED);
+        }
+    }
+    /* ⛔ ASYNC, NOT lv_msgbox_close(). Closing a message box from inside its own
+     * event handler frees the object LVGL is still dispatching on -- it crashes,
+     * reliably. Every handler in this app that closes its own box uses the async
+     * form; the plain one is only safe from outside. */
+    lv_msgbox_close_async(msgbox);
 }

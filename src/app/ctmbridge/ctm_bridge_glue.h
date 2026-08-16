@@ -27,6 +27,10 @@ void ctm_bridge_set_host(const char *host, int port);
  * auto-plug the first one we recognise, and run the stopSniff keep-alive.
  * Idempotent (a second call while active is a no-op). Returns true if a
  * controller was bridged. */
+/* ⛔ EXPERIMENTAL: Bluetooth microphone capture. Default off in the core, so
+ * not calling this leaves it off. Call before ctm_bridge_start(). */
+void ctm_bridge_set_capture_enabled(bool on);
+
 bool ctm_bridge_start(void);
 
 /* Stop bridging: unplug all sessions and stop the keep-alive thread. Idempotent. */
