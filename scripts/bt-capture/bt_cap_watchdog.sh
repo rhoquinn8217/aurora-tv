@@ -44,6 +44,19 @@
 # it sends the silence packet -- five times, because a single write can be lost
 # and the cost of an extra one is nothing.
 #
+# ⭐⭐ EXCEPT WHILE AURORA IS RUNNING, WHEN IT STANDS DOWN ENTIRELY.
+#
+# ⛔ THIS CONDITION IS THE WHOLE POINT AND IT WAS MISSING UNTIL 2026-08-15.
+# Without it the watchdog silences the very capture the app just started: the
+# controller arms on bridge, streams for under a second, is disarmed, and stops.
+# The symptom is a recording that begins with a blip and then holds nothing --
+# and on the listener, in_bytes=0 while the host still pulls at full rate.
+#
+# ⭐ Standing down is safe, and it is the same argument made above: while Aurora
+# is running it holds the controller and its patched SDL ignores audio reports.
+# There is nothing here to protect against. The hazard begins the moment Aurora
+# is gone -- which is exactly when this starts acting again, with no restart.
+#
 # ⚠️ IT IS NOT INSTANT AND IT PREVENTS NOTHING. Up to about a second of storm
 # before it fires, which is enough to activate something. ⭐ IT IS A NET, NOT A
 # GUARANTEE. The reliable stop is still the controller's power button, or the
@@ -157,7 +170,31 @@ echo "watching ${ONLY:-every controller} -- silences anything found streaming"
 echo "⚠️  a net, not a guarantee: up to a second of storm before it fires"
 echo "⛔ the reliable stop is the controller's power button"
 
+# ⭐ Is Aurora running? `pgrep -f aurora` is how this project identifies it
+# elsewhere. ⚠️ Re-checked on EVERY pass, deliberately, rather than once at
+# start-up: the whole hazard is Aurora going away, and a watchdog that decided
+# at launch would never notice.
+aurora_running() {
+    pgrep -f aurora >/dev/null 2>&1
+}
+
+STOOD_DOWN=""
+
 while :; do
+    if aurora_running; then
+        if [ -z "$STOOD_DOWN" ]; then
+            STOOD_DOWN=1
+            echo "aurora is running -- standing down, it protects itself"
+            echo "$(date) aurora up, standing down" >> "$LOG"
+        fi
+        sleep 1
+        continue
+    fi
+    if [ -n "$STOOD_DOWN" ]; then
+        STOOD_DOWN=""
+        echo "aurora is GONE -- watching again"
+        echo "$(date) aurora gone, watching again" >> "$LOG"
+    fi
     for n in ${ONLY:-$NODES_DEFAULT}; do
         [ -e "$n" ] || continue
         if [ "$(is_streaming "$n")" = "yes" ]; then
