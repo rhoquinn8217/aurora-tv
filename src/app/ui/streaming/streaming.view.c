@@ -109,7 +109,7 @@ lv_obj_t *streaming_scene_create(lv_fragment_t *self, lv_obj_t *parent) {
     lv_obj_set_style_bg_color(ctm_btn, lv_palette_main(LV_PALETTE_PURPLE), 0);
     lv_obj_t *ctm_label = lv_label_create(ctm_btn);
     lv_obj_add_style(ctm_label, &controller->overlay_button_label_style, 0);
-    lv_label_set_text(ctm_label, locstr("CTM Bridge"));
+    lv_label_set_text(ctm_label, locstr("USB Bridge"));
 
     lv_obj_t *actions_spacing = lv_obj_create(actions);
     lv_obj_remove_style_all(actions_spacing);

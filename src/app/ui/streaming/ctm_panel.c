@@ -54,7 +54,18 @@ static void open_ctm_panel(lv_event_t *event);
 
 static lv_obj_t   *s_ctm_panel      = NULL;   /* full-screen backdrop */
 static lv_obj_t   *s_ctm_sidebar    = NULL;   /* the device list */
-static lv_obj_t   *s_ctm_status_lbl = NULL;
+/* ⛔ ACTIONS LIVE OUTSIDE THE LIST, PINNED BELOW IT.
+ *
+ * They used to be the last two items in the scrolling container, so with four
+ * devices they were pushed below the fold -- and a user who does not think to
+ * scroll concludes they are gone. The list is the only thing that should
+ * scroll.
+ *
+ * ⭐ They stay in the SAME focus group, so Down from the last device still
+ * reaches them; they simply stay visible while the list moves above. */
+static lv_obj_t   *s_ctm_actions    = NULL;
+static lv_obj_t   *s_ctm_status_lbl = NULL;   /* "USB Server: <addr> -" */
+static lv_obj_t   *s_ctm_state_lbl  = NULL;   /* ONLINE / OFFLINE, the only coloured part */
 static lv_group_t *s_ctm_nav_group    = NULL;
 static streaming_controller_t *s_ctm_owner = NULL;
 
@@ -169,12 +180,27 @@ static void ctm_nav_cancel_cb(lv_event_t *e) {
 }
 
 /* Short sidebar label: kind badge for known controllers, device name for HID. */
+static bool ctm_is(const ctm_bridge_dev_t *d, const char *vid, const char *pid) {
+    return strcmp(d->vid, vid) == 0 && strcmp(d->pid, pid) == 0;
+}
+
 static const char *ctm_dev_label(const ctm_bridge_dev_t *d) {
-    if (strcmp(d->kind, "ds5") == 0 || strcmp(d->kind, "ds5_usb") == 0)  return "DS5";
-    if (strcmp(d->kind, "ds5e") == 0 || strcmp(d->kind, "ds5e_usb") == 0) return "DS5 Edge";
-    if (strcmp(d->kind, "ds4") == 0)  return "DS4";
-    if (strcmp(d->kind, "puck") == 0) return "Steam Puck";
-    if (strcmp(d->kind, "xbox") == 0) return "Xbox";
+    /* ⛔⛔ MATCHED ON VID/PID, NOT ON KIND, AND THAT IS NOT A STYLE CHOICE.
+     *
+     * ctm_bridge_dev_t declares `char kind[8]`. "ds5e_usb" is eight characters
+     * plus a terminator, so it is TRUNCATED to "ds5e_us" on the way in and
+     * matches nothing. A wired DualSense Edge therefore fell through to its raw
+     * system name -- "Sony Interactive Entertainment DualSense Edge Wireless
+     * Controller" -- while a wired DualSense worked, because "ds5_usb" is seven
+     * characters and fits exactly.
+     *
+     * ⭐ vid and pid are what the core matches on anyway, and they cannot be
+     * truncated. */
+    if (ctm_is(d, "054c", "0ce6")) return "DualSense";
+    if (ctm_is(d, "054c", "0df2")) return "DualSense Edge";
+    if (ctm_is(d, "054c", "09cc") || ctm_is(d, "054c", "05c4")) return "DualShock 4";
+    if (strcmp(d->kind, "puck") == 0) return "Steam Controller";
+    if (strcmp(d->kind, "xbox") == 0) return "Xbox Controller";
     return d->name;
 }
 
@@ -201,20 +227,42 @@ static lv_obj_t *ctm_make_dev_row(const ctm_bridge_dev_t *d, int idx) {
     lv_obj_t *name = lv_label_create(row);
     lv_label_set_text(name, ctm_dev_label(d));
     lv_label_set_long_mode(name, LV_LABEL_LONG_DOT);
+    /* ⛔ LONG_DOT only truncates a label with a WIDTH. Left to size itself it
+     * grows and wraps instead, and an unrecognised device -- "RONGYUAN 2.4G
+     * Wireless Device System Control" -- took three lines and a third of the
+     * panel. flex_grow gives it the leftover width; width 1 stops it claiming
+     * more than that. */
+    lv_obj_set_width(name, 1);
     lv_obj_set_flex_grow(name, 1);
     lv_obj_set_style_text_color(name, CTM_COL_TXT, 0);
 
+    /* ⭐ THE LABEL DESCRIBES WHAT THE DEVICE CAN DO, NOT WHETHER WE APPROVE.
+     *
+     *   full   bridged -- speaker, haptics, adaptive triggers, microphone
+     *   basic  reaching the host through the stream's own emulation: buttons,
+     *          sticks, gyro, touchpad, rumble
+     *   idle   doing nothing, and reserved for that
+     *
+     * ⛔ "not supported" was rejected: it is false. Anything here CAN be
+     * bridged; a gamepad simply gains little by it, because the stream already
+     * carries everything but audio and haptics.
+     *
+     * ⛔ And "idle" was wrong for an unbridged controller -- it is working, just
+     * through the other path. ⚠️ Reserve idle for devices the stream does not
+     * emulate at all, where nothing is reaching the host. */
     lv_obj_t *st = lv_label_create(row);
-    if (strcmp(d->kind, "hid") == 0) {
-        lv_label_set_text(st, "(hid)");
-        lv_obj_set_style_text_color(st, CTM_COL_SUB, 0);
-    } else if (d->plugged) {
-        lv_label_set_text(st, "plugged");
+    if (d->plugged) {
+        lv_label_set_text(st, "FULL");
         lv_obj_set_style_text_color(st, CTM_COL_OK, 0);
     } else {
-        lv_label_set_text(st, "idle");
+        /* ⛔ "idle" was wrong for a mouse or a keyboard: the stream carries both,
+         * so an unbridged one is WORKING, not sitting there. Reserved for
+         * something the stream does not carry at all -- which, today, is
+         * nothing. */
+        lv_label_set_text(st, "BASIC");
         lv_obj_set_style_text_color(st, CTM_COL_SUB, 0);
     }
+    lv_obj_set_style_pad_left(st, LV_DPX(8), 0);
     lv_obj_set_style_text_font(st, lv_theme_get_font_small(row), 0);
 
     lv_group_add_obj(s_ctm_nav_group, row);
@@ -227,11 +275,10 @@ static lv_obj_t *ctm_make_dev_row(const ctm_bridge_dev_t *d, int idx) {
 
 static void ctm_act_plugall_cb(lv_event_t *e)   { LV_UNUSED(e); ctm_bridge_plug_all();   ctm_request_refresh(); }
 static void ctm_act_unplugall_cb(lv_event_t *e) { LV_UNUSED(e); ctm_bridge_unplug_all(); ctm_request_refresh(); }
-static void ctm_act_close_cb(lv_event_t *e)     { LV_UNUSED(e); ctm_request_close(); }
 
 static void ctm_make_action(const char *label, lv_event_cb_t cb, lv_color_t bg) {
-    lv_obj_t *btn = ctm_nice_btn(s_ctm_sidebar, label, bg);
-    lv_obj_set_width(btn, LV_PCT(100));
+    lv_obj_t *btn = ctm_nice_btn(s_ctm_actions, label, bg);
+    lv_obj_set_flex_grow(btn, 1);
     lv_group_add_obj(s_ctm_nav_group, btn);
     lv_obj_add_event_cb(btn, ctm_nav_key_cb, LV_EVENT_KEY, (void *) (intptr_t) -1);
     lv_obj_add_event_cb(btn, ctm_nav_cancel_cb, LV_EVENT_CANCEL, NULL);
@@ -248,19 +295,65 @@ static void ctm_panel_refresh(void) {
     lv_obj_clean(s_ctm_sidebar);
     for (int i = 0; i < 16; ++i) s_ctm_dev_rows[i] = NULL;
 
-    lv_obj_t *caption = lv_label_create(s_ctm_sidebar);
-    lv_label_set_text(caption, "CONTROLLERS");
+    /* ⭐ Two headings, laid out like the rows beneath them -- name on the left,
+     * status on the right -- so the FULL/BASIC column reads as something rather
+     * than a word floating at the end of a line. */
+    lv_obj_t *caprow = lv_obj_create(s_ctm_sidebar);
+    lv_obj_remove_style_all(caprow);
+    lv_obj_set_size(caprow, LV_PCT(100), LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(caprow, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(caprow, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_hor(caprow, LV_DPX(10), 0);
+    lv_obj_clear_flag(caprow, LV_OBJ_FLAG_SCROLLABLE);
+
+    /* ⛔ "Controllers" was wrong: the list carries mice, keyboards and wireless
+     * receivers as readily as pads. */
+    lv_obj_t *caption = lv_label_create(caprow);
+    lv_label_set_text(caption, "Devices");
     lv_obj_set_style_text_color(caption, CTM_COL_SUB, 0);
     lv_obj_set_style_text_font(caption, lv_theme_get_font_small(caption), 0);
+
+    lv_obj_t *capfeat = lv_label_create(caprow);
+    lv_label_set_text(capfeat, "Features");
+    lv_obj_set_style_text_color(capfeat, CTM_COL_SUB, 0);
+    lv_obj_set_style_text_font(capfeat, lv_theme_get_font_small(capfeat), 0);
 
     if (s_ctm_status_lbl) {
         int plugged = 0;
         for (int i = 0; i < s_ctm_ndev; ++i) {
             if (s_ctm_devs[i].plugged) plugged++;
         }
-        char agent[64];
-        ctm_bridge_agent(agent, sizeof agent);
-        lv_label_set_text_fmt(s_ctm_status_lbl, "Agent %s  -  %d bridged", agent, plugged);
+        /* ⭐ "Listener", because that is what it is called everywhere else --
+         * the docs, the scripts, the log. "Agent" was the odd one out.
+         *
+         * ⛔ And it reports the LISTENER, not the bridge. A healthy listener
+         * with nothing bridged is a normal state; saying "bridge down" there
+         * would be wrong and would send someone looking at the TV. This line
+         * names the thing to go and check. */
+        char listener[64];
+        ctm_bridge_agent(listener, sizeof listener);
+        /* ⛔ NO COUNT. "0 bridged" sat under a panel called USB Bridge above a
+         * button called Bridge all -- the word had stopped carrying meaning,
+         * and each row already says what it is.
+         *
+         * ⭐ "USB Server", not "listener": the Windows side hosts the USB/IP
+         * server, and "listener" reads as something eavesdropping to anyone who
+         * does not know the networking sense. ⚠️ "Server" alone would be worse
+         * -- this setup already has a streaming server, a PC, and a network
+         * full of them. The repeated "USB" is the price of being unambiguous. */
+        /* ⭐ SAY "online", do not merely imply it with an address. The glue
+         * already returns the literal "offline" when the server is down, so the
+         * failing case read correctly and the working one just showed an IP --
+         * leaving a user to infer that an address means it is up. */
+        if (strcmp(listener, "offline") == 0) {
+            lv_label_set_text(s_ctm_status_lbl, "USB Server:");
+            lv_label_set_text(s_ctm_state_lbl, "- OFFLINE");
+            lv_obj_set_style_text_color(s_ctm_state_lbl, lv_palette_main(LV_PALETTE_RED), 0);
+        } else {
+            lv_label_set_text_fmt(s_ctm_status_lbl, "USB Server: %s", listener);
+            lv_label_set_text(s_ctm_state_lbl, "- ONLINE");
+            lv_obj_set_style_text_color(s_ctm_state_lbl, CTM_COL_OK, 0);
+        }
     }
 
     if (s_ctm_ndev == 0) {
@@ -270,16 +363,34 @@ static void ctm_panel_refresh(void) {
         lv_label_set_long_mode(l, LV_LABEL_LONG_WRAP);
         lv_obj_set_width(l, LV_PCT(100));
     }
+    /* ⏸ NO COLLAPSING OF DUPLICATE HID INTERFACES -- tried 2026-08-17 and
+     * REVERTED the same evening because it emptied the list entirely.
+     *
+     * ⚠️ The observation behind it is real: one Razer Orochi appears three
+     * times and a wireless receiver adds more, because a modern mouse presents
+     * several HID interfaces and each is its own node. ⛔ But we do not yet know
+     * what those interfaces ARE, or which one a user would want bridged, and
+     * collapsing them was a guess dressed as a fix.
+     *
+     * ➡️ Understand the interfaces first. Then decide whether to merge, to
+     * label, or to leave them alone. */
     for (int i = 0; i < s_ctm_ndev; ++i) {
         s_ctm_dev_rows[i] = ctm_make_dev_row(&s_ctm_devs[i], i);
     }
-    lv_obj_t *divider = lv_obj_create(s_ctm_sidebar);
-    lv_obj_remove_style_all(divider);
-    lv_obj_set_size(divider, LV_PCT(100), LV_DPX(1));
-    lv_obj_set_style_bg_color(divider, CTM_COL_BORDER, 0);
-    lv_obj_set_style_bg_opa(divider, LV_OPA_COVER, 0);
-    ctm_make_action("Plug all", ctm_act_plugall_cb, lv_palette_darken(LV_PALETTE_GREEN, 2));
-    ctm_make_action("Unplug all", ctm_act_unplugall_cb, lv_palette_darken(LV_PALETTE_BLUE_GREY, 2));
+
+    /* ⭐ Say so when there is nothing, rather than offering to bridge it.
+     * "Bridge all" and "Release all" over an empty list imply devices exist. */
+    if (s_ctm_ndev == 0) {
+        lv_obj_t *none = lv_label_create(s_ctm_sidebar);
+        lv_label_set_text(none, "No devices connected");
+        lv_obj_set_style_text_color(none, CTM_COL_SUB, 0);
+        lv_obj_set_style_pad_all(none, LV_DPX(8), 0);
+    }
+    lv_obj_clean(s_ctm_actions);
+    if (s_ctm_ndev > 0) {
+        ctm_make_action("Bridge All", ctm_act_plugall_cb, lv_palette_darken(LV_PALETTE_GREEN, 2));
+        ctm_make_action("Release All", ctm_act_unplugall_cb, lv_palette_darken(LV_PALETTE_BLUE_GREY, 2));
+    }
 
     if (s_ctm_sel >= s_ctm_ndev) {
         s_ctm_sel = s_ctm_ndev > 0 ? s_ctm_ndev - 1 : 0;
@@ -318,7 +429,9 @@ static void ctm_close_panel(void) {
     s_ctm_dead_nav = s_ctm_nav_group;
     s_ctm_panel = NULL;
     s_ctm_sidebar = NULL;
+    s_ctm_actions = NULL;
     s_ctm_status_lbl = NULL;
+    s_ctm_state_lbl  = NULL;
     s_ctm_nav_group = NULL;
     s_ctm_owner = NULL;
     lv_async_call(ctm_teardown_async, NULL);
@@ -353,16 +466,36 @@ static void open_ctm_panel(lv_event_t *event) {
     s_ctm_panel = panel;
     lv_obj_remove_style_all(panel);
     lv_obj_set_size(panel, LV_PCT(100), LV_PCT(100));
-    lv_obj_set_style_bg_color(panel, lv_color_black(), 0);
-    lv_obj_set_style_bg_opa(panel, LV_OPA_60, 0);
+    /* ⭐ NO DIM. The backdrop used to darken the whole screen, and that is what
+     * made opening the panel feel like leaving the game. It is now an invisible
+     * layer that exists only to catch a click outside the strip and to hold it
+     * above the video. */
+    lv_obj_set_style_bg_opa(panel, LV_OPA_TRANSP, 0);
     lv_obj_clear_flag(panel, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_flag(panel, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_move_foreground(panel);
 
     lv_obj_t *card = lv_obj_create(panel);
     lv_obj_remove_style_all(card);
-    lv_obj_set_size(card, LV_PCT(82), LV_PCT(84));
-    lv_obj_center(card);
+    /* ⭐ A CORNER STRIP, NOT A DIALOGUE. Narrow, top-right, and only as tall as
+     * its contents -- three devices make a short strip and one makes a shorter
+     * one, with no dead space either way.
+     *
+     * ⚠️ Top-right rather than centred on purpose: it is something to glance at
+     * while a game is running, not something to stand in front of it. A
+     * full-screen card reads as "you have left the game" however little it
+     * contains.
+     *
+     * ⛔ THE CARD ITSELF IS NOT CAPPED. Capping both it and the list clipped
+     * the buttons off the bottom: the list filled the card's limit and the
+     * actions had nowhere left to go. The list is the only thing here that can
+     * grow without bound, so it is the only thing that needs a limit -- and the
+     * card is then always exactly as tall as its header, its list and its
+     * buttons. */
+    lv_obj_set_width(card, LV_PCT(30));
+    lv_obj_set_height(card, LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(card, LV_FLEX_FLOW_COLUMN);
+    lv_obj_align(card, LV_ALIGN_TOP_RIGHT, LV_DPX(-16), LV_DPX(16));
     lv_obj_set_style_bg_color(card, CTM_COL_CARD, 0);
     lv_obj_set_style_bg_opa(card, LV_OPA_COVER, 0);
     lv_obj_set_style_radius(card, LV_DPX(12), 0);
@@ -378,6 +511,9 @@ static void open_ctm_panel(lv_event_t *event) {
     lv_obj_set_size(header, LV_PCT(100), LV_SIZE_CONTENT);
     lv_obj_set_flex_flow(header, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_gap(header, LV_DPX(2), 0);
+    /* The card's own padding already spaces the title from the top edge; the
+     * header was adding its own on top of it. */
+    lv_obj_set_style_pad_top(header, 0, 0);
     lv_obj_clear_flag(header, LV_OBJ_FLAG_SCROLLABLE);
 
     lv_obj_t *titlerow = lv_obj_create(header);
@@ -387,24 +523,52 @@ static void open_ctm_panel(lv_event_t *event) {
     lv_obj_set_flex_align(titlerow, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_clear_flag(titlerow, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_t *title = lv_label_create(titlerow);
-    lv_label_set_text(title, "CTM Bridge");
+    lv_label_set_text(title, "USB Bridge");
     lv_obj_set_style_text_color(title, CTM_COL_TXT, 0);
     lv_obj_set_style_text_font(title, lv_theme_get_font_large(title), 0);
 
-    /* Real close button (pointer); keyboard/gamepad close with Back (B). */
-    lv_obj_t *closebtn = ctm_nice_btn(titlerow, "Close", lv_palette_darken(LV_PALETTE_RED, 3));
-    lv_obj_add_event_cb(closebtn, ctm_act_close_cb, LV_EVENT_CLICKED, NULL);
+    /* ⛔ NO CLOSE BUTTON. It could only ever be pressed with a pointer -- it was
+     * never in the navigation group, so a controller could not reach it at all.
+     * A control only a mouse can use has no place in something driven from a
+     * sofa, and there are two working ways out already: circle on a controller,
+     * back on the remote. */
 
-    s_ctm_status_lbl = lv_label_create(header);
+    /* ⭐ TWO LABELS, because only the STATE should carry colour. One label
+     * cannot be part grey and part green, and colouring the whole line makes
+     * the address look like it means something. */
+    lv_obj_t *statusrow = lv_obj_create(header);
+    lv_obj_remove_style_all(statusrow);
+    lv_obj_set_size(statusrow, LV_PCT(100), LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(statusrow, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(statusrow, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_gap(statusrow, LV_DPX(6), 0);
+    lv_obj_clear_flag(statusrow, LV_OBJ_FLAG_SCROLLABLE);
+
+    s_ctm_status_lbl = lv_label_create(statusrow);
     lv_obj_set_style_text_color(s_ctm_status_lbl, CTM_COL_SUB, 0);
-    lv_obj_set_style_text_font(s_ctm_status_lbl, lv_theme_get_font_small(header), 0);
+    lv_obj_set_style_text_font(s_ctm_status_lbl, lv_theme_get_font_small(statusrow), 0);
+
+    s_ctm_state_lbl = lv_label_create(statusrow);
+    lv_obj_set_style_text_font(s_ctm_state_lbl, lv_theme_get_font_small(statusrow), 0);
 
     /* ⭐ ONE COLUMN. The panel was a sidebar and a detail pane side by side; the
      * detail pane is gone, so the list is the whole body and gets the width. */
     s_ctm_sidebar = lv_obj_create(card);
     lv_obj_remove_style_all(s_ctm_sidebar);
     lv_obj_set_width(s_ctm_sidebar, LV_PCT(100));
-    lv_obj_set_flex_grow(s_ctm_sidebar, 1);
+/* ⛔⛔ SIZE_CONTENT, NOT GROW -- and getting this wrong made the panel LOOK
+     * EMPTY with devices connected.
+     *
+     * flex_grow means "take the leftover space", and a card sized to its own
+     * children HAS no leftover space. The list was given zero height, so every
+     * row was built correctly and drawn into nothing. So was the "no devices"
+     * label, which is how the mistake gave itself away.
+     *
+     * ⭐ Sized to its content instead, and capped: the card grows with the list
+     * until the cap bites, and past that the list scrolls inside the height it
+     * has. A short list makes a short strip either way. */
+    lv_obj_set_height(s_ctm_sidebar, LV_SIZE_CONTENT);
+    lv_obj_set_style_max_height(s_ctm_sidebar, LV_DPX(320), 0);
     lv_obj_set_flex_flow(s_ctm_sidebar, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_all(s_ctm_sidebar, LV_DPX(8), 0);
     lv_obj_set_style_pad_gap(s_ctm_sidebar, LV_DPX(8), 0);
@@ -416,6 +580,15 @@ static void open_ctm_panel(lv_event_t *event) {
     lv_obj_set_scrollbar_mode(s_ctm_sidebar, LV_SCROLLBAR_MODE_AUTO);
     /* Back backstop: any focusable child bubbles CANCEL up here -> close panel. */
     lv_obj_add_event_cb(s_ctm_sidebar, ctm_nav_cancel_cb, LV_EVENT_CANCEL, NULL);
+
+    /* Pinned below the list, so four devices cannot push these off the panel. */
+    s_ctm_actions = lv_obj_create(card);
+    lv_obj_remove_style_all(s_ctm_actions);
+    lv_obj_set_size(s_ctm_actions, LV_PCT(100), LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(s_ctm_actions, LV_FLEX_FLOW_ROW);
+    lv_obj_set_style_pad_gap(s_ctm_actions, LV_DPX(8), 0);
+    lv_obj_clear_flag(s_ctm_actions, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_event_cb(s_ctm_actions, ctm_nav_cancel_cb, LV_EVENT_CANCEL, NULL);
 
     app_input_set_group(&controller->global->ui.input, s_ctm_nav_group);
     ctm_panel_refresh();
@@ -438,7 +611,9 @@ void ctm_panel_on_owner_deleted(streaming_controller_t *controller) {
         if (s_ctm_nav_group)    { lv_group_del(s_ctm_nav_group);    s_ctm_nav_group = NULL; }
         s_ctm_panel = NULL;
         s_ctm_sidebar = NULL;
+        s_ctm_actions = NULL;
         s_ctm_status_lbl = NULL;
+        s_ctm_state_lbl  = NULL;
         s_ctm_owner = NULL;
     }
     /* Cancel any in-flight panel teardown; the dead panel is freed with the
