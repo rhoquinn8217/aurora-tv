@@ -215,6 +215,15 @@ int ctm_bridge_list(ctm_bridge_dev_t *out, int max)
         snprintf(out[n].kind, sizeof(out[n].kind), "%s", kind ? kind : "hid");
         snprintf(out[n].bus, sizeof(out[n].bus), "%s", item->bus);
         snprintf(out[n].mac, sizeof(out[n].mac), "%s", item->mac);
+        /* The first backing node is the one the bridge plugs. */
+        out[n].node[0] = '\0';
+        for (int k = 0; k < item->device_count; ++k) {
+            int j = item->device_indices[k];
+            if (j >= 0 && j < g_scan.count && g_scan.devices[j].node[0]) {
+                snprintf(out[n].node, sizeof(out[n].node), "%s", g_scan.devices[j].node);
+                break;
+            }
+        }
         /* The TV's own Magic Remote row IS the pointer synthesizer (raw relay
          * of its LG-vendor descriptor would code-10 on Windows). */
         out[n].plugged = item_is_tv_remote(item) ? ctm_tv_pointer_active()

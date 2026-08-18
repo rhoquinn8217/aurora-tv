@@ -48,6 +48,11 @@ typedef struct {
     char kind[8];   /* "ds5" / "ds4" / "xbox" / "puck" / "hid" */
     char bus[8];    /* "USB" / "BT" */
     char mac[24];   /* BT MAC (e.g. "58:10:31:..."), empty for USB */
+    /* ⭐ The hidraw node, which is the identity everything else in this project
+     * speaks -- SDL returns it as the controller path on webOS, and the bridge
+     * plugs by it. `index` above is only valid until the next enumerate; this
+     * is not. */
+    char node[64];
     bool plugged;
 } ctm_bridge_dev_t;
 

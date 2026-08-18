@@ -107,6 +107,7 @@ typedef struct {
     char prep_node[64];  /* the node to plug once the pulse finishes */
     bool ours_plugged;   /* we plugged this one and it is still bridged */
     uint32_t plug_check_next;  /* SDL ticks when to look again */
+    uint8_t plug_miss;   /* consecutive "not plugged" answers -- see PLUG_MISSES */
     uint8_t bye_left;    /* steps of the post-unplug pulse still to show */
     uint32_t bye_next;   /* SDL ticks when the next bye step is due */
     uint8_t buzz_left;   /* half-steps of the refusal rumble still to run */
@@ -332,6 +333,28 @@ static bool gesture_held(SDL_GameController *controller) {
  * put a filesystem scan on the app's main loop. The cheaper fix, when it is
  * worth doing, is for the core to say so rather than for this to ask. */
 #define PLUG_CHECK_MS     500
+/* ⛔⛔ HOW MANY CONSECUTIVE "NOT PLUGGED" ANSWERS BEFORE WE BELIEVE IT.
+ *
+ * ctm_bridge_node_is_plugged() RE-ENUMERATES on every call, and an enumeration
+ * that runs while a device is arriving or leaving can miss a node that is
+ * perfectly well bridged. On one answer that is indistinguishable from an
+ * unplug, so a healthy bridge was torn down by an unrelated controller being
+ * paired.
+ *
+ * ⭐ Measured 2026-08-18: a DualSense was paired over Bluetooth while a
+ * DualSense Edge was bridged. Three milliseconds after the new controller
+ * arrived, the Edge was restored to moonlight and the app died shortly after:
+ *
+ *     controller 2 arrived: name=[DualSense Wireless Controller] ...
+ *     moonlight: slot 1 back from the bridge
+ *     /dev/hidraw0 came back to us -- pulsing yellow
+ *
+ * ⚠️ Nothing was pressed. The bridge was fine; the CHECK was wrong.
+ *
+ * ⭐ Two costs one extra interval -- half a second -- to notice a real unplug,
+ * against never tearing down a live bridge because a scan blinked. A real
+ * unplug stays unplugged; a race does not. */
+#define PLUG_MISSES       2
 
 /* The refusal rumble: three short sharp bursts.
  *
@@ -673,6 +696,15 @@ static bool gesture_poll_one(SDL_GameController *controller, SDL_JoystickID id) 
         uint32_t now_ticks = SDL_GetTicks();
         if (now_ticks >= w->plug_check_next) {
             if (!ctm_bridge_node_is_plugged(w->prep_node)) {
+                /* ⭐ One miss is not evidence. See PLUG_MISSES. */
+                if (++w->plug_miss < PLUG_MISSES) {
+                    gesture_log("%s not found on check %u of %u -- waiting",
+                                w->prep_node, (unsigned) w->plug_miss,
+                                (unsigned) PLUG_MISSES);
+                    w->plug_check_next = now_ticks + PLUG_CHECK_MS;
+                    return false;
+                }
+                w->plug_miss = 0;
                 w->ours_plugged = false;
                 gesture_moonlight_set_excluded(controller, false);
                 if (gesture_signal_here(w->prep_node)) {
@@ -711,6 +743,7 @@ static bool gesture_poll_one(SDL_GameController *controller, SDL_JoystickID id) 
                  * anyway, so it is not worth keeping a buzz for. */
                 gesture_log("%s came back to us -- pulsing yellow", w->prep_node);
             } else {
+                w->plug_miss = 0;
                 w->plug_check_next = now_ticks + PLUG_CHECK_MS;
             }
         }
@@ -756,6 +789,7 @@ static bool gesture_poll_one(SDL_GameController *controller, SDL_JoystickID id) 
                     gesture_log("confirmation pulse on %s: bridged",
                                 w->prep_node);
                     w->ours_plugged = true;
+                    w->plug_miss = 0;
                     w->plug_check_next = SDL_GetTicks() + PLUG_CHECK_MS;
                     gesture_moonlight_set_excluded(controller, true);
                 }
@@ -913,12 +947,72 @@ static bool gesture_poll_one(SDL_GameController *controller, SDL_JoystickID id) 
 }
 
 
+/* The gamepad list, kept so a panel request can find a controller by node.
+ * Set on every tick; NULL before the first one. */
+static app_input_t *s_gesture_input = NULL;
+
+bool ctm_bridge_gesture_request_bridge(const char *node) {
+    if (!node || !node[0] || !s_gesture_input) {
+        return false;
+    }
+    int n = (int) app_input_get_max_gamepads(s_gesture_input);
+    for (int i = 0; i < n; ++i) {
+        SDL_GameController *gc = s_gesture_input->gamepads[i].controller;
+        if (!gc) {
+            continue;
+        }
+        const char *dev_path = SDL_GameControllerPath(gc);
+        if (!dev_path || !dev_path[0]) {
+            continue;
+        }
+        char found[64];
+        if (!hidraw_node_for_event(dev_path, found, sizeof(found))) {
+            continue;
+        }
+        if (strcmp(found, node) != 0) {
+            continue;
+        }
+
+        SDL_Joystick *js = SDL_GameControllerGetJoystick(gc);
+        if (!js) {
+            return false;
+        }
+        watched_t *w = watched_for(SDL_JoystickInstanceID(js));
+        if (!w) {
+            return false;
+        }
+        /* ⛔ NO "is it already plugged" CHECK HERE, deliberately.
+         *
+         * ctm_bridge_node_is_plugged() RE-ENUMERATES every device on every
+         * call. The chord can afford that -- it runs once, after a two-second
+         * hold, off the back of an input poll. On a button press it runs on the
+         * LVGL thread and the overlay froze hard enough that the TV pointer
+         * stalled with it. Measured 2026-08-18.
+         *
+         * ⭐ And it was redundant: the panel only offers "Bridge" on a row it
+         * has already listed as not plugged. The caller knows. */
+
+        /* ⭐ EXACTLY WHAT A COMPLETED CHORD SETS, and nothing more. Everything
+         * that makes a bridge a bridge happens on the following ticks, in the
+         * one place it is written. */
+        snprintf(w->prep_node, sizeof(w->prep_node), "%s", node);
+        w->prep_left = ctm_bridge_signals_enabled() ? PREP_STEPS : 0;
+        w->prep_next = SDL_GetTicks();
+        w->fired = true;
+        gesture_log("panel asked to bridge %s : pulsing before handover", node);
+        return true;
+    }
+    gesture_log("panel asked to bridge %s, but no controller is behind it", node);
+    return false;
+}
+
 void ctm_bridge_gesture_tick(struct app_input_t *input, struct session_t *session) {
     s_stream_input = session ? session_get_input(session) : NULL;
     if (!input) {
         return;
     }
     app_input_t *in = (app_input_t *)input;
+    s_gesture_input = in;
     int n = (int)app_input_get_max_gamepads(in);
     for (int i = 0; i < n; ++i) {
         SDL_GameController *gc = in->gamepads[i].controller;

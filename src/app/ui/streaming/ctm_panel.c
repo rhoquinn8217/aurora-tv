@@ -26,6 +26,7 @@
 #include "streaming.controller.h"
 #include "ctm_bridge_glue.h"
 #include "ctm_panel.h"
+#include "input/ctm_bridge_gesture.h"
 
 #include <string.h>
 
@@ -101,12 +102,57 @@ static void ctm_toggle_device(int row) {
     if (row < 0 || row >= s_ctm_ndev) {
         return;
     }
+    /* ⛔⛔ PASS THE DEVICE'S index, NOT THE ROW POSITION.
+     *
+     * ctm_bridge_dev_t.index is an opaque handle into the core's device table;
+     * the row position is where the device happens to sit in OUR copy of the
+     * list. They agree only while nothing has connected or disconnected --
+     * which is exactly when it matters least. Getting this wrong does not
+     * fail quietly: it bridges A DIFFERENT DEVICE. */
+    const int index = s_ctm_devs[row].index;
     if (s_ctm_devs[row].plugged) {
-        ctm_bridge_unplug_index(row);
-    } else {
-        ctm_bridge_plug_index(row);
+        ctm_bridge_unplug_index(index);
+        ctm_request_refresh();
+        return;
+    }
+    /* ⭐⭐ ASK THE GESTURE TO DO IT, rather than plugging from here.
+     *
+     * Plugging directly diverged from the chord in ways that were invisible
+     * until they bit: the emulated pad was never retired, so the host saw the
+     * controller twice; the watcher did not know it owned the bridge, so it
+     * never restored anything afterwards; and releasing from the panel then
+     * skipped the sequence that ends a bridge properly, which over Bluetooth
+     * looked like the controller powering itself off.
+     *
+     * ⭐ Asking means there is one implementation and the two cannot drift.
+     *
+     * ⚠️ A keyboard or a mouse is not an SDL controller and has no gesture path
+     * to borrow, so the direct plug stays as the fallback -- it is what those
+     * devices have always used, and they have none of the problems above
+     * because nothing emulates them in the first place. */
+    if (!ctm_bridge_gesture_request_bridge(s_ctm_devs[row].node)) {
+        ctm_bridge_plug_index(index);
     }
     ctm_request_refresh();
+}
+
+/* Release every bridged device, one at a time, the same way a row does.
+ *
+ * ⛔ NOT ctm_bridge_unplug_all(): that calls release_local_sessions_on_exit(),
+ * the APP SHUTDOWN path. It tears down every session at once while holding the
+ * device mutex, and with the microphone disarm in the unplug path -- five
+ * writes twenty milliseconds apart, per device -- the overlay froze long enough
+ * to look like a crash. Measured 2026-08-18.
+ *
+ * ⚠️ This still runs on the UI thread and still blocks; it just has far less to
+ * do, and it does the same thing pressing each row would. Getting these calls
+ * off the UI thread is T-062 and is a bigger change than this. */
+static void ctm_release_all(void) {
+    for (int i = 0; i < s_ctm_ndev; ++i) {
+        if (s_ctm_devs[i].plugged) {
+            ctm_bridge_unplug_index(s_ctm_devs[i].index);
+        }
+    }
 }
 
 
@@ -213,6 +259,10 @@ static lv_obj_t *ctm_make_dev_row(const ctm_bridge_dev_t *d, int idx) {
     lv_obj_set_style_pad_hor(row, LV_DPX(10), 0);
     lv_obj_set_style_pad_ver(row, LV_DPX(9), 0);
     lv_obj_set_style_radius(row, LV_DPX(6), 0);
+    /* A border, so a row reads as a raised thing rather than a band of colour. */
+    lv_obj_set_style_border_width(row, LV_DPX(1), 0);
+    lv_obj_set_style_border_color(row, lv_color_hex(0x3a4854), 0);
+    lv_obj_set_style_border_color(row, CTM_COL_FOCUS, LV_STATE_FOCUS_KEY);
     lv_obj_set_style_bg_color(row, CTM_COL_ROW, 0);
     lv_obj_set_style_bg_opa(row, LV_OPA_COVER, 0);
     lv_obj_set_style_bg_color(row, CTM_COL_FOCUS, LV_STATE_FOCUS_KEY);
@@ -224,45 +274,72 @@ static lv_obj_t *ctm_make_dev_row(const ctm_bridge_dev_t *d, int idx) {
     lv_obj_add_flag(row, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_flag(row, LV_OBJ_FLAG_EVENT_BUBBLE);   /* Back bubbles to the sidebar */
 
-    lv_obj_t *name = lv_label_create(row);
+    /* ⭐⭐ THE ROW HAS TO LOOK LIKE A CONTROL, NOT A REPORT.
+     *
+     * It listed a name and a state and nothing about it suggested it could be
+     * pressed -- so the panel read as a status page and the one thing a user
+     * needs to do with it was invisible.
+     *
+     * ⭐ Naming the ACTION is the only treatment that says what pressing it
+     * DOES rather than what state the row is in. A chevron was considered and
+     * rejected: it conventionally means "goes somewhere", and this goes
+     * nowhere. A segmented BASIC|FULL was rejected too -- two segments look
+     * like two targets, and on a controller the row is the only target there
+     * is.
+     *
+     * ⚠️ IF THIS MAKES ROWS TOO TALL, the fallback is one line: put the state
+     * back beside the name as "DualSense - BASIC" and keep the button. That is
+     * a change to this block alone. */
+    lv_obj_t *textcol = lv_obj_create(row);
+    lv_obj_remove_style_all(textcol);
+    lv_obj_set_height(textcol, LV_SIZE_CONTENT);
+    lv_obj_set_width(textcol, 1);
+    lv_obj_set_flex_grow(textcol, 1);
+    lv_obj_set_flex_flow(textcol, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_gap(textcol, LV_DPX(1), 0);
+    lv_obj_clear_flag(textcol, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *name = lv_label_create(textcol);
     lv_label_set_text(name, ctm_dev_label(d));
     lv_label_set_long_mode(name, LV_LABEL_LONG_DOT);
     /* ⛔ LONG_DOT only truncates a label with a WIDTH. Left to size itself it
      * grows and wraps instead, and an unrecognised device -- "RONGYUAN 2.4G
      * Wireless Device System Control" -- took three lines and a third of the
-     * panel. flex_grow gives it the leftover width; width 1 stops it claiming
-     * more than that. */
-    lv_obj_set_width(name, 1);
-    lv_obj_set_flex_grow(name, 1);
+     * panel. */
+    lv_obj_set_width(name, LV_PCT(100));
     lv_obj_set_style_text_color(name, CTM_COL_TXT, 0);
 
-    /* ⭐ THE LABEL DESCRIBES WHAT THE DEVICE CAN DO, NOT WHETHER WE APPROVE.
+    /* What the device can do, not what we did to it. FULL is a bridged device:
+     * speaker, haptics, adaptive triggers, microphone. BASIC is anything
+     * reaching the host through the stream's own emulation -- buttons, sticks,
+     * gyro, touchpad, rumble.
      *
-     *   full   bridged -- speaker, haptics, adaptive triggers, microphone
-     *   basic  reaching the host through the stream's own emulation: buttons,
-     *          sticks, gyro, touchpad, rumble
-     *   idle   doing nothing, and reserved for that
-     *
-     * ⛔ "not supported" was rejected: it is false. Anything here CAN be
-     * bridged; a gamepad simply gains little by it, because the stream already
-     * carries everything but audio and haptics.
-     *
-     * ⛔ And "idle" was wrong for an unbridged controller -- it is working, just
-     * through the other path. ⚠️ Reserve idle for devices the stream does not
-     * emulate at all, where nothing is reaching the host. */
-    lv_obj_t *st = lv_label_create(row);
-    if (d->plugged) {
-        lv_label_set_text(st, "FULL");
-        lv_obj_set_style_text_color(st, CTM_COL_OK, 0);
-    } else {
-        /* ⛔ "idle" was wrong for a mouse or a keyboard: the stream carries both,
-         * so an unbridged one is WORKING, not sitting there. Reserved for
-         * something the stream does not carry at all -- which, today, is
-         * nothing. */
-        lv_label_set_text(st, "BASIC");
-        lv_obj_set_style_text_color(st, CTM_COL_SUB, 0);
-    }
-    lv_obj_set_style_pad_left(st, LV_DPX(8), 0);
+     * ⛔ "idle" was wrong for an unbridged controller, and for a mouse: the
+     * stream carries them, so they are WORKING, just by the other path. */
+    lv_obj_t *st = lv_label_create(textcol);
+    lv_label_set_text(st, d->plugged ? "FULL" : "BASIC");
+    lv_obj_set_style_text_color(st, d->plugged ? CTM_COL_OK : CTM_COL_SUB, 0);
+    lv_obj_set_style_text_font(st, lv_theme_get_font_small(textcol), 0);
+
+    /* The action, drawn as a button. ⚠️ NOT actually clickable in its own right:
+     * the whole row takes the press, so this is an affordance rather than a
+     * second target to aim at. */
+    lv_obj_t *act = lv_obj_create(row);
+    lv_obj_remove_style_all(act);
+    lv_obj_set_size(act, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+    lv_obj_set_style_pad_hor(act, LV_DPX(10), 0);
+    lv_obj_set_style_pad_ver(act, LV_DPX(4), 0);
+    lv_obj_set_style_radius(act, LV_DPX(4), 0);
+    lv_obj_set_style_bg_color(act, lv_color_hex(0x2f3d49), 0);
+    lv_obj_set_style_bg_opa(act, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(act, LV_DPX(1), 0);
+    lv_obj_set_style_border_color(act, lv_color_hex(0x4a5866), 0);
+    lv_obj_clear_flag(act, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *actlbl = lv_label_create(act);
+    lv_label_set_text(actlbl, d->plugged ? "Release" : "Bridge");
+    lv_obj_set_style_text_color(actlbl, CTM_COL_TXT, 0);
+    lv_obj_set_style_text_font(actlbl, lv_theme_get_font_small(act), 0);
     lv_obj_set_style_text_font(st, lv_theme_get_font_small(row), 0);
 
     lv_group_add_obj(s_ctm_nav_group, row);
@@ -274,7 +351,7 @@ static lv_obj_t *ctm_make_dev_row(const ctm_bridge_dev_t *d, int idx) {
 }
 
 static void ctm_act_plugall_cb(lv_event_t *e)   { LV_UNUSED(e); ctm_bridge_plug_all();   ctm_request_refresh(); }
-static void ctm_act_unplugall_cb(lv_event_t *e) { LV_UNUSED(e); ctm_bridge_unplug_all(); ctm_request_refresh(); }
+static void ctm_act_unplugall_cb(lv_event_t *e) { LV_UNUSED(e); ctm_release_all(); ctm_request_refresh(); }
 
 static void ctm_make_action(const char *label, lv_event_cb_t cb, lv_color_t bg) {
     lv_obj_t *btn = ctm_nice_btn(s_ctm_actions, label, bg);

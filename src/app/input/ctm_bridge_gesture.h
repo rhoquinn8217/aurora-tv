@@ -6,6 +6,7 @@
 #define CTM_BRIDGE_GESTURE_H
 
 #include <SDL.h>
+#include <stdbool.h>   /* the file declares bool-returning functions */
 
 struct app_input_t;
 
@@ -34,6 +35,23 @@ void ctm_bridge_gesture_tick(struct app_input_t *input, struct session_t *sessio
 /* Forget a controller's gesture progress. When: it is removed, or bridged --
  * once bridged, the bridge core's own gesture takes over. */
 void ctm_bridge_gesture_reset(SDL_JoystickID id);
+
+/* ⭐⭐ ASK FOR A BRIDGE AS IF THE CHORD HAD BEEN HELD.
+ *
+ * The panel used to plug a device itself, and the results diverged from the
+ * gesture in ways that were not obvious until they bit: the emulated pad was
+ * never retired, so the host saw the controller twice; the watcher did not know
+ * it owned the bridge, so it never restored anything afterwards; and unbridging
+ * from the panel skipped the sequence that ends a bridge properly.
+ *
+ * Rather than copy that sequence into the panel and let the two drift, the
+ * panel asks for the SAME code to run. This sets exactly what a completed chord
+ * sets and returns; the pulse, the plug, the confirmation, the retiring of the
+ * emulated pad and the ownership flag all follow on the next ticks, unchanged.
+ *
+ * Returns false when no controller is behind that node -- a keyboard or a mouse
+ * is not an SDL controller and has no gesture path to borrow. */
+bool ctm_bridge_gesture_request_bridge(const char *node);
 
 #else
 
