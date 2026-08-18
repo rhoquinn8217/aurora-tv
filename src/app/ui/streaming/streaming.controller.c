@@ -183,6 +183,35 @@ static int  s_ctm_ndev = 0;
 static int  s_ctm_sel  = 0;
 static bool s_ctm_detail_open = false;
 
+/* ⛔⛔ SET WHILE LEAVING THE DETAIL PANE. Do not rebuild the pane during this.
+ *
+ * THE CRASH THIS PREVENTS, traced 2026-08-17: press circle (or the remote's
+ * back) on a slider in the detail pane and the app dies. Every crash was from
+ * INSIDE the detail pane; circle in the sidebar is fine, and the Close button
+ * never crashes because it is pointer-only and cannot be reached with a
+ * controller at all.
+ *
+ * The chain:
+ *
+ *   CANCEL fires on the slider
+ *     -> ctm_leave_detail()
+ *       -> lv_group_focus_obj(sidebar row)
+ *         -> ctm_dev_focus_cb()
+ *           -> ctm_build_detail()
+ *             -> lv_obj_clean(s_ctm_detail)   <-- frees the slider LVGL is
+ *                                                 STILL DISPATCHING ON
+ *
+ * ⭐ Same family as the message-box crash fixed 2026-08-16: an object deleted
+ * from inside its own event. There the answer was to defer the close; here it
+ * is to not rebuild at all, because the rebuild is pure waste -- the row being
+ * focused is the one already displayed.
+ *
+ * ⚠️ THIS GUARD IS WRITTEN TO SURVIVE T-106. It says "never rebuild from
+ * inside a leave", which stays true however the pane's contents change. The
+ * no-op check in ctm_dev_focus_cb is keyed to the current slider rows and may
+ * not survive; this one does. */
+static bool s_ctm_leaving_detail = false;
+
 static ctm_row_t s_ctm_rows[8];
 static int       s_ctm_nrows = 0;
 
@@ -980,16 +1009,34 @@ static void ctm_leave_detail(void) {
     }
     s_ctm_detail_open = false;
     app_input_set_group(&s_ctm_owner->global->ui.input, s_ctm_nav_group);
+    /* ⛔ The focus below fires ctm_dev_focus_cb, which would rebuild the detail
+     * pane and free the object this event is being dispatched on. See the note
+     * on s_ctm_leaving_detail. */
+    s_ctm_leaving_detail = true;
     if (s_ctm_sel >= 0 && s_ctm_sel < s_ctm_ndev && s_ctm_dev_rows[s_ctm_sel]) {
         lv_group_focus_obj(s_ctm_dev_rows[s_ctm_sel]);
         lv_obj_add_state(s_ctm_dev_rows[s_ctm_sel], LV_STATE_FOCUS_KEY);
     }
+    s_ctm_leaving_detail = false;
 }
 
 /* Sidebar: a controller row was focused -> live-preview its detail. */
 static void ctm_dev_focus_cb(lv_event_t *e) {
     int row = (int) (intptr_t) lv_event_get_user_data(e);
     if (row < 0 || row >= s_ctm_ndev) {
+        return;
+    }
+    /* ⛔ Leaving the detail pane focuses a sidebar row on the way out. Rebuilding
+     * here would free the object still dispatching the event that started it.
+     * See s_ctm_leaving_detail. */
+    if (s_ctm_leaving_detail) {
+        return;
+    }
+    /* ⭐ And nothing to do when the pane already shows this row -- the rebuild
+     * would be identical. Cheap, and it saves a full teardown on every focus
+     * change. ⓘ Keyed to the current row count, so it may not outlive T-106;
+     * the guard above is the one that must. */
+    if (s_ctm_sel == row && s_ctm_nrows > 0) {
         return;
     }
     s_ctm_sel = row;
