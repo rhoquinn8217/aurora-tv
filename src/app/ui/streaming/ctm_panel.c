@@ -31,7 +31,7 @@
 
 /* Which setting a detail row edits. ⚠️ This lived one line above the block that
  * was lifted and was missed on the first pass -- the whole build failed on it. */
-enum { CTM_F_PLUG = 1, CTM_F_AUDIO, CTM_F_HVOL, CTM_F_SVOL, CTM_F_LAT, CTM_F_HAP };
+
 
 /* Forward declarations, moved with the block rather than left behind: several of
  * these functions call each other in both directions. */
@@ -40,10 +40,6 @@ static void ctm_request_close(void);
 static void ctm_teardown_async(void *p);
 static void ctm_panel_refresh(void);
 static void ctm_request_refresh(void);
-static void ctm_build_detail(int row);
-static void ctm_enter_detail(void);
-static void ctm_leave_detail(void);
-static const char *ctm_audio_name(int m);
 static void open_ctm_panel(lv_event_t *event);
 
 #define CTM_COL_CARD     lv_color_hex(0x12181d)
@@ -55,67 +51,28 @@ static void open_ctm_panel(lv_event_t *event);
 #define CTM_COL_SUB      lv_color_hex(0x95a3b0)
 #define CTM_COL_OK       lv_color_hex(0x35c46a)
 
-typedef struct {
-    int field;
-    int cur, min, max, step;
-    int gindex;             /* g_devices index (plug toggle) */
-    bool ds4_audio;         /* audio row cycles the DS4 subset (Auto/Headphones/Split) */
-    lv_obj_t *row;
-    lv_obj_t *slider;       /* NULL for non-slider rows */
-    lv_obj_t *value_lbl;
-} ctm_row_t;
-
-/* DS4 audio row: cur is a POSITION in this subset, translated to/from the
- * shared audio_mode value at read/write. Headset(3) forces the Layout B route
- * 0xFF, Both(4) doubles as "Split" 0xDF (see controller_ds4.c patch_output);
- * Auto leaves the service map's jack auto-route in charge. */
-static const int k_ctm_ds4_modes[] = {0 /* Auto */, 3 /* Headphones */, 4 /* Split */};
 
 static lv_obj_t   *s_ctm_panel      = NULL;   /* full-screen backdrop */
-static lv_obj_t   *s_ctm_sidebar    = NULL;
-static lv_obj_t   *s_ctm_detail     = NULL;
+static lv_obj_t   *s_ctm_sidebar    = NULL;   /* the device list */
 static lv_obj_t   *s_ctm_status_lbl = NULL;
 static lv_group_t *s_ctm_nav_group    = NULL;
-static lv_group_t *s_ctm_detail_group = NULL;
 static streaming_controller_t *s_ctm_owner = NULL;
 
 static ctm_bridge_dev_t s_ctm_devs[16];
 static lv_obj_t        *s_ctm_dev_rows[16];
 static int  s_ctm_ndev = 0;
 static int  s_ctm_sel  = 0;
-static bool s_ctm_detail_open = false;
 
-/* ⛔⛔ SET WHILE LEAVING THE DETAIL PANE. Do not rebuild the pane during this.
+/* ⭐ THE DETAIL PANE IS GONE, AND THE CRASH IT CAUSED WITH IT.
  *
- * THE CRASH THIS PREVENTS, traced 2026-08-17: press circle (or the remote's
- * back) on a slider in the detail pane and the app dies. Every crash was from
- * INSIDE the detail pane; circle in the sidebar is fine, and the Close button
- * never crashes because it is pointer-only and cannot be reached with a
- * controller at all.
+ * A guard used to live here: leaving the pane focused a sidebar row, focusing
+ * rebuilt the pane, and the rebuild freed the object LVGL was still dispatching
+ * on. Fixed on 2026-08-17 by not rebuilding from inside a leave.
  *
- * The chain:
- *
- *   CANCEL fires on the slider
- *     -> ctm_leave_detail()
- *       -> lv_group_focus_obj(sidebar row)
- *         -> ctm_dev_focus_cb()
- *           -> ctm_build_detail()
- *             -> lv_obj_clean(s_ctm_detail)   <-- frees the slider LVGL is
- *                                                 STILL DISPATCHING ON
- *
- * ⭐ Same family as the message-box crash fixed 2026-08-16: an object deleted
- * from inside its own event. There the answer was to defer the close; here it
- * is to not rebuild at all, because the rebuild is pure waste -- the row being
- * focused is the one already displayed.
- *
- * ⚠️ THIS GUARD IS WRITTEN TO SURVIVE T-106. It says "never rebuild from
- * inside a leave", which stays true however the pane's contents change. The
- * no-op check in ctm_dev_focus_cb is keyed to the current slider rows and may
- * not survive; this one does. */
-static bool s_ctm_leaving_detail = false;
+ * ⭐⭐ Removing the pane removes the whole shape of that fault. Recorded because
+ * the same trap waits for anything that rebuilds a container from inside an
+ * event raised by one of its children. */
 
-static ctm_row_t s_ctm_rows[8];
-static int       s_ctm_nrows = 0;
 
 /* Deferred-teardown holders: the panel is hidden synchronously on close (so the
  * remote Back produces a same-frame UI change and webOS doesn't background the
@@ -123,170 +80,24 @@ static int       s_ctm_nrows = 0;
  * inside its own Back event). */
 static lv_obj_t   *s_ctm_dead_panel  = NULL;
 static lv_group_t *s_ctm_dead_nav    = NULL;
-static lv_group_t *s_ctm_dead_detail = NULL;
 
-static const char *ctm_audio_name(int m) {
-    switch (m) {
-        case 0:  return "Auto";
-        case 1:  return "Off";
-        case 2:  return "Speaker";
-        case 3:  return "Headset";
-        case 4:  return "Both";
-        default: return "?";
-    }
-}
 
-/* DS4 names for the same mode values (route semantics, not endpoints). */
-static const char *ctm_audio_name_ds4(int m) {
-    switch (m) {
-        case 0:  return "Auto";
-        case 3:  return "Headphones";
-        case 4:  return "Split";
-        default: return "?";
-    }
-}
-
-static const char *ctm_kind_title(const char *kind) {
-    if (strcmp(kind, "ds5") == 0 || strcmp(kind, "ds5_usb") == 0)
-        return "Sony DualSense (DS5)";
-    if (strcmp(kind, "ds5e") == 0 || strcmp(kind, "ds5e_usb") == 0)
-        return "Sony DualSense Edge";
-    if (strcmp(kind, "ds4") == 0)  return "Sony DualShock 4 (DS4)";
-    if (strcmp(kind, "puck") == 0) return "Steam Controller";
-    if (strcmp(kind, "xbox") == 0) return "Xbox Controller";
-    return "Controller";
-}
-
-/* Push one setting field to the selected controller's live bridge settings. */
-static void ctm_write_field(int field, int val) {
-    if (s_ctm_sel < 0 || s_ctm_sel >= s_ctm_ndev) {
+/* Bridge or release the device on this row.
+ *
+ * ⭐ Activating a row IS the action now. There is no detail pane to enter, so a
+ * press does the one thing a press could mean. */
+static void ctm_toggle_device(int row) {
+    if (row < 0 || row >= s_ctm_ndev) {
         return;
     }
-    int gindex = s_ctm_devs[s_ctm_sel].index;
-    ctm_bridge_settings_t s;
-    if (!ctm_bridge_get_settings(gindex, &s)) {
-        return;
-    }
-    switch (field) {
-        case CTM_F_AUDIO: s.audio_mode = val; break;
-        case CTM_F_HVOL:  s.headset_volume_percent = val; break;
-        case CTM_F_SVOL:  s.speaker_volume_percent = val; break;
-        case CTM_F_LAT:   s.latency_ms = val; break;
-        case CTM_F_HAP:   s.haptics_gain_centi = val; break;
-        default: return;
-    }
-    ctm_bridge_set_settings(gindex, &s);
-}
-
-/* Render a row's value label: audio as "< Name >", haptics on a 0.0-5.0 scale
- * (stored value is centi-units, 0-500), everything else as a plain integer. */
-static void ctm_set_value_label(ctm_row_t *r) {
-    if (!r->value_lbl) {
-        return;
-    }
-    if (r->field == CTM_F_AUDIO) {
-        lv_label_set_text_fmt(r->value_lbl, "< %s >",
-                              r->ds4_audio ? ctm_audio_name_ds4(k_ctm_ds4_modes[r->cur])
-                                           : ctm_audio_name(r->cur));
-    } else if (r->field == CTM_F_HAP) {
-        lv_label_set_text_fmt(r->value_lbl, "%d.%d", r->cur / 100, (r->cur % 100) / 10);
+    if (s_ctm_devs[row].plugged) {
+        ctm_bridge_unplug_index(row);
     } else {
-        lv_label_set_text_fmt(r->value_lbl, "%d", r->cur);
-    }
-}
-
-/* Apply a new value to a settings row (clamp/wrap, sync slider + label, write). */
-static void ctm_apply_row(ctm_row_t *r, int val) {
-    if (r->field == CTM_F_AUDIO) {
-        int n = r->ds4_audio ? (int) (sizeof k_ctm_ds4_modes / sizeof k_ctm_ds4_modes[0]) : 5;
-        val %= n;
-        if (val < 0) val += n;
-    } else {
-        if (val < r->min) val = r->min;
-        if (val > r->max) val = r->max;
-    }
-    r->cur = val;
-    if (r->slider) {
-        lv_slider_set_value(r->slider, val, LV_ANIM_OFF);
-    }
-    ctm_set_value_label(r);
-    /* DS4 audio rows store a subset position; the bridge wants the mode value. */
-    ctm_write_field(r->field, (r->field == CTM_F_AUDIO && r->ds4_audio)
-                                  ? k_ctm_ds4_modes[val] : val);
-}
-
-/* Pointer drag on a slider -> write back + refresh its value label. */
-static void ctm_slider_cb(lv_event_t *e) {
-    ctm_row_t *r = lv_event_get_user_data(e);
-    r->cur = (int) lv_slider_get_value(r->slider);
-    ctm_set_value_label(r);
-    ctm_write_field(r->field, r->cur);
-}
-
-/* Plug/unplug toggle row activated (Select or pointer tap). */
-static void ctm_plug_click_cb(lv_event_t *e) {
-    ctm_row_t *r = lv_event_get_user_data(e);
-    if (r->cur) {
-        ctm_bridge_unplug_index(r->gindex);
-    } else {
-        ctm_bridge_plug_index(r->gindex);
+        ctm_bridge_plug_index(row);
     }
     ctm_request_refresh();
 }
 
-/* Audio row activated (Select or pointer tap) -> cycle to the next mode. */
-static void ctm_audio_click_cb(lv_event_t *e) {
-    ctm_row_t *r = lv_event_get_user_data(e);
-    ctm_apply_row(r, r->cur + 1);
-}
-
-static void ctm_detail_row_key_cb(lv_event_t *e) {
-    ctm_row_t *r = lv_event_get_user_data(e);
-    switch (lv_event_get_key(e)) {
-        case LV_KEY_UP:
-            lv_group_focus_prev(s_ctm_detail_group);
-            lv_obj_scroll_to_view(lv_group_get_focused(s_ctm_detail_group), LV_ANIM_ON);
-            break;
-        case LV_KEY_DOWN:
-            lv_group_focus_next(s_ctm_detail_group);
-            lv_obj_scroll_to_view(lv_group_get_focused(s_ctm_detail_group), LV_ANIM_ON);
-            break;
-        case LV_KEY_LEFT:
-            /* Value-only: plug toggles on Select (A), never on Left/Right. */
-            if (r->field != CTM_F_PLUG) ctm_apply_row(r, r->cur - r->step);
-            break;
-        case LV_KEY_RIGHT:
-            if (r->field != CTM_F_PLUG) ctm_apply_row(r, r->cur + r->step);
-            break;
-        case LV_KEY_ESC:   ctm_leave_detail(); break;
-        default: break;
-    }
-}
-
-static void ctm_detail_cancel_cb(lv_event_t *e) {
-    LV_UNUSED(e);
-    ctm_leave_detail();
-}
-
-/* A focusable card row inside the detail pane. */
-static lv_obj_t *ctm_detail_card(void) {
-    lv_obj_t *row = lv_obj_create(s_ctm_detail);
-    lv_obj_remove_style_all(row);
-    lv_obj_set_size(row, LV_PCT(100), LV_SIZE_CONTENT);
-    lv_obj_set_flex_flow(row, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_style_pad_all(row, LV_DPX(10), 0);
-    lv_obj_set_style_pad_gap(row, LV_DPX(6), 0);
-    lv_obj_set_style_radius(row, LV_DPX(8), 0);
-    lv_obj_set_style_bg_color(row, CTM_COL_ROW, 0);
-    lv_obj_set_style_bg_opa(row, LV_OPA_COVER, 0);
-    lv_obj_set_style_outline_width(row, LV_DPX(2), LV_STATE_FOCUS_KEY);
-    lv_obj_set_style_outline_color(row, CTM_COL_FOCUS, LV_STATE_FOCUS_KEY);
-    lv_obj_set_style_outline_pad(row, LV_DPX(2), LV_STATE_FOCUS_KEY);
-    lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_add_flag(row, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_add_flag(row, LV_OBJ_FLAG_EVENT_BUBBLE);   /* Back bubbles to the detail pane */
-    return row;
-}
 
 /* A native-looking button: reuses the streaming action-bar style (rounded,
  * shadow, blue focus outline) so panel buttons match the rest of the app
@@ -305,191 +116,14 @@ static lv_obj_t *ctm_nice_btn(lv_obj_t *parent, const char *text, lv_color_t bg)
     return btn;
 }
 
-/* Name (left) + value (right) header line for a card row; returns the value label. */
-static lv_obj_t *ctm_row_header(lv_obj_t *card, const char *name) {
-    lv_obj_t *hdr = lv_obj_create(card);
-    lv_obj_remove_style_all(hdr);
-    lv_obj_set_size(hdr, LV_PCT(100), LV_SIZE_CONTENT);
-    lv_obj_set_flex_flow(hdr, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(hdr, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_clear_flag(hdr, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_t *nl = lv_label_create(hdr);
-    lv_label_set_text(nl, name);
-    lv_obj_set_style_text_color(nl, CTM_COL_SUB, 0);
-    lv_obj_t *vl = lv_label_create(hdr);
-    lv_obj_set_style_text_color(vl, CTM_COL_TXT, 0);
-    return vl;
-}
 
-static void ctm_add_slider_row(const char *name, int field, int val, int min, int max, int step) {
-    if (s_ctm_nrows >= (int) (sizeof s_ctm_rows / sizeof s_ctm_rows[0])) return;
-    ctm_row_t *r = &s_ctm_rows[s_ctm_nrows++];
-    r->field = field; r->cur = val; r->min = min; r->max = max; r->step = step;
-    r->gindex = 0;
-    lv_obj_t *card = ctm_detail_card();
-    r->row = card;
-    r->value_lbl = ctm_row_header(card, name);
-    ctm_set_value_label(r);
-    lv_obj_t *sl = lv_slider_create(card);
-    r->slider = sl;
-    lv_obj_set_width(sl, LV_PCT(100));
-    lv_slider_set_range(sl, min, max);
-    lv_slider_set_value(sl, val, LV_ANIM_OFF);
-    lv_group_remove_obj(sl);            /* pointer-only; nav happens via the card */
-    lv_obj_add_event_cb(sl, ctm_slider_cb, LV_EVENT_VALUE_CHANGED, r);
-    lv_group_add_obj(s_ctm_detail_group, card);
-    lv_obj_add_event_cb(card, ctm_detail_row_key_cb, LV_EVENT_KEY, r);
-    lv_obj_add_event_cb(card, ctm_detail_cancel_cb, LV_EVENT_CANCEL, r);
-}
-
-static void ctm_add_audio_row(int val, bool ds4) {
-    if (s_ctm_nrows >= (int) (sizeof s_ctm_rows / sizeof s_ctm_rows[0])) return;
-    ctm_row_t *r = &s_ctm_rows[s_ctm_nrows++];
-    r->field = CTM_F_AUDIO; r->min = 0; r->max = 4; r->step = 1;
-    r->ds4_audio = ds4;
-    if (ds4) {
-        /* Translate the stored mode to a subset position (unknown -> Auto). */
-        r->cur = 0;
-        for (int i = 0; i < (int) (sizeof k_ctm_ds4_modes / sizeof k_ctm_ds4_modes[0]); ++i) {
-            if (k_ctm_ds4_modes[i] == val) { r->cur = i; break; }
-        }
-    } else {
-        r->cur = val;
-    }
-    r->gindex = 0; r->slider = NULL;
-    lv_obj_t *card = ctm_detail_card();
-    r->row = card;
-    r->value_lbl = ctm_row_header(card, "Audio mode");
-    ctm_set_value_label(r);
-    lv_group_add_obj(s_ctm_detail_group, card);
-    lv_obj_add_event_cb(card, ctm_detail_row_key_cb, LV_EVENT_KEY, r);
-    lv_obj_add_event_cb(card, ctm_detail_cancel_cb, LV_EVENT_CANCEL, r);
-    lv_obj_add_event_cb(card, ctm_audio_click_cb, LV_EVENT_CLICKED, r);
-}
-
-/* Bottom action of the detail pane: plug/unplug THIS controller. Activated by
- * Select (A) or pointer tap only. Plain text — no symbol glyph (the webOS font
- * build lacks the LVGL symbol range, so glyphs render as tofu boxes). */
-static void ctm_add_plug_row(const ctm_bridge_dev_t *d) {
-    if (s_ctm_nrows >= (int) (sizeof s_ctm_rows / sizeof s_ctm_rows[0])) return;
-    ctm_row_t *r = &s_ctm_rows[s_ctm_nrows++];
-    r->field = CTM_F_PLUG; r->cur = d->plugged ? 1 : 0; r->min = 0; r->max = 1; r->step = 1;
-    r->gindex = d->index; r->slider = NULL; r->value_lbl = NULL;
-    lv_obj_t *btn = ctm_nice_btn(s_ctm_detail,
-                                 d->plugged ? "Unplug this controller" : "Plug this controller",
-                                 d->plugged ? lv_palette_darken(LV_PALETTE_RED, 2)
-                                            : lv_palette_darken(LV_PALETTE_GREEN, 2));
-    lv_obj_set_width(btn, LV_PCT(100));
-    r->row = btn;
-    lv_group_add_obj(s_ctm_detail_group, btn);
-    lv_obj_add_event_cb(btn, ctm_detail_row_key_cb, LV_EVENT_KEY, r);
-    lv_obj_add_event_cb(btn, ctm_detail_cancel_cb, LV_EVENT_CANCEL, r);
-    lv_obj_add_event_cb(btn, ctm_plug_click_cb, LV_EVENT_CLICKED, r);
-}
-
-static void ctm_build_detail(int row) {
-    if (!s_ctm_detail) {
-        return;
-    }
-    lv_group_remove_all_objs(s_ctm_detail_group);
-    lv_obj_clean(s_ctm_detail);
-    s_ctm_nrows = 0;
-
-    if (row < 0 || row >= s_ctm_ndev) {
-        lv_obj_t *l = lv_label_create(s_ctm_detail);
-        lv_label_set_text(l, "No controller selected.");
-        lv_obj_set_style_text_color(l, CTM_COL_SUB, 0);
-        return;
-    }
-    ctm_bridge_dev_t *d = &s_ctm_devs[row];
-
-    lv_obj_t *title = lv_label_create(s_ctm_detail);
-    lv_label_set_text(title, ctm_kind_title(d->kind));
-    lv_obj_set_style_text_color(title, CTM_COL_TXT, 0);
-    lv_obj_set_style_text_font(title, lv_theme_get_font_normal(title), 0);
-
-    /* Identity sub-line: vid:pid - BUS - MAC (ASCII separators; no glyphs). */
-    lv_obj_t *idl = lv_label_create(s_ctm_detail);
-    if (d->mac[0]) {
-        lv_label_set_text_fmt(idl, "%s:%s - %s - %s", d->vid, d->pid,
-                              d->bus[0] ? d->bus : "?", d->mac);
-    } else {
-        lv_label_set_text_fmt(idl, "%s:%s - %s", d->vid, d->pid, d->bus[0] ? d->bus : "?");
-    }
-    lv_obj_set_style_text_color(idl, CTM_COL_SUB, 0);
-    lv_obj_set_style_text_font(idl, lv_theme_get_font_small(idl), 0);
-    lv_obj_set_style_pad_bottom(idl, LV_DPX(8), 0);
-
-    ctm_bridge_settings_t s;
-    bool have = ctm_bridge_get_settings(d->index, &s);
-    if (have && (strcmp(d->kind, "ds5") == 0 || strcmp(d->kind, "ds4") == 0)) {
-        ctm_add_audio_row(s.audio_mode, strcmp(d->kind, "ds4") == 0);
-        if (strcmp(d->kind, "ds4") == 0) {
-            /* DS4 firmware volume ceiling is 0x4f; no host latency/haptics block. */
-            ctm_add_slider_row("Headset vol", CTM_F_HVOL, s.headset_volume_percent, 0, 0x4f, 1);
-            ctm_add_slider_row("Speaker vol", CTM_F_SVOL, s.speaker_volume_percent, 0, 0x4f, 1);
-        } else {
-            ctm_add_slider_row("Headset vol", CTM_F_HVOL, s.headset_volume_percent, 0, 100, 1);
-            ctm_add_slider_row("Speaker vol", CTM_F_SVOL, s.speaker_volume_percent, 0, 100, 1);
-            ctm_add_slider_row("Latency (ms)", CTM_F_LAT, s.latency_ms, 20, 255, 1);
-            ctm_add_slider_row("Haptics", CTM_F_HAP, s.haptics_gain_centi, 0, 500, 10);
-        }
-    } else {
-        lv_obj_t *l = lv_label_create(s_ctm_detail);
-        lv_label_set_text(l, "No adjustable audio/haptics for this controller.");
-        lv_obj_set_style_text_color(l, CTM_COL_SUB, 0);
-        lv_label_set_long_mode(l, LV_LABEL_LONG_WRAP);
-        lv_obj_set_width(l, LV_PCT(100));
-    }
-
-    /* Bottom action: plug/unplug THIS controller (A toggles, never Left/Right). */
-    ctm_add_plug_row(d);
-}
-
-static void ctm_enter_detail(void) {
-    if (s_ctm_nrows == 0 || !s_ctm_owner) {
-        return;
-    }
-    s_ctm_detail_open = true;
-    app_input_set_group(&s_ctm_owner->global->ui.input, s_ctm_detail_group);
-    lv_group_focus_obj(s_ctm_rows[0].row);
-    lv_obj_add_state(s_ctm_rows[0].row, LV_STATE_FOCUS_KEY);
-}
-
-static void ctm_leave_detail(void) {
-    if (!s_ctm_owner) {
-        return;
-    }
-    s_ctm_detail_open = false;
-    app_input_set_group(&s_ctm_owner->global->ui.input, s_ctm_nav_group);
-    /* ⛔ The focus below fires ctm_dev_focus_cb, which would rebuild the detail
-     * pane and free the object this event is being dispatched on. See the note
-     * on s_ctm_leaving_detail. */
-    s_ctm_leaving_detail = true;
-    if (s_ctm_sel >= 0 && s_ctm_sel < s_ctm_ndev && s_ctm_dev_rows[s_ctm_sel]) {
-        lv_group_focus_obj(s_ctm_dev_rows[s_ctm_sel]);
-        lv_obj_add_state(s_ctm_dev_rows[s_ctm_sel], LV_STATE_FOCUS_KEY);
-    }
-    s_ctm_leaving_detail = false;
-}
-
-/* Sidebar: a controller row was focused -> live-preview its detail. */
+/* A row was focused: move the selection highlight. Nothing else.
+ *
+ * ⭐ This used to rebuild a detail pane on every focus change, which is what
+ * made the crash possible. */
 static void ctm_dev_focus_cb(lv_event_t *e) {
     int row = (int) (intptr_t) lv_event_get_user_data(e);
     if (row < 0 || row >= s_ctm_ndev) {
-        return;
-    }
-    /* ⛔ Leaving the detail pane focuses a sidebar row on the way out. Rebuilding
-     * here would free the object still dispatching the event that started it.
-     * See s_ctm_leaving_detail. */
-    if (s_ctm_leaving_detail) {
-        return;
-    }
-    /* ⭐ And nothing to do when the pane already shows this row -- the rebuild
-     * would be identical. Cheap, and it saves a full teardown on every focus
-     * change. ⓘ Keyed to the current row count, so it may not outlive T-106;
-     * the guard above is the one that must. */
-    if (s_ctm_sel == row && s_ctm_nrows > 0) {
         return;
     }
     s_ctm_sel = row;
@@ -498,18 +132,13 @@ static void ctm_dev_focus_cb(lv_event_t *e) {
         if (i == row) lv_obj_add_state(s_ctm_dev_rows[i], LV_STATE_CHECKED);
         else          lv_obj_clear_state(s_ctm_dev_rows[i], LV_STATE_CHECKED);
     }
-    ctm_build_detail(row);
 }
 
-/* Sidebar: a controller row was activated (Select/Right or tap) -> enter detail. */
+/* A row was activated -> bridge or release it. */
 static void ctm_dev_click_cb(lv_event_t *e) {
     int row = (int) (intptr_t) lv_event_get_user_data(e);
-    if (row < 0 || row >= s_ctm_ndev) {
-        return;
-    }
     s_ctm_sel = row;
-    ctm_build_detail(row);
-    ctm_enter_detail();
+    ctm_toggle_device(row);
 }
 
 static void ctm_nav_key_cb(lv_event_t *e) {
@@ -524,7 +153,10 @@ static void ctm_nav_key_cb(lv_event_t *e) {
             lv_obj_scroll_to_view(lv_group_get_focused(s_ctm_nav_group), LV_ANIM_ON);
             break;
         case LV_KEY_RIGHT:
-            if (row >= 0 && s_ctm_nrows > 0) ctm_enter_detail();
+            /* ⭐ Right used to enter the detail pane. With the pane gone it does
+             * the same thing as Select, so a user who reaches for either gets
+             * the action rather than nothing. */
+            ctm_toggle_device(row);
             break;
         case LV_KEY_ESC:   ctm_request_close(); break;
         default: break;
@@ -652,18 +284,11 @@ static void ctm_panel_refresh(void) {
     if (s_ctm_sel >= s_ctm_ndev) {
         s_ctm_sel = s_ctm_ndev > 0 ? s_ctm_ndev - 1 : 0;
     }
-    ctm_build_detail(s_ctm_ndev > 0 ? s_ctm_sel : -1);
 
-    /* Restore focus to the correct group after the rebuild. */
-    if (s_ctm_detail_open && s_ctm_nrows > 0) {
-        app_input_set_group(&s_ctm_owner->global->ui.input, s_ctm_detail_group);
-        lv_group_focus_obj(s_ctm_rows[0].row);
-        lv_obj_add_state(s_ctm_rows[0].row, LV_STATE_FOCUS_KEY);
-        if (s_ctm_dev_rows[s_ctm_sel]) {
-            lv_obj_add_state(s_ctm_dev_rows[s_ctm_sel], LV_STATE_CHECKED);
-        }
-    } else {
-        s_ctm_detail_open = false;
+    /* ⭐ ONE GROUP NOW. There is no second pane to hand focus to, so a refresh
+     * cannot leave focus somewhere that no longer exists -- which is what the
+     * branch here used to guard against. */
+    {
         app_input_set_group(&s_ctm_owner->global->ui.input, s_ctm_nav_group);
         if (s_ctm_ndev > 0 && s_ctm_dev_rows[s_ctm_sel]) {
             lv_group_focus_obj(s_ctm_dev_rows[s_ctm_sel]);
@@ -676,7 +301,6 @@ static void ctm_teardown_async(void *p) {
     LV_UNUSED(p);
     if (s_ctm_dead_panel)  { lv_obj_del(s_ctm_dead_panel);    s_ctm_dead_panel = NULL; }
     if (s_ctm_dead_nav)    { lv_group_del(s_ctm_dead_nav);    s_ctm_dead_nav = NULL; }
-    if (s_ctm_dead_detail) { lv_group_del(s_ctm_dead_detail); s_ctm_dead_detail = NULL; }
 }
 
 static void ctm_close_panel(void) {
@@ -692,15 +316,10 @@ static void ctm_close_panel(void) {
     }
     s_ctm_dead_panel = s_ctm_panel;
     s_ctm_dead_nav = s_ctm_nav_group;
-    s_ctm_dead_detail = s_ctm_detail_group;
     s_ctm_panel = NULL;
     s_ctm_sidebar = NULL;
-    s_ctm_detail = NULL;
     s_ctm_status_lbl = NULL;
     s_ctm_nav_group = NULL;
-    s_ctm_detail_group = NULL;
-    s_ctm_nrows = 0;
-    s_ctm_detail_open = false;
     s_ctm_owner = NULL;
     lv_async_call(ctm_teardown_async, NULL);
 }
@@ -722,14 +341,10 @@ static void open_ctm_panel(lv_event_t *event) {
         return;
     }
     s_ctm_owner = controller;
-    s_ctm_detail_open = false;
     s_ctm_sel = 0;
-    s_ctm_nrows = 0;
 
     s_ctm_nav_group = lv_group_create();
-    s_ctm_detail_group = lv_group_create();
     lv_group_set_wrap(s_ctm_nav_group, false);
-    lv_group_set_wrap(s_ctm_detail_group, false);
 
     /* Full-screen dim backdrop on the act screen (detached_root) so it does NOT
      * flip the UI into key/gamepad mode the way a modal does (that hid the webOS
@@ -784,17 +399,12 @@ static void open_ctm_panel(lv_event_t *event) {
     lv_obj_set_style_text_color(s_ctm_status_lbl, CTM_COL_SUB, 0);
     lv_obj_set_style_text_font(s_ctm_status_lbl, lv_theme_get_font_small(header), 0);
 
-    lv_obj_t *body = lv_obj_create(card);
-    lv_obj_remove_style_all(body);
-    lv_obj_set_width(body, LV_PCT(100));
-    lv_obj_set_flex_grow(body, 1);
-    lv_obj_set_flex_flow(body, LV_FLEX_FLOW_ROW);
-    lv_obj_set_style_pad_gap(body, LV_DPX(12), 0);
-    lv_obj_clear_flag(body, LV_OBJ_FLAG_SCROLLABLE);
-
-    s_ctm_sidebar = lv_obj_create(body);
+    /* ⭐ ONE COLUMN. The panel was a sidebar and a detail pane side by side; the
+     * detail pane is gone, so the list is the whole body and gets the width. */
+    s_ctm_sidebar = lv_obj_create(card);
     lv_obj_remove_style_all(s_ctm_sidebar);
-    lv_obj_set_size(s_ctm_sidebar, LV_PCT(38), LV_PCT(100));
+    lv_obj_set_width(s_ctm_sidebar, LV_PCT(100));
+    lv_obj_set_flex_grow(s_ctm_sidebar, 1);
     lv_obj_set_flex_flow(s_ctm_sidebar, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_all(s_ctm_sidebar, LV_DPX(8), 0);
     lv_obj_set_style_pad_gap(s_ctm_sidebar, LV_DPX(8), 0);
@@ -806,17 +416,6 @@ static void open_ctm_panel(lv_event_t *event) {
     lv_obj_set_scrollbar_mode(s_ctm_sidebar, LV_SCROLLBAR_MODE_AUTO);
     /* Back backstop: any focusable child bubbles CANCEL up here -> close panel. */
     lv_obj_add_event_cb(s_ctm_sidebar, ctm_nav_cancel_cb, LV_EVENT_CANCEL, NULL);
-
-    s_ctm_detail = lv_obj_create(body);
-    lv_obj_remove_style_all(s_ctm_detail);
-    lv_obj_set_height(s_ctm_detail, LV_PCT(100));
-    lv_obj_set_flex_grow(s_ctm_detail, 1);
-    lv_obj_set_flex_flow(s_ctm_detail, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_style_pad_all(s_ctm_detail, LV_DPX(8), 0);
-    lv_obj_set_style_pad_gap(s_ctm_detail, LV_DPX(8), 0);
-    lv_obj_set_scrollbar_mode(s_ctm_detail, LV_SCROLLBAR_MODE_AUTO);
-    /* Back backstop: a focused detail card bubbles CANCEL up here -> back to sidebar. */
-    lv_obj_add_event_cb(s_ctm_detail, ctm_detail_cancel_cb, LV_EVENT_CANCEL, NULL);
 
     app_input_set_group(&controller->global->ui.input, s_ctm_nav_group);
     ctm_panel_refresh();
@@ -837,19 +436,14 @@ void ctm_panel_open(lv_event_t *event) {
 void ctm_panel_on_owner_deleted(streaming_controller_t *controller) {
     if (s_ctm_owner == controller) {
         if (s_ctm_nav_group)    { lv_group_del(s_ctm_nav_group);    s_ctm_nav_group = NULL; }
-        if (s_ctm_detail_group) { lv_group_del(s_ctm_detail_group); s_ctm_detail_group = NULL; }
         s_ctm_panel = NULL;
         s_ctm_sidebar = NULL;
-        s_ctm_detail = NULL;
         s_ctm_status_lbl = NULL;
         s_ctm_owner = NULL;
-        s_ctm_detail_open = false;
-        s_ctm_nrows = 0;
     }
     /* Cancel any in-flight panel teardown; the dead panel is freed with the
      * fragment's detached_root, but its groups must be released here. */
     lv_async_call_cancel(ctm_teardown_async, NULL);
     if (s_ctm_dead_nav)    { lv_group_del(s_ctm_dead_nav);    s_ctm_dead_nav = NULL; }
-    if (s_ctm_dead_detail) { lv_group_del(s_ctm_dead_detail); s_ctm_dead_detail = NULL; }
     s_ctm_dead_panel = NULL;
 }
