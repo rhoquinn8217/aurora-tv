@@ -4,7 +4,7 @@ set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
 # Keep the fork's upstream version; CTM changes bump only the build number,
 # shown as "1.1.7 (N_EXP)" in the app on this branch. appinfo/ipk stay at the numeric version.
 set(MOONLIGHT_VERSION "1.1.7")
-set(CTM_BUILD_NUMBER 9)
+set(CTM_BUILD_NUMBER 10)
 
 # ⛔ EXPERIMENTAL BRANCH ONLY. Empty on stable, so the two branches can never
 # produce a package or an Info tab that look the same.
