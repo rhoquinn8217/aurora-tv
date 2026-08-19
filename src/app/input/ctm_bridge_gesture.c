@@ -383,8 +383,8 @@ static bool gesture_held(SDL_GameController *controller) {
  * hardware findings, each learnt by breaking something. */
 #define BT_LAYER_GESTURE  1
 #define BT_LAYER_LIGHT    1
-#define BT_LAYER_RUMBLE   0
-#define BT_LAYER_TONE     0
+#define BT_LAYER_RUMBLE   1
+#define BT_LAYER_CORE_SIGNAL 1
 
 /* The refusal rumble: three short sharp bursts.
  *
@@ -464,7 +464,10 @@ static bool gesture_held(SDL_GameController *controller) {
  * Green for done, red for refused -- the light says which without anyone
  * learning a vocabulary. Fewer than the refusal because success is the ordinary
  * case and does not need insisting on. */
-#define BRIDGED_FLASHES   2
+/* One breath of green on a successful bridge, against three hard red flashes on
+ * a refusal. Shorter than the yellow handback, which is two breaths -- a bridge
+ * is the start of something and does not need dwelling on. */
+#define BRIDGED_PULSE_STEPS  BYE_STEPS_PER_PULSE
 #define REFUSED_ON_MS     240
 #define REFUSED_OFF_MS    240
 
@@ -712,12 +715,24 @@ static bool gesture_poll_one(SDL_GameController *controller, SDL_JoystickID id) 
                  * app's loop is fast enough to draw the shape intended: the
                  * loop's passes are the clock, and a slow one stretches every
                  * pulse into a single fade. */
-                gesture_log("unplug pulse finished, %u steps in %ums, player colour set",
+                /* ⚠️ Says WHICH pulse: the tick is shared, so a successful
+                 * bridge was being logged as an unplug. */
+                gesture_log("%s pulse finished, %u steps in %ums, player colour set",
+                            w->flash_ok ? "bridge" : "unplug",
                             (unsigned)w->bye_steps,
                             (unsigned)(SDL_GetTicks() - w->bye_started));
             } else {
                 uint8_t level = pulse_level_breath(w->bye_left, BYE_STEPS_PER_PULSE);
-                flash_write(controller, level, level, 0);   /* red + green = yellow */
+                /* ⭐ SUCCESS BREATHES, A REFUSAL FLASHES. rhoquinn8217, 2026-08-18:
+                 * "pulsing is comforting, appropriate for a success; hard
+                 * flashing on a refusal should feel abrupt." The two outcomes
+                 * are told apart by their RHYTHM before their colour, which is
+                 * the part you notice from across a room. */
+                if (w->flash_ok) {
+                    flash_write(controller, 0, level, 0);      /* green */
+                } else {
+                    flash_write(controller, level, level, 0);  /* yellow */
+                }
                 ++w->bye_steps;
                 w->bye_next = now_ticks + PREP_STEP_MS;
             }
@@ -743,7 +758,7 @@ static bool gesture_poll_one(SDL_GameController *controller, SDL_JoystickID id) 
                 w->ours_plugged = false;
                 gesture_moonlight_set_excluded(controller, false);
                 /* ⛔⛔ ON BLUETOOTH THE CORE ALWAYS CLAIMS THE SIGNAL, AND
-                 * WITH BT_LAYER_TONE OFF IT THEN DOES NOTHING.
+                 * WITH BT_LAYER_CORE_SIGNAL OFF IT THEN DOES NOTHING.
                  *
                  * gesture_signal_here() asks "should I signal, or has the core
                  * already?" -- and on Bluetooth the answer is always "the core
@@ -756,7 +771,8 @@ static bool gesture_poll_one(SDL_GameController *controller, SDL_JoystickID id) 
                  * "will the core signal AND is it switched on". */
                 const bool core_will_signal =
                     !gesture_signal_here(w->prep_node) &&
-                    (w->xport != 1 || BT_LAYER_TONE);
+                    (w->xport != 1 || BT_LAYER_CORE_SIGNAL);
+                w->flash_ok = 0;   /* yellow, not green: this is a handback */
                 if (!core_will_signal) {
                     w->bye_left = (w->xport != 1 || BT_LAYER_LIGHT) ? BYE_STEPS : 0;   /* T-120 */
                 } else {
@@ -835,12 +851,29 @@ static bool gesture_poll_one(SDL_GameController *controller, SDL_JoystickID id) 
                     /* T-120: on Bluetooth the rumble -- and the signal check
                      * that costs an enumeration, measured at 5s on the C3 --
                      * wait for BT_LAYER_RUMBLE. Wired unchanged. */
-                    if ((w->xport != 1 || BT_LAYER_RUMBLE) && gesture_signal_here(w->prep_node)) {
+                    /* ⛔⛔ THE SAME TRAP AS THE BYE PULSE. On Bluetooth
+                     * gesture_signal_here() is always false -- the core claims
+                     * the signal there -- so this never fired, gate or no gate.
+                     * BT_LAYER_RUMBLE could not do anything while
+                     * BT_LAYER_CORE_SIGNAL was 0. Found in step 4, 2026-08-18.
+                     *
+                     * ⭐ Ask whether the core will signal AND is switched on.
+                     *
+                     * ⏱️ TIMED: gesture_signal_here() ends in a full device
+                     * enumeration and was measured at 5144ms on the C3 against
+                     * 0 on the monitor. The number is logged so a slow one is
+                     * seen rather than felt. */
+                    uint64_t sig_t0 = gesture_now_ms();
+                    const bool core_signals_ok =
+                        !gesture_signal_here(w->prep_node) &&
+                        (w->xport != 1 || BT_LAYER_CORE_SIGNAL);
+                    const uint64_t sig_ms = gesture_now_ms() - sig_t0;
+                    if (!core_signals_ok && (w->xport != 1 || BT_LAYER_RUMBLE)) {
                         SDL_GameControllerRumble(controller, OK_PULSE_STRENGTH,
                                                  OK_PULSE_STRENGTH, OK_PULSE_MS);
                     }
-                    gesture_log("confirmation pulse on %s: bridged",
-                                w->prep_node);
+                    gesture_log("confirmation pulse on %s: bridged (signal check %llums)",
+                                w->prep_node, (unsigned long long) sig_ms);
                     w->ours_plugged = true;
                     w->plug_miss = 0;
                     w->plug_check_next = SDL_GetTicks() + PLUG_CHECK_MS;
@@ -861,8 +894,10 @@ static bool gesture_poll_one(SDL_GameController *controller, SDL_JoystickID id) 
                      * ⓘ The flash tick restores the player colour on its last
                      * step, which is why nothing does so here. */
                     w->flash_ok = 1;
-                    w->flash_left = BRIDGED_FLASHES * 2 + 1;   /* +1 for the restore */
-                    w->flash_next = SDL_GetTicks();
+                    w->bye_left = BRIDGED_PULSE_STEPS;
+                    w->bye_next = SDL_GetTicks();
+                    w->bye_started = SDL_GetTicks();
+                    w->bye_steps = 0;
                     /* ⛔ RETIRED AFTER THE PLUG, NOT BEFORE. Retiring first was
                      * tried on 2026-08-18 to close the input gap and did not
                      * help -- the gap is Bluetooth-only and wired has none, so
@@ -949,16 +984,15 @@ static bool gesture_poll_one(SDL_GameController *controller, SDL_JoystickID id) 
                  * refusal made one colour carry two opposite meanings: you
                  * have it back because you asked, and you still have it
                  * because the bridge failed. */
-                if (w->flash_ok) {
-                    flash_write(controller, 0x00, lit ? 0xff : 0x00, 0x00);   /* green */
-                } else {
-                    /* RED, not yellow.
-                     *
-                     * Yellow already means "the controller is yours again" --
-                     * the colour of a deliberate unbridge. Using it for a
-                     * refusal made one colour carry two opposite meanings. */
-                    flash_write(controller, lit ? 0xff : 0x00, 0x00, 0x00);
-                }
+                /* RED, not yellow.
+                 *
+                 * Yellow already means "the controller is yours again" -- the
+                 * colour of a deliberate unbridge. Using it for a refusal made
+                 * one colour carry two opposite meanings.
+                 *
+                 * ⓘ This tick only ever draws a refusal now: success breathes
+                 * green through the pulse tick instead. */
+                flash_write(controller, lit ? 0xff : 0x00, 0x00, 0x00);
                 w->flash_next = now_ticks + (lit ? REFUSED_ON_MS : REFUSED_OFF_MS);
             }
         }
