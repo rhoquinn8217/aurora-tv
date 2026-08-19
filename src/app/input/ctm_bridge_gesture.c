@@ -326,9 +326,36 @@ static bool gesture_held(SDL_GameController *controller) {
 /* The post-unplug signal: three shorter breaths rather than one long one.
  * Repetition is what makes it unmistakable, and each breath is brief enough
  * that three of them still pass in about a second and a half. */
-#define BYE_PULSES          3
-#define BYE_STEPS_PER_PULSE 10
+/* ⭐⭐ TWO breaths, not three, and MANY more steps in each.
+ *
+ * ⛔ Ten steps is too few to read as breathing -- each one is a visible jump,
+ * and nine jumps in a row look like a flicker however long they take. Slowing
+ * the step to 90 ms made it MORE steppy, not smoother: measured 453 ms then
+ * 812 ms for the same nine steps, and it still read as fast.
+ *
+ * ⭐ Smoothness is the step COUNT; pace is the interval. 26 steps at 45 ms is a
+ * breath of about 1.2 s with 26 brightness levels in it. ⓘ Dropped to two
+ * breaths so the handback does not run to three and a half seconds. */
+#define BYE_PULSES          2
+#define BYE_STEPS_PER_PULSE 60
 #define BYE_STEPS           (BYE_PULSES * BYE_STEPS_PER_PULSE)
+
+/* ⭐⭐ HOW LONG ONE BREATH TAKES. Ten steps at this interval.
+ *
+ * ⛔ It used to borrow the pre-plug pulse's 50 ms, which made a breath half a
+ * second long -- and half a second reads as a BLINK, not breathing. rhoquinn8217,
+ * 2026-08-19: "it's just going really fast now." ⓘ The log had been saying so
+ * all along: `bridge pulse finished, 9 steps in 453ms`.
+ *
+ * ⚠️ The pre-plug pulse keeps the shorter step deliberately: it runs DURING the
+ * two-second hold and has to fill it, so it is a different job.
+ *
+ * ⭐ 90 ms gives a breath just under a second, which is about the rate a person
+ * breathes and is what makes it read as calm rather than urgent. */
+/* ⭐ 20 ms, which the app's loop can hold -- it ran 25 steps in 1128 ms at 45,
+ * so the pace is real rather than aspirational. Sixty steps at 20 ms is a
+ * breath of 1.2 s with THIRTY brightness levels climbing and thirty falling. */
+#define BYE_STEP_MS         20
 
 /* How often to ask whether a controller we plugged is still bridged.
  *
@@ -505,6 +532,26 @@ static void flash_write(SDL_GameController *controller, uint8_t r, uint8_t g, ui
  * Set directly rather than by re-applying the index: SDL sees the same value
  * and repaints nothing, which left the light stuck on the signal colour.
  * Measured 2026-08-06 on both transports. */
+/* ⭐⭐ THE COLOUR A BRIDGED CONTROLLER IS HANDED OVER IN.
+ *
+ * ⛔ After a bridge the light is NOT ours. The controller belongs to the host,
+ * and Windows and Steam paint it themselves -- measured 2026-08-07: plugging a
+ * ds5 in leaves the lightbar TEAL.
+ *
+ * ⚠️ So repainting the player colour on the way out was a claim we do not have.
+ * It also showed: our colour, then Steam's a moment later, a visible flip that
+ * says the wrong thing about who owns the controller.
+ *
+ * ⭐ Painting it where the host is about to put it makes the handover
+ * seamless. rhoquinn8217, 2026-08-19: "setting it early makes the flow cleaner."
+ *
+ * ⓘ THE EXACT VALUE IS APPROXIMATE. Teal was observed, not measured as an RGB
+ * triple. If it ever visibly steps when Steam takes over, this is the number to
+ * tune -- it is one line. */
+static void paint_handed_over(SDL_GameController *controller) {
+    flash_write(controller, 0x00, 0xc0, 0xc0);
+}
+
 static void paint_player_colour(SDL_GameController *controller) {
     static const uint8_t player_rgb[4][3] = {
         { 0x00, 0x00, 0xff },   /* 1: blue   */
@@ -530,9 +577,17 @@ static uint8_t pulse_level_breath(uint8_t step, uint8_t span) {
     if (half == 0) {
         return 0;
     }
+    /* ⛔ `255 / half` FIRST TRUNCATES, and that is why adding steps did not add
+     * smoothness. With 13 steps to a half-breath it is 255/13 = 19, so the
+     * brightness climbs in jumps of 19 and never reaches 255 -- thirteen
+     * visible stairs however many steps are drawn.
+     *
+     * ⭐ Multiplying first keeps the whole range and spreads it across every
+     * step there is. */
     uint8_t p = step % span;
-    return (p > half) ? (uint8_t)((span - p) * (255 / half))
-                      : (uint8_t)(p * (255 / half));
+    unsigned v = (p > half) ? ((unsigned)(span - p) * 255u) / half
+                            : ((unsigned)p * 255u) / half;
+    return (uint8_t)(v > 255u ? 255u : v);
 }
 
 /* A ramp that only rises, ending at full brightness.
@@ -710,17 +765,25 @@ static bool gesture_poll_one(SDL_GameController *controller, SDL_JoystickID id) 
         if (now_ticks >= w->bye_next) {
             --w->bye_left;
             if (w->bye_left == 0) {
-                paint_player_colour(controller);
+                /* ⭐ Whose light is it now? A bridge hands the controller to
+                 * the host, so it goes out in the host's colour. An unbridge
+                 * brings it back to us, so the player colour is right. */
+                if (w->flash_ok) {
+                    paint_handed_over(controller);
+                } else {
+                    paint_player_colour(controller);
+                }
                 /* The step count against the elapsed time says whether the
                  * app's loop is fast enough to draw the shape intended: the
                  * loop's passes are the clock, and a slow one stretches every
                  * pulse into a single fade. */
                 /* ⚠️ Says WHICH pulse: the tick is shared, so a successful
                  * bridge was being logged as an unplug. */
-                gesture_log("%s pulse finished, %u steps in %ums, player colour set",
+                gesture_log("%s pulse finished, %u steps in %ums, %s set",
                             w->flash_ok ? "bridge" : "unplug",
                             (unsigned)w->bye_steps,
-                            (unsigned)(SDL_GetTicks() - w->bye_started));
+                            (unsigned)(SDL_GetTicks() - w->bye_started),
+                            w->flash_ok ? "host colour" : "player colour");
             } else {
                 uint8_t level = pulse_level_breath(w->bye_left, BYE_STEPS_PER_PULSE);
                 /* ⭐ SUCCESS BREATHES, A REFUSAL FLASHES. rhoquinn8217, 2026-08-18:
@@ -734,7 +797,7 @@ static bool gesture_poll_one(SDL_GameController *controller, SDL_JoystickID id) 
                     flash_write(controller, level, level, 0);  /* yellow */
                 }
                 ++w->bye_steps;
-                w->bye_next = now_ticks + PREP_STEP_MS;
+                w->bye_next = now_ticks + BYE_STEP_MS;
             }
         }
         return false;
@@ -769,21 +832,50 @@ static bool gesture_poll_one(SDL_GameController *controller, SDL_JoystickID id) 
                  *
                  * ⭐ So the question is not just "will the core signal" but
                  * "will the core signal AND is it switched on". */
-                const bool core_will_signal =
-                    !gesture_signal_here(w->prep_node) &&
-                    (w->xport != 1 || BT_LAYER_CORE_SIGNAL);
+                /* ⛔⛔ THE LIGHT IS ALWAYS OURS NOW. Changed 2026-08-19.
+                 *
+                 * This used to ask whether the core would signal the unplug,
+                 * and skip the yellow pulse if it would -- because the core's
+                 * Bluetooth signal painted the lightbar itself.
+                 *
+                 * ⚠️ IT NO LONGER DOES. Claiming the light was removed from it
+                 * earlier the same day: it was landing after the app's own
+                 * pattern and then staying, and it was claiming the lightbar
+                 * and player LEDs on all 122 reports with the colour bytes at
+                 * zero, which is what made the patterns flicker.
+                 *
+                 * ⭐ The wired signal never painted the light at all -- it is
+                 * audio and haptics only. So on BOTH transports the core now
+                 * carries the SOUND and the FEEL, and every colour on this
+                 * controller comes from here.
+                 *
+                 * ⛔ The symptom when this was still asking: `pulsing yellow`
+                 * in the log, and no `unplug pulse finished` ever after it.
+                 * Armed, then given zero steps. */
                 w->flash_ok = 0;   /* yellow, not green: this is a handback */
-                if (!core_will_signal) {
-                    w->bye_left = (w->xport != 1 || BT_LAYER_LIGHT) ? BYE_STEPS : 0;   /* T-120 */
-                } else {
-                    /* The core did the flashes. ⚠️ But it does not put the
-                     * colour back: it releases its claim on the lightbar,
-                     * which only stops it writing -- the last colour it wrote
-                     * is still showing. The player colour belongs to this
-                     * side, and the sequence that normally restores it is the
-                     * one being skipped here, so do it directly. */
+
+                /* ⭐⭐ ON BLUETOOTH THE CORE PAINTS THIS ONE, AND IT IS ON TIME.
+                 *
+                 * The unbridge chord is detected in the CORE -- a bridged
+                 * controller's touchpad reports come through it, so this side
+                 * is blind to them. We only learn of the unplug from the
+                 * plugged-check, a second or more after the core's tone has
+                 * already finished. ⛔ A yellow pulse armed here is always
+                 * LATE, which is exactly how it looked: the sound, then the
+                 * colour afterwards.
+                 *
+                 * ⭐ So the core carries the light with the sound, and this
+                 * side only puts the player colour back once it catches up.
+                 *
+                 * ⚠️ A BRIDGE IS THE OPPOSITE and the core must NOT paint it --
+                 * that signal runs after the bridge completes and lands on top
+                 * of our green. Both directions were got wrong before this was
+                 * settled. */
+                if (w->xport == 1 && BT_LAYER_CORE_SIGNAL) {
                     w->bye_left = 0;
                     paint_player_colour(controller);
+                } else {
+                    w->bye_left = BT_LAYER_LIGHT ? BYE_STEPS : 0;
                 }
                 w->bye_next = now_ticks;
                 w->bye_started = now_ticks;
@@ -1098,6 +1190,19 @@ static bool gesture_poll_one(SDL_GameController *controller, SDL_JoystickID id) 
 /* The gamepad list, kept so a panel request can find a controller by node.
  * Set on every tick; NULL before the first one. */
 static app_input_t *s_gesture_input = NULL;
+
+/* Is this side drawing a pattern on that controller right now?
+ *
+ * ⭐ Used to drop the HOST's lightbar writes while we draw -- see the note in
+ * app_input_gamepad_set_controller_led. */
+bool ctm_bridge_gesture_light_busy(SDL_GameController *controller) {
+    if (!controller) return false;
+    SDL_Joystick *js = SDL_GameControllerGetJoystick(controller);
+    if (!js) return false;
+    watched_t *w = watched_for(SDL_JoystickInstanceID(js));
+    if (!w) return false;
+    return w->prep_left > 0 || w->bye_left > 0 || w->flash_left > 0;
+}
 
 int ctm_bridge_gesture_player_for_node(const char *node) {
     if (!node || !node[0] || !s_gesture_input) {

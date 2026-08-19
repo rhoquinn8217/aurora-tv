@@ -1,3 +1,5 @@
+#include "ctm_bridge_gesture.h"
+
 #include "input_gamepad.h"
 
 #include <stdbool.h>
@@ -263,7 +265,31 @@ void app_input_gamepad_set_motion_event_state(app_input_t *input, unsigned short
 void app_input_gamepad_set_controller_led(app_input_t *input, unsigned short controllerNumber, uint8_t r, uint8_t g,
                                           uint8_t b) {
 #if SDL_VERSION_ATLEAST(2, 0, 14)
-    SDL_GameControllerSetLED(input->gamepads[controllerNumber].controller, r, g, b);
+    /* ⭐⭐ THE HOST'S LIGHTBAR WRITES ARE FORWARDED HERE, AND THIS IS WHERE THEY
+     * STOP WHILE THE CONTROLLER IS STILL OURS.
+     *
+     * ⓘ Moonlight's emulated pad has a lightbar, so Windows and Steam paint it
+     * -- and that colour arrives over the stream and lands on the PHYSICAL
+     * controller through this function. ⭐ Which means the host has been a
+     * SECOND WRITER on that light the whole time a stream is running, not
+     * because of anything the bridge does.
+     *
+     * ⚠️ That is not the host taking the light: this call is ours, and the TV
+     * chooses to pass it on -- the same way the overlay stays reachable while
+     * streaming. So it can equally choose not to.
+     *
+     * ⛔ And it should not, while we are drawing. Two writers on one light is
+     * what every "flicker" report today has turned out to be, and no amount of
+     * writing more carefully on our side fixes a second writer.
+     *
+     * ⭐ Once a controller is BRIDGED its emulated pad is retired, so nothing
+     * comes through here for it at all and the host owns the light properly,
+     * over its own connection. */
+    SDL_GameController *gc = input->gamepads[controllerNumber].controller;
+    if (CTM_HOST_OWNS_LIGHTBAR == 0 && ctm_bridge_gesture_light_busy(gc)) {
+        return;
+    }
+    SDL_GameControllerSetLED(gc, r, g, b);
 #endif
 }
 

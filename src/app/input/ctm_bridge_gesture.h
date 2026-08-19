@@ -53,6 +53,18 @@ void ctm_bridge_gesture_reset(SDL_JoystickID id);
  * is not an SDL controller and has no gesture path to borrow. */
 bool ctm_bridge_gesture_request_bridge(const char *node);
 
+/* ⭐⭐ SHIPS AS 0: the host's lightbar writes are DROPPED while this side is
+ * drawing a pattern.
+ *
+ * ⓘ Moonlight's emulated pad has a lightbar, so Windows and Steam paint it and
+ * the colour arrives over the stream. Set to 1 to forward them unconditionally,
+ * which is how it behaved before 2026-08-19 -- useful only for telling a
+ * host-driven colour apart from one of ours. */
+#define CTM_HOST_OWNS_LIGHTBAR 0
+
+/* True while this side is drawing a pattern on that controller's lightbar. */
+bool ctm_bridge_gesture_light_busy(SDL_GameController *controller);
+
 /* The player number SDL gave the controller behind this hidraw node, or -1 if
  * nothing there is a controller. Zero-based, as SDL reports it.
  *

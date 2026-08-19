@@ -4,7 +4,7 @@ set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
 # Keep the fork's upstream version; CTM changes bump only the build number,
 # shown as "1.1.7 (N)" in the app. appinfo/ipk stay at the numeric version.
 set(MOONLIGHT_VERSION "1.1.7")
-set(CTM_BUILD_NUMBER 183)
+set(CTM_BUILD_NUMBER 191)
 
 project(moonlight VERSION ${MOONLIGHT_VERSION} LANGUAGES C CXX)
 
