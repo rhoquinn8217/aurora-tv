@@ -101,7 +101,11 @@ typedef struct {
     uint32_t since;      /* SDL ticks when the gesture began; 0 = not held */
     bool fired;          /* already acted on this hold */
     bool asked_full;     /* full-report request already sent for this connection */
-    uint8_t flash_left;  /* half-steps of the refusal flash still to show */
+    uint8_t flash_left;  /* half-steps of the outcome flash still to show */
+    /* ⭐ WHICH OUTCOME THE FLASH IS SAYING. 0 = refused (red), 1 = bridged
+     * (green). The mechanism is identical; only the colour and the count
+     * differ, so one is not worth duplicating for the other. */
+    uint8_t flash_ok;
     uint8_t prep_left;   /* steps of the pre-plug pulse still to show */
     uint32_t prep_next;  /* SDL ticks when the next pulse step is due */
     char prep_node[64];  /* the node to plug once the pulse finishes */
@@ -378,7 +382,7 @@ static bool gesture_held(SDL_GameController *controller) {
  * ⓘ Nothing is deleted. The code behind each gate encodes a fortnight of
  * hardware findings, each learnt by breaking something. */
 #define BT_LAYER_GESTURE  1
-#define BT_LAYER_LIGHT    0
+#define BT_LAYER_LIGHT    1
 #define BT_LAYER_RUMBLE   0
 #define BT_LAYER_TONE     0
 
@@ -456,6 +460,11 @@ static bool gesture_held(SDL_GameController *controller) {
  * useful if it outlasts the reaction it provokes. Three flashes at 120 ms was
  * over in under a second. */
 #define REFUSED_FLASHES   3
+/* ⭐ Two green flashes on a successful bridge, against three red on a refusal.
+ * Green for done, red for refused -- the light says which without anyone
+ * learning a vocabulary. Fewer than the refusal because success is the ordinary
+ * case and does not need insisting on. */
+#define BRIDGED_FLASHES   2
 #define REFUSED_ON_MS     240
 #define REFUSED_OFF_MS    240
 
@@ -733,7 +742,22 @@ static bool gesture_poll_one(SDL_GameController *controller, SDL_JoystickID id) 
                 w->plug_miss = 0;
                 w->ours_plugged = false;
                 gesture_moonlight_set_excluded(controller, false);
-                if (gesture_signal_here(w->prep_node)) {
+                /* ⛔⛔ ON BLUETOOTH THE CORE ALWAYS CLAIMS THE SIGNAL, AND
+                 * WITH BT_LAYER_TONE OFF IT THEN DOES NOTHING.
+                 *
+                 * gesture_signal_here() asks "should I signal, or has the core
+                 * already?" -- and on Bluetooth the answer is always "the core
+                 * will". That was true until the layered rebuild gated the
+                 * core's Bluetooth signal off, at which point neither side did
+                 * anything and an unbridge had no flashes at all. Found in step
+                 * 3, 2026-08-18.
+                 *
+                 * ⭐ So the question is not just "will the core signal" but
+                 * "will the core signal AND is it switched on". */
+                const bool core_will_signal =
+                    !gesture_signal_here(w->prep_node) &&
+                    (w->xport != 1 || BT_LAYER_TONE);
+                if (!core_will_signal) {
                     w->bye_left = (w->xport != 1 || BT_LAYER_LIGHT) ? BYE_STEPS : 0;   /* T-120 */
                 } else {
                     /* The core did the flashes. ⚠️ But it does not put the
@@ -820,6 +844,25 @@ static bool gesture_poll_one(SDL_GameController *controller, SDL_JoystickID id) 
                     w->ours_plugged = true;
                     w->plug_miss = 0;
                     w->plug_check_next = SDL_GetTicks() + PLUG_CHECK_MS;
+                    /* ⛔ PUT THE LIGHT BACK. The pre-plug pulse leaves magenta
+                     * and walks away: nothing after it repaints, so the light
+                     * stayed magenta until Steam claimed it -- long after the
+                     * controller was already working. Measured in step 3,
+                     * 2026-08-18.
+                     *
+                     * ⭐ The unplug path has done this all along; the plug path
+                     * never did, because on a cable the core's own signal
+                     * repainted it and hid the gap. */
+                    /* ⭐ TWO GREEN FLASHES, then the player colour. The pulse
+                     * before a plug says "asking"; this says "done", and it
+                     * mirrors the red the same mechanism shows on a refusal --
+                     * so the light alone reports the outcome.
+                     *
+                     * ⓘ The flash tick restores the player colour on its last
+                     * step, which is why nothing does so here. */
+                    w->flash_ok = 1;
+                    w->flash_left = BRIDGED_FLASHES * 2 + 1;   /* +1 for the restore */
+                    w->flash_next = SDL_GetTicks();
                     /* ⛔ RETIRED AFTER THE PLUG, NOT BEFORE. Retiring first was
                      * tried on 2026-08-18 to close the input gap and did not
                      * help -- the gap is Bluetooth-only and wired has none, so
@@ -864,6 +907,7 @@ static bool gesture_poll_one(SDL_GameController *controller, SDL_JoystickID id) 
                              * wrote is still showing. */
                             paint_player_colour(controller);
                         } else {
+                            w->flash_ok = 0;
                             w->flash_left = REFUSED_FLASHES * 2 + 1;   /* +1 for the restore */
                             w->flash_next = SDL_GetTicks();
                         }
@@ -905,10 +949,16 @@ static bool gesture_poll_one(SDL_GameController *controller, SDL_JoystickID id) 
                  * refusal made one colour carry two opposite meanings: you
                  * have it back because you asked, and you still have it
                  * because the bridge failed. */
-                flash_write(controller,
-                            lit ? 0xff : 0x00,   /* red */
-                            0x00,
-                            0x00);
+                if (w->flash_ok) {
+                    flash_write(controller, 0x00, lit ? 0xff : 0x00, 0x00);   /* green */
+                } else {
+                    /* RED, not yellow.
+                     *
+                     * Yellow already means "the controller is yours again" --
+                     * the colour of a deliberate unbridge. Using it for a
+                     * refusal made one colour carry two opposite meanings. */
+                    flash_write(controller, lit ? 0xff : 0x00, 0x00, 0x00);
+                }
                 w->flash_next = now_ticks + (lit ? REFUSED_ON_MS : REFUSED_OFF_MS);
             }
         }

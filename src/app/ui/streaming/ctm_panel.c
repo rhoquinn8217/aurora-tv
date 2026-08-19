@@ -245,7 +245,18 @@ static void ctm_nav_key_cb(lv_event_t *e) {
         case LV_KEY_RIGHT:
             /* ⭐ Right used to enter the detail pane. With the pane gone it does
              * the same thing as Select, so a user who reaches for either gets
-             * the action rather than nothing. */
+             * the action rather than nothing.
+             *
+             * ⭐⭐ AND IT TURNED OUT TO BE THE SAFE ONE, by accident. While a
+             * bridged controller is MIRRORED on the host (T-116), every press
+             * reaches the panel AND whatever has focus behind it -- so X here
+             * also activates something in the game or in Steam. Right does too,
+             * but "right" in a background app is usually harmless.
+             *
+             * ⚠️ THAT IS A WORKAROUND WITH A LIFETIME. When the mirror is fixed,
+             * this loses its justification and goes back to being a direction
+             * key that performs an action -- which is worth removing then, not
+             * now. rhoquinn8217, 2026-08-18. */
             ctm_toggle_device(row);
             break;
         case LV_KEY_ESC:   ctm_request_close(); break;
