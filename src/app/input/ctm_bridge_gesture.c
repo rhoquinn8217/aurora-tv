@@ -111,6 +111,7 @@ typedef struct {
     /* T-120: transport of prep_node, resolved once when it is set.
      * 1 = Bluetooth, 2 = wired. Lets the gates ask without enumerating. */
     uint8_t xport;
+
     uint8_t bye_left;    /* steps of the post-unplug pulse still to show */
     uint32_t bye_next;   /* SDL ticks when the next bye step is due */
     uint8_t buzz_left;   /* half-steps of the refusal rumble still to run */
@@ -376,7 +377,7 @@ static bool gesture_held(SDL_GameController *controller) {
  *
  * ⓘ Nothing is deleted. The code behind each gate encodes a fortnight of
  * hardware findings, each learnt by breaking something. */
-#define BT_LAYER_GESTURE  0
+#define BT_LAYER_GESTURE  1
 #define BT_LAYER_LIGHT    0
 #define BT_LAYER_RUMBLE   0
 #define BT_LAYER_TONE     0
@@ -819,6 +820,13 @@ static bool gesture_poll_one(SDL_GameController *controller, SDL_JoystickID id) 
                     w->ours_plugged = true;
                     w->plug_miss = 0;
                     w->plug_check_next = SDL_GetTicks() + PLUG_CHECK_MS;
+                    /* ⛔ RETIRED AFTER THE PLUG, NOT BEFORE. Retiring first was
+                     * tried on 2026-08-18 to close the input gap and did not
+                     * help -- the gap is Bluetooth-only and wired has none, so
+                     * it is the device becoming usable, not the handover. And
+                     * it left a phantom: the pad is only restored when the
+                     * plugged-check notices the bridge has ended, which needs
+                     * ours_plugged, which is set here. */
                     gesture_moonlight_set_excluded(controller, true);
                 }
                 if (!ok) {

@@ -160,6 +160,26 @@ static void ctm_toggle_device(int row) {
  * ⚠️ This still runs on the UI thread and still blocks; it just has far less to
  * do, and it does the same thing pressing each row would. Getting these calls
  * off the UI thread is T-062 and is a bigger change than this. */
+/* Bridge every device that is not already bridged, the same way pressing its
+ * row would.
+ *
+ * ⛔ NOT ctm_bridge_plug_all(): that plugs from the core directly and never
+ * tells moonlight, so every controller it bridged stayed in the host's panel
+ * as an emulated pad AS WELL -- the host saw each of them twice. The row press
+ * goes through the gesture, which retires the emulated pad and records that the
+ * bridge is ours.
+ *
+ * ⚠️ Runs on the UI thread, like the row press, and the same caveat applies:
+ * with several devices this is several bridges in a row. Acceptable while a
+ * bridge is ~2 seconds; worth revisiting if that changes. */
+static void ctm_bridge_all(void) {
+    for (int i = 0; i < s_ctm_ndev; ++i) {
+        if (!s_ctm_devs[i].plugged) {
+            ctm_toggle_device(i);
+        }
+    }
+}
+
 static void ctm_release_all(void) {
     for (int i = 0; i < s_ctm_ndev; ++i) {
         if (s_ctm_devs[i].plugged) {
@@ -376,7 +396,7 @@ static lv_obj_t *ctm_make_dev_row(const ctm_bridge_dev_t *d, int idx) {
     return row;
 }
 
-static void ctm_act_plugall_cb(lv_event_t *e)   { LV_UNUSED(e); ctm_bridge_plug_all();   ctm_request_refresh(); }
+static void ctm_act_plugall_cb(lv_event_t *e)   { LV_UNUSED(e); ctm_bridge_all();   ctm_request_refresh(); }
 static void ctm_act_unplugall_cb(lv_event_t *e) { LV_UNUSED(e); ctm_release_all(); ctm_request_refresh(); }
 
 static void ctm_make_action(const char *label, lv_event_cb_t cb, lv_color_t bg) {
