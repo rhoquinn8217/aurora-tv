@@ -14,6 +14,8 @@
 #include "ctm_hostmouse.h" /* TV-pointer synthesizer feed (kind "hid") */
 #include "ctm_monitor.h" /* hotplug: connect/disconnect watch thread */
 
+#include <time.h>   /* clock_gettime, for the enumeration cache window */
+
 static bool s_active = false;
 
 void ctm_bridge_set_host(const char *host, int port)
@@ -35,8 +37,53 @@ static bool s_autoplug = false;
 /* Enumerate + build the logical model + Stage-1 puck enumeration capture. The
  * Steam puck only exposes its full composite if g_puck_enum is cached BEFORE the
  * plug; the standalone app does this in refresh_devices(), so the glue must too. */
+/* ⛔⛔ HOW LONG AN ENUMERATION IS TRUSTED BEFORE IT IS DONE AGAIN.
+ *
+ * enumerate_devices() reads from every HID device on the system, and a device
+ * that does not answer costs the kernel's timeout -- five seconds, measured.
+ * That is survivable once. It is not survivable when everything that asks a
+ * question about devices re-enumerates first, which is what was happening:
+ *
+ *   plug a controller       -> enumerate
+ *   ask if it is bluetooth  -> enumerate      (the signal check, after EVERY plug)
+ *   ask if it is plugged    -> enumerate      (on a timer, per bridged device)
+ *   refresh the panel       -> enumerate
+ *   unplug                  -> enumerate
+ *
+ * ⭐ Measured 2026-08-18: a bridge whose plug call took 70ms then sat for 5.233
+ * seconds before the next line -- the whole of it in the signal check's
+ * enumeration. The overlay, the remote pointer and the host mouse were all dead
+ * for that time; only the video kept running, because it is on other threads.
+ *
+ * ⭐⭐ A quarter of a second is far shorter than any human notices a device
+ * appearing, and far longer than the burst of questions a single action asks.
+ * The hotplug monitor invalidates this the moment something actually changes,
+ * so freshness does not depend on the window. */
+#define ENUM_CACHE_MS 250
+
+static uint64_t s_enum_fresh_until = 0;
+
+static uint64_t glue_now_ms(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (uint64_t) ts.tv_sec * 1000u + (uint64_t) (ts.tv_nsec / 1000000);
+}
+
+/* Force the next enumeration to actually run. Called when the device set is
+ * known to have changed, so the window above never hides a real arrival. */
+static void ctm_glue_enum_invalidate(void)
+{
+    s_enum_fresh_until = 0;
+}
+
 static void ctm_glue_enumerate(void)
 {
+    const uint64_t now = glue_now_ms();
+    if (now < s_enum_fresh_until) {
+        return;
+    }
+    s_enum_fresh_until = now + ENUM_CACHE_MS;
     enumerate_devices(&g_scan);
     build_logical_devices(&g_scan, &g_devices);
     bool puck = false;
@@ -99,6 +146,11 @@ static void glue_hotplug_cb(void *ud, const ctm_controller_dev_t *dev, int prese
     if (!s_active) {
         return;
     }
+    /* ⭐ The device set has actually changed, so the cached enumeration is
+     * stale by definition. This is what keeps ENUM_CACHE_MS from ever hiding an
+     * arrival: the window only ever suppresses repeats of a question asked
+     * while nothing moved. */
+    ctm_glue_enum_invalidate();
     /* Any device appearing or disappearing used to plug EVERYTHING, without
      * asking whether auto-plug was wanted. Two surprises came from that:
      * a stream opened with every device on a hub bridged at once, and pulling

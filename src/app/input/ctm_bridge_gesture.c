@@ -108,6 +108,9 @@ typedef struct {
     bool ours_plugged;   /* we plugged this one and it is still bridged */
     uint32_t plug_check_next;  /* SDL ticks when to look again */
     uint8_t plug_miss;   /* consecutive "not plugged" answers -- see PLUG_MISSES */
+    /* ⭐ Asked BEFORE the pre-plug pulse and remembered, because asking costs an
+     * enumeration and enumeration is slow. See where it is set. */
+    bool signal_here;
     uint8_t bye_left;    /* steps of the post-unplug pulse still to show */
     uint32_t bye_next;   /* SDL ticks when the next bye step is due */
     uint8_t buzz_left;   /* half-steps of the refusal rumble still to run */
@@ -355,6 +358,21 @@ static bool gesture_held(SDL_GameController *controller) {
  * against never tearing down a live bridge because a scan blinked. A real
  * unplug stays unplugged; a race does not. */
 #define PLUG_MISSES       2
+
+/* ⛔⛔ DIAGNOSTIC. SHIPS AS 1. Set to 0 to skip the signal check entirely.
+ *
+ * gesture_signal_here() ends in a full device enumeration, and that is the only
+ * call in this path MEASURED to be slow: 5144ms on 2026-08-18, against 0ms for
+ * the rumble beside it. Moving it earlier did not help -- the wait blocks the
+ * interface wherever it runs.
+ *
+ * ⭐ Set to 0 and the question is not asked at all. The cost is the SDL rumble
+ * on a successful bridge; the gestures, the plug, the lightbar pulses and the
+ * wired tone are all untouched.
+ *
+ * ➡️ If the stall SURVIVES this, it is not the signal check and a day of
+ * measurement pointed at the wrong call. If it goes, the whole cost was here. */
+#define GESTURE_ASK_SIGNAL 1
 
 /* The refusal rumble: three short sharp bursts.
  *
@@ -782,12 +800,27 @@ static bool gesture_poll_one(SDL_GameController *controller, SDL_JoystickID id) 
                      * also plays a tone and its own pulse, so this reinforces
                      * rather than replaces -- judged by feel, and easily
                      * gated later if it turns out to be too much. */
-                    if (gesture_signal_here(w->prep_node)) {
+                    /* ⏱️ TIMED SEPARATELY, because five seconds sits somewhere
+                     * in these two calls and reading the code has not settled
+                     * which. Measured 2026-08-18: 5.233s, then 5.161s with the
+                     * Bluetooth tone suppressed -- so the tone is NOT it, and
+                     * the cost is in one of the two lines below.
+                     *
+                     * ⓘ Cheap enough to keep: two clock reads on a path that
+                     * runs once per bridge. */
+                    uint64_t sig_ms = 0;   /* asked before the pulse now */
+                    uint64_t rumble_ms = 0;
+                    if (w->signal_here) {
+                        uint64_t r_t0 = gesture_now_ms();
                         SDL_GameControllerRumble(controller, OK_PULSE_STRENGTH,
                                                  OK_PULSE_STRENGTH, OK_PULSE_MS);
+                        rumble_ms = gesture_now_ms() - r_t0;
                     }
-                    gesture_log("confirmation pulse on %s: bridged",
-                                w->prep_node);
+                    gesture_log("confirmation pulse on %s: bridged"
+                                " (signal check %llums, rumble %llums)",
+                                w->prep_node,
+                                (unsigned long long) sig_ms,
+                                (unsigned long long) rumble_ms);
                     w->ours_plugged = true;
                     w->plug_miss = 0;
                     w->plug_check_next = SDL_GetTicks() + PLUG_CHECK_MS;
@@ -934,6 +967,23 @@ static bool gesture_poll_one(SDL_GameController *controller, SDL_JoystickID id) 
     /* Start the pulse and hand over when it ends. The node is kept because it
      * is resolved now and used a second later. */
     snprintf(w->prep_node, sizeof(w->prep_node), "%s", node);
+    /* ⛔⛔ ASKED HERE, NOT AFTER THE PLUG, AND THE REASON IS FIVE SECONDS.
+     *
+     * gesture_signal_here() ends in ctm_glue_enumerate(), which reads from every
+     * HID device. Measured 2026-08-18 with the tone already suppressed:
+     *
+     *     confirmation pulse on /dev/hidraw1: bridged
+     *         (signal check 5144ms, rumble 0ms)
+     *
+     * ⭐ Asked here it overlaps the pre-plug pulse, which is about a second of
+     * waiting we are doing anyway; asked afterwards it sits between the plug
+     * and the confirmation with nothing to hide behind. The answer cannot
+     * change in that second: a controller does not swap transports mid-gesture.
+     *
+     * ⚠️ THE ENUMERATION BEING SLOW AT ALL IS A SEPARATE FAULT and is not fixed
+     * by this -- the same cost turns up in the splash screen and in the panel.
+     * This moves it off the path that a person is watching. */
+    w->signal_here = GESTURE_ASK_SIGNAL ? gesture_signal_here(node) : false;
     /* The pre-plug pulse runs on BOTH transports: it happens before anything
      * knows whether the plug will succeed, and it is the only thing marking
      * the gap between the gesture and the outcome. The core's signal follows
@@ -996,6 +1046,9 @@ bool ctm_bridge_gesture_request_bridge(const char *node) {
          * that makes a bridge a bridge happens on the following ticks, in the
          * one place it is written. */
         snprintf(w->prep_node, sizeof(w->prep_node), "%s", node);
+        /* ⭐ Asked before the pulse, like the chord's path -- see the note
+         * there. It costs an enumeration, measured at five seconds. */
+        w->signal_here = GESTURE_ASK_SIGNAL ? gesture_signal_here(node) : false;
         w->prep_left = ctm_bridge_signals_enabled() ? PREP_STEPS : 0;
         w->prep_next = SDL_GetTicks();
         w->fired = true;
