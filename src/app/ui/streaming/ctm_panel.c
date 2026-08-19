@@ -41,6 +41,7 @@ static void ctm_request_close(void);
 static void ctm_teardown_async(void *p);
 static void ctm_panel_refresh(void);
 static void ctm_request_refresh(void);
+static void ctm_late_refresh_cb(lv_timer_t *t);
 static void open_ctm_panel(lv_event_t *event);
 
 #define CTM_COL_CARD     lv_color_hex(0x12181d)
@@ -133,7 +134,19 @@ static void ctm_toggle_device(int row) {
     if (!ctm_bridge_gesture_request_bridge(s_ctm_devs[row].node)) {
         ctm_bridge_plug_index(index);
     }
+    /* ⛔ ASKING IS NOT BRIDGING. The gesture takes over and the plug happens on
+     * a later tick, so a refresh now reads the OLD state and the row still says
+     * BASIC. That looked like the press had failed, and pressing again asked
+     * for a second bridge on an already-bridged node -- which is what produced
+     * a rumble and a tone on the SECOND press.
+     *
+     * ⭐ So: refresh now for anything that finished immediately, and once more
+     * shortly after for the bridge that is still on its way. Two refreshes
+     * rather than a timer, because a timer would enumerate on every tick and
+     * enumeration is the expensive thing here. */
     ctm_request_refresh();
+    lv_timer_t *late = lv_timer_create(ctm_late_refresh_cb, 1200, NULL);
+    lv_timer_set_repeat_count(late, 1);
 }
 
 /* Release every bridged device, one at a time, the same way a row does.
@@ -299,8 +312,21 @@ static lv_obj_t *ctm_make_dev_row(const ctm_bridge_dev_t *d, int idx) {
     lv_obj_set_style_pad_gap(textcol, LV_DPX(1), 0);
     lv_obj_clear_flag(textcol, LV_OBJ_FLAG_SCROLLABLE);
 
+    /* ⭐ "DualSense · 1st" -- which controller this is, not just what kind.
+     *
+     * SDL numbers them from zero and the bridge core knows nothing about SDL,
+     * so the hidraw node is the join. ⓘ A mouse or a keyboard has no player
+     * number and simply shows none. */
     lv_obj_t *name = lv_label_create(textcol);
-    lv_label_set_text(name, ctm_dev_label(d));
+    {
+        static const char *k_ordinal[] = { "1st", "2nd", "3rd", "4th" };
+        const int player = ctm_bridge_gesture_player_for_node(d->node);
+        if (player >= 0 && player < 4) {
+            lv_label_set_text_fmt(name, "%s  %s", ctm_dev_label(d), k_ordinal[player]);
+        } else {
+            lv_label_set_text(name, ctm_dev_label(d));
+        }
+    }
     lv_label_set_long_mode(name, LV_LABEL_LONG_DOT);
     /* ⛔ LONG_DOT only truncates a label with a WIDTH. Left to size itself it
      * grows and wraps instead, and an unrecognised device -- "RONGYUAN 2.4G
@@ -519,6 +545,14 @@ static void ctm_request_close(void) { ctm_close_panel(); }
 
 static void ctm_refresh_async(void *p) { LV_UNUSED(p); ctm_panel_refresh(); }
 static void ctm_request_refresh(void)  { lv_async_call(ctm_refresh_async, NULL); }
+
+/* One-shot, for a bridge that completes after the press. See ctm_toggle_device. */
+static void ctm_late_refresh_cb(lv_timer_t *t) {
+    LV_UNUSED(t);
+    if (s_ctm_panel) {
+        ctm_request_refresh();
+    }
+}
 
 static void open_ctm_panel(lv_event_t *event) {
     /* The CTM button has LV_OBJ_FLAG_EVENT_BUBBLE; stop the CLICKED here so it

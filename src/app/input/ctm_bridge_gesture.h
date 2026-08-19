@@ -53,6 +53,13 @@ void ctm_bridge_gesture_reset(SDL_JoystickID id);
  * is not an SDL controller and has no gesture path to borrow. */
 bool ctm_bridge_gesture_request_bridge(const char *node);
 
+/* The player number SDL gave the controller behind this hidraw node, or -1 if
+ * nothing there is a controller. Zero-based, as SDL reports it.
+ *
+ * ⭐ The panel gets its list from the bridge core, which knows nothing about
+ * SDL. The hidraw node is what both sides speak, so it is the join. */
+int ctm_bridge_gesture_player_for_node(const char *node);
+
 #else
 
 #define ctm_bridge_gesture_tick(input, session) ((void)0)
