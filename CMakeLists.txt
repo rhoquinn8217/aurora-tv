@@ -2,14 +2,14 @@ cmake_minimum_required(VERSION 3.19)
 set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
 
 # Keep the fork's upstream version; CTM changes bump only the build number,
-# shown as "1.2.0 (N)" in the app. appinfo/ipk stay at the numeric version.
+# shown as "1.2.1 (N)" in the app. appinfo/ipk stay at the numeric version.
 #
 # The version follows GuiDev1994's releases as they are merged forward. The
 # build number is ours, he does not have it, and it keeps counting across a
 # merge -- resetting it would make old builds and new ones share numbers, and
 # every log and test note that names one would become ambiguous.
-set(MOONLIGHT_VERSION "1.2.0")
-set(CTM_BUILD_NUMBER 212)
+set(MOONLIGHT_VERSION "1.2.1")
+set(CTM_BUILD_NUMBER 213)
 
 project(moonlight VERSION ${MOONLIGHT_VERSION} LANGUAGES C CXX)
 
