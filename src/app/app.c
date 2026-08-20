@@ -1,3 +1,4 @@
+#include "ui/streaming/streaming.controller.h"   /* streaming_overlay_shown */
 #include <stdbool.h>
 #include <SDL.h>
 #include <assert.h>
@@ -330,7 +331,20 @@ static int app_event_filter(void *userdata, SDL_Event *event) {
 void app_process_events(app_t *app) {
     SDL_PumpEvents();
     SDL_FilterEvents(app_event_filter, app);
-    ctm_bridge_gesture_tick(&app->input, app->session);
+    /* ⛔⛔ streaming_overlay_shown(), NOT app_ui_is_opened(). Third attempt, and
+     * this one has evidence rather than reasoning behind it.
+     *
+     * ⓘ app_ui_is_opened asks whether the LVGL display exists, and on webOS it
+     * exists for the whole life of the app -- the video is drawn behind it. So
+     * it reads TRUE while a game is being played, and the input hold stayed on
+     * the entire time.
+     *
+     * ⚠️ THE SYMPTOM THAT PROVED IT: on a bridged DualSense, the lightbar,
+     * rumble, speaker and GYRO all worked while buttons, sticks and the
+     * touchpad did nothing. ⭐ Those are exactly the fields the blanker zeroes,
+     * and the gyro is exactly what it deliberately leaves alone. Output is
+     * unaffected either way. Nothing else could produce that pattern. */
+    ctm_bridge_gesture_tick(&app->input, app->session, streaming_overlay_shown());
 }
 
 void app_quit_confirm() {

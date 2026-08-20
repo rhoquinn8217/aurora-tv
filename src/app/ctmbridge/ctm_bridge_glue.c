@@ -177,6 +177,21 @@ void ctm_bridge_set_gesture_enabled(bool enabled)
     ctm_gesture_set_enabled(enabled ? 1 : 0);
 }
 
+/* ⭐⭐ HOLD OR RELEASE A BRIDGED CONTROLLER'S INPUT.
+ *
+ * ⓘ Called as the TV's own overlay opens and closes -- see app_ui_open. The
+ * core blanks each report while held rather than dropping it, so a button that
+ * was down when the overlay opened is actually released in the game instead of
+ * staying stuck. ⭐ Audio, rumble, the lightbar and the unbridge chord all keep
+ * working throughout.
+ *
+ * ⓘ Safe with nothing bridged: the flag is only read in the relay path, and
+ * with no session there is nothing to relay. */
+void ctm_bridge_set_input_held(bool held)
+{
+    ctm_input_set_held(held ? 1 : 0);
+}
+
 bool ctm_bridge_start(void)
 {
     if (s_active) {

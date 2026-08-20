@@ -34,6 +34,11 @@ bool ctm_bridge_start(void);
  * bridge half of the gesture; this passes the other half to the core. */
 void ctm_bridge_set_gesture_enabled(bool enabled);
 
+/* Hold a bridged controller's input while the TV's overlay is open, so
+ * navigating the panel does not also play the game. ⭐ Reports are blanked, not
+ * dropped -- a held button is released rather than left stuck. */
+void ctm_bridge_set_input_held(bool held);
+
 void ctm_bridge_stop(void);
 
 /* True while the bridge is active. */

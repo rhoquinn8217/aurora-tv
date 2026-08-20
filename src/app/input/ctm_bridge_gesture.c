@@ -1313,7 +1313,35 @@ bool ctm_bridge_gesture_request_bridge(const char *node) {
     return false;
 }
 
-void ctm_bridge_gesture_tick(struct app_input_t *input, struct session_t *session) {
+void ctm_bridge_gesture_tick(struct app_input_t *input, struct session_t *session,
+                             bool overlay_open) {
+    /* ⭐⭐ HOLD A BRIDGED CONTROLLER'S INPUT WHILE THE OVERLAY IS UP.
+     *
+     * ⛔ THE FAULT: with the overlay open, a bridged controller's presses still
+     * reached the game behind it. An unbridged one's do not -- the app's event
+     * filter stops forwarding them. A bridged controller produces no SDL events
+     * at all; its reports go TV -> USB/IP -> PC and pass nothing.
+     *
+     * ⚠️ TWO EARLIER ATTEMPTS GOT THE "IS THE OVERLAY OPEN" PART WRONG, so this
+     * one SAYS WHAT IT DECIDED rather than being trusted. ⛔ The first hung it
+     * on app_ui_open/app_ui_close -- which sound right and are not: app_ui_open
+     * runs ONCE, from main.c at boot, and is the launcher. The hold latched on
+     * at startup and no controller reached any game.
+     *
+     * ⓘ Re-asserted every pass on purpose: whatever happened last pass, this
+     * pass corrects it, so it cannot latch again. */
+    {
+        const bool held = overlay_open && session != NULL;
+        static int s_last = -1;
+        if ((int) held != s_last) {
+            s_last = (int) held;
+            gesture_log("input hold: %s (overlay=%d, session=%d)",
+                        held ? "ON -- the game sees nothing pressed" : "off",
+                        (int) overlay_open, session != NULL);
+            ctm_bridge_set_input_held(held);
+        }
+    }
+
     /* ⭐ THE SETTING GATES THE WHOLE THING, at the one place it runs.
      *
      * ⓘ Returning here means no chord is ever detected: no pre-plug pulse, no
