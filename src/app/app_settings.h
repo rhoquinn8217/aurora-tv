@@ -58,6 +58,8 @@ typedef struct app_settings_t {
     int idr_refresh_interval_ms;
     bool show_stats_on_start;
     bool show_stats_compact;
+    /** On-screen log overlay preference (Yellow cycles Off/Live/Frozen). */
+    bool show_logs;
     int stick_deadzone;
     /**
      * Sent to host as STREAM_CONFIGURATION.clientRefreshRateX100 (Hz * 100, e.g. 11994 = 119.94 Hz).
@@ -71,6 +73,11 @@ typedef struct app_settings_t {
     bool use_ntsc_refresh;
     bool auto_adjust_bitrate;
     int abr_mode;
+    /**
+     * webOS rooted only: switch picture/sound to Game mode for the stream (ALLM stand-in).
+     * Default on; UI row only shown when Homebrew Channel elevated service is present.
+     */
+    bool game_mode;
     char *conf_dir;
     char *ini_path;
     char *condb_path;

@@ -29,6 +29,7 @@
 #include "app_session.h"
 #include "stream/embed_wrapper.h"
 #include "profile/profile_manager.h"
+#include "util/log_overlay.h"
 
 PCONFIGURATION app_configuration = NULL;
 
@@ -118,6 +119,7 @@ int app_init(app_t *app, app_settings_loader *settings_loader, int argc, char *a
     app_input_init(&app->input, app);
 
     app_ui_init(&app->ui, app);
+    log_overlay_init();
 
     global = app;
 
@@ -153,6 +155,7 @@ void app_deinit(app_t *app) {
 
     SDL_Quit();
 
+    log_overlay_deinit();
     commons_logging_deinit();
 }
 

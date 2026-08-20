@@ -14,25 +14,29 @@
 #include "backend/pcmanager/worker/worker.h"
 #include "app_settings.h"
 
+#if TARGET_WEBOS
+#include "platform/webos/game_mode.h"
+#endif
+
 #include <stdlib.h>
 #include <stdio.h>
 
-static void session_apply_smooth_pacing_env(const session_t *session) {
+static void session_apply_decoder_env(const session_t *session) {
 #if TARGET_WEBOS
-    /*
-     * Diagnostic A/B (v1.1.10+): microstutters persist in BOTH HDR and SDR with
-     * smooth pacing on (including host-PTS-only). Overlay FD/RTT stay flat while
-     * judder is visible — so presentation PTS rewriting is the next suspect.
-     * Disable the grid entirely; decoder uses wall-clock PTS.
-     */
+    /* C5 native compositor is 120Hz. SDL_webOSGetRefreshRate often returns 144
+     * (HDMI VRR max). Snapping PTS to 144Hz on a 120Hz plane is 5:6 pulldown —
+     * pan hitch at every FPS. Wall-clock PTS tested best on-device for PAN. */
     setenv("SS4S_SMOOTH_PACING", "0", 1);
     setenv("SS4S_NDL_SMOOTH_PACING", "0", 1);
+    setenv("SS4S_PANEL_PHASE_PACING", "0", 1);
     unsetenv("SS4S_SMOOTH_PACING_HOST_ONLY");
-    setenv("SS4S_PAUSE_AT_DECODE_TIME", "1", 1);
+    unsetenv("SS4S_PRESENTATION_OFFSET_US");
     unsetenv("SS4S_SMOOTH_PACING_INTERVAL_US");
     unsetenv("SS4S_NDL_PACING_INTERVAL_US");
-    commons_log_info("Session",
-                     "Smooth pacing OFF (wall-clock PTS) — A/B for SDR/HDR microstutter");
+    unsetenv("SS4S_SMOOTH_PACING_MAX_DRIFT_FRAMES");
+    unsetenv("SS4S_PANEL_PHASE_INTERVAL_US");
+    setenv("SS4S_PAUSE_AT_DECODE_TIME", "1", 1);
+    commons_log_info("Session", "Stream pacing: wall-clock PTS (native 120Hz, no 144 VRR grid)");
     (void) session;
 #else
     (void) session;
@@ -68,6 +72,9 @@ int session_worker(session_t *session) {
     int reconnect_attempts = 0;
     Uint32 reconnect_since = 0;
     Uint32 stream_up_since = 0;
+#if TARGET_WEBOS
+    webos_game_mode_state_t *game_mode_state = NULL;
+#endif
 
 #if FEATURE_INPUT_EVMOUSE
     if (!session->config.view_only && session->config.hardware_mouse) {
@@ -89,19 +96,9 @@ int session_worker(session_t *session) {
                          session->config.stream.fps, session->config.stream.bitrate);
     }
     GS_CLIENT client = app_gs_client_new(app);
+    /* Host keeps SDL/Vorbis channel order. webOS SMP/NDL remaps PCM to device
+     * order in Feed (SS4S_WebOS_RemapPcm51ToDevice). Do not send surroundParams. */
     const char *surround_params = NULL;
-#if TARGET_WEBOS
-    if (session->config.stream.audioConfiguration == AUDIO_CONFIGURATION_51_SURROUND) {
-        // webOS NDL Opus passthrough only accepts mapping {0,1,4,5,2,3}
-        // (FL FR SL SR FC LFE). Asking the host for SDL order (012345) forces
-        // SS4S opus_fix re-encode every frame and causes momentary dropouts.
-        // 6 ch, 4 streams, 2 coupled, FL FR SL SR FC LFE:
-        surround_params = "642014523";
-        commons_log_info("Session",
-                         "5.1 surroundParams=%s (NDL passthrough layout; skips opus_fix)",
-                         surround_params);
-    }
-#endif
     short gamepad_mask;
     int ret;
     connect:
@@ -142,8 +139,16 @@ int session_worker(session_t *session) {
     SS4S_PlayerSetViewportSize(session->player, app->ui.width, app->ui.height);
     SS4S_PlayerSetUserdata(session->player, app);
 
-    session_apply_smooth_pacing_env(session);
+    session_apply_decoder_env(session);
     session_video_prepare_stream();
+
+#if TARGET_WEBOS
+    if (session->app->settings.game_mode) {
+        const bool hdr = session->app->settings.hdr &&
+                         (session->config.stream.supportedVideoFormats & VIDEO_FORMAT_MASK_10BIT) != 0;
+        game_mode_state = webos_game_mode_enter(hdr);
+    }
+#endif
 
     int startResult = LiStartConnection(&server->serverInfo, &session->config.stream,
                                         session_connection_callbacks_prepare(session),
@@ -272,6 +277,10 @@ int session_worker(session_t *session) {
     // Keep the error state (if any) so the finish handler shows the dialog
     session_set_state(session, streaming_errno != GS_OK ? STREAMING_ERROR : STREAMING_NONE);
     thread_cleanup:
+#if TARGET_WEBOS
+    webos_game_mode_restore(game_mode_state);
+    game_mode_state = NULL;
+#endif
     /* Restore only on a clean exit: streaming_errno != GS_OK means the session
      * ended in error/disconnect and the host is likely unreachable -- the
      * restore round-trips would just block teardown on timeouts. */
