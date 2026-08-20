@@ -43,7 +43,14 @@ typedef struct app_settings_t {
     bool quitappafter;
     bool autoresume;
     bool viewonly;
-    bool ctm_bridge;
+    /* ⭐ THE TWO WAYS TO ASK FOR A BRIDGE. Both default ON.
+     *
+     * ⓘ These replaced a single "use CTM bridge" switch, which suppressed the
+     * host's gamepad entirely and so had to be off for an ordinary stream to
+     * work. Bridging is now something done on top of a working stream, and
+     * these gate the ways of asking for it rather than the bridge itself. */
+    bool bridge_gesture;   /* the touchpad chord on the controller */
+    bool bridge_panel;     /* the USB Bridge panel in the stream overlay */
     bool absmouse;
     bool hardware_mouse;
     bool virtual_mouse;

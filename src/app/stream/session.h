@@ -68,7 +68,15 @@ typedef struct session_config_t {
      * while leaving keyboard, mouse and touch working. Set when the CTM bridge
      * is forwarding the physical controller itself, so the host would otherwise
      * see it twice. Distinct from view_only, which silences ALL input. */
+    /* ⛔ ALWAYS FALSE SINCE 2026-08-19, and kept only so the field it feeds
+     * still exists. Moonlight announces its gamepads to the host as it always
+     * did; the emulated pad is retired PER CONTROLLER when that one is bridged.
+     * ⓘ Nothing sets this true any more -- see session_config_init. */
     bool no_host_gamepad;
+    /* ⓘ Always true. The bridge starts with every stream now; what a user can
+     * switch is the two ways of ASKING for one -- the gesture and the panel.
+     * Kept as a field rather than removed so the start/stop calls read the same
+     * as they always have. */
     bool ctm_bridge;
     bool local_audio;
     bool hardware_mouse;

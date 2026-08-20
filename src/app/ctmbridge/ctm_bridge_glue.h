@@ -30,6 +30,10 @@ void ctm_bridge_set_host(const char *host, int port);
 bool ctm_bridge_start(void);
 
 /* Stop bridging: unplug all sessions and stop the keep-alive thread. Idempotent. */
+/* Switch the UNBRIDGE chord on or off. ⭐ The app owns the setting and the
+ * bridge half of the gesture; this passes the other half to the core. */
+void ctm_bridge_set_gesture_enabled(bool enabled);
+
 void ctm_bridge_stop(void);
 
 /* True while the bridge is active. */

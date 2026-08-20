@@ -50,11 +50,15 @@ static bool stream_input_gamepad_sends_moonlight(const stream_input_t *input,
     }
     /* Per controller, not per session.
      *
-     * `no_host_gamepad` is set for the whole session when the bridge is
-     * enabled, which switched moonlight's gamepad input off for EVERY
+     * `no_host_gamepad` used to be set for the whole session when the bridge
+     * was enabled, which switched moonlight's gamepad input off for EVERY
      * controller -- even ones nobody had upgraded, leaving them unusable for
-     * no reason. GuiDev1994's original has no suppression at all; this is
-     * closer to it.
+     * no reason.
+     *
+     * ⭐ IT IS NEVER SET NOW (2026-08-19). The per-controller mask below is the
+     * only suppression left, and GuiDev1994's original has none at all -- so a
+     * stream behaves exactly as his does until a controller is actually
+     * bridged, and only that controller changes.
      *
      * Reads a stored mask rather than asking the bridge. Deriving the answer
      * live meant calling into the bridge from inside limelight's send path,

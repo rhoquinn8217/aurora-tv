@@ -158,12 +158,32 @@ static void ctm_glue_ensure_core(void)
     s_core_up = true;
 }
 
+/* ⭐⭐ THE GESTURE SETTING, HANDED IN RATHER THAN READ.
+ *
+ * ⛔ This target cannot see the app's headers on purpose -- it is the seam that
+ * has to stay thin if a bridge is ever contributed upstream -- so the setting
+ * arrives the same way the host address does: the caller reads it and passes
+ * it, and nothing here knows what a preference file is.
+ *
+ * ⓘ The gesture has two halves in two places: the app detects the BRIDGE chord,
+ * and the core detects the UNBRIDGE chord, because once bridged a controller's
+ * touchpad reports come through the bridge and the app cannot see them. ➡️ One
+ * user setting, so both are told; this is the core's half.
+ *
+ * ⓘ Set once when a stream starts, which is right: it cannot change during one,
+ * and leaving a stream by any route unbridges everything anyway. */
+void ctm_bridge_set_gesture_enabled(bool enabled)
+{
+    ctm_gesture_set_enabled(enabled ? 1 : 0);
+}
+
 bool ctm_bridge_start(void)
 {
     if (s_active) {
         return true;
     }
     ctm_glue_ensure_core();
+
 
     if (s_autoplug) {
         int count = ctm_bridge_plug_all();

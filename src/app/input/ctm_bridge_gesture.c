@@ -22,6 +22,7 @@
 #include <time.h>
 
 #include "ctm_bridge_gesture.h"
+#include "app.h"   /* app_configuration, for the bridge_gesture switch */
 #include "stream/session.h"
 #include "stream/input/session_input.h"
 
@@ -1313,6 +1314,25 @@ bool ctm_bridge_gesture_request_bridge(const char *node) {
 }
 
 void ctm_bridge_gesture_tick(struct app_input_t *input, struct session_t *session) {
+    /* ⭐ THE SETTING GATES THE WHOLE THING, at the one place it runs.
+     *
+     * ⓘ Returning here means no chord is ever detected: no pre-plug pulse, no
+     * plug, no watching.
+     *
+     * ⓘ THE UNBRIDGE HALF IS GATED IN THE CORE, not here -- a bridged
+     * controller's touchpad reports go through the bridge, so this side cannot
+     * see them. Both halves read the same setting.
+     *
+     * ⭐ An earlier version deliberately left the unbridge chord alive, to
+     * avoid a controller being stuck on the PC with gestures off. ⛔ rhoquinn8217,
+     * 2026-08-19: that cannot happen. The setting is read when a stream starts
+     * and cannot be changed during one, and leaving a stream by ANY route --
+     * app switch, disconnect, crash -- unbridges everything. ➡️ So off means
+     * off, in both directions, and the asymmetry was solving a problem that
+     * does not exist. */
+    if (app_configuration && !app_configuration->bridge_gesture) {
+        return;
+    }
     s_stream_input = session ? session_get_input(session) : NULL;
     if (!input) {
         return;

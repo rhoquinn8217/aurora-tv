@@ -157,7 +157,8 @@ void settings_initialize(app_settings_t *config, char *conf_dir) {
     config->quitappafter = false;
     config->autoresume = false;
     config->viewonly = false;
-    config->ctm_bridge = false;
+    config->bridge_gesture = true;
+    config->bridge_panel = true;
     config->rotate = 0;
     config->absmouse = true;
     config->virtual_mouse = false;
@@ -232,7 +233,8 @@ bool settings_save(app_settings_t *config) {
     ini_write_bool(fp, "quitappafter", config->quitappafter);
     ini_write_bool(fp, "autoresume", config->autoresume);
     ini_write_bool(fp, "viewonly", config->viewonly);
-    ini_write_bool(fp, "ctm_bridge", config->ctm_bridge);
+    ini_write_bool(fp, "bridge_gesture", config->bridge_gesture);
+    ini_write_bool(fp, "bridge_panel", config->bridge_panel);
 
     ini_write_section(fp, "input");
     ini_write_bool(fp, "absmouse", config->absmouse);
@@ -429,8 +431,10 @@ static int settings_parse(app_settings_t *config, const char *section, const cha
         config->autoresume = INI_IS_TRUE(value);
     } else if (INI_NAME_MATCH("viewonly")) {
         config->viewonly = INI_IS_TRUE(value);
-    } else if (INI_NAME_MATCH("ctm_bridge")) {
-        config->ctm_bridge = INI_IS_TRUE(value);
+    } else if (INI_NAME_MATCH("bridge_gesture")) {
+        config->bridge_gesture = INI_IS_TRUE(value);
+    } else if (INI_NAME_MATCH("bridge_panel")) {
+        config->bridge_panel = INI_IS_TRUE(value);
     } else if (INI_NAME_MATCH("absmouse")) {
         config->absmouse = INI_IS_TRUE(value);
     } else if (INI_NAME_MATCH("virtual_mouse")) {

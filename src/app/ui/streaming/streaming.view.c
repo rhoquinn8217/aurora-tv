@@ -103,6 +103,9 @@ lv_obj_t *streaming_scene_create(lv_fragment_t *self, lv_obj_t *parent) {
     // CTM Bridge button: third in the actions bar (Soft keyboard, Virtual Mouse,
     // then CTM Bridge). Created after vmouse_btn so both its flex position and its
     // focus-group order fall to the right of Virtual Mouse.
+    /* ⭐ Hidden rather than absent when switched off: the overlay's focus order
+     * is built from these children, and removing one shifts everything after
+     * it. ⓘ A hidden object keeps its place and takes no focus. */
     lv_obj_t *ctm_btn = lv_btn_create(actions);
     lv_obj_add_flag(ctm_btn, LV_OBJ_FLAG_EVENT_BUBBLE);
     lv_obj_add_style(ctm_btn, &controller->overlay_button_style, 0);
@@ -111,6 +114,9 @@ lv_obj_t *streaming_scene_create(lv_fragment_t *self, lv_obj_t *parent) {
     lv_obj_t *ctm_label = lv_label_create(ctm_btn);
     lv_obj_add_style(ctm_label, &controller->overlay_button_label_style, 0);
     lv_label_set_text(ctm_label, locstr("USB Bridge"));
+    if (app_configuration && !app_configuration->bridge_panel) {
+        lv_obj_add_flag(ctm_btn, LV_OBJ_FLAG_HIDDEN);
+    }
 
     lv_obj_t *actions_spacing = lv_obj_create(actions);
     lv_obj_remove_style_all(actions_spacing);

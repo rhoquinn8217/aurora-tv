@@ -165,7 +165,7 @@ bool session_start_input(session_t *session) {
     if (session->config.vmouse) {
         session_input_set_vmouse_active(&session->input.vmouse, true);
     }
-    if (session->config.ctm_bridge) {
+    {
         if (ctm_bridge_active()) {
             // Stream came back after an auto-reconnect: the bridge was left
             // running so the controllers stayed plugged through the outage.
@@ -180,6 +180,9 @@ bool session_start_input(session_t *session) {
             // bridge that address rather than letting it broadcast for one: a
             // broadcast probe never leaves the local network, so a host reached
             // over the internet is never found.
+            /* ⭐ The core owns the unbridge half of the gesture and cannot
+             * see the app's settings, so it is told here. */
+            ctm_bridge_set_gesture_enabled(app_configuration->bridge_gesture);
             ctm_bridge_set_host(session->server->serverInfo.address, 0);
             ctm_bridge_start();
         }
@@ -189,9 +192,7 @@ bool session_start_input(session_t *session) {
 
 void session_stop_input(session_t *session) {
     session_input_stopped(&session->input);
-    if (session->config.ctm_bridge) {
-        ctm_bridge_stop();
-    }
+    ctm_bridge_stop();
     /* ⭐ The stream is over, so every controller is the TV's again -- say so in
      * the light. One of only three places the player colour is set; see
      * ctm_bridge_gesture_restore_player_colours. */
@@ -330,8 +331,30 @@ void session_config_init(app_t *app, session_config_t *config, const SERVER_DATA
     /* The bridge forwards the physical controller itself, so moonlight must not
      * also present it -- but only the GAMEPAD conflicts. Keyboard, mouse and
      * touch have no bridged counterpart and stay working. */
-    config->no_host_gamepad = app_config->ctm_bridge;
-    config->ctm_bridge = app_config->ctm_bridge;
+    /* ⛔⛔ THE HOST GAMEPAD IS NO LONGER SUPPRESSED, AND THE SETTING IS GONE.
+     *
+     * ⓘ What it used to do: with the bridge enabled, Moonlight stopped
+     * announcing ANY gamepad to the host, because a bridged controller arrives
+     * on the PC directly and the host would otherwise see it twice.
+     *
+     * ⛔ That is a sledgehammer, and it stopped being necessary. We retire the
+     * emulated pad PER CONTROLLER, at the moment that controller is bridged --
+     * see gesture_moonlight_set_excluded. The global gate solves the same
+     * problem by never offering a gamepad at all.
+     *
+     * ⚠️ AND IT COST THE CASE THAT MATTERS: two controllers, one bridged. The
+     * other had no route to the host whatsoever. Someone who never bridged got
+     * nothing at all.
+     *
+     * ⭐ rhoquinn8217, 2026-08-19: "when you start a stream, aurora-tv automatically
+     * gives the keyboards, mice and controllers to the PC. No bridging, no
+     * extra steps. It just works. That's how ours should work by default." ⓘ It
+     * is also how GuiDev1994's does -- he has no such gate.
+     *
+     * ➡️ Bridging is now something done ON TOP of a working stream, not instead
+     * of one. What gates it is whether the ways of ASKING are available: the
+     * gesture and the USB Bridge panel, which have their own settings. */
+    config->ctm_bridge = true;
     config->sops = app_config->sops;
     if (app_config->stick_deadzone < 0) {
         config->stick_deadzone = 0;
