@@ -116,12 +116,8 @@ typedef struct {
      * 1 = Bluetooth, 2 = wired. Lets the gates ask without enumerating. */
     uint8_t xport;
 
-    uint8_t bye_left;    /* steps of the post-unplug pulse still to show */
-    uint32_t bye_next;   /* SDL ticks when the next bye step is due */
     uint8_t buzz_left;   /* half-steps of the refusal rumble still to run */
     uint32_t buzz_next;  /* SDL ticks when the next buzz half-step is due */
-    uint32_t bye_started;  /* SDL ticks when the bye pulse began */
-    uint16_t bye_steps;    /* steps actually drawn, for timing the loop */
     uint32_t flash_next; /* SDL ticks when the next half-step is due */
 } watched_t;
 
@@ -336,9 +332,6 @@ static bool gesture_held(SDL_GameController *controller) {
  * ⭐ Smoothness is the step COUNT; pace is the interval. 26 steps at 45 ms is a
  * breath of about 1.2 s with 26 brightness levels in it. ⓘ Dropped to two
  * breaths so the handback does not run to three and a half seconds. */
-#define BYE_PULSES          2
-#define BYE_STEPS_PER_PULSE 60
-#define BYE_STEPS           (BYE_PULSES * BYE_STEPS_PER_PULSE)
 
 /* ⭐⭐ HOW LONG ONE BREATH TAKES. Ten steps at this interval.
  *
@@ -355,7 +348,21 @@ static bool gesture_held(SDL_GameController *controller) {
 /* ⭐ 20 ms, which the app's loop can hold -- it ran 25 steps in 1128 ms at 45,
  * so the pace is real rather than aspirational. Sixty steps at 20 ms is a
  * breath of 1.2 s with THIRTY brightness levels climbing and thirty falling. */
-#define BYE_STEP_MS         20
+/* ⭐ How long ONE breath lasts. The shape is drawn from the clock, so this is
+ * a real duration rather than a step count times an interval -- and it holds
+ * whatever the app's loop is doing. About a second reads as breathing; half a
+ * second reads as a blink. */
+
+/* ⭐ The BRIDGE breath is deliberately shorter than the handback's.
+ *
+ * ⛔ Not a style choice. A bridge hands the controller over the instant this
+ * starts -- the emulated pad retires, the real one arrives, and the host
+ * repaints -- so a long breath spends most of itself competing with a device
+ * changing hands. ⚠️ Measured by eye across builds: 450 ms read as clean,
+ * 800-1200 ms read as flickering throughout.
+ *
+ * ⓘ A handback has no such problem, because nothing is being relayed by then --
+ * which is why yellow has never flickered and can afford to be slow. */
 
 /* How often to ask whether a controller we plugged is still bridged.
  *
@@ -494,7 +501,6 @@ static bool gesture_held(SDL_GameController *controller) {
 /* One breath of green on a successful bridge, against three hard red flashes on
  * a refusal. Shorter than the yellow handback, which is two breaths -- a bridge
  * is the start of something and does not need dwelling on. */
-#define BRIDGED_PULSE_STEPS  BYE_STEPS_PER_PULSE
 #define REFUSED_ON_MS     240
 #define REFUSED_OFF_MS    240
 
@@ -548,9 +554,6 @@ static void flash_write(SDL_GameController *controller, uint8_t r, uint8_t g, ui
  * ⓘ THE EXACT VALUE IS APPROXIMATE. Teal was observed, not measured as an RGB
  * triple. If it ever visibly steps when Steam takes over, this is the number to
  * tune -- it is one line. */
-static void paint_handed_over(SDL_GameController *controller) {
-    flash_write(controller, 0x00, 0xc0, 0xc0);
-}
 
 static void paint_player_colour(SDL_GameController *controller) {
     static const uint8_t player_rgb[4][3] = {
@@ -572,23 +575,23 @@ static void paint_player_colour(SDL_GameController *controller) {
  * its own, where the last step is not the thing being seen.
  *
  * `span` is the length of ONE breath, so a longer count simply repeats it. */
-static uint8_t pulse_level_breath(uint8_t step, uint8_t span) {
-    uint8_t half = span / 2;
-    if (half == 0) {
-        return 0;
-    }
-    /* ⛔ `255 / half` FIRST TRUNCATES, and that is why adding steps did not add
-     * smoothness. With 13 steps to a half-breath it is 255/13 = 19, so the
-     * brightness climbs in jumps of 19 and never reaches 255 -- thirteen
-     * visible stairs however many steps are drawn.
-     *
-     * ⭐ Multiplying first keeps the whole range and spreads it across every
-     * step there is. */
-    uint8_t p = step % span;
-    unsigned v = (p > half) ? ((unsigned)(span - p) * 255u) / half
-                            : ((unsigned)p * 255u) / half;
-    return (uint8_t)(v > 255u ? 255u : v);
-}
+/* ⭐⭐ BRIGHTNESS FROM THE CLOCK, NOT FROM A STEP COUNTER.
+ *
+ * ⛔ The pulse used to count steps and sleep between them, which means the
+ * SHAPE depended on the app's loop keeping time -- and that loop is also
+ * drawing the interface. This file already warned about it: an earlier version
+ * "froze at its brightest and stayed there, because it animated on the UI
+ * thread and lost the competition for it."
+ *
+ * ⚠️ It was got wrong twice in one day, in opposite directions. Fifty
+ * milliseconds a step looked smooth; ninety looked steppy; twenty looked like
+ * the light was fighting something, because the loop cannot promise fifty
+ * updates a second and the steps landed unevenly.
+ *
+ * ⭐ Asking the clock removes the problem instead of tuning it. A late pass
+ * simply lands at the brightness that moment deserves, so jitter shifts nothing
+ * -- and the shape is the same on a busy loop as an idle one. */
+
 
 /* A ramp that only rises, ending at full brightness.
  *
@@ -730,6 +733,19 @@ static bool gesture_poll_one(SDL_GameController *controller, SDL_JoystickID id) 
     watched_t *w = watched_for(id);
     if (w && !was_known) {
         log_controller_identity(controller, id);
+        /* ⭐⭐ THE ONLY PLACE THIS SIDE PAINTS THE PLAYER COLOUR NOW.
+         *
+         * ⛔ It used to be restored after every pattern -- a bridge, an
+         * unbridge, a refusal. rhoquinn8217 ruled that out on 2026-08-19: on a
+         * controller the host has just taken, the colour is overwritten within
+         * a moment anyway, "and it comes off like an error".
+         *
+         * ⭐ Painting it once, when a controller first appears, is what the
+         * colour is actually for: knowing which pad is yours on the dashboard.
+         * ⓘ Two more places are wanted and not built yet -- on stream
+         * disconnect, and on switching away mid-stream. Both need a hook in
+         * app.c rather than here. */
+        paint_player_colour(controller);
     }
     if (!w) {
         return false;
@@ -760,48 +776,9 @@ static bool gesture_poll_one(SDL_GameController *controller, SDL_JoystickID id) 
     /* The controller has just come back to us: pulse yellow, then leave it on
      * its player colour. Runs after an unplug has actually completed, which is
      * the moment the light stops belonging to the host. */
-    if (w->bye_left > 0) {
-        uint32_t now_ticks = SDL_GetTicks();
-        if (now_ticks >= w->bye_next) {
-            --w->bye_left;
-            if (w->bye_left == 0) {
-                /* ⭐ Whose light is it now? A bridge hands the controller to
-                 * the host, so it goes out in the host's colour. An unbridge
-                 * brings it back to us, so the player colour is right. */
-                if (w->flash_ok) {
-                    paint_handed_over(controller);
-                } else {
-                    paint_player_colour(controller);
-                }
-                /* The step count against the elapsed time says whether the
-                 * app's loop is fast enough to draw the shape intended: the
-                 * loop's passes are the clock, and a slow one stretches every
-                 * pulse into a single fade. */
-                /* ⚠️ Says WHICH pulse: the tick is shared, so a successful
-                 * bridge was being logged as an unplug. */
-                gesture_log("%s pulse finished, %u steps in %ums, %s set",
-                            w->flash_ok ? "bridge" : "unplug",
-                            (unsigned)w->bye_steps,
-                            (unsigned)(SDL_GetTicks() - w->bye_started),
-                            w->flash_ok ? "host colour" : "player colour");
-            } else {
-                uint8_t level = pulse_level_breath(w->bye_left, BYE_STEPS_PER_PULSE);
-                /* ⭐ SUCCESS BREATHES, A REFUSAL FLASHES. rhoquinn8217, 2026-08-18:
-                 * "pulsing is comforting, appropriate for a success; hard
-                 * flashing on a refusal should feel abrupt." The two outcomes
-                 * are told apart by their RHYTHM before their colour, which is
-                 * the part you notice from across a room. */
-                if (w->flash_ok) {
-                    flash_write(controller, 0, level, 0);      /* green */
-                } else {
-                    flash_write(controller, level, level, 0);  /* yellow */
-                }
-                ++w->bye_steps;
-                w->bye_next = now_ticks + BYE_STEP_MS;
-            }
-        }
-        return false;
-    }
+    /* ⓘ The bye pulse is GONE. Every pattern is drawn by the core now, in the
+     * same code that plays its tone, so this side animates nothing. See the
+     * note where the bridge no longer arms a green. */
 
     /* Did a controller we plugged just stop being bridged? Asked on a timer,
      * never every pass -- see PLUG_CHECK_MS. */
@@ -871,18 +848,12 @@ static bool gesture_poll_one(SDL_GameController *controller, SDL_JoystickID id) 
                  * that signal runs after the bridge completes and lands on top
                  * of our green. Both directions were got wrong before this was
                  * settled. */
-                if (w->xport == 1 && BT_LAYER_CORE_SIGNAL) {
-                    w->bye_left = 0;
-                    paint_player_colour(controller);
-                } else {
-                    w->bye_left = BT_LAYER_LIGHT ? BYE_STEPS : 0;
-                }
-                w->bye_next = now_ticks;
-                w->bye_started = now_ticks;
-                w->bye_steps = 0;
-                /* Handed back. The same pulse as the handover: the event is
-                 * "this controller changed hands", and which way is already
-                 * said by the light -- magenta going, yellow returning. */
+                /* ⭐ THE LIGHT IS THE CORE'S ON BOTH TRANSPORTS. It detects
+                 * the unbridge chord -- a bridged controller's touchpad reports
+                 * come through it -- so it knows first and paints yellow with
+                 * the tone. This side does nothing at all now: it learns of the
+                 * unplug a second later from its plugged-check, and the player
+                 * colour is no longer restored after a pattern. */
                 /* NOTHING FROM HERE ON THE WAY BACK. The core signals an
                  * unplug BEFORE it tears the session down, so the felt pulse
                  * has already played by the time this runs -- on both
@@ -978,18 +949,25 @@ static bool gesture_poll_one(SDL_GameController *controller, SDL_JoystickID id) 
                      * ⭐ The unplug path has done this all along; the plug path
                      * never did, because on a cable the core's own signal
                      * repainted it and hid the gap. */
-                    /* ⭐ TWO GREEN FLASHES, then the player colour. The pulse
-                     * before a plug says "asking"; this says "done", and it
-                     * mirrors the red the same mechanism shows on a refusal --
-                     * so the light alone reports the outcome.
+                    /* ⛔⛔ NO GREEN FROM THIS SIDE. Changed 2026-08-19.
                      *
-                     * ⓘ The flash tick restores the player colour on its last
-                     * step, which is why nothing does so here. */
-                    w->flash_ok = 1;
-                    w->bye_left = BRIDGED_PULSE_STEPS;
-                    w->bye_next = SDL_GetTicks();
-                    w->bye_started = SDL_GetTicks();
-                    w->bye_steps = 0;
+                     * ⚠️ It used to be drawn here, the moment the plug call
+                     * returned -- about a SECOND before the core plays the
+                     * confirmation tone. The light and the sound never arrived
+                     * together, and no amount of tuning the breath could fix
+                     * that, because they were triggered by different events.
+                     *
+                     * ⭐ The core paints it now, in the same code that plays the
+                     * tone, so they are simultaneous by construction. That
+                     * makes every signal one rule: green, yellow and red all
+                     * come from the core, each with its own sound, on both
+                     * transports -- and this side only ever puts the player
+                     * colour back.
+                     *
+                     * ⓘ The green WILL stutter, because a bridge completing is
+                     * the moment the emulated pad retires and the real
+                     * controller arrives on the host. Knowingly traded for the
+                     * timing; see the note in ctm_bt_signal.inl. */
                     /* ⛔ RETIRED AFTER THE PLUG, NOT BEFORE. Retiring first was
                      * tried on 2026-08-18 to close the input gap and did not
                      * help -- the gap is Bluetooth-only and wired has none, so
@@ -1028,11 +1006,9 @@ static bool gesture_poll_one(SDL_GameController *controller, SDL_JoystickID id) 
                             sounded && ctm_bridge_node_is_bluetooth(w->prep_node);
 
                         if (lit) {
-                            /* ⚠️ The core releases its claim on the lightbar
-                             * but does not put the colour back -- releasing
-                             * only stops it writing, and the last colour it
-                             * wrote is still showing. */
-                            paint_player_colour(controller);
+                            /* ⓘ The core lit it and nothing repaints after a
+                             * pattern any more. The refused controller keeps
+                             * the red until something else writes the light. */
                         } else {
                             w->flash_ok = 0;
                             w->flash_left = REFUSED_FLASHES * 2 + 1;   /* +1 for the restore */
@@ -1049,7 +1025,13 @@ static bool gesture_poll_one(SDL_GameController *controller, SDL_JoystickID id) 
                 return ok;
             }
             /* Up then back down: bright in the middle, dark at both ends, so it
-             * reads as a breath rather than a blink. */
+             * reads as a breath rather than a blink.
+             *
+             * ⓘ Stays MAGENTA the whole way. Turning it green halfway was tried
+             * on 2026-08-19 and rejected by rhoquinn8217: green before the plug means
+             * "gesture accepted", and a refusal 70 ms later contradicts it.
+             * ⭐ Green after the plug only ever shows on success and red only
+             * on failure, so the two can never disagree. */
             uint8_t level = pulse_level_rising(w->prep_left);
             flash_write(controller, level, 0, level);   /* red + blue = magenta */
             w->prep_next = now_ticks + PREP_STEP_MS;
@@ -1063,8 +1045,7 @@ static bool gesture_poll_one(SDL_GameController *controller, SDL_JoystickID id) 
         if (now_ticks >= w->flash_next) {
             --w->flash_left;
             if (w->flash_left == 0) {
-                paint_player_colour(controller);
-                gesture_log("refusal flash finished, player colour set");
+                gesture_log("refusal flash finished");
             } else {
                 /* Odd counts are the lit ones, so the LAST flash step is lit
                  * rather than an unlit one nobody sees. */
@@ -1191,6 +1172,24 @@ static bool gesture_poll_one(SDL_GameController *controller, SDL_JoystickID id) 
  * Set on every tick; NULL before the first one. */
 static app_input_t *s_gesture_input = NULL;
 
+/* ⭐⭐ PUT THE PLAYER COLOUR BACK ON EVERY CONTROLLER WE ARE WATCHING.
+ *
+ * ⓘ Called at the two moments a controller comes back to the TV's own world:
+ * when a stream disconnects, and when Aurora is switched away from mid-stream.
+ * The third moment -- a controller first appearing -- is handled where it is
+ * first seen, in gesture_poll_one.
+ *
+ * ⛔ AND NOWHERE ELSE. It used to be restored after every pattern, which rhoquinn8217
+ * ruled out on 2026-08-19: on a controller the host has just taken, the colour
+ * is overwritten within a moment anyway and "comes off like an error". */
+void ctm_bridge_gesture_restore_player_colours(void) {
+    for (int i = 0; i < MAX_WATCHED; ++i) {
+        if (!s_watched[i].in_use) continue;
+        SDL_GameController *gc = SDL_GameControllerFromInstanceID(s_watched[i].id);
+        if (gc) paint_player_colour(gc);
+    }
+}
+
 /* Is this side drawing a pattern on that controller right now?
  *
  * ⭐ Used to drop the HOST's lightbar writes while we draw -- see the note in
@@ -1201,7 +1200,28 @@ bool ctm_bridge_gesture_light_busy(SDL_GameController *controller) {
     if (!js) return false;
     watched_t *w = watched_for(SDL_JoystickInstanceID(js));
     if (!w) return false;
-    return w->prep_left > 0 || w->bye_left > 0 || w->flash_left > 0;
+    bool busy = w->prep_left > 0 || w->flash_left > 0;
+
+    /* ⭐ COUNTED, because "it still flickers" cannot say whether the gate ran.
+     *
+     * ⛔ This is called only from the lightbar forward, so a true here IS a
+     * dropped host colour. Silence in the log means the host's colour does not
+     * arrive down the stream at all -- and with the relay's own hold logging
+     * separately, BOTH quiet would mean the writes come from somewhere we do
+     * not route: most likely the kernel's own PlayStation driver, which no
+     * gate of ours can reach.
+     *
+     * ⓘ Once per app run. Reported here rather than at the call site because
+     * the app's own log cannot be read on webOS; this one lands in
+     * /tmp/ctm-gesture.log. */
+    if (busy) {
+        static int s_dropped;
+        if (!s_dropped) {
+            s_dropped = 1;
+            gesture_log("lightbar: dropping the host's colour while a pattern plays");
+        }
+    }
+    return busy;
 }
 
 int ctm_bridge_gesture_player_for_node(const char *node) {

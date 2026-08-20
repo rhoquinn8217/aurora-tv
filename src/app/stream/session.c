@@ -1,3 +1,6 @@
+#if defined(TARGET_WEBOS)
+#include "input/ctm_bridge_gesture.h"
+#endif
 #include "app.h"
 #include "app_settings.h"
 #include "session_priv.h"
@@ -176,6 +179,12 @@ void session_stop_input(session_t *session) {
     if (session->config.ctm_bridge) {
         ctm_bridge_stop();
     }
+    /* ⭐ The stream is over, so every controller is the TV's again -- say so in
+     * the light. One of only three places the player colour is set; see
+     * ctm_bridge_gesture_restore_player_colours. */
+#if defined(TARGET_WEBOS)
+    ctm_bridge_gesture_restore_player_colours();
+#endif
 }
 
 bool session_has_input(session_t *session) {

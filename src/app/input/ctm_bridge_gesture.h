@@ -62,6 +62,12 @@ bool ctm_bridge_gesture_request_bridge(const char *node);
  * host-driven colour apart from one of ours. */
 #define CTM_HOST_OWNS_LIGHTBAR 0
 
+/* Repaint the player colour on every watched controller.
+ *
+ * ⭐ For the two moments a controller returns to the TV's own world: a stream
+ * disconnecting, and Aurora being switched away from mid-stream. */
+void ctm_bridge_gesture_restore_player_colours(void);
+
 /* True while this side is drawing a pattern on that controller's lightbar. */
 bool ctm_bridge_gesture_light_busy(SDL_GameController *controller);
 

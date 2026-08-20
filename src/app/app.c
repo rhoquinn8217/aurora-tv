@@ -6,7 +6,9 @@
 #include "lvgl/util/lv_app_utils.h"
 
 #include "app.h"
+#if defined(TARGET_WEBOS)
 #include "input/ctm_bridge_gesture.h"
+#endif
 #include "config.h"
 
 #include "logging.h"
@@ -168,6 +170,18 @@ static int app_event_filter(void *userdata, SDL_Event *event) {
             if (app_ui_is_opened(&app->ui) && app->session != NULL) {
                 session_interrupt(app->session, false, STREAMING_INTERRUPT_BACKGROUND);
             }
+            /* ⛔ THE PLAYER COLOUR IS NOT PAINTED HERE, and it was tried.
+             *
+             * ⚠️ Painting on this event puts the colour up BEFORE the teardown
+             * that follows it -- so a bridged controller went blue and then
+             * black as the bridge came down. Measured 2026-08-19.
+             *
+             * ⭐ session_stop_input paints instead, after the bridge has
+             * actually stopped, which is the right moment for both this path
+             * and a normal stream end. ⓘ If the colour does NOT appear on an
+             * app switch, that means the teardown never reaches
+             * session_stop_input -- worth knowing, and a question that has been
+             * open a while. */
             break;
         }
         case SDL_APP_DIDENTERFOREGROUND: {
