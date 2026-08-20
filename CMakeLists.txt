@@ -2,14 +2,14 @@ cmake_minimum_required(VERSION 3.19)
 set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
 
 # Keep the fork's upstream version; CTM changes bump only the build number,
-# shown as "1.1.10 (N)" in the app. appinfo/ipk stay at the numeric version.
+# shown as "1.1.11 (N)" in the app. appinfo/ipk stay at the numeric version.
 #
 # The version follows GuiDev1994's releases as they are merged forward. The
 # build number is ours, he does not have it, and it keeps counting across a
 # merge -- resetting it would make old builds and new ones share numbers, and
 # every log and test note that names one would become ambiguous.
-set(MOONLIGHT_VERSION "1.1.10")
-set(CTM_BUILD_NUMBER 210)
+set(MOONLIGHT_VERSION "1.1.11")
+set(CTM_BUILD_NUMBER 211)
 
 project(moonlight VERSION ${MOONLIGHT_VERSION} LANGUAGES C CXX)
 
@@ -188,6 +188,30 @@ endif ()
 
 set(BUILD_SHARED_LIBS ${BUILD_SHARED_CORE_LIBS})
 add_subdirectory(core/moonlight-common-c)
+
+# moonlight-common-c selects its monotonic clock with #ifdef HAVE_CLOCK_GETTIME, but its own
+# CMakeLists only computes that value and never passes it to the compiler. Without the definition
+# PltGetMillis() and PltGetMicroseconds() fall back to gettimeofday(), so every stream timeout,
+# dejitter wait and latency stat would run off a settable wall clock. Define it here until
+# upstream propagates its own check. (mariotaku/moonlight-tv#605)
+include(CheckSymbolExists)
+check_symbol_exists(clock_gettime "time.h" MLCOMMON_HAVE_CLOCK_GETTIME)
+if (NOT MLCOMMON_HAVE_CLOCK_GETTIME)
+    # Before glibc 2.17 clock_gettime lives in librt rather than libc
+    set(CMAKE_REQUIRED_LIBRARIES rt)
+    check_symbol_exists(clock_gettime "time.h" MLCOMMON_HAVE_CLOCK_GETTIME_IN_RT)
+    unset(CMAKE_REQUIRED_LIBRARIES)
+    if (MLCOMMON_HAVE_CLOCK_GETTIME_IN_RT)
+        target_link_libraries(moonlight-common-c PRIVATE rt)
+        set(MLCOMMON_HAVE_CLOCK_GETTIME ON)
+    endif ()
+endif ()
+if (MLCOMMON_HAVE_CLOCK_GETTIME)
+    target_compile_definitions(moonlight-common-c PRIVATE HAVE_CLOCK_GETTIME)
+else ()
+    message(WARNING "clock_gettime() is unavailable, moonlight-common-c will use a non-monotonic clock")
+endif ()
+
 add_subdirectory(core/libgamestream)
 if (BUILD_SHARED_LIBS)
     install(TARGETS moonlight-common-c LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR})
