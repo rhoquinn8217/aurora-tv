@@ -82,6 +82,22 @@ static lv_obj_t   *s_ctm_state_lbl  = NULL;   /* ONLINE / OFFLINE, the only colo
 /* ⭐ The same fact the label shows, kept so the rows and Bridge All can act on
  * it rather than only report it. */
 static bool        s_ctm_server_online = true;
+/* ⭐⭐ THREE STATES, NOT TWO: not known, online, offline.
+ *
+ * ⛔ g_agent_online starts false, so the panel used to say OFFLINE the instant
+ * it opened -- before a single probe had completed. Usually right, and still a
+ * claim we had not earned. ⓘ rhoquinn8217, 2026-08-20.
+ *
+ * ⭐ While it is not known the rows stay pressable, and a press simply ATTEMPTS
+ * the bridge: it either works -- signals, and the state resolves to online -- or
+ * it refuses, and the state resolves to offline. ⓘ A command that gets through
+ * is proof the agent is there, which is why send_agent_command now sets both
+ * flags either way.
+ *
+ * ⚠️ So a refusal is possible here, deliberately. Greying rows exists to avoid
+ * a refusal we KNOW is coming; when nobody knows, finding out is the honest
+ * answer and the refusal is real information. */
+static bool        s_ctm_server_known = false;
 
 /* ⭐⭐ FLASH THE OFFLINE TAG WHEN SOMEONE TRIES TO BRIDGE ANYWAY.
  *
@@ -119,11 +135,19 @@ static void ctm_online_tick(lv_timer_t *t) {
     if (!s_ctm_state_lbl || s_ctm_flash_left > 0) {
         return;   /* mid-flash: leave the colour alone */
     }
+    const bool known = ctm_bridge_agent_probed();
     const bool now = ctm_bridge_agent_online();
-    if (now == s_ctm_server_online) {
+    if (known == s_ctm_server_known && now == s_ctm_server_online) {
         return;
     }
+    s_ctm_server_known = known;
     s_ctm_server_online = now;
+    if (!known) {
+        lv_label_set_text(s_ctm_state_lbl, "- N/A");
+        lv_obj_set_style_text_color(s_ctm_state_lbl, CTM_COL_SUB, 0);
+        ctm_request_refresh();
+        return;
+    }
     lv_label_set_text(s_ctm_state_lbl, now ? "- ONLINE" : "- OFFLINE");
     lv_obj_set_style_text_color(s_ctm_state_lbl,
                                 now ? CTM_COL_OK : lv_palette_main(LV_PALETTE_RED), 0);
@@ -274,7 +298,7 @@ static void ctm_toggle_device(int row) {
      * offline a bridge cannot work, and attempting it answers with a refusal --
      * red flashes and a buzz, which look exactly like a real failure. ⓘ The row
      * is disabled too; this is the belt to that's braces. */
-    if (!s_ctm_server_online) {
+    if (s_ctm_server_known && !s_ctm_server_online) {
         ctm_flash_offline();
         return;
     }
@@ -669,7 +693,7 @@ static lv_obj_t *ctm_make_dev_row(const ctm_bridge_dev_t *d, int idx) {
      * bridged, and a light touch of grey was invisible on a television. ⓘ A
      * BRIDGED row is left alone: releasing it is a teardown on this side and
      * needs no host, so it is still worth pressing. */
-    if (!s_ctm_server_online && !d->plugged) {
+    if (s_ctm_server_known && !s_ctm_server_online && !d->plugged) {
         lv_obj_set_style_opa(row, LV_OPA_30, 0);
     }
 
@@ -693,7 +717,7 @@ static lv_obj_t *ctm_make_dev_row(const ctm_bridge_dev_t *d, int idx) {
  * does not reliably stop it being activated. ⭐ And it flashes the reason. */
 static void ctm_act_plugall_cb(lv_event_t *e) {
     LV_UNUSED(e);
-    if (!s_ctm_server_online) {
+    if (s_ctm_server_known && !s_ctm_server_online) {
         ctm_flash_offline();
         return;
     }
@@ -779,12 +803,18 @@ static void ctm_panel_refresh(void) {
          * leaving a user to infer that an address means it is up. */
         /* ⭐ The address shows either way -- OFFLINE says nothing is answering
          * there, not that the address has gone. ⓘ rhoquinn8217, 2026-08-20. */
+        s_ctm_server_known = ctm_bridge_agent_probed();
         s_ctm_server_online = ctm_bridge_agent_online();
         lv_label_set_text_fmt(s_ctm_status_lbl, "USB Server: %s", listener);
-        lv_label_set_text(s_ctm_state_lbl, s_ctm_server_online ? "- ONLINE" : "- OFFLINE");
-        lv_obj_set_style_text_color(s_ctm_state_lbl,
-                                    s_ctm_server_online ? CTM_COL_OK
-                                                        : lv_palette_main(LV_PALETTE_RED), 0);
+        if (!s_ctm_server_known) {
+            lv_label_set_text(s_ctm_state_lbl, "- N/A");
+            lv_obj_set_style_text_color(s_ctm_state_lbl, CTM_COL_SUB, 0);
+        } else {
+            lv_label_set_text(s_ctm_state_lbl, s_ctm_server_online ? "- ONLINE" : "- OFFLINE");
+            lv_obj_set_style_text_color(s_ctm_state_lbl,
+                                        s_ctm_server_online ? CTM_COL_OK
+                                                            : lv_palette_main(LV_PALETTE_RED), 0);
+        }
     }
 
     if (s_ctm_ndev == 0) {
@@ -833,7 +863,7 @@ static void ctm_panel_refresh(void) {
          * until then this is the way out. */
         lv_obj_t *plug_all =
                 ctm_make_action("Bridge All", ctm_act_plugall_cb, CTM_COL_FULL);
-        if (plug_all && !s_ctm_server_online) {
+        if (plug_all && s_ctm_server_known && !s_ctm_server_online) {
             /* ⛔ LV_STATE_DISABLED alone was barely visible -- it only shifts
              * the theme's own opacity a little. ⭐ Paint it grey and fade it. */
             lv_obj_add_state(plug_all, LV_STATE_DISABLED);

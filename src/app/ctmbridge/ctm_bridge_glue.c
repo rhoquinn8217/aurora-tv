@@ -620,6 +620,14 @@ void ctm_bridge_agent_recheck(void)
     ctm_agent_probe_soon();
 }
 
+/* ⭐ Has anything actually reached a verdict yet? ⓘ Separate from the verdict
+ * itself, so the panel can say "not known" instead of asserting "offline"
+ * before a single probe has completed. */
+bool ctm_bridge_agent_probed(void)
+{
+    return g_agent_probed;
+}
+
 bool ctm_bridge_agent_online(void)
 {
     return g_agent_online != 0;

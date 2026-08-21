@@ -79,6 +79,10 @@ typedef struct {
  * once; the answer lands on the next refresh. */
 void ctm_bridge_agent_recheck(void);
 
+/* True once a probe or a command has reached a verdict about the USB server.
+ * ⭐ Until then the answer to ctm_bridge_agent_online() means nothing. */
+bool ctm_bridge_agent_probed(void);
+
 bool ctm_bridge_agent_online(void);
 
 void ctm_bridge_agent(char *out, size_t out_len);
