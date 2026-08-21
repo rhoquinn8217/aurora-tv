@@ -93,7 +93,44 @@ static bool        s_ctm_server_online = true;
  * ⓘ An odd count so it ends bright, and it drives itself off a timer rather
  * than the panel's refresh, which is too slow to read as a flash. */
 static lv_timer_t *s_ctm_flash_timer = NULL;
+static lv_timer_t *s_ctm_online_timer = NULL;
 static int         s_ctm_flash_left = 0;
+
+/* ⭐⭐ THE ONLINE LABEL UPDATES ITSELF; THE DEVICE LIST DOES NOT.
+ *
+ * ⛔ THE PANEL HAD NO TIMER AT ALL. It redrew only when you did something to it
+ * -- pressed a row, or Bridge All -- so a listener started while the panel was
+ * open went unnoticed until you closed and reopened it. ⓘ rhoquinn8217, 2026-08-20:
+ * "why doesn't the panel update live?"
+ *
+ * ⚠️ AND THE OBVIOUS FIX IS WRONG. A timer calling the full refresh would call
+ * ctm_bridge_list, which calls ctm_glue_enumerate EVERY TIME -- and enumeration
+ * is the expensive thing here, measured at seconds on the C3. The existing
+ * comment on the open path says exactly that, and it is right.
+ *
+ * ⭐ So this polls the ONE cheap thing: a flag the probe thread already
+ * maintains. No enumeration, no list rebuild, just a label. ⓘ The device list
+ * still refreshes on action, as before.
+ *
+ * ⓘ It also removes the case for a refresh button: the only thing that went
+ * stale while the panel sat open now does not. */
+static void ctm_online_tick(lv_timer_t *t) {
+    LV_UNUSED(t);
+    if (!s_ctm_state_lbl || s_ctm_flash_left > 0) {
+        return;   /* mid-flash: leave the colour alone */
+    }
+    const bool now = ctm_bridge_agent_online();
+    if (now == s_ctm_server_online) {
+        return;
+    }
+    s_ctm_server_online = now;
+    lv_label_set_text(s_ctm_state_lbl, now ? "- ONLINE" : "- OFFLINE");
+    lv_obj_set_style_text_color(s_ctm_state_lbl,
+                                now ? CTM_COL_OK : lv_palette_main(LV_PALETTE_RED), 0);
+    /* ⓘ The rows and Bridge All are drawn from this state, so a change has to
+     * rebuild them -- but only on a CHANGE, which is rare. */
+    ctm_request_refresh();
+}
 
 static void ctm_flash_tick(lv_timer_t *t) {
     if (!s_ctm_state_lbl) {
@@ -1024,7 +1061,33 @@ static void open_ctm_panel(lv_event_t *event) {
 /* ---- the seam ---------------------------------------------------------- */
 
 void ctm_panel_open(lv_event_t *event) {
+    /* ⭐⭐ ASK FOR A FRESH READING AS THE PANEL OPENS -- the one moment somebody
+     * is definitely reading it. ⓘ rhoquinn8217's suggestion, 2026-08-20.
+     *
+     * ⛔ IT ONLY ASKS. The probe blocks for up to a second against a host that
+     * is not answering, and this runs on the interface thread; doing it here
+     * would freeze the overlay for that second. ⭐ The answer arrives on the
+     * panel's next refresh, a moment later.
+     *
+     * ⓘ Without this, a listener started mid-stream went unnoticed until the
+     * probe's own interval came round. */
+    ctm_bridge_agent_recheck();
     open_ctm_panel(event);
+
+    /* ⭐ Watches the online flag while the panel is up. See ctm_online_tick.
+     *
+     * ⛔ CREATED HERE, ON THE OPEN PATH. A first attempt put it in
+     * ctm_toggle_device by matching the wrong ctm_request_refresh() call -- so
+     * it only started when a row was pressed, which is precisely when nobody
+     * needs it.
+     *
+     * ⭐ Any previous timer is deleted first rather than guarded against: a
+     * stale non-NULL pointer would otherwise mean no timer is ever made
+     * again. */
+    if (s_ctm_online_timer) {
+        lv_timer_del(s_ctm_online_timer);
+    }
+    s_ctm_online_timer = lv_timer_create(ctm_online_tick, 1000, NULL);
 }
 
 /* Called from the owner fragment's teardown, which is not ours to move.
@@ -1036,6 +1099,12 @@ void ctm_panel_open(lv_event_t *event) {
 void ctm_panel_on_owner_deleted(streaming_controller_t *controller) {
     if (s_ctm_owner == controller) {
         if (s_ctm_nav_group)    { lv_group_del(s_ctm_nav_group);    s_ctm_nav_group = NULL; }
+        /* ⛔ The online timer must go with the labels it writes to, or it fires
+         * against freed objects. ⓘ The flash timer deletes itself when it runs
+         * out; this one does not, because it never stops on its own. */
+        if (s_ctm_online_timer) { lv_timer_del(s_ctm_online_timer); s_ctm_online_timer = NULL; }
+        if (s_ctm_flash_timer)  { lv_timer_del(s_ctm_flash_timer);  s_ctm_flash_timer = NULL; }
+        s_ctm_flash_left = 0;
         s_ctm_panel = NULL;
         s_ctm_sidebar = NULL;
         s_ctm_actions = NULL;

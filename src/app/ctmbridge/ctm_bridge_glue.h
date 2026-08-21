@@ -75,6 +75,10 @@ typedef struct {
  * For the overlay header. */
 /* Is the USB server answering? ⓘ Its address is reported by ctm_bridge_agent()
  * whether or not it is. */
+/* Ask for a fresh reading of whether the USB server is answering. ⭐ Returns at
+ * once; the answer lands on the next refresh. */
+void ctm_bridge_agent_recheck(void);
+
 bool ctm_bridge_agent_online(void);
 
 void ctm_bridge_agent(char *out, size_t out_len);

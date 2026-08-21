@@ -214,6 +214,22 @@ bool ctm_bridge_start(void)
     }
     ctm_glue_ensure_core();
 
+    /* ⭐⭐ START THE AGENT PROBE WHEN THE BRIDGE COMES UP, not when something is
+     * first plugged.
+     *
+     * ⛔ THE FAULT: ctm_bridge_gesture_init is called from plug_in_item -- the
+     * PLUG path -- so the probe only ever started once a device had actually
+     * been bridged. ⚠️ With the USB server down you cannot bridge anything, so
+     * the probe never started, so the panel never learned it was down and
+     * showed its default instead. ➡️ It was worst exactly when it mattered most.
+     *
+     * ⓘ Found 2026-08-20 after the panel read ONLINE with the listener stopped:
+     * the log had no `agent probe thread started` line for that run at all.
+     *
+     * ⓘ Safe to call more than once -- it starts a worker only if one is not
+     * already running. */
+    ctm_bridge_gesture_init();
+
 
     if (s_autoplug) {
         int count = ctm_bridge_plug_all();
@@ -597,6 +613,13 @@ void ctm_bridge_status(char *out, size_t out_len)
 
 /* Is the USB server answering? ⭐ Separate from its address, which is known
  * whether or not anything is listening at it. */
+/* ⭐ Ask for a fresh reading. ⓘ The panel calls this as it opens, so a listener
+ * started mid-stream is noticed at once rather than up to ten seconds later. */
+void ctm_bridge_agent_recheck(void)
+{
+    ctm_agent_probe_soon();
+}
+
 bool ctm_bridge_agent_online(void)
 {
     return g_agent_online != 0;
