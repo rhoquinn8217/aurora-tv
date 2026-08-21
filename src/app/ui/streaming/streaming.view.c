@@ -114,7 +114,7 @@ lv_obj_t *streaming_scene_create(lv_fragment_t *self, lv_obj_t *parent) {
     lv_obj_t *ctm_label = lv_label_create(ctm_btn);
     lv_obj_add_style(ctm_label, &controller->overlay_button_label_style, 0);
     lv_label_set_text(ctm_label, locstr("USB Bridge"));
-    if (app_configuration && !app_configuration->bridge_panel) {
+    if (app_configuration && !app_configuration->bridge_enable) {
         lv_obj_add_flag(ctm_btn, LV_OBJ_FLAG_HIDDEN);
     }
 

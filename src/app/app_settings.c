@@ -157,8 +157,12 @@ void settings_initialize(app_settings_t *config, char *conf_dir) {
     config->quitappafter = false;
     config->autoresume = false;
     config->viewonly = false;
+    config->bridge_enable = true;
     config->bridge_gesture = true;
-    config->bridge_panel = true;
+    config->bridge_signal_light = true;
+    config->bridge_signal_rumble = true;
+    config->bridge_signal_tone = true;
+    config->bridge_mic_capture = true;
     config->rotate = 0;
     config->absmouse = true;
     config->virtual_mouse = false;
@@ -233,8 +237,12 @@ bool settings_save(app_settings_t *config) {
     ini_write_bool(fp, "quitappafter", config->quitappafter);
     ini_write_bool(fp, "autoresume", config->autoresume);
     ini_write_bool(fp, "viewonly", config->viewonly);
+    ini_write_bool(fp, "bridge_enable", config->bridge_enable);
     ini_write_bool(fp, "bridge_gesture", config->bridge_gesture);
-    ini_write_bool(fp, "bridge_panel", config->bridge_panel);
+    ini_write_bool(fp, "bridge_signal_light", config->bridge_signal_light);
+    ini_write_bool(fp, "bridge_signal_rumble", config->bridge_signal_rumble);
+    ini_write_bool(fp, "bridge_signal_tone", config->bridge_signal_tone);
+    ini_write_bool(fp, "bridge_mic_capture", config->bridge_mic_capture);
 
     ini_write_section(fp, "input");
     ini_write_bool(fp, "absmouse", config->absmouse);
@@ -431,10 +439,18 @@ static int settings_parse(app_settings_t *config, const char *section, const cha
         config->autoresume = INI_IS_TRUE(value);
     } else if (INI_NAME_MATCH("viewonly")) {
         config->viewonly = INI_IS_TRUE(value);
+    } else if (INI_NAME_MATCH("bridge_enable")) {
+        config->bridge_enable = INI_IS_TRUE(value);
     } else if (INI_NAME_MATCH("bridge_gesture")) {
         config->bridge_gesture = INI_IS_TRUE(value);
-    } else if (INI_NAME_MATCH("bridge_panel")) {
-        config->bridge_panel = INI_IS_TRUE(value);
+    } else if (INI_NAME_MATCH("bridge_signal_light")) {
+        config->bridge_signal_light = INI_IS_TRUE(value);
+    } else if (INI_NAME_MATCH("bridge_signal_rumble")) {
+        config->bridge_signal_rumble = INI_IS_TRUE(value);
+    } else if (INI_NAME_MATCH("bridge_signal_tone")) {
+        config->bridge_signal_tone = INI_IS_TRUE(value);
+    } else if (INI_NAME_MATCH("bridge_mic_capture")) {
+        config->bridge_mic_capture = INI_IS_TRUE(value);
     } else if (INI_NAME_MATCH("absmouse")) {
         config->absmouse = INI_IS_TRUE(value);
     } else if (INI_NAME_MATCH("virtual_mouse")) {

@@ -37,6 +37,12 @@ void ctm_bridge_set_gesture_enabled(bool enabled);
 /* Hold a bridged controller's input while the TV's overlay is open, so
  * navigating the panel does not also play the game. ⭐ Reports are blanked, not
  * dropped -- a held button is released rather than left stuck. */
+/* Which confirmation signals the bridge may make, and whether it captures the
+ * controller's microphone. ⭐ Set when a stream starts. */
+void ctm_bridge_set_signals(bool light, bool rumble, bool tone);
+
+void ctm_bridge_set_mic_capture(bool on);
+
 void ctm_bridge_set_input_held(bool held);
 
 void ctm_bridge_stop(void);
@@ -67,6 +73,10 @@ typedef struct {
 
 /* Write the discovered Windows agent host (or "offline") into out (NUL-terminated).
  * For the overlay header. */
+/* Is the USB server answering? ⓘ Its address is reported by ctm_bridge_agent()
+ * whether or not it is. */
+bool ctm_bridge_agent_online(void);
+
 void ctm_bridge_agent(char *out, size_t out_len);
 
 /* Re-enumerate and fill out[0..max-1] with the detected devices; returns the

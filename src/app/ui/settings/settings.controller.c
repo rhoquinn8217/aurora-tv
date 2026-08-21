@@ -31,6 +31,10 @@ static const settings_entry_t entries[] = {
         /* punktfunk-style: one compact Stream list, then slim side panes */
         {MAT_SYMBOL_SETTINGS,        translatable("Stream"),       &settings_pane_basic_cls},
         {MAT_SYMBOL_SPORTS_ESPORTS,  translatable("Input"),        &settings_pane_input_cls},
+        /* ⚠️ PLACEHOLDER ICON. The bundled Material font has no USB glyph, and
+         * adding one means regenerating the font. TV is the least wrong of what
+         * is there -- this section is about devices on the television. */
+        {MAT_SYMBOL_TV,              translatable("USB Bridge"),   &settings_pane_usbbridge_cls},
         {MAT_SYMBOL_DESKTOP_WINDOWS, translatable("Host"),         &settings_pane_host_cls},
         {MAT_SYMBOL_TUNE,            translatable("Experimental"), &settings_pane_experimental_cls},
 };

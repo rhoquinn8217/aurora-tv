@@ -1,110 +1,80 @@
-# Aurora
+# Aurora — wired DualSense support
 
-> This is a fork of [Aurora](https://github.com/GuiDev1994/Aurora-TV) by GuiDev1994,
-> extended with my **[CTM Bridge](https://github.com/CTM-Bridge/CTM-USBIP)**:
-> controllers paired to the TV — and the Magic Remote as a pointer + keyboard —
-> show up on the gaming PC as native USB devices, with full input, rumble and
-> controller audio.
+A fork of [Aurora](https://github.com/GuiDev1994/aurora-tv) by GuiDev1994,
+with the [CTM Bridge](https://github.com/CTM-Bridge/CTM-USBIP) controller
+bridge, adding **full wired DualSense support**.
 
-## Support
+A DualSense plugged into the TV appears on the gaming PC as a native USB
+DualSense — with its speaker, haptics, adaptive triggers and microphone.
 
-One person, late nights: controllers were just the start — native AMF
-streaming, a custom low-latency codec and a bigger webOS app are in the pipe.
-If CTM Bridge saved you some hassle, coffee speeds them up.
+> # ⛔ NOT CURRENT — A PRE-RELEASE DRAFT. DO NOT READ THIS AS THE STATE OF THE APP.
+>
+> _Marked 2026-08-14._ **This file was never published and describes the fork as
+> it stood months ago.** ⛔ *"Nothing has been removed or changed"* **is no longer
+> true** — auto-plug is off, gestures were added, the pad is released per
+> controller, and there is extensive Bluetooth work.
+>
+> ⓘ **The repository's own README is still upstream's** and is deliberately left
+> alone for now.
+>
+> ➡️ **The real README gets written at RELEASE** (rhoquinn8217, 2026-08-14): our
+> features, with a link back to `aurora-tv` for the base ones. → **T-108**
+>
+> 🔗 **For what the fork actually does:** `improvements-over-upstream.md`,
+> `project-status.md`.
 
-[![Support me on Ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/ciprianteodormisaila)
+> ⭐ **Everything else is Aurora.** Nothing has been removed or changed.
+> For streaming settings, controls, screenshots, install and the build guide,
+> see the [upstream README](https://github.com/GuiDev1994/aurora-tv#readme).
+> This page covers only what is added.
 
-Unofficial fork of [Moonlight TV](https://github.com/mariotaku/moonlight-tv) for **LG webOS** (C1–C5 and compatible sets), focused on high-quality streaming on OLED TVs with a remote- and gamepad-friendly UI.
+---
 
-> Rights to the original project belong to [mariotaku/moonlight-tv](https://github.com/mariotaku/moonlight-tv) and the Moonlight community. Provided without warranty.
+## What is added
 
-## Highlights
+Over a cable. The Bluetooth path is unchanged.
 
-- **AMOLED layout** — pure black background, dark surfaces, violet accent.
-- **3.6K (3584×2016)** recommended on LG C5 (stable quality without native-4K cumulative delay); **4K** when the set handles it.
-- **HDR10 (PQ)** over HEVC Main10 (when supported).
-- Bitrate slider up to **300 Mbps**; above **250 Mbps** there is usually no visible gain and packet loss becomes more likely as the link becomes less stable.
-- **Performance stats overlay**, **full on-screen keyboard**, and **virtual mouse** during streaming.
-- **Redesigned settings** — row-based D-pad navigation, fixed combobox/checkbox remote handling, modal Host/Input/Experimental panes.
-- **On-screen log overlay** (Experimental) — punktfunk-style live log tail; Magic Remote **Yellow** cycles Live → Frozen → Off.
-- **Rooted game mode** (Experimental, rooted TVs) — TV picture/sound and motion/energy pack tuned for streaming; restored on exit.
-- **Select server** popup uses home-screen style app tiles instead of a plain list.
+| | |
+|---|---|
+| **Speaker, haptics, adaptive triggers** | The wired path carries input only without this |
+| **Microphone** | Read from the controller and presented to the host |
+| **Plug and unplug by gesture** | Two fingers on the touchpad, press down. **One second to bridge, four to release** |
+| **The controller says what happened** | A tone and a pulse when bridged and when released; three short rumbles when a plug is refused |
+| **Each controller gets its own audio** | With two identical controllers, the right one is identified rather than guessed |
+| **Audio recovers itself** | If the controller's audio device fails mid-session |
 
-## Screenshots
+## What is unchanged
 
-| Home | Settings |
-|:---:|:---:|
-| ![Home screen](docs/images/home.png) | ![Basic settings](docs/images/settings.png) |
+⭐⭐ **A controller you have not upgraded behaves exactly as it does in
+Aurora**, including when the bridge is running. Upgrading is opt-in, per
+controller, and by gesture.
 
-| Performance stats | On-screen keyboard |
-|:---:|:---:|
-| ![Performance stats](docs/images/performance-stats.png) | ![On-screen keyboard](docs/images/keyboard.png) |
+⚠️ **Without the CTM-USBIP listener running on the PC, this is Aurora.**
+Controllers still work through Moonlight's normal path — a plug attempt simply
+fails, and the controller buzzes three times to say so.
 
-![Streaming with keyboard and stats](docs/images/keyboard-streaming.png)
+## Requirements
 
-## Quick start
-
-| Setting | Suggestion |
-|---------|------------|
-| Resolution | **3.6K** (3584×2016) on LG C5; **4K** if your set is stable at native 4K |
-| FPS | 60 or 120 |
-| Codec | HEVC (H.265) |
-| Bitrate | Start at **120–180 Mbps**; stay at or below **250 Mbps** for a stable link. Higher values rarely help and can increase packet loss. |
-
-## Streaming controls
-
-**Open overlay:** Magic Remote **RED** / **EXIT**, or gamepad **LB + RB + Back + Start** (hold, then release).
-
-| Gesture | Action |
-|---------|--------|
-| **Hold Select/Back 4s** | Toggle pinned performance stats |
-| **Y / Triangle** (virtual mouse on) | Open on-screen keyboard |
-
-Full keyboard: stream overlay, Magic Remote **BLUE**, or gamepad **Y** while virtual mouse is active. With the keyboard open: **Y** = Space, **LT** = abc/`&123`, **LB/RB** = Left/Right. Virtual mouse: stream overlay button (or enable in Settings → Input to start enabled); right stick = cursor, left stick = scroll, LT/RT = mouse buttons.
-
-Details, hotkey layout, and stats field reference: [webOS build guide](docs/BUILD_WEBOS.md).
+- Everything Aurora requires.
+- A DualSense or DualSense Edge **connected to the TV by USB cable**.
+- The [CTM-USBIP](https://github.com/CTM-Bridge/CTM-USBIP) listener running on
+  the gaming PC.
 
 ## Install
 
-- [webOS Homebrew Channel](https://github.com/webosbrew/webos-homebrew-channel) — repo: `https://raw.githubusercontent.com/GuiDev1994/aurora-tv/main/repo.json`
-- [Device Manager](https://github.com/webosbrew/dev-manager-desktop) — install the latest `.ipk` from [Releases](https://github.com/GuiDev1994/aurora-tv/releases)
-- [webOS TV CLI](https://webostv.developer.lge.com/develop/tools/cli-installation) — `ares-install com.aurora.gamestream_*_arm.ipk` ([build guide](docs/BUILD_WEBOS.md))
-
-## Build from source (developers)
-
-Cross-compile Aurora for webOS using Docker. **Prerequisites:** Docker Desktop (Windows/macOS) or Docker Engine (Linux).
-
-**Windows (PowerShell):**
-
-```powershell
-.\scripts\webos\build_with_docker.ps1
-```
-
-**Linux / macOS (Docker):**
-
-```bash
-docker run --rm \
-  --dns 8.8.8.8 --dns 1.1.1.1 \
-  -v "$(pwd):/build" \
-  -v "$(pwd)/scripts/webos/docker_build_inner.sh:/docker_build.sh" \
-  -w /build -e CI=1 -e DOCKER_SKIP_SUBMODULES=1 \
-  ubuntu:22.04 \
-  bash -c "sed 's/\r$//' /docker_build.sh | bash"
-```
-
-The `.ipk` is written to `dist/com.aurora.gamestream_<version>_arm.ipk`. To generate a Homebrew manifest locally (optional), install `webosbrew-gen-manifest` once; official [releases](https://github.com/GuiDev1994/aurora-tv/releases) build and publish the manifest via GitHub Actions.
-
-Full build, install, and troubleshooting guide: [docs/BUILD_WEBOS.md](docs/BUILD_WEBOS.md).
+Build from source as per the
+[upstream build guide](https://github.com/GuiDev1994/aurora-tv/blob/main/docs/BUILD_WEBOS.md),
+or install the `.ipk` with
+[Device Manager](https://github.com/webosbrew/dev-manager-desktop).
 
 ## Credits
 
 - Base: [mariotaku/moonlight-tv](https://github.com/mariotaku/moonlight-tv)
-- Components: [moonlight-embedded](https://github.com/irtimmer/moonlight-embedded), [moonlight-common-c](https://github.com/moonlight-stream/moonlight-common-c)
+- Aurora: [GuiDev1994/aurora-tv](https://github.com/GuiDev1994/aurora-tv)
+- Controller bridge: [CTM-Bridge/CTM-USBIP](https://github.com/CTM-Bridge/CTM-USBIP)
 
 ## License
 
-This project is licensed under the [GNU General Public License v3.0](LICENSE) (GPL-3.0-or-later).
-
-Copyright and attribution details are in [COPYRIGHT](COPYRIGHT).
-
-Aurora is a fork of [moonlight-tv](https://github.com/mariotaku/moonlight-tv), which is also licensed under GPL-3.0.
+[GNU General Public License v3.0](LICENSE) (GPL-3.0-or-later), as with Aurora
+and moonlight-tv. Copyright and attribution details are in
+[COPYRIGHT](COPYRIGHT).

@@ -43,14 +43,45 @@ typedef struct app_settings_t {
     bool quitappafter;
     bool autoresume;
     bool viewonly;
-    /* ⭐ THE TWO WAYS TO ASK FOR A BRIDGE. Both default ON.
+    /* ⭐ CAN A DEVICE BE HANDED TO THE PC AT ALL? Defaults ON.
      *
-     * ⓘ These replaced a single "use CTM bridge" switch, which suppressed the
-     * host's gamepad entirely and so had to be off for an ordinary stream to
-     * work. Bridging is now something done on top of a working stream, and
-     * these gate the ways of asking for it rather than the bridge itself. */
-    bool bridge_gesture;   /* the touchpad chord on the controller */
-    bool bridge_panel;     /* the USB Bridge panel in the stream overlay */
+     * ⓘ The gesture and the USB Bridge panel are the only two ways to ask for a
+     * bridge, so this switches both and nothing else. A stream behaves the same
+     * either way -- keyboards, mice and controllers all reach the PC as usual.
+     *
+     * ⛔ NOT the old "use CTM Bridge" switch, removed 2026-08-19: that stopped
+     * Moonlight announcing any gamepad for the whole session, so an ordinary
+     * stream behaved differently and a second controller had no route at all. */
+    bool bridge_enable;
+
+    /* ⭐ The touchpad chord, on by default. Only meaningful while bridge_enable
+     * is set, and the settings screen greys it out when that is off.
+     *
+     * ⓘ The USB Bridge PANEL has no switch of its own, deliberately: a panel
+     * hidden while gestures still worked would look like the feature had
+     * broken, with nothing to explain it. bridge_enable covers both. */
+    bool bridge_gesture;
+
+    /* ⭐ THE SIGNALS AND THE MICROPHONE. All on for now.
+     *
+     * ⓘ These are "I do not want that" switches, not a battery feature. A
+     * bright light in a dark room, a buzz at midnight, a chirp while someone is
+     * asleep, a microphone nobody asked for -- four reasons, one shape. ⚠️ The
+     * battery saving is real for the microphone, small for rumble and the tone,
+     * and negligible for the lightbar, so it is not what they are sold on.
+     *
+     * ⛔ TURN ALL THREE SIGNALS OFF AND A REFUSAL IS INVISIBLE: the chord does
+     * nothing and there is no way to tell that from a gesture that was not
+     * recognised. Said in the section description rather than per switch.
+     *
+     * ⚠️ DEFAULTS ARE NOT SETTLED. Everything is on while this is being worked
+     * on so testing is not gated behind ticking boxes. ⓘ Microphone capture is
+     * expected to end up OFF -- it is only for voice chat through the
+     * controller itself, and most people will not want it. */
+    bool bridge_signal_light;
+    bool bridge_signal_rumble;
+    bool bridge_signal_tone;
+    bool bridge_mic_capture;
     bool absmouse;
     bool hardware_mouse;
     bool virtual_mouse;

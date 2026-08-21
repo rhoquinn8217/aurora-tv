@@ -166,6 +166,18 @@ bool session_start_input(session_t *session) {
         session_input_set_vmouse_active(&session->input.vmouse, true);
     }
     {
+        /* ⭐⭐ THE SETTINGS GO IN FIRST, whether or not the bridge is already
+         * running. ⛔ They used to sit in the branch below that starts a fresh
+         * bridge, so a stream that came back from an auto-reconnect kept
+         * whatever the core had from last time -- and a changed setting looked
+         * like it did nothing. */
+        ctm_bridge_set_gesture_enabled(app_configuration->bridge_enable &&
+                                       app_configuration->bridge_gesture);
+        ctm_bridge_set_signals(app_configuration->bridge_signal_light,
+                               app_configuration->bridge_signal_rumble,
+                               app_configuration->bridge_signal_tone);
+        ctm_bridge_set_mic_capture(app_configuration->bridge_mic_capture);
+
         if (ctm_bridge_active()) {
             // Stream came back after an auto-reconnect: the bridge was left
             // running so the controllers stayed plugged through the outage.
@@ -180,9 +192,6 @@ bool session_start_input(session_t *session) {
             // bridge that address rather than letting it broadcast for one: a
             // broadcast probe never leaves the local network, so a host reached
             // over the internet is never found.
-            /* ⭐ The core owns the unbridge half of the gesture and cannot
-             * see the app's settings, so it is told here. */
-            ctm_bridge_set_gesture_enabled(app_configuration->bridge_gesture);
             ctm_bridge_set_host(session->server->serverInfo.address, 0);
             ctm_bridge_start();
         }

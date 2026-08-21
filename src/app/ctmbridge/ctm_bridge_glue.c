@@ -187,6 +187,21 @@ void ctm_bridge_set_gesture_enabled(bool enabled)
  *
  * ⓘ Safe with nothing bridged: the flag is only read in the relay path, and
  * with no session there is nothing to relay. */
+/* ⭐ WHICH SIGNALS THIS SIDE MAY MAKE, and whether the microphone is captured.
+ *
+ * ⓘ Handed in rather than read here: this target cannot see the app's headers
+ * on purpose, and that seam is what has to stay thin if a bridge is ever
+ * contributed upstream. Same shape as the host address and the gesture switch. */
+void ctm_bridge_set_signals(bool light, bool rumble, bool tone)
+{
+    ctm_signals_set_enabled(light ? 1 : 0, rumble ? 1 : 0, tone ? 1 : 0);
+}
+
+void ctm_bridge_set_mic_capture(bool on)
+{
+    ctm_mic_capture_set_enabled(on ? 1 : 0);
+}
+
 void ctm_bridge_set_input_held(bool held)
 {
     ctm_input_set_held(held ? 1 : 0);
@@ -580,10 +595,21 @@ void ctm_bridge_status(char *out, size_t out_len)
     }
 }
 
+/* Is the USB server answering? ⭐ Separate from its address, which is known
+ * whether or not anything is listening at it. */
+bool ctm_bridge_agent_online(void)
+{
+    return g_agent_online != 0;
+}
+
 void ctm_bridge_agent(char *out, size_t out_len)
 {
     if (out == NULL || out_len == 0) {
         return;
     }
-    snprintf(out, out_len, "%s", (g_agent_online && g_agent_host[0]) ? g_agent_host : "offline");
+    /* ⛔ THE ADDRESS IS REPORTED EITHER WAY. It used to be replaced by "offline",
+     * which made the panel drop the IP when the server went down -- and the
+     * address does not change just because nothing is answering at it. ⓘ rhoquinn8217,
+     * 2026-08-20. ➡️ Callers ask ctm_bridge_agent_online() for the state. */
+    snprintf(out, out_len, "%s", g_agent_host[0] ? g_agent_host : "not set");
 }

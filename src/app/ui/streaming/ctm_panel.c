@@ -52,6 +52,17 @@ static void open_ctm_panel(lv_event_t *event);
 #define CTM_COL_TXT      lv_color_hex(0xf5f8fa)
 #define CTM_COL_SUB      lv_color_hex(0x95a3b0)
 #define CTM_COL_OK       lv_color_hex(0x35c46a)
+/* ⭐ The bridged state and the action that produces it, in one colour.
+ *
+ * ⛔ Green was tried and rejected 2026-08-20: it is the colour every other part
+ * of this interface uses for "fine", so it said nothing about THIS state, and a
+ * green Bridge All beside a green FULL made the two look like the same thing.
+ * ⓘ THE SAME PURPLE AS THE "USB Bridge" BUTTON IN THE STREAMING OVERLAY -- the
+ * one that opens this panel. ⭐ So the colour follows the feature: the button
+ * you press to get here, the state it produces, and the action that produces
+ * it, all one colour. ⛔ A softer hex was tried first and was not punchy
+ * enough beside it. */
+#define CTM_COL_FULL     lv_palette_main(LV_PALETTE_PURPLE)
 
 
 static lv_obj_t   *s_ctm_panel      = NULL;   /* full-screen backdrop */
@@ -68,6 +79,47 @@ static lv_obj_t   *s_ctm_sidebar    = NULL;   /* the device list */
 static lv_obj_t   *s_ctm_actions    = NULL;
 static lv_obj_t   *s_ctm_status_lbl = NULL;   /* "USB Server: <addr> -" */
 static lv_obj_t   *s_ctm_state_lbl  = NULL;   /* ONLINE / OFFLINE, the only coloured part */
+/* ⭐ The same fact the label shows, kept so the rows and Bridge All can act on
+ * it rather than only report it. */
+static bool        s_ctm_server_online = true;
+
+/* ⭐⭐ FLASH THE OFFLINE TAG WHEN SOMEONE TRIES TO BRIDGE ANYWAY.
+ *
+ * ⛔ Greying alone was not enough -- rhoquinn8217, 2026-08-20: "I couldn't tell." A
+ * disabled row says "not now"; it does not say WHY, and the reason is already
+ * on screen two lines above. ➡️ Flashing it points at the answer instead of
+ * refusing silently.
+ *
+ * ⓘ An odd count so it ends bright, and it drives itself off a timer rather
+ * than the panel's refresh, which is too slow to read as a flash. */
+static lv_timer_t *s_ctm_flash_timer = NULL;
+static int         s_ctm_flash_left = 0;
+
+static void ctm_flash_tick(lv_timer_t *t) {
+    if (!s_ctm_state_lbl) {
+        lv_timer_del(t);
+        s_ctm_flash_timer = NULL;
+        return;
+    }
+    const bool on = (s_ctm_flash_left % 2) == 1;
+    lv_obj_set_style_text_color(s_ctm_state_lbl,
+                                on ? CTM_COL_TXT : lv_palette_main(LV_PALETTE_RED), 0);
+    if (--s_ctm_flash_left <= 0) {
+        lv_obj_set_style_text_color(s_ctm_state_lbl, lv_palette_main(LV_PALETTE_RED), 0);
+        lv_timer_del(t);
+        s_ctm_flash_timer = NULL;
+    }
+}
+
+static void ctm_flash_offline(void) {
+    if (!s_ctm_state_lbl) {
+        return;
+    }
+    s_ctm_flash_left = 7;
+    if (!s_ctm_flash_timer) {
+        s_ctm_flash_timer = lv_timer_create(ctm_flash_tick, 120, NULL);
+    }
+}
 static lv_group_t *s_ctm_nav_group    = NULL;
 static streaming_controller_t *s_ctm_owner = NULL;
 
@@ -99,6 +151,52 @@ static lv_group_t *s_ctm_dead_nav    = NULL;
  *
  * ⭐ Activating a row IS the action now. There is no detail pane to enter, so a
  * press does the one thing a press could mean. */
+/* ⭐⭐ DIRECTION, NOT TOGGLE. Right hands the device to the PC, left brings it
+ * back -- which is what the arrow on the row promises.
+ *
+ * ⓘ Pressing the direction a device is already in does nothing, deliberately.
+ * The row is showing only one arrow, so the other direction has nothing to
+ * offer, and doing something anyway would make the arrow a lie.
+ *
+ * ⓘ The row itself still toggles on Select, for anyone who does not want to
+ * think about direction. */
+/* ⭐⭐ A ROW WAITING FOR ITS CHANGE TO LAND.
+ *
+ * ⛔ THE FAULT IT FIXES: pressing bridge or release made the row FLICKER. The
+ * panel rebuilds its rows on every refresh, and a refresh that lands before the
+ * bridge has finished redraws the row in its OLD state -- so the label flips
+ * back, then forward again a moment later.
+ *
+ * ⭐ Instead the row is greyed from the press until the state it was asked for
+ * actually arrives. Nothing flips twice, and the grey says "working on it",
+ * which is true: a bridge takes a second or two.
+ *
+ * ⚠️ Keyed by the device's INDEX, not its row position, because the list can be
+ * rebuilt underneath it -- the same trap ctm_toggle_device documents.
+ *
+ * ⓘ Given a deadline so a bridge that never completes cannot leave a row grey
+ * forever. */
+#define CTM_PENDING_MS 6000
+static int      s_ctm_pending_index = -1;
+static bool     s_ctm_pending_want = false;
+static uint32_t s_ctm_pending_until = 0;
+
+static void ctm_toggle_device(int row);
+
+static void ctm_bridge_device(int row) {
+    if (row < 0 || row >= s_ctm_ndev || s_ctm_devs[row].plugged) {
+        return;
+    }
+    ctm_toggle_device(row);
+}
+
+static void ctm_release_device(int row) {
+    if (row < 0 || row >= s_ctm_ndev || !s_ctm_devs[row].plugged) {
+        return;
+    }
+    ctm_toggle_device(row);
+}
+
 static void ctm_toggle_device(int row) {
     if (row < 0 || row >= s_ctm_ndev) {
         return;
@@ -111,6 +209,10 @@ static void ctm_toggle_device(int row) {
      * which is exactly when it matters least. Getting this wrong does not
      * fail quietly: it bridges A DIFFERENT DEVICE. */
     const int index = s_ctm_devs[row].index;
+    /* ⭐ Remember what we asked for, so the row can grey until it happens. */
+    s_ctm_pending_index = index;
+    s_ctm_pending_want = !s_ctm_devs[row].plugged;
+    s_ctm_pending_until = lv_tick_get() + CTM_PENDING_MS;
     if (s_ctm_devs[row].plugged) {
         ctm_bridge_unplug_index(index);
         ctm_request_refresh();
@@ -131,6 +233,14 @@ static void ctm_toggle_device(int row) {
      * to borrow, so the direct plug stays as the fallback -- it is what those
      * devices have always used, and they have none of the problems above
      * because nothing emulates them in the first place. */
+    /* ⭐ Refuse the press rather than letting it fail. ⛔ With the server
+     * offline a bridge cannot work, and attempting it answers with a refusal --
+     * red flashes and a buzz, which look exactly like a real failure. ⓘ The row
+     * is disabled too; this is the belt to that's braces. */
+    if (!s_ctm_server_online) {
+        ctm_flash_offline();
+        return;
+    }
     if (!ctm_bridge_gesture_request_bridge(s_ctm_devs[row].node)) {
         ctm_bridge_plug_index(index);
     }
@@ -256,8 +366,36 @@ static void ctm_nav_key_cb(lv_event_t *e) {
              * ⚠️ THAT IS A WORKAROUND WITH A LIFETIME. When the mirror is fixed,
              * this loses its justification and goes back to being a direction
              * key that performs an action -- which is worth removing then, not
-             * now. rhoquinn8217, 2026-08-18. */
-            ctm_toggle_device(row);
+             * now. rhoquinn8217, 2026-08-18.
+             *
+             * ⛔ RIGHT IS NOW BRIDGE-ONLY, not a toggle. It used to release a
+             * bridged device too, which contradicted the arrow the row shows --
+             * a bridged row offers only the back arrow.
+             *
+             * ⭐⭐ ON THE ACTION BUTTONS -- row == -1 -- LEFT AND RIGHT MOVE
+             * FOCUS INSTEAD. Bridge All and Release All sit SIDE BY SIDE, so
+             * reaching for right to get from one to the other is the obvious
+             * thing to do, and it did nothing: they are consecutive in the
+             * group, so only up and down moved between them. ⓘ rhoquinn8217,
+             * 2026-08-20. ➡️ Where two things are drawn beside each other, the
+             * key that points that way should go there. */
+            if (row < 0) {
+                lv_group_focus_next(s_ctm_nav_group);
+                lv_obj_scroll_to_view(lv_group_get_focused(s_ctm_nav_group), LV_ANIM_ON);
+                break;
+            }
+            ctm_bridge_device(row);
+            break;
+        case LV_KEY_LEFT:
+            if (row < 0) {
+                lv_group_focus_prev(s_ctm_nav_group);
+                lv_obj_scroll_to_view(lv_group_get_focused(s_ctm_nav_group), LV_ANIM_ON);
+                break;
+            }
+            /* ⭐ The other half of the same idea: left brings a bridged device
+             * back. ⓘ It was not handled at all before, which is why the back
+             * arrow did nothing. */
+            ctm_release_device(row);
             break;
         case LV_KEY_ESC:   ctm_request_close(); break;
         default: break;
@@ -298,10 +436,17 @@ static lv_obj_t *ctm_make_dev_row(const ctm_bridge_dev_t *d, int idx) {
     lv_obj_t *row = lv_obj_create(s_ctm_sidebar);
     lv_obj_remove_style_all(row);
     lv_obj_set_size(row, LV_PCT(100), LV_SIZE_CONTENT);
-    lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(row, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    /* ⭐ Name on top, action beneath. ⛔ Side by side left the button competing
+     * with a long device name for the same width, and the name is the part that
+     * cannot be shortened. ⓘ rhoquinn8217, 2026-08-20. */
+    lv_obj_set_flex_flow(row, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
+    lv_obj_set_style_pad_gap(row, 0, 0);
     lv_obj_set_style_pad_hor(row, LV_DPX(10), 0);
-    lv_obj_set_style_pad_ver(row, LV_DPX(9), 0);
+    /* ⭐ Tighter than it was. ⛔ Two lines per row makes a short list long, and
+     * the padding was sized for the one-line version. ⓘ The gap between the two
+     * lines is cut too -- see the pad_gap below. */
+    lv_obj_set_style_pad_ver(row, LV_DPX(4), 0);
     lv_obj_set_style_radius(row, LV_DPX(6), 0);
     /* A border, so a row reads as a raised thing rather than a band of colour. */
     lv_obj_set_style_border_width(row, LV_DPX(1), 0);
@@ -336,11 +481,18 @@ static lv_obj_t *ctm_make_dev_row(const ctm_bridge_dev_t *d, int idx) {
      * a change to this block alone. */
     lv_obj_t *textcol = lv_obj_create(row);
     lv_obj_remove_style_all(textcol);
+    /* ⛔⛔ NO flex_grow HERE. The row is a COLUMN now, and in a column grow takes
+     * leftover HEIGHT -- so a zero-width box stretched down the whole list and
+     * the panel became one blue block. Measured on hardware, 2026-08-20.
+     * ⭐ Full width, height from its contents. */
+    lv_obj_set_width(textcol, LV_PCT(100));
     lv_obj_set_height(textcol, LV_SIZE_CONTENT);
-    lv_obj_set_width(textcol, 1);
-    lv_obj_set_flex_grow(textcol, 1);
-    lv_obj_set_flex_flow(textcol, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_style_pad_gap(textcol, LV_DPX(1), 0);
+    /* ⭐ Name on the left, tag on the right under its heading. */
+    lv_obj_set_flex_flow(textcol, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(textcol, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER,
+                          LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_gap(textcol, LV_DPX(8), 0);
+    lv_obj_set_style_pad_all(textcol, 0, 0);
     lv_obj_clear_flag(textcol, LV_OBJ_FLAG_SCROLLABLE);
 
     /* ⭐ "DualSense · 1st" -- which controller this is, not just what kind.
@@ -350,10 +502,16 @@ static lv_obj_t *ctm_make_dev_row(const ctm_bridge_dev_t *d, int idx) {
      * number and simply shows none. */
     lv_obj_t *name = lv_label_create(textcol);
     {
-        static const char *k_ordinal[] = { "1st", "2nd", "3rd", "4th" };
+        /* ⭐ "(1) DualSense" rather than "DualSense  1st". Shorter, which the
+         * row needs -- and the number reads as an identifier rather than a
+         * ranking. ⓘ It also leads, so a column of rows can be scanned by
+         * number. ⚠️ Ordinals were also four separate strings to translate. */
+        /* ⭐ "(1) DualSense" -- the number prepended rather than given a column
+         * of its own. ⛔ A separate column was tried and wasted width the name
+         * needed. ⓘ Anything without a player number just shows its name. */
         const int player = ctm_bridge_gesture_player_for_node(d->node);
         if (player >= 0 && player < 4) {
-            lv_label_set_text_fmt(name, "%s  %s", ctm_dev_label(d), k_ordinal[player]);
+            lv_label_set_text_fmt(name, "(%d) %s", player + 1, ctm_dev_label(d));
         } else {
             lv_label_set_text(name, ctm_dev_label(d));
         }
@@ -363,8 +521,15 @@ static lv_obj_t *ctm_make_dev_row(const ctm_bridge_dev_t *d, int idx) {
      * grows and wraps instead, and an unrecognised device -- "RONGYUAN 2.4G
      * Wireless Device System Control" -- took three lines and a third of the
      * panel. */
-    lv_obj_set_width(name, LV_PCT(100));
+    /* ⛔ LONG_DOT only truncates a label that HAS a width. Left to size itself
+     * it grows and wraps -- measured on hardware: "DualSense Edge Wireless
+     * Controller" took three lines. */
+    /* ⓘ Takes what the tag leaves, and truncates rather than wrapping -- inside
+     * a ROW, grow means leftover WIDTH, which is what is wanted here. */
+    lv_obj_set_width(name, 1);
+    lv_obj_set_flex_grow(name, 1);
     lv_obj_set_style_text_color(name, CTM_COL_TXT, 0);
+    lv_obj_set_style_text_font(name, lv_theme_get_font_normal(textcol), 0);
 
     /* What the device can do, not what we did to it. FULL is a bridged device:
      * speaker, haptics, adaptive triggers, microphone. BASIC is anything
@@ -373,31 +538,111 @@ static lv_obj_t *ctm_make_dev_row(const ctm_bridge_dev_t *d, int idx) {
      *
      * ⛔ "idle" was wrong for an unbridged controller, and for a mouse: the
      * stream carries them, so they are WORKING, just by the other path. */
-    lv_obj_t *st = lv_label_create(textcol);
-    lv_label_set_text(st, d->plugged ? "FULL" : "BASIC");
-    lv_obj_set_style_text_color(st, d->plugged ? CTM_COL_OK : CTM_COL_SUB, 0);
-    lv_obj_set_style_text_font(st, lv_theme_get_font_small(textcol), 0);
 
     /* The action, drawn as a button. ⚠️ NOT actually clickable in its own right:
      * the whole row takes the press, so this is an affordance rather than a
      * second target to aim at. */
+    /* ⭐⭐ FULL IN A GREEN BOX, BASIC AS PLAIN TEXT.
+     *
+     * ⛔ Colour used to be on the ACTION button, and it read backwards: a big
+     * red block beside a controller that was working looked like an alarm, and
+     * a big green one beside a basic controller looked like all was well. ⓘ
+     * rhoquinn8217, 2026-08-20. ➡️ The colour belongs on the STATE, which is the thing
+     * it describes.
+     *
+     * ⭐ A box rather than green text, so the good state is the one that stands
+     * out -- BASIC is the absence of it rather than a warning of its own. */
+    lv_obj_t *st;
+    if (d->plugged) {
+        lv_obj_t *badge = lv_obj_create(textcol);
+        lv_obj_remove_style_all(badge);
+        lv_obj_set_size(badge, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+        lv_obj_set_style_pad_hor(badge, LV_DPX(10), 0);
+        lv_obj_set_style_pad_ver(badge, LV_DPX(3), 0);
+        lv_obj_set_style_radius(badge, LV_DPX(4), 0);
+        lv_obj_set_style_bg_color(badge, CTM_COL_FULL, 0);
+        lv_obj_set_style_bg_opa(badge, LV_OPA_COVER, 0);
+        lv_obj_clear_flag(badge, LV_OBJ_FLAG_SCROLLABLE);
+        st = lv_label_create(badge);
+        lv_label_set_text(st, "FULL");
+        lv_obj_set_style_text_color(st, CTM_COL_TXT, 0);
+    } else {
+        /* ⭐ A box too, so the two states are the same shape and only the
+         * colour differs -- a boxed FULL beside a bare BASIC made the row look
+         * lopsided. */
+        lv_obj_t *badge = lv_obj_create(textcol);
+        lv_obj_remove_style_all(badge);
+        lv_obj_set_size(badge, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+        lv_obj_set_style_pad_hor(badge, LV_DPX(10), 0);
+        lv_obj_set_style_pad_ver(badge, LV_DPX(3), 0);
+        lv_obj_set_style_radius(badge, LV_DPX(4), 0);
+        lv_obj_set_style_bg_color(badge, lv_color_hex(0x4a5866), 0);
+        lv_obj_set_style_bg_opa(badge, LV_OPA_COVER, 0);
+        lv_obj_clear_flag(badge, LV_OBJ_FLAG_SCROLLABLE);
+        st = lv_label_create(badge);
+        lv_label_set_text(st, "BASIC");
+        lv_obj_set_style_text_color(st, CTM_COL_SUB, 0);
+    }
+    lv_obj_set_style_text_font(st, lv_theme_get_font_normal(textcol), 0);
+
     lv_obj_t *act = lv_obj_create(row);
     lv_obj_remove_style_all(act);
     lv_obj_set_size(act, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
-    lv_obj_set_style_pad_hor(act, LV_DPX(10), 0);
-    lv_obj_set_style_pad_ver(act, LV_DPX(4), 0);
+    /* ⛔ THE ROW'S OWN PADDING WAS NEVER THE HEIGHT. Its children carried their
+     * own, so trimming the row alone changed nothing visible -- measured
+     * 2026-08-20 after a first attempt did exactly that. */
+    lv_obj_set_style_pad_hor(act, 0, 0);
+    lv_obj_set_style_pad_ver(act, 0, 0);
     lv_obj_set_style_radius(act, LV_DPX(4), 0);
-    lv_obj_set_style_bg_color(act, lv_color_hex(0x2f3d49), 0);
-    lv_obj_set_style_bg_opa(act, LV_OPA_COVER, 0);
-    lv_obj_set_style_border_width(act, LV_DPX(1), 0);
-    lv_obj_set_style_border_color(act, lv_color_hex(0x4a5866), 0);
+    /* ⭐ NO CHROME AND NO COLOUR ON THE ACTION. ⛔ A coloured button here read as
+     * a status light and contradicted the real one: red beside a working
+     * controller looked like a fault. ➡️ The action is a quiet line of text; the
+     * colour lives on the state above it. */
+    lv_obj_set_style_bg_opa(act, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(act, 0, 0);
     lv_obj_clear_flag(act, LV_OBJ_FLAG_SCROLLABLE);
 
+    /* ⭐⭐ THE ARROW SITS ON THE SIDE YOU WOULD PRESS, so the glyph teaches the
+     * control: right sends the device to the PC, left brings it back.
+     *
+     * ⭐ ONLY THE AVAILABLE DIRECTION IS EVER SHOWN. A bridged device offers
+     * "release" and nothing else; pressing right does nothing, and showing it
+     * would promise otherwise. ⓘ The row itself still takes a press, which
+     * toggles -- that is the path for anyone who does not want to think about
+     * direction. */
     lv_obj_t *actlbl = lv_label_create(act);
-    lv_label_set_text(actlbl, d->plugged ? "Release" : "Bridge");
+    /* ⛔ PLAIN CHARACTERS, NOT LV_SYMBOL_*. LV_SYMBOL_LEFT was tried on
+     * 2026-08-20 and rendered as an empty box -- the small theme font on these
+     * rows has no symbol range. ⓘ "<" and ">" are in every font there is. */
+    /* ⭐ "Click to ..." says what pressing DOES, which is the whole point of the
+     * row being a control rather than a report. ⓘ The state is already on the
+     * line above, so the button carries only the action.
+     *
+     * ⛔ PLAIN CHARACTERS, NOT LV_SYMBOL_*. LV_SYMBOL_LEFT rendered as an empty
+     * box -- the small theme font on these rows has no symbol range. */
+    lv_label_set_text(actlbl, d->plugged ? "< Click to Release" : "Click to Bridge >");
     lv_obj_set_style_text_color(actlbl, CTM_COL_TXT, 0);
     lv_obj_set_style_text_font(actlbl, lv_theme_get_font_small(act), 0);
-    lv_obj_set_style_text_font(st, lv_theme_get_font_small(row), 0);
+    lv_obj_set_style_text_color(actlbl, CTM_COL_SUB, 0);
+
+    /* ⭐ Grey while the change we asked for has not arrived. ⓘ Cleared here
+     * rather than on a timer: the row is rebuilt on every refresh, so the first
+     * rebuild that shows the wanted state is the moment it landed. */
+    /* ⭐ Faded hard while the server is offline -- nothing in the list can be
+     * bridged, and a light touch of grey was invisible on a television. ⓘ A
+     * BRIDGED row is left alone: releasing it is a teardown on this side and
+     * needs no host, so it is still worth pressing. */
+    if (!s_ctm_server_online && !d->plugged) {
+        lv_obj_set_style_opa(row, LV_OPA_30, 0);
+    }
+
+    if (s_ctm_pending_index == d->index) {
+        if (d->plugged == s_ctm_pending_want || lv_tick_get() > s_ctm_pending_until) {
+            s_ctm_pending_index = -1;
+        } else {
+            lv_obj_set_style_opa(row, LV_OPA_50, 0);
+        }
+    }
 
     lv_group_add_obj(s_ctm_nav_group, row);
     lv_obj_add_event_cb(row, ctm_nav_key_cb, LV_EVENT_KEY, (void *) (intptr_t) idx);
@@ -407,16 +652,29 @@ static lv_obj_t *ctm_make_dev_row(const ctm_bridge_dev_t *d, int idx) {
     return row;
 }
 
-static void ctm_act_plugall_cb(lv_event_t *e)   { LV_UNUSED(e); ctm_bridge_all();   ctm_request_refresh(); }
+/* ⛔ Guarded rather than trusting LV_STATE_DISABLED, which greys a button but
+ * does not reliably stop it being activated. ⭐ And it flashes the reason. */
+static void ctm_act_plugall_cb(lv_event_t *e) {
+    LV_UNUSED(e);
+    if (!s_ctm_server_online) {
+        ctm_flash_offline();
+        return;
+    }
+    ctm_bridge_all();
+    ctm_request_refresh();
+}
 static void ctm_act_unplugall_cb(lv_event_t *e) { LV_UNUSED(e); ctm_release_all(); ctm_request_refresh(); }
 
-static void ctm_make_action(const char *label, lv_event_cb_t cb, lv_color_t bg) {
+/* ⓘ Returns the button so a caller can disable it -- see Bridge All while the
+ * server is offline. */
+static lv_obj_t *ctm_make_action(const char *label, lv_event_cb_t cb, lv_color_t bg) {
     lv_obj_t *btn = ctm_nice_btn(s_ctm_actions, label, bg);
     lv_obj_set_flex_grow(btn, 1);
     lv_group_add_obj(s_ctm_nav_group, btn);
     lv_obj_add_event_cb(btn, ctm_nav_key_cb, LV_EVENT_KEY, (void *) (intptr_t) -1);
     lv_obj_add_event_cb(btn, ctm_nav_cancel_cb, LV_EVENT_CANCEL, NULL);
     lv_obj_add_event_cb(btn, cb, LV_EVENT_CLICKED, NULL);
+    return btn;
 }
 
 static void ctm_panel_refresh(void) {
@@ -443,12 +701,15 @@ static void ctm_panel_refresh(void) {
     /* ⛔ "Controllers" was wrong: the list carries mice, keyboards and wireless
      * receivers as readily as pads. */
     lv_obj_t *caption = lv_label_create(caprow);
-    lv_label_set_text(caption, "Devices");
+    lv_label_set_text(caption, "Device");
     lv_obj_set_style_text_color(caption, CTM_COL_SUB, 0);
     lv_obj_set_style_text_font(caption, lv_theme_get_font_small(caption), 0);
 
+    /* ⭐ Back on 2026-08-20 as "Feature Set", and now it sits over something:
+     * the tag is right-aligned on the row's first line, directly beneath it.
+     * ⛔ As "Features" it sat over the action button and named nothing. */
     lv_obj_t *capfeat = lv_label_create(caprow);
-    lv_label_set_text(capfeat, "Features");
+    lv_label_set_text(capfeat, "Feature Set");
     lv_obj_set_style_text_color(capfeat, CTM_COL_SUB, 0);
     lv_obj_set_style_text_font(capfeat, lv_theme_get_font_small(capfeat), 0);
 
@@ -479,15 +740,14 @@ static void ctm_panel_refresh(void) {
          * already returns the literal "offline" when the server is down, so the
          * failing case read correctly and the working one just showed an IP --
          * leaving a user to infer that an address means it is up. */
-        if (strcmp(listener, "offline") == 0) {
-            lv_label_set_text(s_ctm_status_lbl, "USB Server:");
-            lv_label_set_text(s_ctm_state_lbl, "- OFFLINE");
-            lv_obj_set_style_text_color(s_ctm_state_lbl, lv_palette_main(LV_PALETTE_RED), 0);
-        } else {
-            lv_label_set_text_fmt(s_ctm_status_lbl, "USB Server: %s", listener);
-            lv_label_set_text(s_ctm_state_lbl, "- ONLINE");
-            lv_obj_set_style_text_color(s_ctm_state_lbl, CTM_COL_OK, 0);
-        }
+        /* ⭐ The address shows either way -- OFFLINE says nothing is answering
+         * there, not that the address has gone. ⓘ rhoquinn8217, 2026-08-20. */
+        s_ctm_server_online = ctm_bridge_agent_online();
+        lv_label_set_text_fmt(s_ctm_status_lbl, "USB Server: %s", listener);
+        lv_label_set_text(s_ctm_state_lbl, s_ctm_server_online ? "- ONLINE" : "- OFFLINE");
+        lv_obj_set_style_text_color(s_ctm_state_lbl,
+                                    s_ctm_server_online ? CTM_COL_OK
+                                                        : lv_palette_main(LV_PALETTE_RED), 0);
     }
 
     if (s_ctm_ndev == 0) {
@@ -522,8 +782,33 @@ static void ctm_panel_refresh(void) {
     }
     lv_obj_clean(s_ctm_actions);
     if (s_ctm_ndev > 0) {
-        ctm_make_action("Bridge All", ctm_act_plugall_cb, lv_palette_darken(LV_PALETTE_GREEN, 2));
-        ctm_make_action("Release All", ctm_act_unplugall_cb, lv_palette_darken(LV_PALETTE_BLUE_GREY, 2));
+        /* ⭐⭐ WITH THE SERVER OFFLINE, RELEASE ALL IS THE ONLY THING THAT HELPS.
+         *
+         * ⛔ Bridging cannot work, and trying it gives a refusal -- red flashes
+         * and a buzz, indistinguishable from a real failure. ⭐ Releasing is a
+         * teardown on this side and needs no host at all.
+         *
+         * ⚠️ AND IT IS WHAT THE TV NEEDS ANYWAY. Losing the listener does not
+         * currently tear anything down: the session loops back and retries
+         * forever, so a controller stays claimed and bridged, waiting for a host
+         * that is not coming. ⓘ rhoquinn8217, 2026-08-20: "when the listener is down,
+         * that's what the TV needs to do anyway." ➡️ T-127 makes it automatic;
+         * until then this is the way out. */
+        lv_obj_t *plug_all =
+                ctm_make_action("Bridge All", ctm_act_plugall_cb, CTM_COL_FULL);
+        if (plug_all && !s_ctm_server_online) {
+            /* ⛔ LV_STATE_DISABLED alone was barely visible -- it only shifts
+             * the theme's own opacity a little. ⭐ Paint it grey and fade it. */
+            lv_obj_add_state(plug_all, LV_STATE_DISABLED);
+            lv_obj_set_style_bg_color(plug_all, lv_color_hex(0x3a4552), 0);
+            lv_obj_set_style_opa(plug_all, LV_OPA_40, 0);
+        }
+        /* ⭐ RED, because it takes every device back at once. ⓘ It was blue-grey, which
+         * read as the neutral of the pair -- but Bridge All affects one thing at a
+         * time in practice and this affects all of them, so it is the one worth
+         * hesitating over. ⚠️ It stays available while the server is offline: that
+         * is exactly when it is needed. */
+        ctm_make_action("Release All", ctm_act_unplugall_cb, lv_palette_darken(LV_PALETTE_RED, 2));
     }
 
     if (s_ctm_sel >= s_ctm_ndev) {

@@ -22,7 +22,7 @@
 #include <time.h>
 
 #include "ctm_bridge_gesture.h"
-#include "app.h"   /* app_configuration, for the bridge_gesture switch */
+#include "app.h"   /* app_configuration, for the bridge_enable switch */
 #include "stream/session.h"
 #include "stream/input/session_input.h"
 
@@ -45,7 +45,11 @@
 
 /* Shorter than the unplug hold: plugging in is constructive, and the overlay is
  * still there if it is missed. */
-#define GESTURE_PLUG_HOLD_MS 2000
+/* ⭐ One second, down from two on 2026-08-20. ⚠️ The hold exists to make the
+ * gesture deliberate, and a second is still deliberate on a touchpad you have
+ * to press with two fingers -- but it is closer to the edge, so an accidental
+ * bridge is the thing to watch for. */
+#define GESTURE_PLUG_HOLD_MS 1000
 
 /* The app's own log is not readable on webOS -- there is no journal and no
  * /var/log -- so gesture activity goes to a file of its own, beside the ones
@@ -1012,11 +1016,16 @@ static bool gesture_poll_one(SDL_GameController *controller, SDL_JoystickID id) 
                              * the red until something else writes the light. */
                         } else {
                             w->flash_ok = 0;
-                            w->flash_left = REFUSED_FLASHES * 2 + 1;   /* +1 for the restore */
+                            /* ⭐ The user's switch. ⓘ The refusal is the one
+                             * worth being loudest about, so it is gated last
+                             * and independently of the others. */
+                            if (app_configuration->bridge_signal_light)
+                                w->flash_left = REFUSED_FLASHES * 2 + 1;   /* +1 for the restore */
                             w->flash_next = SDL_GetTicks();
                         }
                         if (!sounded) {
-                            w->buzz_left = BUZZ_BURSTS * 2;   /* on and off per burst */
+                            if (app_configuration->bridge_signal_rumble)
+                                w->buzz_left = BUZZ_BURSTS * 2;   /* on and off per burst */
                             w->buzz_next = SDL_GetTicks();
                         }
                         gesture_log("refused on %s: core sounded=%d lit=%d",
@@ -1033,8 +1042,11 @@ static bool gesture_poll_one(SDL_GameController *controller, SDL_JoystickID id) 
              * "gesture accepted", and a refusal 70 ms later contradicts it.
              * ⭐ Green after the plug only ever shows on success and red only
              * on failure, so the two can never disagree. */
-            uint8_t level = pulse_level_rising(w->prep_left);
-            flash_write(controller, level, 0, level);   /* red + blue = magenta */
+            /* ⭐ Magenta-while-asking is a lightbar signal like any other. */
+            if (app_configuration->bridge_signal_light) {
+                uint8_t level = pulse_level_rising(w->prep_left);
+                flash_write(controller, level, 0, level);   /* red + blue = magenta */
+            }
             w->prep_next = now_ticks + PREP_STEP_MS;
         }
         return false;
@@ -1078,6 +1090,23 @@ static bool gesture_poll_one(SDL_GameController *controller, SDL_JoystickID id) 
     if (!w->asked_full) {
         w->asked_full = true;
         request_full_report(SDL_GameControllerPath(controller));
+    }
+
+    /* ⭐⭐ THE GESTURE SWITCH BELONGS HERE, NOT AT THE TOP OF THE TICK.
+     *
+     * ⛔ It was on the tick itself, and that broke the PANEL: the panel only
+     * ASKS for a bridge -- the pulse, the plug and the flashes all run from
+     * this poll, so returning early left the request armed and never finished.
+     * rhoquinn8217, 2026-08-20: "it just flashes, looks broken and unresponsive."
+     *
+     * ⭐ Everything above this point is machinery that must keep running
+     * whatever the setting says. Only what follows -- noticing a new chord --
+     * is the gesture. */
+    if (app_configuration &&
+        !(app_configuration->bridge_enable && app_configuration->bridge_gesture)) {
+        w->since = 0;
+        w->fired = false;
+        return false;
     }
 
     if (!gesture_held(controller)) {
@@ -1358,9 +1387,6 @@ void ctm_bridge_gesture_tick(struct app_input_t *input, struct session_t *sessio
      * app switch, disconnect, crash -- unbridges everything. ➡️ So off means
      * off, in both directions, and the asymmetry was solving a problem that
      * does not exist. */
-    if (app_configuration && !app_configuration->bridge_gesture) {
-        return;
-    }
     s_stream_input = session ? session_get_input(session) : NULL;
     if (!input) {
         return;

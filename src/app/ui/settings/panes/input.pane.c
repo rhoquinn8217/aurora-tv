@@ -51,12 +51,6 @@ static lv_obj_t *create_obj(lv_fragment_t *self, lv_obj_t *container) {
     pref_checkbox(view, locstr("View-only mode"), &app_configuration->viewonly, false);
     pref_desc_label(view, locstr("Don't send mouse, keyboard or gamepad input to host computer."), false);
 
-    pref_checkbox(view, locstr("Bridge by gesture"), &app_configuration->bridge_gesture, false);
-    pref_desc_label(view, locstr("Hold two fingers on the touchpad and press to hand a controller to the PC, or hold longer to take it back."), false);
-
-    pref_checkbox(view, locstr("Show the USB Bridge panel"), &app_configuration->bridge_panel, false);
-    pref_desc_label(view, locstr("Hand controllers to the PC from a list in the streaming overlay."), false);
-
     pref_checkbox(view, locstr("Capture system keys"), &app_configuration->syskey_capture, false);
     pref_desc_label(view, locstr("Capture and send system keys (e.g. Meta/Win key) to host computer."), false);
 
