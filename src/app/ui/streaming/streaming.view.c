@@ -3,6 +3,7 @@
 
 #include "util/i18n.h"
 #include "util/font.h"
+#include "util/log_overlay.h"
 #include "hints.h"
 
 #include "lvgl/ext/lv_child_group.h"
@@ -102,6 +103,9 @@ lv_obj_t *streaming_scene_create(lv_fragment_t *self, lv_obj_t *parent) {
     // CTM Bridge button: third in the actions bar (Soft keyboard, Virtual Mouse,
     // then CTM Bridge). Created after vmouse_btn so both its flex position and its
     // focus-group order fall to the right of Virtual Mouse.
+    /* ⭐ Hidden rather than absent when switched off: the overlay's focus order
+     * is built from these children, and removing one shifts everything after
+     * it. ⓘ A hidden object keeps its place and takes no focus. */
     lv_obj_t *ctm_btn = lv_btn_create(actions);
     lv_obj_add_flag(ctm_btn, LV_OBJ_FLAG_EVENT_BUBBLE);
     lv_obj_add_style(ctm_btn, &controller->overlay_button_style, 0);
@@ -109,7 +113,10 @@ lv_obj_t *streaming_scene_create(lv_fragment_t *self, lv_obj_t *parent) {
     lv_obj_set_style_bg_color(ctm_btn, lv_palette_main(LV_PALETTE_PURPLE), 0);
     lv_obj_t *ctm_label = lv_label_create(ctm_btn);
     lv_obj_add_style(ctm_label, &controller->overlay_button_label_style, 0);
-    lv_label_set_text(ctm_label, locstr("CTM Bridge"));
+    lv_label_set_text(ctm_label, locstr("USB Bridge"));
+    if (app_configuration && !app_configuration->bridge_enable) {
+        lv_obj_add_flag(ctm_btn, LV_OBJ_FLAG_HIDDEN);
+    }
 
     lv_obj_t *actions_spacing = lv_obj_create(actions);
     lv_obj_remove_style_all(actions_spacing);
@@ -190,6 +197,7 @@ lv_obj_t *streaming_scene_create(lv_fragment_t *self, lv_obj_t *parent) {
         controller->stats_items.host_latency = NULL;
         controller->stats_items.vdec_latency = NULL;
         controller->stats_items.render_queue = NULL;
+        controller->stats_items.cpu_ram = NULL;
     } else {
         lv_obj_set_size(stats, LV_DPX(384), LV_SIZE_CONTENT);
         lv_obj_set_flex_flow(stats, LV_FLEX_FLOW_ROW_WRAP);
@@ -199,10 +207,11 @@ lv_obj_t *streaming_scene_create(lv_fragment_t *self, lv_obj_t *parent) {
         controller->stats_compact_label = NULL;
         controller->stats_quality_indicator = NULL;
         controller->stats_items.decoder = stat_label(stats, "Video");
+        controller->stats_items.cpu_ram = stat_label(stats, "CPU / RAM");
         controller->stats_items.audio = stat_label(stats, "Audio");
         controller->stats_items.rtt = stat_label(stats, "Network RTT");
-        controller->stats_items.net_fps = stat_label(stats, "Network framerate");
-        controller->stats_items.render_fps = stat_label(stats, "Render framerate");
+        controller->stats_items.net_fps = NULL;
+        controller->stats_items.render_fps = stat_label(stats, "Decoded framerate");
         controller->stats_items.drop_rate = stat_label(stats, "Network frame drop");
         controller->stats_items.bitrate = stat_label(stats, "Bitrate");
         controller->stats_items.host_latency = stat_label(stats, "Host processing latency");
@@ -223,6 +232,9 @@ lv_obj_t *streaming_scene_create(lv_fragment_t *self, lv_obj_t *parent) {
     controller->stats = stats;
 
     streaming_overlay_resized(controller);
+
+    /* Settings → Show logs ON: force Live when the stream UI mounts. */
+    log_overlay_reassert();
 
     // We return overlay instead of obj, and will delete the obj manually
     return overlay;

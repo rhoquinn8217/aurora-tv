@@ -1,3 +1,4 @@
+#include "ui/streaming/streaming.controller.h"   /* streaming_overlay_shown */
 #include <stdbool.h>
 #include <SDL.h>
 #include <assert.h>
@@ -6,7 +7,9 @@
 #include "lvgl/util/lv_app_utils.h"
 
 #include "app.h"
+#if defined(TARGET_WEBOS)
 #include "input/ctm_bridge_gesture.h"
+#endif
 #include "config.h"
 
 #include "logging.h"
@@ -27,6 +30,7 @@
 #include "app_session.h"
 #include "stream/embed_wrapper.h"
 #include "profile/profile_manager.h"
+#include "util/log_overlay.h"
 
 PCONFIGURATION app_configuration = NULL;
 
@@ -116,6 +120,7 @@ int app_init(app_t *app, app_settings_loader *settings_loader, int argc, char *a
     app_input_init(&app->input, app);
 
     app_ui_init(&app->ui, app);
+    log_overlay_init();
 
     global = app;
 
@@ -151,6 +156,7 @@ void app_deinit(app_t *app) {
 
     SDL_Quit();
 
+    log_overlay_deinit();
     commons_logging_deinit();
 }
 
@@ -168,6 +174,18 @@ static int app_event_filter(void *userdata, SDL_Event *event) {
             if (app_ui_is_opened(&app->ui) && app->session != NULL) {
                 session_interrupt(app->session, false, STREAMING_INTERRUPT_BACKGROUND);
             }
+            /* ⛔ THE PLAYER COLOUR IS NOT PAINTED HERE, and it was tried.
+             *
+             * ⚠️ Painting on this event puts the colour up BEFORE the teardown
+             * that follows it -- so a bridged controller went blue and then
+             * black as the bridge came down. Measured 2026-08-19.
+             *
+             * ⭐ session_stop_input paints instead, after the bridge has
+             * actually stopped, which is the right moment for both this path
+             * and a normal stream end. ⓘ If the colour does NOT appear on an
+             * app switch, that means the teardown never reaches
+             * session_stop_input -- worth knowing, and a question that has been
+             * open a while. */
             break;
         }
         case SDL_APP_DIDENTERFOREGROUND: {
@@ -313,7 +331,20 @@ static int app_event_filter(void *userdata, SDL_Event *event) {
 void app_process_events(app_t *app) {
     SDL_PumpEvents();
     SDL_FilterEvents(app_event_filter, app);
-    ctm_bridge_gesture_tick(&app->input, app->session);
+    /* ⛔⛔ streaming_overlay_shown(), NOT app_ui_is_opened(). Third attempt, and
+     * this one has evidence rather than reasoning behind it.
+     *
+     * ⓘ app_ui_is_opened asks whether the LVGL display exists, and on webOS it
+     * exists for the whole life of the app -- the video is drawn behind it. So
+     * it reads TRUE while a game is being played, and the input hold stayed on
+     * the entire time.
+     *
+     * ⚠️ THE SYMPTOM THAT PROVED IT: on a bridged DualSense, the lightbar,
+     * rumble, speaker and GYRO all worked while buttons, sticks and the
+     * touchpad did nothing. ⭐ Those are exactly the fields the blanker zeroes,
+     * and the gyro is exactly what it deliberately leaves alone. Output is
+     * unaffected either way. Nothing else could produce that pattern. */
+    ctm_bridge_gesture_tick(&app->input, app->session, streaming_overlay_shown());
 }
 
 void app_quit_confirm() {

@@ -14,62 +14,31 @@
 #include "backend/pcmanager/worker/worker.h"
 #include "app_settings.h"
 
+#if TARGET_WEBOS
+#include "platform/webos/game_mode.h"
+#include "platform/webos/stream_priority.h"
+#endif
+
 #include <stdlib.h>
 #include <stdio.h>
 
+static void session_apply_decoder_env(const session_t *session) {
 #if TARGET_WEBOS
-#include <SDL.h>
-#endif
-
-static void session_apply_smooth_pacing_env(const session_t *session) {
-#if TARGET_WEBOS
-    /* Always-on aggressive pacing (no user toggle). */
-    setenv("SS4S_SMOOTH_PACING", "1", 1);
-    setenv("SS4S_NDL_SMOOTH_PACING", "1", 1);
-    /* Historical Starfish default; not exposed in settings. */
+    /* C5 native compositor is 120Hz. SDL_webOSGetRefreshRate often returns 144
+     * (HDMI VRR max). Snapping PTS to 144Hz on a 120Hz plane is 5:6 pulldown —
+     * pan hitch at every FPS. Wall-clock PTS tested best on-device for PAN. */
+    setenv("SS4S_SMOOTH_PACING", "0", 1);
+    setenv("SS4S_NDL_SMOOTH_PACING", "0", 1);
+    setenv("SS4S_PANEL_PHASE_PACING", "0", 1);
+    unsetenv("SS4S_SMOOTH_PACING_HOST_ONLY");
+    unsetenv("SS4S_PRESENTATION_OFFSET_US");
+    unsetenv("SS4S_SMOOTH_PACING_INTERVAL_US");
+    unsetenv("SS4S_NDL_PACING_INTERVAL_US");
+    unsetenv("SS4S_SMOOTH_PACING_MAX_DRIFT_FRAMES");
+    unsetenv("SS4S_PANEL_PHASE_INTERVAL_US");
     setenv("SS4S_PAUSE_AT_DECODE_TIME", "1", 1);
-    /* Tight drift: 0.5 frame (SS4S reads as percent of interval via maxDrift factor). */
-    setenv("SS4S_SMOOTH_PACING_MAX_DRIFT_FRAMES", "0.5", 1);
-
-    /* Prefer measured panel refresh for the PTS grid so display cadence matches the OLED,
-     * not only the host's clientRefreshRateX100 / stream fps (common microstutter source). */
-    int stream_x100 = session->config.stream.clientRefreshRateX100;
-    if (stream_x100 <= 0 && session->config.stream.fps > 0) {
-        stream_x100 = session->config.stream.fps * 100;
-    }
-
-    int x100 = stream_x100;
-    int panel_hz = 0;
-    const char *source = "stream";
-    if (SDL_webOSGetRefreshRate(&panel_hz) && panel_hz >= 20 && panel_hz <= 240) {
-        int panel_x100 = panel_hz * 100;
-        if (stream_x100 <= 0) {
-            x100 = panel_x100;
-            source = "panel";
-        } else {
-            int stream_hz = (stream_x100 + 50) / 100;
-            /* Same ballpark (±2 Hz): anchor PTS to the panel. Far apart: keep stream. */
-            if (abs(stream_hz - panel_hz) <= 2) {
-                x100 = panel_x100;
-                source = "panel";
-            }
-        }
-    }
-
-    if (x100 > 0) {
-        /* interval_us = 1e6 * 100 / x100  (e.g. 12000 → 8333 µs) */
-        long interval_us = (100000000L + (x100 / 2)) / x100;
-        char buf[32];
-        snprintf(buf, sizeof(buf), "%ld", interval_us);
-        setenv("SS4S_SMOOTH_PACING_INTERVAL_US", buf, 1);
-        setenv("SS4S_NDL_PACING_INTERVAL_US", buf, 1);
-        commons_log_info("Session",
-                         "Smooth pacing interval %ld µs from %s (x100=%d, stream_x100=%d, panel=%d Hz)",
-                         interval_us, source, x100, stream_x100, panel_hz);
-    } else {
-        unsetenv("SS4S_SMOOTH_PACING_INTERVAL_US");
-        unsetenv("SS4S_NDL_PACING_INTERVAL_US");
-    }
+    commons_log_info("Session", "Stream pacing: wall-clock PTS (native 120Hz, no 144 VRR grid)");
+    (void) session;
 #else
     (void) session;
 #endif
@@ -104,11 +73,21 @@ int session_worker(session_t *session) {
     int reconnect_attempts = 0;
     Uint32 reconnect_since = 0;
     Uint32 stream_up_since = 0;
+#if TARGET_WEBOS
+    webos_game_mode_state_t *game_mode_state = NULL;
+    webos_stream_priority_state_t *stream_prio = NULL;
+    session->webos_game_mode = NULL;
+#endif
 
 #if FEATURE_INPUT_EVMOUSE
     if (!session->config.view_only && session->config.hardware_mouse) {
         session_evmouse_wait_ready(&session->input.evmouse);
     }
+#endif
+
+#if TARGET_WEBOS
+    /* USB/net buffers must land before UDP sockets (LiStartConnection). */
+    stream_prio = webos_stream_priority_enter();
 #endif
 
     commons_log_info("Session", "Launch app %d (host currentGame=%d)...", appId, server->currentGame);
@@ -125,13 +104,9 @@ int session_worker(session_t *session) {
                          session->config.stream.fps, session->config.stream.bitrate);
     }
     GS_CLIENT client = app_gs_client_new(app);
+    /* Host keeps SDL/Vorbis channel order. webOS SMP/NDL remaps PCM to device
+     * order in Feed (SS4S_WebOS_RemapPcm51ToDevice). Do not send surroundParams. */
     const char *surround_params = NULL;
-#if TARGET_WEBOS
-    if (session->config.stream.audioConfiguration == AUDIO_CONFIGURATION_51_SURROUND) {
-        // 6 channels, 4 streams, 2 coupled streams, FL, FR, SL, SR, FC, LFE
-        surround_params = "642014523";
-    }
-#endif
     short gamepad_mask;
     int ret;
     connect:
@@ -172,8 +147,17 @@ int session_worker(session_t *session) {
     SS4S_PlayerSetViewportSize(session->player, app->ui.width, app->ui.height);
     SS4S_PlayerSetUserdata(session->player, app);
 
-    session_apply_smooth_pacing_env(session);
+    session_apply_decoder_env(session);
     session_video_prepare_stream();
+
+#if TARGET_WEBOS
+    if (session->app->settings.game_mode) {
+        const bool hdr = session->app->settings.hdr &&
+                         (session->config.stream.supportedVideoFormats & VIDEO_FORMAT_MASK_10BIT) != 0;
+        game_mode_state = webos_game_mode_enter(hdr);
+        session->webos_game_mode = game_mode_state;
+    }
+#endif
 
     int startResult = LiStartConnection(&server->serverInfo, &session->config.stream,
                                         session_connection_callbacks_prepare(session),
@@ -302,6 +286,13 @@ int session_worker(session_t *session) {
     // Keep the error state (if any) so the finish handler shows the dialog
     session_set_state(session, streaming_errno != GS_OK ? STREAMING_ERROR : STREAMING_NONE);
     thread_cleanup:
+#if TARGET_WEBOS
+    session->webos_game_mode = NULL;
+    webos_game_mode_restore(game_mode_state);
+    game_mode_state = NULL;
+    webos_stream_priority_leave(stream_prio);
+    stream_prio = NULL;
+#endif
     /* Restore only on a clean exit: streaming_errno != GS_OK means the session
      * ended in error/disconnect and the host is likely unreachable -- the
      * restore round-trips would just block teardown on timeouts. */

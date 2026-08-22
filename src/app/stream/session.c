@@ -1,3 +1,6 @@
+#if defined(TARGET_WEBOS)
+#include "input/ctm_bridge_gesture.h"
+#endif
 #include "app.h"
 #include "app_settings.h"
 #include "session_priv.h"
@@ -17,6 +20,10 @@
 #include "session_worker.h"
 #include "stream/input/session_virt_mouse.h"
 #include "ctm_bridge_glue.h"
+
+#if TARGET_WEBOS
+#include "platform/webos/game_mode.h"
+#endif
 
 // Expected luminance values in SEI are in units of 0.0001 cd/m2
 #define LUMINANCE_SCALE 10000
@@ -51,6 +58,12 @@ session_t *session_create(app_t *app, const CONFIGURATION *config, const SERVER_
         if (session->config.stream.supportedVideoFormats & VIDEO_FORMAT_H265_MAIN10) {
             session->server->serverInfo.serverCodecModeSupport |= SCM_HEVC_MAIN10;
         }
+    }
+    if (session->config.stream.supportedVideoFormats & VIDEO_FORMAT_AV1_MAIN8) {
+        session->server->serverInfo.serverCodecModeSupport |= SCM_AV1_MAIN8;
+    }
+    if (session->config.stream.supportedVideoFormats & VIDEO_FORMAT_AV1_MAIN10) {
+        session->server->serverInfo.serverCodecModeSupport |= SCM_AV1_MAIN10;
     }
     session->app_id = gs_app->id;
     session->app_name = strdup(gs_app->name);
@@ -149,7 +162,24 @@ bool session_start_input(session_t *session) {
     }
 #endif
     session_input_started(&session->input);
-    if (session->config.ctm_bridge) {
+    if (session->config.vmouse) {
+        session_input_set_vmouse_active(&session->input.vmouse, true);
+    }
+    {
+        /* ⭐⭐ THE SETTINGS GO IN FIRST, whether or not the bridge is already
+         * running. ⛔ They used to sit in the branch below that starts a fresh
+         * bridge, so a stream that came back from an auto-reconnect kept
+         * whatever the core had from last time -- and a changed setting looked
+         * like it did nothing. */
+        ctm_bridge_set_gesture_enabled(app_configuration->bridge_enable &&
+                                       app_configuration->bridge_gesture);
+        ctm_bridge_set_signals(app_configuration->bridge_signal_light,
+                               app_configuration->bridge_signal_rumble,
+                               app_configuration->bridge_signal_tone);
+        /* ⓘ Wired only. The Bluetooth setting is greyed out on this branch and
+         * the core refuses it regardless -- see app_settings.h. */
+        ctm_bridge_set_mic_capture(app_configuration->bridge_mic_wired);
+
         if (ctm_bridge_active()) {
             // Stream came back after an auto-reconnect: the bridge was left
             // running so the controllers stayed plugged through the outage.
@@ -165,7 +195,14 @@ bool session_start_input(session_t *session) {
             // broadcast probe never leaves the local network, so a host reached
             // over the internet is never found.
             ctm_bridge_set_host(session->server->serverInfo.address, 0);
-            ctm_bridge_set_capture_enabled(app_configuration->bt_mic_capture);
+#if CTM_BT_MIC_ARMING
+            /* ⭐ Stable's setting, not this branch's own. ⛔ The two branches
+             * each grew their own microphone switch on 2026-08-20 -- the same
+             * feature built twice, which is what made this merge painful. ⓘ One
+             * setting now, `bridge_mic_bt`, present on both branches; only the
+             * arming code behind it differs. */
+            ctm_bridge_set_capture_enabled(app_configuration->bridge_mic_bt);
+#endif
             ctm_bridge_start();
         }
     }
@@ -174,9 +211,13 @@ bool session_start_input(session_t *session) {
 
 void session_stop_input(session_t *session) {
     session_input_stopped(&session->input);
-    if (session->config.ctm_bridge) {
-        ctm_bridge_stop();
-    }
+    ctm_bridge_stop();
+    /* ⭐ The stream is over, so every controller is the TV's again -- say so in
+     * the light. One of only three places the player colour is set; see
+     * ctm_bridge_gesture_restore_player_colours. */
+#if defined(TARGET_WEBOS)
+    ctm_bridge_gesture_restore_player_colours();
+#endif
 }
 
 bool session_has_input(session_t *session) {
@@ -184,7 +225,7 @@ bool session_has_input(session_t *session) {
 }
 
 void session_toggle_vmouse(session_t *session) {
-    bool value = session->config.vmouse && !session_input_is_vmouse_active(&session->input.vmouse);
+    bool value = !session_input_is_vmouse_active(&session->input.vmouse);
     session_input_set_vmouse_active(&session->input.vmouse, value);
 }
 
@@ -258,6 +299,9 @@ void streaming_set_hdr(session_t *session, bool hdr) {
         populate_hdr_info_vui(&info, &session->config.stream);
         SS4S_PlayerVideoSetHDRInfo(session->player, &info);
     }
+#if TARGET_WEBOS
+    webos_game_mode_on_hdr(session->webos_game_mode, hdr);
+#endif
 }
 
 void streaming_error(session_t *session, int code, const char *fmt, ...) {
@@ -283,6 +327,14 @@ void session_config_init(app_t *app, session_config_t *config, const SERVER_DATA
                          const CONFIGURATION *app_config) {
     CONFIGURATION resolved = *app_config;
     settings_reconcile_refresh_rate(&resolved);
+#if TARGET_WEBOS
+    if (resolved.stream.fps > 120) {
+        resolved.stream.fps = 120;
+        if (resolved.client_refresh_rate_x100 > 12000) {
+            resolved.client_refresh_rate_x100 = resolved.use_ntsc_refresh ? 11988 : 0;
+        }
+    }
+#endif
 
     config->stream = resolved.stream;
     if (resolved.client_refresh_rate_x100 > 0) {
@@ -298,8 +350,30 @@ void session_config_init(app_t *app, session_config_t *config, const SERVER_DATA
     /* The bridge forwards the physical controller itself, so moonlight must not
      * also present it -- but only the GAMEPAD conflicts. Keyboard, mouse and
      * touch have no bridged counterpart and stay working. */
-    config->no_host_gamepad = app_config->ctm_bridge;
-    config->ctm_bridge = app_config->ctm_bridge;
+    /* ⛔⛔ THE HOST GAMEPAD IS NO LONGER SUPPRESSED, AND THE SETTING IS GONE.
+     *
+     * ⓘ What it used to do: with the bridge enabled, Moonlight stopped
+     * announcing ANY gamepad to the host, because a bridged controller arrives
+     * on the PC directly and the host would otherwise see it twice.
+     *
+     * ⛔ That is a sledgehammer, and it stopped being necessary. We retire the
+     * emulated pad PER CONTROLLER, at the moment that controller is bridged --
+     * see gesture_moonlight_set_excluded. The global gate solves the same
+     * problem by never offering a gamepad at all.
+     *
+     * ⚠️ AND IT COST THE CASE THAT MATTERS: two controllers, one bridged. The
+     * other had no route to the host whatsoever. Someone who never bridged got
+     * nothing at all.
+     *
+     * ⭐ rhoquinn8217, 2026-08-19: "when you start a stream, aurora-tv automatically
+     * gives the keyboards, mice and controllers to the PC. No bridging, no
+     * extra steps. It just works. That's how ours should work by default." ⓘ It
+     * is also how GuiDev1994's does -- he has no such gate.
+     *
+     * ➡️ Bridging is now something done ON TOP of a working stream, not instead
+     * of one. What gates it is whether the ways of ASKING are available: the
+     * gesture and the USB Bridge panel, which have their own settings. */
+    config->ctm_bridge = true;
     config->sops = app_config->sops;
     if (app_config->stick_deadzone < 0) {
         config->stick_deadzone = 0;
@@ -331,6 +405,12 @@ void session_config_init(app_t *app, session_config_t *config, const SERVER_DATA
         config->stream.supportedVideoFormats |= VIDEO_FORMAT_H265;
         if (app_config->hdr && video_cap.hdr) {
             config->stream.supportedVideoFormats |= VIDEO_FORMAT_H265_MAIN10;
+        }
+    }
+    if (app_config->av1 && video_cap.codecs & SS4S_VIDEO_AV1) {
+        config->stream.supportedVideoFormats |= VIDEO_FORMAT_AV1_MAIN8;
+        if (app_config->hdr && video_cap.hdr) {
+            config->stream.supportedVideoFormats |= VIDEO_FORMAT_AV1_MAIN10;
         }
     }
     // If no video format is supported, default to H.264
@@ -379,24 +459,15 @@ void session_config_init(app_t *app, session_config_t *config, const SERVER_DATA
  * @param config Moonlight stream configuration
  */
 static void populate_hdr_info_vui(SS4S_VideoHDRInfo *info, const STREAM_CONFIGURATION *config) {
-    switch (config->colorSpace) {
-        case COLORSPACE_REC_601:
-            info->colorPrimaries = 6 /* SMPTE 170M */;
-            info->transferCharacteristics = 6 /* SMPTE 170M */;
-            info->matrixCoefficients = 6 /* SMPTE 170M */;
-            break;
-        case COLORSPACE_REC_709:
-            info->colorPrimaries = 1 /* BT.709 */;
-            info->transferCharacteristics = 1 /* BT.709 */;
-            info->matrixCoefficients = 1 /* BT.709 */;
-            break;
-        case COLORSPACE_REC_2020: {
-            info->colorPrimaries = 9 /* BT.2020 */;
-            info->transferCharacteristics = 16 /* SMPTE ST 2084 */;
-            info->matrixCoefficients = 9 /* BT.2020 NCL */;
-            break;
-        }
-    }
-    info->videoFullRange = config->colorRange == COLOR_RANGE_FULL;
+    (void) config;
+    /*
+     * HDR10 path only (called from streaming_set_hdr when hdr=true).
+     * Always signal BT.2020 + PQ + limited range. Using negotiated Rec.709/601 here
+     * on a PQ stream can skew skin/asphalt hues on webOS NDL (C5).
+     */
+    info->colorPrimaries = 9 /* BT.2020 */;
+    info->transferCharacteristics = 16 /* SMPTE ST 2084 */;
+    info->matrixCoefficients = 9 /* BT.2020 NCL */;
+    info->videoFullRange = 0;
 }
 

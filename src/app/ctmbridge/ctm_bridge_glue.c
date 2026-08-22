@@ -96,6 +96,14 @@ static int glue_plug_all_locked(void)
 static void glue_hotplug_cb(void *ud, const ctm_controller_dev_t *dev, int present)
 {
     (void) ud; (void) dev; (void) present;
+    /* ⭐ A CABLE'S AUDIO IS NOT READY THE MOMENT IT APPEARS -- measured at
+     * several seconds -- so the core is told when each node showed up and works
+     * out for itself whether a tone should wait. ⓘ Before the s_active check on
+     * purpose: the clock should start when the device appears, whatever the
+     * bridge happens to be doing. */
+    if (present && dev && dev->path[0]) {
+        ctm_feedback_note_appeared(dev->path);
+    }
     if (!s_active) {
         return;
     }
@@ -150,6 +158,56 @@ static void ctm_glue_ensure_core(void)
     s_core_up = true;
 }
 
+/* ⭐⭐ THE GESTURE SETTING, HANDED IN RATHER THAN READ.
+ *
+ * ⛔ This target cannot see the app's headers on purpose -- it is the seam that
+ * has to stay thin if a bridge is ever contributed upstream -- so the setting
+ * arrives the same way the host address does: the caller reads it and passes
+ * it, and nothing here knows what a preference file is.
+ *
+ * ⓘ The gesture has two halves in two places: the app detects the BRIDGE chord,
+ * and the core detects the UNBRIDGE chord, because once bridged a controller's
+ * touchpad reports come through the bridge and the app cannot see them. ➡️ One
+ * user setting, so both are told; this is the core's half.
+ *
+ * ⓘ Set once when a stream starts, which is right: it cannot change during one,
+ * and leaving a stream by any route unbridges everything anyway. */
+void ctm_bridge_set_gesture_enabled(bool enabled)
+{
+    ctm_gesture_set_enabled(enabled ? 1 : 0);
+}
+
+/* ⭐⭐ HOLD OR RELEASE A BRIDGED CONTROLLER'S INPUT.
+ *
+ * ⓘ Called as the TV's own overlay opens and closes -- see app_ui_open. The
+ * core blanks each report while held rather than dropping it, so a button that
+ * was down when the overlay opened is actually released in the game instead of
+ * staying stuck. ⭐ Audio, rumble, the lightbar and the unbridge chord all keep
+ * working throughout.
+ *
+ * ⓘ Safe with nothing bridged: the flag is only read in the relay path, and
+ * with no session there is nothing to relay. */
+/* ⭐ WHICH SIGNALS THIS SIDE MAY MAKE, and whether the microphone is captured.
+ *
+ * ⓘ Handed in rather than read here: this target cannot see the app's headers
+ * on purpose, and that seam is what has to stay thin if a bridge is ever
+ * contributed upstream. Same shape as the host address and the gesture switch. */
+void ctm_bridge_set_signals(bool light, bool rumble, bool tone)
+{
+    ctm_signals_set_enabled(light ? 1 : 0, rumble ? 1 : 0, tone ? 1 : 0);
+}
+
+void ctm_bridge_set_mic_capture(bool on)
+{
+    ctm_mic_capture_set_enabled(on ? 1 : 0);
+}
+
+void ctm_bridge_set_input_held(bool held)
+{
+    ctm_input_set_held(held ? 1 : 0);
+}
+
+#if CTM_BT_MIC_ARMING
 /* ⛔ EXPERIMENTAL BRANCH ONLY -- Bluetooth microphone capture.
  *
  * ⭐ THE VALUE IS PUSHED IN, NOT READ OUT. The bridge library cannot see the
@@ -164,6 +222,7 @@ void ctm_bridge_set_capture_enabled(bool on)
     ctm_bt_capture_set_enabled(on);
     log_append("ctm glue: microphone capture %s", on ? "ENABLED" : "disabled");
 }
+#endif
 
 bool ctm_bridge_start(void)
 {
@@ -172,6 +231,23 @@ bool ctm_bridge_start(void)
     }
 
     ctm_glue_ensure_core();
+
+    /* ⭐⭐ START THE AGENT PROBE WHEN THE BRIDGE COMES UP, not when something is
+     * first plugged.
+     *
+     * ⛔ THE FAULT: ctm_bridge_gesture_init is called from plug_in_item -- the
+     * PLUG path -- so the probe only ever started once a device had actually
+     * been bridged. ⚠️ With the USB server down you cannot bridge anything, so
+     * the probe never started, so the panel never learned it was down and
+     * showed its default instead. ➡️ It was worst exactly when it mattered most.
+     *
+     * ⓘ Found 2026-08-20 after the panel read ONLINE with the listener stopped:
+     * the log had no `agent probe thread started` line for that run at all.
+     *
+     * ⓘ Safe to call more than once -- it starts a worker only if one is not
+     * already running. */
+    ctm_bridge_gesture_init();
+
 
     if (s_autoplug) {
         int count = ctm_bridge_plug_all();
@@ -231,6 +307,15 @@ int ctm_bridge_list(ctm_bridge_dev_t *out, int max)
         snprintf(out[n].kind, sizeof(out[n].kind), "%s", kind ? kind : "hid");
         snprintf(out[n].bus, sizeof(out[n].bus), "%s", item->bus);
         snprintf(out[n].mac, sizeof(out[n].mac), "%s", item->mac);
+        /* The first backing node is the one the bridge plugs. */
+        out[n].node[0] = '\0';
+        for (int k = 0; k < item->device_count; ++k) {
+            int j = item->device_indices[k];
+            if (j >= 0 && j < g_scan.count && g_scan.devices[j].node[0]) {
+                snprintf(out[n].node, sizeof(out[n].node), "%s", g_scan.devices[j].node);
+                break;
+            }
+        }
         /* The TV's own Magic Remote row IS the pointer synthesizer (raw relay
          * of its LG-vendor descriptor would code-10 on Windows). */
         out[n].plugged = item_is_tv_remote(item) ? ctm_tv_pointer_active()
@@ -544,10 +629,36 @@ void ctm_bridge_status(char *out, size_t out_len)
     }
 }
 
+/* Is the USB server answering? ⭐ Separate from its address, which is known
+ * whether or not anything is listening at it. */
+/* ⭐ Ask for a fresh reading. ⓘ The panel calls this as it opens, so a listener
+ * started mid-stream is noticed at once rather than up to ten seconds later. */
+void ctm_bridge_agent_recheck(void)
+{
+    ctm_agent_probe_soon();
+}
+
+/* ⭐ Has anything actually reached a verdict yet? ⓘ Separate from the verdict
+ * itself, so the panel can say "not known" instead of asserting "offline"
+ * before a single probe has completed. */
+bool ctm_bridge_agent_probed(void)
+{
+    return g_agent_probed;
+}
+
+bool ctm_bridge_agent_online(void)
+{
+    return g_agent_online != 0;
+}
+
 void ctm_bridge_agent(char *out, size_t out_len)
 {
     if (out == NULL || out_len == 0) {
         return;
     }
-    snprintf(out, out_len, "%s", (g_agent_online && g_agent_host[0]) ? g_agent_host : "offline");
+    /* ⛔ THE ADDRESS IS REPORTED EITHER WAY. It used to be replaced by "offline",
+     * which made the panel drop the IP when the server went down -- and the
+     * address does not change just because nothing is answering at it. ⓘ rhoquinn8217,
+     * 2026-08-20. ➡️ Callers ask ctm_bridge_agent_online() for the state. */
+    snprintf(out, out_len, "%s", g_agent_host[0] ? g_agent_host : "not set");
 }

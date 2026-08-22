@@ -1,5 +1,4 @@
 #include <stdlib.h>
-#include <string.h>
 #include <assert.h>
 
 #include <opus_multistream.h>
@@ -8,6 +7,7 @@
 #include "stream/connection/session_connection.h"
 #include "stream/session_priv.h"
 #include "logging.h"
+#include "config.h"
 
 #define SAMPLES_PER_FRAME  240
 
@@ -21,37 +21,6 @@ AUDIO_INFO audio_stream_info;
 
 static size_t opus_head_serialize(const OPUS_MULTISTREAM_CONFIGURATION *config, unsigned char *data);
 
-#if TARGET_WEBOS
-/* NDL/webOS Opus 5.1 layout (FL FR RL RR C LFE). Same as surround_params "642014523". */
-static const unsigned char WEBOS_OPUS_51_MAPPING[6] = {0, 1, 4, 5, 2, 3};
-
-static void maybe_remap_webos_51(OPUS_MULTISTREAM_CONFIGURATION *config) {
-    if (config->channelCount != 6) {
-        return;
-    }
-    /* Hosts that honor surround_params already send webOS order — remapping again
-     * swaps channels (regression for Apollo on some sets after #50). Only remap when
-     * the stream is still in Moonlight/SDL order (FL FR C LFE RL RR). */
-    if (memcmp(config->mapping, WEBOS_OPUS_51_MAPPING, sizeof(WEBOS_OPUS_51_MAPPING)) == 0) {
-        commons_log_info("Session", "5.1 Opus mapping already webOS order; skip remap");
-        return;
-    }
-
-    unsigned char tmp;
-    /* Center (2) <-> Surround Left (4); LFE (3) <-> Surround Right (5) */
-    tmp = config->mapping[2];
-    config->mapping[2] = config->mapping[4];
-    config->mapping[4] = tmp;
-    tmp = config->mapping[3];
-    config->mapping[3] = config->mapping[5];
-    config->mapping[5] = tmp;
-    commons_log_info("Session",
-                     "5.1 Opus mapping remapped to webOS order [%u,%u,%u,%u,%u,%u]",
-                     config->mapping[0], config->mapping[1], config->mapping[2],
-                     config->mapping[3], config->mapping[4], config->mapping[5]);
-}
-#endif
-
 static int aud_init(int audioConfiguration, const POPUS_MULTISTREAM_CONFIGURATION opusConfig, void *context,
                     int arFlags) {
     (void) audioConfiguration;
@@ -61,18 +30,11 @@ static int aud_init(int audioConfiguration, const POPUS_MULTISTREAM_CONFIGURATIO
     player = session->player;
     SS4S_AudioCodec codec = SS4S_AUDIO_PCM_S16LE;
     size_t codecDataLen = 0;
-
-    OPUS_MULTISTREAM_CONFIGURATION config_copy = *opusConfig;
-
-#if TARGET_WEBOS
-    maybe_remap_webos_51(&config_copy);
-#endif
-
     SS4S_AudioInfo info = {
-            .numOfChannels = config_copy.channelCount,
+            .numOfChannels = opusConfig->channelCount,
             .appName = "Aurora",
             .streamName = "Streaming",
-            .sampleRate = config_copy.sampleRate,
+            .sampleRate = opusConfig->sampleRate,
             .samplesPerFrame = SAMPLES_PER_FRAME,
     };
     if (session->audio_cap.codecs & SS4S_AUDIO_OPUS && SS4S_GetAudioPreferredCodecs(&info) & SS4S_AUDIO_OPUS) {
@@ -83,16 +45,16 @@ static int aud_init(int audioConfiguration, const POPUS_MULTISTREAM_CONFIGURATIO
             commons_log_error("Session", "Audio init: failed to allocate codec data buffer");
             return -1;
         }
-        codecDataLen = opus_head_serialize(&config_copy, buffer);
+        codecDataLen = opus_head_serialize(opusConfig, buffer);
     } else {
         int rc;
-        decoder = opus_multistream_decoder_create(config_copy.sampleRate, config_copy.channelCount, config_copy.streams,
-                                                  config_copy.coupledStreams, config_copy.mapping, &rc);
+        decoder = opus_multistream_decoder_create(opusConfig->sampleRate, opusConfig->channelCount, opusConfig->streams,
+                                                  opusConfig->coupledStreams, opusConfig->mapping, &rc);
         if (rc != 0) {
             return rc;
         }
-        frame_size = config_copy.samplesPerFrame;
-        unit_size = (int) (config_copy.channelCount * sizeof(int16_t));
+        frame_size = opusConfig->samplesPerFrame;
+        unit_size = (int) (opusConfig->channelCount * sizeof(int16_t));
         buffer = calloc(unit_size, frame_size);
         if (buffer == NULL) {
             commons_log_error("Session", "Audio init: failed to allocate decode buffer");
@@ -139,12 +101,27 @@ static void aud_cleanup() {
 }
 
 static void aud_feed(char *sampleData, int sampleLength) {
+    SS4S_AudioFeedResult result;
     if (decoder != NULL) {
         int decode_len = opus_multistream_decode(decoder, (unsigned char *) sampleData, sampleLength,
                                                  (opus_int16 *) buffer, frame_size, 0);
-        SS4S_PlayerAudioFeed(player, buffer, unit_size * decode_len);
+        // Negative return = decode error (e.g. corrupt packet); feeding
+        // unit_size * decode_len would pass a huge wrapped size downstream.
+        if (decode_len <= 0) {
+            audio_stream_info.feedFailures++;
+            return;
+        }
+        result = SS4S_PlayerAudioFeed(player, buffer, unit_size * decode_len);
     } else {
-        SS4S_PlayerAudioFeed(player, (unsigned char *) sampleData, sampleLength);
+        result = SS4S_PlayerAudioFeed(player, (unsigned char *) sampleData, sampleLength);
+    }
+    if (result != SS4S_AUDIO_FEED_OK) {
+        audio_stream_info.feedFailures++;
+        /* Rate-limit: first failure and every 50th thereafter. */
+        if (audio_stream_info.feedFailures == 1 || (audio_stream_info.feedFailures % 50) == 0) {
+            commons_log_warn("Session", "Audio feed failure #%u result=%d",
+                             (unsigned) audio_stream_info.feedFailures, (int) result);
+        }
     }
 }
 

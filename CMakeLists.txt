@@ -2,13 +2,34 @@ cmake_minimum_required(VERSION 3.19)
 set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
 
 # Keep the fork's upstream version; CTM changes bump only the build number,
-# shown as "1.1.7 (N_EXP)" in the app on this branch. appinfo/ipk stay at the numeric version.
-set(MOONLIGHT_VERSION "1.1.7")
-set(CTM_BUILD_NUMBER 10)
+# shown as "1.2.1 (N)" in the app. appinfo/ipk stay at the numeric version.
+#
+# The version follows GuiDev1994's releases as they are merged forward. The
+# build number is ours, he does not have it, and it keeps counting across a
+# merge -- resetting it would make old builds and new ones share numbers, and
+# every log and test note that names one would become ambiguous.
+set(MOONLIGHT_VERSION "1.2.1")
+set(CTM_BUILD_NUMBER 254)
 
 # ⛔ EXPERIMENTAL BRANCH ONLY. Empty on stable, so the two branches can never
-# produce a package or an Info tab that look the same.
+# produce a package with the same name.
+#
+# ⭐ THE NUMBER ITSELF NOW FOLLOWS STABLE (2026-08-21, rhoquinn8217). It used to count
+# separately -- stable was at 251 while this branch was still at 10 -- which
+# made the ipk list unsortable and let two different builds share a number.
+# ⓘ Same reasoning as taking GuiDev1994's version string: one sequence, marked.
 set(CTM_BUILD_SUFFIX "_EXP")
+
+# ⭐⭐ THE ONE THING THAT MAKES THIS BRANCH DIFFERENT.
+#
+# ⓘ Stable defines this 0 by omission -- every file that changes with it says
+# `#ifndef CTM_BT_MIC_ARMING / #define 0`, so the SOURCE IS IDENTICAL ON BOTH
+# BRANCHES and only this line differs. ⛔ Two strings kept in step by memory is
+# exactly how the microphone setting came to be built twice.
+#
+# ⚠️ Arming the microphone over Bluetooth triggers the input storm. This branch
+# also carries the patched SDL that makes it survivable; stable carries neither.
+add_compile_definitions(CTM_BT_MIC_ARMING=1)
 
 project(moonlight VERSION ${MOONLIGHT_VERSION} LANGUAGES C CXX)
 
@@ -189,6 +210,30 @@ endif ()
 
 set(BUILD_SHARED_LIBS ${BUILD_SHARED_CORE_LIBS})
 add_subdirectory(core/moonlight-common-c)
+
+# moonlight-common-c selects its monotonic clock with #ifdef HAVE_CLOCK_GETTIME, but its own
+# CMakeLists only computes that value and never passes it to the compiler. Without the definition
+# PltGetMillis() and PltGetMicroseconds() fall back to gettimeofday(), so every stream timeout,
+# dejitter wait and latency stat would run off a settable wall clock. Define it here until
+# upstream propagates its own check. (mariotaku/moonlight-tv#605)
+include(CheckSymbolExists)
+check_symbol_exists(clock_gettime "time.h" MLCOMMON_HAVE_CLOCK_GETTIME)
+if (NOT MLCOMMON_HAVE_CLOCK_GETTIME)
+    # Before glibc 2.17 clock_gettime lives in librt rather than libc
+    set(CMAKE_REQUIRED_LIBRARIES rt)
+    check_symbol_exists(clock_gettime "time.h" MLCOMMON_HAVE_CLOCK_GETTIME_IN_RT)
+    unset(CMAKE_REQUIRED_LIBRARIES)
+    if (MLCOMMON_HAVE_CLOCK_GETTIME_IN_RT)
+        target_link_libraries(moonlight-common-c PRIVATE rt)
+        set(MLCOMMON_HAVE_CLOCK_GETTIME ON)
+    endif ()
+endif ()
+if (MLCOMMON_HAVE_CLOCK_GETTIME)
+    target_compile_definitions(moonlight-common-c PRIVATE HAVE_CLOCK_GETTIME)
+else ()
+    message(WARNING "clock_gettime() is unavailable, moonlight-common-c will use a non-monotonic clock")
+endif ()
+
 add_subdirectory(core/libgamestream)
 if (BUILD_SHARED_LIBS)
     install(TARGETS moonlight-common-c LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR})

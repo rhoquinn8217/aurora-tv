@@ -26,12 +26,13 @@
 #include "streaming.controller.h"
 #include "ctm_bridge_glue.h"
 #include "ctm_panel.h"
+#include "input/ctm_bridge_gesture.h"
 
 #include <string.h>
 
 /* Which setting a detail row edits. ⚠️ This lived one line above the block that
  * was lifted and was missed on the first pass -- the whole build failed on it. */
-enum { CTM_F_PLUG = 1, CTM_F_AUDIO, CTM_F_HVOL, CTM_F_SVOL, CTM_F_LAT, CTM_F_HAP };
+
 
 /* Forward declarations, moved with the block rather than left behind: several of
  * these functions call each other in both directions. */
@@ -40,10 +41,7 @@ static void ctm_request_close(void);
 static void ctm_teardown_async(void *p);
 static void ctm_panel_refresh(void);
 static void ctm_request_refresh(void);
-static void ctm_build_detail(int row);
-static void ctm_enter_detail(void);
-static void ctm_leave_detail(void);
-static const char *ctm_audio_name(int m);
+static void ctm_late_refresh_cb(lv_timer_t *t);
 static void open_ctm_panel(lv_event_t *event);
 
 #define CTM_COL_CARD     lv_color_hex(0x12181d)
@@ -54,68 +52,153 @@ static void open_ctm_panel(lv_event_t *event);
 #define CTM_COL_TXT      lv_color_hex(0xf5f8fa)
 #define CTM_COL_SUB      lv_color_hex(0x95a3b0)
 #define CTM_COL_OK       lv_color_hex(0x35c46a)
+/* ⭐ The bridged state and the action that produces it, in one colour.
+ *
+ * ⛔ Green was tried and rejected 2026-08-20: it is the colour every other part
+ * of this interface uses for "fine", so it said nothing about THIS state, and a
+ * green Bridge All beside a green FULL made the two look like the same thing.
+ * ⓘ THE SAME PURPLE AS THE "USB Bridge" BUTTON IN THE STREAMING OVERLAY -- the
+ * one that opens this panel. ⭐ So the colour follows the feature: the button
+ * you press to get here, the state it produces, and the action that produces
+ * it, all one colour. ⛔ A softer hex was tried first and was not punchy
+ * enough beside it. */
+#define CTM_COL_FULL     lv_palette_main(LV_PALETTE_PURPLE)
 
-typedef struct {
-    int field;
-    int cur, min, max, step;
-    int gindex;             /* g_devices index (plug toggle) */
-    bool ds4_audio;         /* audio row cycles the DS4 subset (Auto/Headphones/Split) */
-    lv_obj_t *row;
-    lv_obj_t *slider;       /* NULL for non-slider rows */
-    lv_obj_t *value_lbl;
-} ctm_row_t;
-
-/* DS4 audio row: cur is a POSITION in this subset, translated to/from the
- * shared audio_mode value at read/write. Headset(3) forces the Layout B route
- * 0xFF, Both(4) doubles as "Split" 0xDF (see controller_ds4.c patch_output);
- * Auto leaves the service map's jack auto-route in charge. */
-static const int k_ctm_ds4_modes[] = {0 /* Auto */, 3 /* Headphones */, 4 /* Split */};
 
 static lv_obj_t   *s_ctm_panel      = NULL;   /* full-screen backdrop */
-static lv_obj_t   *s_ctm_sidebar    = NULL;
-static lv_obj_t   *s_ctm_detail     = NULL;
-static lv_obj_t   *s_ctm_status_lbl = NULL;
+static lv_obj_t   *s_ctm_sidebar    = NULL;   /* the device list */
+/* ⛔ ACTIONS LIVE OUTSIDE THE LIST, PINNED BELOW IT.
+ *
+ * They used to be the last two items in the scrolling container, so with four
+ * devices they were pushed below the fold -- and a user who does not think to
+ * scroll concludes they are gone. The list is the only thing that should
+ * scroll.
+ *
+ * ⭐ They stay in the SAME focus group, so Down from the last device still
+ * reaches them; they simply stay visible while the list moves above. */
+static lv_obj_t   *s_ctm_actions    = NULL;
+static lv_obj_t   *s_ctm_status_lbl = NULL;   /* "USB Server: <addr> -" */
+static lv_obj_t   *s_ctm_state_lbl  = NULL;   /* ONLINE / OFFLINE, the only coloured part */
+/* ⭐ The same fact the label shows, kept so the rows and Bridge All can act on
+ * it rather than only report it. */
+static bool        s_ctm_server_online = true;
+/* ⭐⭐ THREE STATES, NOT TWO: not known, online, offline.
+ *
+ * ⛔ g_agent_online starts false, so the panel used to say OFFLINE the instant
+ * it opened -- before a single probe had completed. Usually right, and still a
+ * claim we had not earned. ⓘ rhoquinn8217, 2026-08-20.
+ *
+ * ⭐ While it is not known the rows stay pressable, and a press simply ATTEMPTS
+ * the bridge: it either works -- signals, and the state resolves to online -- or
+ * it refuses, and the state resolves to offline. ⓘ A command that gets through
+ * is proof the agent is there, which is why send_agent_command now sets both
+ * flags either way.
+ *
+ * ⚠️ So a refusal is possible here, deliberately. Greying rows exists to avoid
+ * a refusal we KNOW is coming; when nobody knows, finding out is the honest
+ * answer and the refusal is real information. */
+static bool        s_ctm_server_known = false;
+
+/* ⭐⭐ FLASH THE OFFLINE TAG WHEN SOMEONE TRIES TO BRIDGE ANYWAY.
+ *
+ * ⛔ Greying alone was not enough -- rhoquinn8217, 2026-08-20: "I couldn't tell." A
+ * disabled row says "not now"; it does not say WHY, and the reason is already
+ * on screen two lines above. ➡️ Flashing it points at the answer instead of
+ * refusing silently.
+ *
+ * ⓘ An odd count so it ends bright, and it drives itself off a timer rather
+ * than the panel's refresh, which is too slow to read as a flash. */
+static lv_timer_t *s_ctm_flash_timer = NULL;
+static lv_timer_t *s_ctm_online_timer = NULL;
+static int         s_ctm_flash_left = 0;
+
+/* ⭐⭐ THE ONLINE LABEL UPDATES ITSELF; THE DEVICE LIST DOES NOT.
+ *
+ * ⛔ THE PANEL HAD NO TIMER AT ALL. It redrew only when you did something to it
+ * -- pressed a row, or Bridge All -- so a listener started while the panel was
+ * open went unnoticed until you closed and reopened it. ⓘ rhoquinn8217, 2026-08-20:
+ * "why doesn't the panel update live?"
+ *
+ * ⚠️ AND THE OBVIOUS FIX IS WRONG. A timer calling the full refresh would call
+ * ctm_bridge_list, which calls ctm_glue_enumerate EVERY TIME -- and enumeration
+ * is the expensive thing here, measured at seconds on the C3. The existing
+ * comment on the open path says exactly that, and it is right.
+ *
+ * ⭐ So this polls the ONE cheap thing: a flag the probe thread already
+ * maintains. No enumeration, no list rebuild, just a label. ⓘ The device list
+ * still refreshes on action, as before.
+ *
+ * ⓘ It also removes the case for a refresh button: the only thing that went
+ * stale while the panel sat open now does not. */
+static void ctm_online_tick(lv_timer_t *t) {
+    LV_UNUSED(t);
+    if (!s_ctm_state_lbl || s_ctm_flash_left > 0) {
+        return;   /* mid-flash: leave the colour alone */
+    }
+    const bool known = ctm_bridge_agent_probed();
+    const bool now = ctm_bridge_agent_online();
+    if (known == s_ctm_server_known && now == s_ctm_server_online) {
+        return;
+    }
+    s_ctm_server_known = known;
+    s_ctm_server_online = now;
+    if (!known) {
+        lv_label_set_text(s_ctm_state_lbl, "- N/A");
+        lv_obj_set_style_text_color(s_ctm_state_lbl, CTM_COL_SUB, 0);
+        ctm_request_refresh();
+        return;
+    }
+    lv_label_set_text(s_ctm_state_lbl, now ? "- ONLINE" : "- OFFLINE");
+    lv_obj_set_style_text_color(s_ctm_state_lbl,
+                                now ? CTM_COL_OK : lv_palette_main(LV_PALETTE_RED), 0);
+    /* ⓘ The rows and Bridge All are drawn from this state, so a change has to
+     * rebuild them -- but only on a CHANGE, which is rare. */
+    ctm_request_refresh();
+}
+
+static void ctm_flash_tick(lv_timer_t *t) {
+    if (!s_ctm_state_lbl) {
+        lv_timer_del(t);
+        s_ctm_flash_timer = NULL;
+        return;
+    }
+    const bool on = (s_ctm_flash_left % 2) == 1;
+    lv_obj_set_style_text_color(s_ctm_state_lbl,
+                                on ? CTM_COL_TXT : lv_palette_main(LV_PALETTE_RED), 0);
+    if (--s_ctm_flash_left <= 0) {
+        lv_obj_set_style_text_color(s_ctm_state_lbl, lv_palette_main(LV_PALETTE_RED), 0);
+        lv_timer_del(t);
+        s_ctm_flash_timer = NULL;
+    }
+}
+
+static void ctm_flash_offline(void) {
+    if (!s_ctm_state_lbl) {
+        return;
+    }
+    s_ctm_flash_left = 7;
+    if (!s_ctm_flash_timer) {
+        s_ctm_flash_timer = lv_timer_create(ctm_flash_tick, 120, NULL);
+    }
+}
 static lv_group_t *s_ctm_nav_group    = NULL;
-static lv_group_t *s_ctm_detail_group = NULL;
 static streaming_controller_t *s_ctm_owner = NULL;
 
 static ctm_bridge_dev_t s_ctm_devs[16];
 static lv_obj_t        *s_ctm_dev_rows[16];
 static int  s_ctm_ndev = 0;
 static int  s_ctm_sel  = 0;
-static bool s_ctm_detail_open = false;
 
-/* ⛔⛔ SET WHILE LEAVING THE DETAIL PANE. Do not rebuild the pane during this.
+/* ⭐ THE DETAIL PANE IS GONE, AND THE CRASH IT CAUSED WITH IT.
  *
- * THE CRASH THIS PREVENTS, traced 2026-08-17: press circle (or the remote's
- * back) on a slider in the detail pane and the app dies. Every crash was from
- * INSIDE the detail pane; circle in the sidebar is fine, and the Close button
- * never crashes because it is pointer-only and cannot be reached with a
- * controller at all.
+ * A guard used to live here: leaving the pane focused a sidebar row, focusing
+ * rebuilt the pane, and the rebuild freed the object LVGL was still dispatching
+ * on. Fixed on 2026-08-17 by not rebuilding from inside a leave.
  *
- * The chain:
- *
- *   CANCEL fires on the slider
- *     -> ctm_leave_detail()
- *       -> lv_group_focus_obj(sidebar row)
- *         -> ctm_dev_focus_cb()
- *           -> ctm_build_detail()
- *             -> lv_obj_clean(s_ctm_detail)   <-- frees the slider LVGL is
- *                                                 STILL DISPATCHING ON
- *
- * ⭐ Same family as the message-box crash fixed 2026-08-16: an object deleted
- * from inside its own event. There the answer was to defer the close; here it
- * is to not rebuild at all, because the rebuild is pure waste -- the row being
- * focused is the one already displayed.
- *
- * ⚠️ THIS GUARD IS WRITTEN TO SURVIVE T-106. It says "never rebuild from
- * inside a leave", which stays true however the pane's contents change. The
- * no-op check in ctm_dev_focus_cb is keyed to the current slider rows and may
- * not survive; this one does. */
-static bool s_ctm_leaving_detail = false;
+ * ⭐⭐ Removing the pane removes the whole shape of that fault. Recorded because
+ * the same trap waits for anything that rebuilds a container from inside an
+ * event raised by one of its children. */
 
-static ctm_row_t s_ctm_rows[8];
-static int       s_ctm_nrows = 0;
 
 /* Deferred-teardown holders: the panel is hidden synchronously on close (so the
  * remote Back produces a same-frame UI change and webOS doesn't background the
@@ -123,170 +206,159 @@ static int       s_ctm_nrows = 0;
  * inside its own Back event). */
 static lv_obj_t   *s_ctm_dead_panel  = NULL;
 static lv_group_t *s_ctm_dead_nav    = NULL;
-static lv_group_t *s_ctm_dead_detail = NULL;
 
-static const char *ctm_audio_name(int m) {
-    switch (m) {
-        case 0:  return "Auto";
-        case 1:  return "Off";
-        case 2:  return "Speaker";
-        case 3:  return "Headset";
-        case 4:  return "Both";
-        default: return "?";
-    }
-}
 
-/* DS4 names for the same mode values (route semantics, not endpoints). */
-static const char *ctm_audio_name_ds4(int m) {
-    switch (m) {
-        case 0:  return "Auto";
-        case 3:  return "Headphones";
-        case 4:  return "Split";
-        default: return "?";
-    }
-}
+/* Bridge or release the device on this row.
+ *
+ * ⭐ Activating a row IS the action now. There is no detail pane to enter, so a
+ * press does the one thing a press could mean. */
+/* ⭐⭐ DIRECTION, NOT TOGGLE. Right hands the device to the PC, left brings it
+ * back -- which is what the arrow on the row promises.
+ *
+ * ⓘ Pressing the direction a device is already in does nothing, deliberately.
+ * The row is showing only one arrow, so the other direction has nothing to
+ * offer, and doing something anyway would make the arrow a lie.
+ *
+ * ⓘ The row itself still toggles on Select, for anyone who does not want to
+ * think about direction. */
+/* ⭐⭐ A ROW WAITING FOR ITS CHANGE TO LAND.
+ *
+ * ⛔ THE FAULT IT FIXES: pressing bridge or release made the row FLICKER. The
+ * panel rebuilds its rows on every refresh, and a refresh that lands before the
+ * bridge has finished redraws the row in its OLD state -- so the label flips
+ * back, then forward again a moment later.
+ *
+ * ⭐ Instead the row is greyed from the press until the state it was asked for
+ * actually arrives. Nothing flips twice, and the grey says "working on it",
+ * which is true: a bridge takes a second or two.
+ *
+ * ⚠️ Keyed by the device's INDEX, not its row position, because the list can be
+ * rebuilt underneath it -- the same trap ctm_toggle_device documents.
+ *
+ * ⓘ Given a deadline so a bridge that never completes cannot leave a row grey
+ * forever. */
+#define CTM_PENDING_MS 6000
+static int      s_ctm_pending_index = -1;
+static bool     s_ctm_pending_want = false;
+static uint32_t s_ctm_pending_until = 0;
 
-static const char *ctm_kind_title(const char *kind) {
-    if (strcmp(kind, "ds5") == 0 || strcmp(kind, "ds5_usb") == 0)
-        return "Sony DualSense (DS5)";
-    if (strcmp(kind, "ds5e") == 0 || strcmp(kind, "ds5e_usb") == 0)
-        return "Sony DualSense Edge";
-    if (strcmp(kind, "ds4") == 0)  return "Sony DualShock 4 (DS4)";
-    if (strcmp(kind, "puck") == 0) return "Steam Controller";
-    if (strcmp(kind, "xbox") == 0) return "Xbox Controller";
-    return "Controller";
-}
+static void ctm_toggle_device(int row);
 
-/* Push one setting field to the selected controller's live bridge settings. */
-static void ctm_write_field(int field, int val) {
-    if (s_ctm_sel < 0 || s_ctm_sel >= s_ctm_ndev) {
+static void ctm_bridge_device(int row) {
+    if (row < 0 || row >= s_ctm_ndev || s_ctm_devs[row].plugged) {
         return;
     }
-    int gindex = s_ctm_devs[s_ctm_sel].index;
-    ctm_bridge_settings_t s;
-    if (!ctm_bridge_get_settings(gindex, &s)) {
+    ctm_toggle_device(row);
+}
+
+static void ctm_release_device(int row) {
+    if (row < 0 || row >= s_ctm_ndev || !s_ctm_devs[row].plugged) {
         return;
     }
-    switch (field) {
-        case CTM_F_AUDIO: s.audio_mode = val; break;
-        case CTM_F_HVOL:  s.headset_volume_percent = val; break;
-        case CTM_F_SVOL:  s.speaker_volume_percent = val; break;
-        case CTM_F_LAT:   s.latency_ms = val; break;
-        case CTM_F_HAP:   s.haptics_gain_centi = val; break;
-        default: return;
-    }
-    ctm_bridge_set_settings(gindex, &s);
+    ctm_toggle_device(row);
 }
 
-/* Render a row's value label: audio as "< Name >", haptics on a 0.0-5.0 scale
- * (stored value is centi-units, 0-500), everything else as a plain integer. */
-static void ctm_set_value_label(ctm_row_t *r) {
-    if (!r->value_lbl) {
+static void ctm_toggle_device(int row) {
+    if (row < 0 || row >= s_ctm_ndev) {
         return;
     }
-    if (r->field == CTM_F_AUDIO) {
-        lv_label_set_text_fmt(r->value_lbl, "< %s >",
-                              r->ds4_audio ? ctm_audio_name_ds4(k_ctm_ds4_modes[r->cur])
-                                           : ctm_audio_name(r->cur));
-    } else if (r->field == CTM_F_HAP) {
-        lv_label_set_text_fmt(r->value_lbl, "%d.%d", r->cur / 100, (r->cur % 100) / 10);
-    } else {
-        lv_label_set_text_fmt(r->value_lbl, "%d", r->cur);
+    /* ⛔⛔ PASS THE DEVICE'S index, NOT THE ROW POSITION.
+     *
+     * ctm_bridge_dev_t.index is an opaque handle into the core's device table;
+     * the row position is where the device happens to sit in OUR copy of the
+     * list. They agree only while nothing has connected or disconnected --
+     * which is exactly when it matters least. Getting this wrong does not
+     * fail quietly: it bridges A DIFFERENT DEVICE. */
+    const int index = s_ctm_devs[row].index;
+    /* ⭐ Remember what we asked for, so the row can grey until it happens. */
+    s_ctm_pending_index = index;
+    s_ctm_pending_want = !s_ctm_devs[row].plugged;
+    s_ctm_pending_until = lv_tick_get() + CTM_PENDING_MS;
+    if (s_ctm_devs[row].plugged) {
+        ctm_bridge_unplug_index(index);
+        ctm_request_refresh();
+        return;
     }
-}
-
-/* Apply a new value to a settings row (clamp/wrap, sync slider + label, write). */
-static void ctm_apply_row(ctm_row_t *r, int val) {
-    if (r->field == CTM_F_AUDIO) {
-        int n = r->ds4_audio ? (int) (sizeof k_ctm_ds4_modes / sizeof k_ctm_ds4_modes[0]) : 5;
-        val %= n;
-        if (val < 0) val += n;
-    } else {
-        if (val < r->min) val = r->min;
-        if (val > r->max) val = r->max;
+    /* ⭐⭐ ASK THE GESTURE TO DO IT, rather than plugging from here.
+     *
+     * Plugging directly diverged from the chord in ways that were invisible
+     * until they bit: the emulated pad was never retired, so the host saw the
+     * controller twice; the watcher did not know it owned the bridge, so it
+     * never restored anything afterwards; and releasing from the panel then
+     * skipped the sequence that ends a bridge properly, which over Bluetooth
+     * looked like the controller powering itself off.
+     *
+     * ⭐ Asking means there is one implementation and the two cannot drift.
+     *
+     * ⚠️ A keyboard or a mouse is not an SDL controller and has no gesture path
+     * to borrow, so the direct plug stays as the fallback -- it is what those
+     * devices have always used, and they have none of the problems above
+     * because nothing emulates them in the first place. */
+    /* ⭐ Refuse the press rather than letting it fail. ⛔ With the server
+     * offline a bridge cannot work, and attempting it answers with a refusal --
+     * red flashes and a buzz, which look exactly like a real failure. ⓘ The row
+     * is disabled too; this is the belt to that's braces. */
+    if (s_ctm_server_known && !s_ctm_server_online) {
+        ctm_flash_offline();
+        return;
     }
-    r->cur = val;
-    if (r->slider) {
-        lv_slider_set_value(r->slider, val, LV_ANIM_OFF);
+    if (!ctm_bridge_gesture_request_bridge(s_ctm_devs[row].node)) {
+        ctm_bridge_plug_index(index);
     }
-    ctm_set_value_label(r);
-    /* DS4 audio rows store a subset position; the bridge wants the mode value. */
-    ctm_write_field(r->field, (r->field == CTM_F_AUDIO && r->ds4_audio)
-                                  ? k_ctm_ds4_modes[val] : val);
-}
-
-/* Pointer drag on a slider -> write back + refresh its value label. */
-static void ctm_slider_cb(lv_event_t *e) {
-    ctm_row_t *r = lv_event_get_user_data(e);
-    r->cur = (int) lv_slider_get_value(r->slider);
-    ctm_set_value_label(r);
-    ctm_write_field(r->field, r->cur);
-}
-
-/* Plug/unplug toggle row activated (Select or pointer tap). */
-static void ctm_plug_click_cb(lv_event_t *e) {
-    ctm_row_t *r = lv_event_get_user_data(e);
-    if (r->cur) {
-        ctm_bridge_unplug_index(r->gindex);
-    } else {
-        ctm_bridge_plug_index(r->gindex);
-    }
+    /* ⛔ ASKING IS NOT BRIDGING. The gesture takes over and the plug happens on
+     * a later tick, so a refresh now reads the OLD state and the row still says
+     * BASIC. That looked like the press had failed, and pressing again asked
+     * for a second bridge on an already-bridged node -- which is what produced
+     * a rumble and a tone on the SECOND press.
+     *
+     * ⭐ So: refresh now for anything that finished immediately, and once more
+     * shortly after for the bridge that is still on its way. Two refreshes
+     * rather than a timer, because a timer would enumerate on every tick and
+     * enumeration is the expensive thing here. */
     ctm_request_refresh();
+    lv_timer_t *late = lv_timer_create(ctm_late_refresh_cb, 1200, NULL);
+    lv_timer_set_repeat_count(late, 1);
 }
 
-/* Audio row activated (Select or pointer tap) -> cycle to the next mode. */
-static void ctm_audio_click_cb(lv_event_t *e) {
-    ctm_row_t *r = lv_event_get_user_data(e);
-    ctm_apply_row(r, r->cur + 1);
-}
-
-static void ctm_detail_row_key_cb(lv_event_t *e) {
-    ctm_row_t *r = lv_event_get_user_data(e);
-    switch (lv_event_get_key(e)) {
-        case LV_KEY_UP:
-            lv_group_focus_prev(s_ctm_detail_group);
-            lv_obj_scroll_to_view(lv_group_get_focused(s_ctm_detail_group), LV_ANIM_ON);
-            break;
-        case LV_KEY_DOWN:
-            lv_group_focus_next(s_ctm_detail_group);
-            lv_obj_scroll_to_view(lv_group_get_focused(s_ctm_detail_group), LV_ANIM_ON);
-            break;
-        case LV_KEY_LEFT:
-            /* Value-only: plug toggles on Select (A), never on Left/Right. */
-            if (r->field != CTM_F_PLUG) ctm_apply_row(r, r->cur - r->step);
-            break;
-        case LV_KEY_RIGHT:
-            if (r->field != CTM_F_PLUG) ctm_apply_row(r, r->cur + r->step);
-            break;
-        case LV_KEY_ESC:   ctm_leave_detail(); break;
-        default: break;
+/* Release every bridged device, one at a time, the same way a row does.
+ *
+ * ⛔ NOT ctm_bridge_unplug_all(): that calls release_local_sessions_on_exit(),
+ * the APP SHUTDOWN path. It tears down every session at once while holding the
+ * device mutex, and with the microphone disarm in the unplug path -- five
+ * writes twenty milliseconds apart, per device -- the overlay froze long enough
+ * to look like a crash. Measured 2026-08-18.
+ *
+ * ⚠️ This still runs on the UI thread and still blocks; it just has far less to
+ * do, and it does the same thing pressing each row would. Getting these calls
+ * off the UI thread is T-062 and is a bigger change than this. */
+/* Bridge every device that is not already bridged, the same way pressing its
+ * row would.
+ *
+ * ⛔ NOT ctm_bridge_plug_all(): that plugs from the core directly and never
+ * tells moonlight, so every controller it bridged stayed in the host's panel
+ * as an emulated pad AS WELL -- the host saw each of them twice. The row press
+ * goes through the gesture, which retires the emulated pad and records that the
+ * bridge is ours.
+ *
+ * ⚠️ Runs on the UI thread, like the row press, and the same caveat applies:
+ * with several devices this is several bridges in a row. Acceptable while a
+ * bridge is ~2 seconds; worth revisiting if that changes. */
+static void ctm_bridge_all(void) {
+    for (int i = 0; i < s_ctm_ndev; ++i) {
+        if (!s_ctm_devs[i].plugged) {
+            ctm_toggle_device(i);
+        }
     }
 }
 
-static void ctm_detail_cancel_cb(lv_event_t *e) {
-    LV_UNUSED(e);
-    ctm_leave_detail();
+static void ctm_release_all(void) {
+    for (int i = 0; i < s_ctm_ndev; ++i) {
+        if (s_ctm_devs[i].plugged) {
+            ctm_bridge_unplug_index(s_ctm_devs[i].index);
+        }
+    }
 }
 
-/* A focusable card row inside the detail pane. */
-static lv_obj_t *ctm_detail_card(void) {
-    lv_obj_t *row = lv_obj_create(s_ctm_detail);
-    lv_obj_remove_style_all(row);
-    lv_obj_set_size(row, LV_PCT(100), LV_SIZE_CONTENT);
-    lv_obj_set_flex_flow(row, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_style_pad_all(row, LV_DPX(10), 0);
-    lv_obj_set_style_pad_gap(row, LV_DPX(6), 0);
-    lv_obj_set_style_radius(row, LV_DPX(8), 0);
-    lv_obj_set_style_bg_color(row, CTM_COL_ROW, 0);
-    lv_obj_set_style_bg_opa(row, LV_OPA_COVER, 0);
-    lv_obj_set_style_outline_width(row, LV_DPX(2), LV_STATE_FOCUS_KEY);
-    lv_obj_set_style_outline_color(row, CTM_COL_FOCUS, LV_STATE_FOCUS_KEY);
-    lv_obj_set_style_outline_pad(row, LV_DPX(2), LV_STATE_FOCUS_KEY);
-    lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_add_flag(row, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_add_flag(row, LV_OBJ_FLAG_EVENT_BUBBLE);   /* Back bubbles to the detail pane */
-    return row;
-}
 
 /* A native-looking button: reuses the streaming action-bar style (rounded,
  * shadow, blue focus outline) so panel buttons match the rest of the app
@@ -305,191 +377,14 @@ static lv_obj_t *ctm_nice_btn(lv_obj_t *parent, const char *text, lv_color_t bg)
     return btn;
 }
 
-/* Name (left) + value (right) header line for a card row; returns the value label. */
-static lv_obj_t *ctm_row_header(lv_obj_t *card, const char *name) {
-    lv_obj_t *hdr = lv_obj_create(card);
-    lv_obj_remove_style_all(hdr);
-    lv_obj_set_size(hdr, LV_PCT(100), LV_SIZE_CONTENT);
-    lv_obj_set_flex_flow(hdr, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(hdr, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_clear_flag(hdr, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_t *nl = lv_label_create(hdr);
-    lv_label_set_text(nl, name);
-    lv_obj_set_style_text_color(nl, CTM_COL_SUB, 0);
-    lv_obj_t *vl = lv_label_create(hdr);
-    lv_obj_set_style_text_color(vl, CTM_COL_TXT, 0);
-    return vl;
-}
 
-static void ctm_add_slider_row(const char *name, int field, int val, int min, int max, int step) {
-    if (s_ctm_nrows >= (int) (sizeof s_ctm_rows / sizeof s_ctm_rows[0])) return;
-    ctm_row_t *r = &s_ctm_rows[s_ctm_nrows++];
-    r->field = field; r->cur = val; r->min = min; r->max = max; r->step = step;
-    r->gindex = 0;
-    lv_obj_t *card = ctm_detail_card();
-    r->row = card;
-    r->value_lbl = ctm_row_header(card, name);
-    ctm_set_value_label(r);
-    lv_obj_t *sl = lv_slider_create(card);
-    r->slider = sl;
-    lv_obj_set_width(sl, LV_PCT(100));
-    lv_slider_set_range(sl, min, max);
-    lv_slider_set_value(sl, val, LV_ANIM_OFF);
-    lv_group_remove_obj(sl);            /* pointer-only; nav happens via the card */
-    lv_obj_add_event_cb(sl, ctm_slider_cb, LV_EVENT_VALUE_CHANGED, r);
-    lv_group_add_obj(s_ctm_detail_group, card);
-    lv_obj_add_event_cb(card, ctm_detail_row_key_cb, LV_EVENT_KEY, r);
-    lv_obj_add_event_cb(card, ctm_detail_cancel_cb, LV_EVENT_CANCEL, r);
-}
-
-static void ctm_add_audio_row(int val, bool ds4) {
-    if (s_ctm_nrows >= (int) (sizeof s_ctm_rows / sizeof s_ctm_rows[0])) return;
-    ctm_row_t *r = &s_ctm_rows[s_ctm_nrows++];
-    r->field = CTM_F_AUDIO; r->min = 0; r->max = 4; r->step = 1;
-    r->ds4_audio = ds4;
-    if (ds4) {
-        /* Translate the stored mode to a subset position (unknown -> Auto). */
-        r->cur = 0;
-        for (int i = 0; i < (int) (sizeof k_ctm_ds4_modes / sizeof k_ctm_ds4_modes[0]); ++i) {
-            if (k_ctm_ds4_modes[i] == val) { r->cur = i; break; }
-        }
-    } else {
-        r->cur = val;
-    }
-    r->gindex = 0; r->slider = NULL;
-    lv_obj_t *card = ctm_detail_card();
-    r->row = card;
-    r->value_lbl = ctm_row_header(card, "Audio mode");
-    ctm_set_value_label(r);
-    lv_group_add_obj(s_ctm_detail_group, card);
-    lv_obj_add_event_cb(card, ctm_detail_row_key_cb, LV_EVENT_KEY, r);
-    lv_obj_add_event_cb(card, ctm_detail_cancel_cb, LV_EVENT_CANCEL, r);
-    lv_obj_add_event_cb(card, ctm_audio_click_cb, LV_EVENT_CLICKED, r);
-}
-
-/* Bottom action of the detail pane: plug/unplug THIS controller. Activated by
- * Select (A) or pointer tap only. Plain text — no symbol glyph (the webOS font
- * build lacks the LVGL symbol range, so glyphs render as tofu boxes). */
-static void ctm_add_plug_row(const ctm_bridge_dev_t *d) {
-    if (s_ctm_nrows >= (int) (sizeof s_ctm_rows / sizeof s_ctm_rows[0])) return;
-    ctm_row_t *r = &s_ctm_rows[s_ctm_nrows++];
-    r->field = CTM_F_PLUG; r->cur = d->plugged ? 1 : 0; r->min = 0; r->max = 1; r->step = 1;
-    r->gindex = d->index; r->slider = NULL; r->value_lbl = NULL;
-    lv_obj_t *btn = ctm_nice_btn(s_ctm_detail,
-                                 d->plugged ? "Unplug this controller" : "Plug this controller",
-                                 d->plugged ? lv_palette_darken(LV_PALETTE_RED, 2)
-                                            : lv_palette_darken(LV_PALETTE_GREEN, 2));
-    lv_obj_set_width(btn, LV_PCT(100));
-    r->row = btn;
-    lv_group_add_obj(s_ctm_detail_group, btn);
-    lv_obj_add_event_cb(btn, ctm_detail_row_key_cb, LV_EVENT_KEY, r);
-    lv_obj_add_event_cb(btn, ctm_detail_cancel_cb, LV_EVENT_CANCEL, r);
-    lv_obj_add_event_cb(btn, ctm_plug_click_cb, LV_EVENT_CLICKED, r);
-}
-
-static void ctm_build_detail(int row) {
-    if (!s_ctm_detail) {
-        return;
-    }
-    lv_group_remove_all_objs(s_ctm_detail_group);
-    lv_obj_clean(s_ctm_detail);
-    s_ctm_nrows = 0;
-
-    if (row < 0 || row >= s_ctm_ndev) {
-        lv_obj_t *l = lv_label_create(s_ctm_detail);
-        lv_label_set_text(l, "No controller selected.");
-        lv_obj_set_style_text_color(l, CTM_COL_SUB, 0);
-        return;
-    }
-    ctm_bridge_dev_t *d = &s_ctm_devs[row];
-
-    lv_obj_t *title = lv_label_create(s_ctm_detail);
-    lv_label_set_text(title, ctm_kind_title(d->kind));
-    lv_obj_set_style_text_color(title, CTM_COL_TXT, 0);
-    lv_obj_set_style_text_font(title, lv_theme_get_font_normal(title), 0);
-
-    /* Identity sub-line: vid:pid - BUS - MAC (ASCII separators; no glyphs). */
-    lv_obj_t *idl = lv_label_create(s_ctm_detail);
-    if (d->mac[0]) {
-        lv_label_set_text_fmt(idl, "%s:%s - %s - %s", d->vid, d->pid,
-                              d->bus[0] ? d->bus : "?", d->mac);
-    } else {
-        lv_label_set_text_fmt(idl, "%s:%s - %s", d->vid, d->pid, d->bus[0] ? d->bus : "?");
-    }
-    lv_obj_set_style_text_color(idl, CTM_COL_SUB, 0);
-    lv_obj_set_style_text_font(idl, lv_theme_get_font_small(idl), 0);
-    lv_obj_set_style_pad_bottom(idl, LV_DPX(8), 0);
-
-    ctm_bridge_settings_t s;
-    bool have = ctm_bridge_get_settings(d->index, &s);
-    if (have && (strcmp(d->kind, "ds5") == 0 || strcmp(d->kind, "ds4") == 0)) {
-        ctm_add_audio_row(s.audio_mode, strcmp(d->kind, "ds4") == 0);
-        if (strcmp(d->kind, "ds4") == 0) {
-            /* DS4 firmware volume ceiling is 0x4f; no host latency/haptics block. */
-            ctm_add_slider_row("Headset vol", CTM_F_HVOL, s.headset_volume_percent, 0, 0x4f, 1);
-            ctm_add_slider_row("Speaker vol", CTM_F_SVOL, s.speaker_volume_percent, 0, 0x4f, 1);
-        } else {
-            ctm_add_slider_row("Headset vol", CTM_F_HVOL, s.headset_volume_percent, 0, 100, 1);
-            ctm_add_slider_row("Speaker vol", CTM_F_SVOL, s.speaker_volume_percent, 0, 100, 1);
-            ctm_add_slider_row("Latency (ms)", CTM_F_LAT, s.latency_ms, 20, 255, 1);
-            ctm_add_slider_row("Haptics", CTM_F_HAP, s.haptics_gain_centi, 0, 500, 10);
-        }
-    } else {
-        lv_obj_t *l = lv_label_create(s_ctm_detail);
-        lv_label_set_text(l, "No adjustable audio/haptics for this controller.");
-        lv_obj_set_style_text_color(l, CTM_COL_SUB, 0);
-        lv_label_set_long_mode(l, LV_LABEL_LONG_WRAP);
-        lv_obj_set_width(l, LV_PCT(100));
-    }
-
-    /* Bottom action: plug/unplug THIS controller (A toggles, never Left/Right). */
-    ctm_add_plug_row(d);
-}
-
-static void ctm_enter_detail(void) {
-    if (s_ctm_nrows == 0 || !s_ctm_owner) {
-        return;
-    }
-    s_ctm_detail_open = true;
-    app_input_set_group(&s_ctm_owner->global->ui.input, s_ctm_detail_group);
-    lv_group_focus_obj(s_ctm_rows[0].row);
-    lv_obj_add_state(s_ctm_rows[0].row, LV_STATE_FOCUS_KEY);
-}
-
-static void ctm_leave_detail(void) {
-    if (!s_ctm_owner) {
-        return;
-    }
-    s_ctm_detail_open = false;
-    app_input_set_group(&s_ctm_owner->global->ui.input, s_ctm_nav_group);
-    /* ⛔ The focus below fires ctm_dev_focus_cb, which would rebuild the detail
-     * pane and free the object this event is being dispatched on. See the note
-     * on s_ctm_leaving_detail. */
-    s_ctm_leaving_detail = true;
-    if (s_ctm_sel >= 0 && s_ctm_sel < s_ctm_ndev && s_ctm_dev_rows[s_ctm_sel]) {
-        lv_group_focus_obj(s_ctm_dev_rows[s_ctm_sel]);
-        lv_obj_add_state(s_ctm_dev_rows[s_ctm_sel], LV_STATE_FOCUS_KEY);
-    }
-    s_ctm_leaving_detail = false;
-}
-
-/* Sidebar: a controller row was focused -> live-preview its detail. */
+/* A row was focused: move the selection highlight. Nothing else.
+ *
+ * ⭐ This used to rebuild a detail pane on every focus change, which is what
+ * made the crash possible. */
 static void ctm_dev_focus_cb(lv_event_t *e) {
     int row = (int) (intptr_t) lv_event_get_user_data(e);
     if (row < 0 || row >= s_ctm_ndev) {
-        return;
-    }
-    /* ⛔ Leaving the detail pane focuses a sidebar row on the way out. Rebuilding
-     * here would free the object still dispatching the event that started it.
-     * See s_ctm_leaving_detail. */
-    if (s_ctm_leaving_detail) {
-        return;
-    }
-    /* ⭐ And nothing to do when the pane already shows this row -- the rebuild
-     * would be identical. Cheap, and it saves a full teardown on every focus
-     * change. ⓘ Keyed to the current row count, so it may not outlive T-106;
-     * the guard above is the one that must. */
-    if (s_ctm_sel == row && s_ctm_nrows > 0) {
         return;
     }
     s_ctm_sel = row;
@@ -498,18 +393,13 @@ static void ctm_dev_focus_cb(lv_event_t *e) {
         if (i == row) lv_obj_add_state(s_ctm_dev_rows[i], LV_STATE_CHECKED);
         else          lv_obj_clear_state(s_ctm_dev_rows[i], LV_STATE_CHECKED);
     }
-    ctm_build_detail(row);
 }
 
-/* Sidebar: a controller row was activated (Select/Right or tap) -> enter detail. */
+/* A row was activated -> bridge or release it. */
 static void ctm_dev_click_cb(lv_event_t *e) {
     int row = (int) (intptr_t) lv_event_get_user_data(e);
-    if (row < 0 || row >= s_ctm_ndev) {
-        return;
-    }
     s_ctm_sel = row;
-    ctm_build_detail(row);
-    ctm_enter_detail();
+    ctm_toggle_device(row);
 }
 
 static void ctm_nav_key_cb(lv_event_t *e) {
@@ -524,7 +414,49 @@ static void ctm_nav_key_cb(lv_event_t *e) {
             lv_obj_scroll_to_view(lv_group_get_focused(s_ctm_nav_group), LV_ANIM_ON);
             break;
         case LV_KEY_RIGHT:
-            if (row >= 0 && s_ctm_nrows > 0) ctm_enter_detail();
+            /* ⭐ Right used to enter the detail pane. With the pane gone it does
+             * the same thing as Select, so a user who reaches for either gets
+             * the action rather than nothing.
+             *
+             * ⭐⭐ AND IT TURNED OUT TO BE THE SAFE ONE, by accident. While a
+             * bridged controller is MIRRORED on the host (T-116), every press
+             * reaches the panel AND whatever has focus behind it -- so X here
+             * also activates something in the game or in Steam. Right does too,
+             * but "right" in a background app is usually harmless.
+             *
+             * ⚠️ THAT IS A WORKAROUND WITH A LIFETIME. When the mirror is fixed,
+             * this loses its justification and goes back to being a direction
+             * key that performs an action -- which is worth removing then, not
+             * now. rhoquinn8217, 2026-08-18.
+             *
+             * ⛔ RIGHT IS NOW BRIDGE-ONLY, not a toggle. It used to release a
+             * bridged device too, which contradicted the arrow the row shows --
+             * a bridged row offers only the back arrow.
+             *
+             * ⭐⭐ ON THE ACTION BUTTONS -- row == -1 -- LEFT AND RIGHT MOVE
+             * FOCUS INSTEAD. Bridge All and Release All sit SIDE BY SIDE, so
+             * reaching for right to get from one to the other is the obvious
+             * thing to do, and it did nothing: they are consecutive in the
+             * group, so only up and down moved between them. ⓘ rhoquinn8217,
+             * 2026-08-20. ➡️ Where two things are drawn beside each other, the
+             * key that points that way should go there. */
+            if (row < 0) {
+                lv_group_focus_next(s_ctm_nav_group);
+                lv_obj_scroll_to_view(lv_group_get_focused(s_ctm_nav_group), LV_ANIM_ON);
+                break;
+            }
+            ctm_bridge_device(row);
+            break;
+        case LV_KEY_LEFT:
+            if (row < 0) {
+                lv_group_focus_prev(s_ctm_nav_group);
+                lv_obj_scroll_to_view(lv_group_get_focused(s_ctm_nav_group), LV_ANIM_ON);
+                break;
+            }
+            /* ⭐ The other half of the same idea: left brings a bridged device
+             * back. ⓘ It was not handled at all before, which is why the back
+             * arrow did nothing. */
+            ctm_release_device(row);
             break;
         case LV_KEY_ESC:   ctm_request_close(); break;
         default: break;
@@ -537,12 +469,27 @@ static void ctm_nav_cancel_cb(lv_event_t *e) {
 }
 
 /* Short sidebar label: kind badge for known controllers, device name for HID. */
+static bool ctm_is(const ctm_bridge_dev_t *d, const char *vid, const char *pid) {
+    return strcmp(d->vid, vid) == 0 && strcmp(d->pid, pid) == 0;
+}
+
 static const char *ctm_dev_label(const ctm_bridge_dev_t *d) {
-    if (strcmp(d->kind, "ds5") == 0 || strcmp(d->kind, "ds5_usb") == 0)  return "DS5";
-    if (strcmp(d->kind, "ds5e") == 0 || strcmp(d->kind, "ds5e_usb") == 0) return "DS5 Edge";
-    if (strcmp(d->kind, "ds4") == 0)  return "DS4";
-    if (strcmp(d->kind, "puck") == 0) return "Steam Puck";
-    if (strcmp(d->kind, "xbox") == 0) return "Xbox";
+    /* ⛔⛔ MATCHED ON VID/PID, NOT ON KIND, AND THAT IS NOT A STYLE CHOICE.
+     *
+     * ctm_bridge_dev_t declares `char kind[8]`. "ds5e_usb" is eight characters
+     * plus a terminator, so it is TRUNCATED to "ds5e_us" on the way in and
+     * matches nothing. A wired DualSense Edge therefore fell through to its raw
+     * system name -- "Sony Interactive Entertainment DualSense Edge Wireless
+     * Controller" -- while a wired DualSense worked, because "ds5_usb" is seven
+     * characters and fits exactly.
+     *
+     * ⭐ vid and pid are what the core matches on anyway, and they cannot be
+     * truncated. */
+    if (ctm_is(d, "054c", "0ce6")) return "DualSense";
+    if (ctm_is(d, "054c", "0df2")) return "DualSense Edge";
+    if (ctm_is(d, "054c", "09cc") || ctm_is(d, "054c", "05c4")) return "DualShock 4";
+    if (strcmp(d->kind, "puck") == 0) return "Steam Controller";
+    if (strcmp(d->kind, "xbox") == 0) return "Xbox Controller";
     return d->name;
 }
 
@@ -550,11 +497,22 @@ static lv_obj_t *ctm_make_dev_row(const ctm_bridge_dev_t *d, int idx) {
     lv_obj_t *row = lv_obj_create(s_ctm_sidebar);
     lv_obj_remove_style_all(row);
     lv_obj_set_size(row, LV_PCT(100), LV_SIZE_CONTENT);
-    lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(row, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    /* ⭐ Name on top, action beneath. ⛔ Side by side left the button competing
+     * with a long device name for the same width, and the name is the part that
+     * cannot be shortened. ⓘ rhoquinn8217, 2026-08-20. */
+    lv_obj_set_flex_flow(row, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
+    lv_obj_set_style_pad_gap(row, 0, 0);
     lv_obj_set_style_pad_hor(row, LV_DPX(10), 0);
-    lv_obj_set_style_pad_ver(row, LV_DPX(9), 0);
+    /* ⭐ Tighter than it was. ⛔ Two lines per row makes a short list long, and
+     * the padding was sized for the one-line version. ⓘ The gap between the two
+     * lines is cut too -- see the pad_gap below. */
+    lv_obj_set_style_pad_ver(row, LV_DPX(4), 0);
     lv_obj_set_style_radius(row, LV_DPX(6), 0);
+    /* A border, so a row reads as a raised thing rather than a band of colour. */
+    lv_obj_set_style_border_width(row, LV_DPX(1), 0);
+    lv_obj_set_style_border_color(row, lv_color_hex(0x3a4854), 0);
+    lv_obj_set_style_border_color(row, CTM_COL_FOCUS, LV_STATE_FOCUS_KEY);
     lv_obj_set_style_bg_color(row, CTM_COL_ROW, 0);
     lv_obj_set_style_bg_opa(row, LV_OPA_COVER, 0);
     lv_obj_set_style_bg_color(row, CTM_COL_FOCUS, LV_STATE_FOCUS_KEY);
@@ -566,24 +524,186 @@ static lv_obj_t *ctm_make_dev_row(const ctm_bridge_dev_t *d, int idx) {
     lv_obj_add_flag(row, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_flag(row, LV_OBJ_FLAG_EVENT_BUBBLE);   /* Back bubbles to the sidebar */
 
-    lv_obj_t *name = lv_label_create(row);
-    lv_label_set_text(name, ctm_dev_label(d));
+    /* ⭐⭐ THE ROW HAS TO LOOK LIKE A CONTROL, NOT A REPORT.
+     *
+     * It listed a name and a state and nothing about it suggested it could be
+     * pressed -- so the panel read as a status page and the one thing a user
+     * needs to do with it was invisible.
+     *
+     * ⭐ Naming the ACTION is the only treatment that says what pressing it
+     * DOES rather than what state the row is in. A chevron was considered and
+     * rejected: it conventionally means "goes somewhere", and this goes
+     * nowhere. A segmented BASIC|FULL was rejected too -- two segments look
+     * like two targets, and on a controller the row is the only target there
+     * is.
+     *
+     * ⚠️ IF THIS MAKES ROWS TOO TALL, the fallback is one line: put the state
+     * back beside the name as "DualSense - BASIC" and keep the button. That is
+     * a change to this block alone. */
+    lv_obj_t *textcol = lv_obj_create(row);
+    lv_obj_remove_style_all(textcol);
+    /* ⛔⛔ NO flex_grow HERE. The row is a COLUMN now, and in a column grow takes
+     * leftover HEIGHT -- so a zero-width box stretched down the whole list and
+     * the panel became one blue block. Measured on hardware, 2026-08-20.
+     * ⭐ Full width, height from its contents. */
+    lv_obj_set_width(textcol, LV_PCT(100));
+    lv_obj_set_height(textcol, LV_SIZE_CONTENT);
+    /* ⭐ Name on the left, tag on the right under its heading. */
+    lv_obj_set_flex_flow(textcol, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(textcol, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER,
+                          LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_gap(textcol, LV_DPX(8), 0);
+    lv_obj_set_style_pad_all(textcol, 0, 0);
+    lv_obj_clear_flag(textcol, LV_OBJ_FLAG_SCROLLABLE);
+
+    /* ⭐ "DualSense · 1st" -- which controller this is, not just what kind.
+     *
+     * SDL numbers them from zero and the bridge core knows nothing about SDL,
+     * so the hidraw node is the join. ⓘ A mouse or a keyboard has no player
+     * number and simply shows none. */
+    lv_obj_t *name = lv_label_create(textcol);
+    {
+        /* ⭐ "(1) DualSense" rather than "DualSense  1st". Shorter, which the
+         * row needs -- and the number reads as an identifier rather than a
+         * ranking. ⓘ It also leads, so a column of rows can be scanned by
+         * number. ⚠️ Ordinals were also four separate strings to translate. */
+        /* ⭐ "(1) DualSense" -- the number prepended rather than given a column
+         * of its own. ⛔ A separate column was tried and wasted width the name
+         * needed. ⓘ Anything without a player number just shows its name. */
+        const int player = ctm_bridge_gesture_player_for_node(d->node);
+        if (player >= 0 && player < 4) {
+            lv_label_set_text_fmt(name, "(%d) %s", player + 1, ctm_dev_label(d));
+        } else {
+            lv_label_set_text(name, ctm_dev_label(d));
+        }
+    }
     lv_label_set_long_mode(name, LV_LABEL_LONG_DOT);
+    /* ⛔ LONG_DOT only truncates a label with a WIDTH. Left to size itself it
+     * grows and wraps instead, and an unrecognised device -- "RONGYUAN 2.4G
+     * Wireless Device System Control" -- took three lines and a third of the
+     * panel. */
+    /* ⛔ LONG_DOT only truncates a label that HAS a width. Left to size itself
+     * it grows and wraps -- measured on hardware: "DualSense Edge Wireless
+     * Controller" took three lines. */
+    /* ⓘ Takes what the tag leaves, and truncates rather than wrapping -- inside
+     * a ROW, grow means leftover WIDTH, which is what is wanted here. */
+    lv_obj_set_width(name, 1);
     lv_obj_set_flex_grow(name, 1);
     lv_obj_set_style_text_color(name, CTM_COL_TXT, 0);
+    lv_obj_set_style_text_font(name, lv_theme_get_font_normal(textcol), 0);
 
-    lv_obj_t *st = lv_label_create(row);
-    if (strcmp(d->kind, "hid") == 0) {
-        lv_label_set_text(st, "(hid)");
-        lv_obj_set_style_text_color(st, CTM_COL_SUB, 0);
-    } else if (d->plugged) {
-        lv_label_set_text(st, "plugged");
-        lv_obj_set_style_text_color(st, CTM_COL_OK, 0);
+    /* What the device can do, not what we did to it. FULL is a bridged device:
+     * speaker, haptics, adaptive triggers, microphone. BASIC is anything
+     * reaching the host through the stream's own emulation -- buttons, sticks,
+     * gyro, touchpad, rumble.
+     *
+     * ⛔ "idle" was wrong for an unbridged controller, and for a mouse: the
+     * stream carries them, so they are WORKING, just by the other path. */
+
+    /* The action, drawn as a button. ⚠️ NOT actually clickable in its own right:
+     * the whole row takes the press, so this is an affordance rather than a
+     * second target to aim at. */
+    /* ⭐⭐ FULL IN A GREEN BOX, BASIC AS PLAIN TEXT.
+     *
+     * ⛔ Colour used to be on the ACTION button, and it read backwards: a big
+     * red block beside a controller that was working looked like an alarm, and
+     * a big green one beside a basic controller looked like all was well. ⓘ
+     * rhoquinn8217, 2026-08-20. ➡️ The colour belongs on the STATE, which is the thing
+     * it describes.
+     *
+     * ⭐ A box rather than green text, so the good state is the one that stands
+     * out -- BASIC is the absence of it rather than a warning of its own. */
+    lv_obj_t *st;
+    if (d->plugged) {
+        lv_obj_t *badge = lv_obj_create(textcol);
+        lv_obj_remove_style_all(badge);
+        lv_obj_set_size(badge, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+        lv_obj_set_style_pad_hor(badge, LV_DPX(10), 0);
+        lv_obj_set_style_pad_ver(badge, LV_DPX(3), 0);
+        lv_obj_set_style_radius(badge, LV_DPX(4), 0);
+        lv_obj_set_style_bg_color(badge, CTM_COL_FULL, 0);
+        lv_obj_set_style_bg_opa(badge, LV_OPA_COVER, 0);
+        lv_obj_clear_flag(badge, LV_OBJ_FLAG_SCROLLABLE);
+        st = lv_label_create(badge);
+        lv_label_set_text(st, "FULL");
+        lv_obj_set_style_text_color(st, CTM_COL_TXT, 0);
     } else {
-        lv_label_set_text(st, "idle");
+        /* ⭐ A box too, so the two states are the same shape and only the
+         * colour differs -- a boxed FULL beside a bare BASIC made the row look
+         * lopsided. */
+        lv_obj_t *badge = lv_obj_create(textcol);
+        lv_obj_remove_style_all(badge);
+        lv_obj_set_size(badge, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+        lv_obj_set_style_pad_hor(badge, LV_DPX(10), 0);
+        lv_obj_set_style_pad_ver(badge, LV_DPX(3), 0);
+        lv_obj_set_style_radius(badge, LV_DPX(4), 0);
+        lv_obj_set_style_bg_color(badge, lv_color_hex(0x4a5866), 0);
+        lv_obj_set_style_bg_opa(badge, LV_OPA_COVER, 0);
+        lv_obj_clear_flag(badge, LV_OBJ_FLAG_SCROLLABLE);
+        st = lv_label_create(badge);
+        lv_label_set_text(st, "BASIC");
         lv_obj_set_style_text_color(st, CTM_COL_SUB, 0);
     }
-    lv_obj_set_style_text_font(st, lv_theme_get_font_small(row), 0);
+    lv_obj_set_style_text_font(st, lv_theme_get_font_normal(textcol), 0);
+
+    lv_obj_t *act = lv_obj_create(row);
+    lv_obj_remove_style_all(act);
+    lv_obj_set_size(act, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+    /* ⛔ THE ROW'S OWN PADDING WAS NEVER THE HEIGHT. Its children carried their
+     * own, so trimming the row alone changed nothing visible -- measured
+     * 2026-08-20 after a first attempt did exactly that. */
+    lv_obj_set_style_pad_hor(act, 0, 0);
+    lv_obj_set_style_pad_ver(act, 0, 0);
+    lv_obj_set_style_radius(act, LV_DPX(4), 0);
+    /* ⭐ NO CHROME AND NO COLOUR ON THE ACTION. ⛔ A coloured button here read as
+     * a status light and contradicted the real one: red beside a working
+     * controller looked like a fault. ➡️ The action is a quiet line of text; the
+     * colour lives on the state above it. */
+    lv_obj_set_style_bg_opa(act, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(act, 0, 0);
+    lv_obj_clear_flag(act, LV_OBJ_FLAG_SCROLLABLE);
+
+    /* ⭐⭐ THE ARROW SITS ON THE SIDE YOU WOULD PRESS, so the glyph teaches the
+     * control: right sends the device to the PC, left brings it back.
+     *
+     * ⭐ ONLY THE AVAILABLE DIRECTION IS EVER SHOWN. A bridged device offers
+     * "release" and nothing else; pressing right does nothing, and showing it
+     * would promise otherwise. ⓘ The row itself still takes a press, which
+     * toggles -- that is the path for anyone who does not want to think about
+     * direction. */
+    lv_obj_t *actlbl = lv_label_create(act);
+    /* ⛔ PLAIN CHARACTERS, NOT LV_SYMBOL_*. LV_SYMBOL_LEFT was tried on
+     * 2026-08-20 and rendered as an empty box -- the small theme font on these
+     * rows has no symbol range. ⓘ "<" and ">" are in every font there is. */
+    /* ⭐ "Click to ..." says what pressing DOES, which is the whole point of the
+     * row being a control rather than a report. ⓘ The state is already on the
+     * line above, so the button carries only the action.
+     *
+     * ⛔ PLAIN CHARACTERS, NOT LV_SYMBOL_*. LV_SYMBOL_LEFT rendered as an empty
+     * box -- the small theme font on these rows has no symbol range. */
+    lv_label_set_text(actlbl, d->plugged ? "< Click to Release" : "Click to Bridge >");
+    lv_obj_set_style_text_color(actlbl, CTM_COL_TXT, 0);
+    lv_obj_set_style_text_font(actlbl, lv_theme_get_font_small(act), 0);
+    lv_obj_set_style_text_color(actlbl, CTM_COL_SUB, 0);
+
+    /* ⭐ Grey while the change we asked for has not arrived. ⓘ Cleared here
+     * rather than on a timer: the row is rebuilt on every refresh, so the first
+     * rebuild that shows the wanted state is the moment it landed. */
+    /* ⭐ Faded hard while the server is offline -- nothing in the list can be
+     * bridged, and a light touch of grey was invisible on a television. ⓘ A
+     * BRIDGED row is left alone: releasing it is a teardown on this side and
+     * needs no host, so it is still worth pressing. */
+    if (s_ctm_server_known && !s_ctm_server_online && !d->plugged) {
+        lv_obj_set_style_opa(row, LV_OPA_30, 0);
+    }
+
+    if (s_ctm_pending_index == d->index) {
+        if (d->plugged == s_ctm_pending_want || lv_tick_get() > s_ctm_pending_until) {
+            s_ctm_pending_index = -1;
+        } else {
+            lv_obj_set_style_opa(row, LV_OPA_50, 0);
+        }
+    }
 
     lv_group_add_obj(s_ctm_nav_group, row);
     lv_obj_add_event_cb(row, ctm_nav_key_cb, LV_EVENT_KEY, (void *) (intptr_t) idx);
@@ -593,17 +713,29 @@ static lv_obj_t *ctm_make_dev_row(const ctm_bridge_dev_t *d, int idx) {
     return row;
 }
 
-static void ctm_act_plugall_cb(lv_event_t *e)   { LV_UNUSED(e); ctm_bridge_plug_all();   ctm_request_refresh(); }
-static void ctm_act_unplugall_cb(lv_event_t *e) { LV_UNUSED(e); ctm_bridge_unplug_all(); ctm_request_refresh(); }
-static void ctm_act_close_cb(lv_event_t *e)     { LV_UNUSED(e); ctm_request_close(); }
+/* ⛔ Guarded rather than trusting LV_STATE_DISABLED, which greys a button but
+ * does not reliably stop it being activated. ⭐ And it flashes the reason. */
+static void ctm_act_plugall_cb(lv_event_t *e) {
+    LV_UNUSED(e);
+    if (s_ctm_server_known && !s_ctm_server_online) {
+        ctm_flash_offline();
+        return;
+    }
+    ctm_bridge_all();
+    ctm_request_refresh();
+}
+static void ctm_act_unplugall_cb(lv_event_t *e) { LV_UNUSED(e); ctm_release_all(); ctm_request_refresh(); }
 
-static void ctm_make_action(const char *label, lv_event_cb_t cb, lv_color_t bg) {
-    lv_obj_t *btn = ctm_nice_btn(s_ctm_sidebar, label, bg);
-    lv_obj_set_width(btn, LV_PCT(100));
+/* ⓘ Returns the button so a caller can disable it -- see Bridge All while the
+ * server is offline. */
+static lv_obj_t *ctm_make_action(const char *label, lv_event_cb_t cb, lv_color_t bg) {
+    lv_obj_t *btn = ctm_nice_btn(s_ctm_actions, label, bg);
+    lv_obj_set_flex_grow(btn, 1);
     lv_group_add_obj(s_ctm_nav_group, btn);
     lv_obj_add_event_cb(btn, ctm_nav_key_cb, LV_EVENT_KEY, (void *) (intptr_t) -1);
     lv_obj_add_event_cb(btn, ctm_nav_cancel_cb, LV_EVENT_CANCEL, NULL);
     lv_obj_add_event_cb(btn, cb, LV_EVENT_CLICKED, NULL);
+    return btn;
 }
 
 static void ctm_panel_refresh(void) {
@@ -616,19 +748,73 @@ static void ctm_panel_refresh(void) {
     lv_obj_clean(s_ctm_sidebar);
     for (int i = 0; i < 16; ++i) s_ctm_dev_rows[i] = NULL;
 
-    lv_obj_t *caption = lv_label_create(s_ctm_sidebar);
-    lv_label_set_text(caption, "CONTROLLERS");
+    /* ⭐ Two headings, laid out like the rows beneath them -- name on the left,
+     * status on the right -- so the FULL/BASIC column reads as something rather
+     * than a word floating at the end of a line. */
+    lv_obj_t *caprow = lv_obj_create(s_ctm_sidebar);
+    lv_obj_remove_style_all(caprow);
+    lv_obj_set_size(caprow, LV_PCT(100), LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(caprow, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(caprow, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_hor(caprow, LV_DPX(10), 0);
+    lv_obj_clear_flag(caprow, LV_OBJ_FLAG_SCROLLABLE);
+
+    /* ⛔ "Controllers" was wrong: the list carries mice, keyboards and wireless
+     * receivers as readily as pads. */
+    lv_obj_t *caption = lv_label_create(caprow);
+    lv_label_set_text(caption, "Device");
     lv_obj_set_style_text_color(caption, CTM_COL_SUB, 0);
     lv_obj_set_style_text_font(caption, lv_theme_get_font_small(caption), 0);
+
+    /* ⭐ Back on 2026-08-20 as "Feature Set", and now it sits over something:
+     * the tag is right-aligned on the row's first line, directly beneath it.
+     * ⛔ As "Features" it sat over the action button and named nothing. */
+    lv_obj_t *capfeat = lv_label_create(caprow);
+    lv_label_set_text(capfeat, "Feature Set");
+    lv_obj_set_style_text_color(capfeat, CTM_COL_SUB, 0);
+    lv_obj_set_style_text_font(capfeat, lv_theme_get_font_small(capfeat), 0);
 
     if (s_ctm_status_lbl) {
         int plugged = 0;
         for (int i = 0; i < s_ctm_ndev; ++i) {
             if (s_ctm_devs[i].plugged) plugged++;
         }
-        char agent[64];
-        ctm_bridge_agent(agent, sizeof agent);
-        lv_label_set_text_fmt(s_ctm_status_lbl, "Agent %s  -  %d bridged", agent, plugged);
+        /* ⭐ "Listener", because that is what it is called everywhere else --
+         * the docs, the scripts, the log. "Agent" was the odd one out.
+         *
+         * ⛔ And it reports the LISTENER, not the bridge. A healthy listener
+         * with nothing bridged is a normal state; saying "bridge down" there
+         * would be wrong and would send someone looking at the TV. This line
+         * names the thing to go and check. */
+        char listener[64];
+        ctm_bridge_agent(listener, sizeof listener);
+        /* ⛔ NO COUNT. "0 bridged" sat under a panel called USB Bridge above a
+         * button called Bridge all -- the word had stopped carrying meaning,
+         * and each row already says what it is.
+         *
+         * ⭐ "USB Server", not "listener": the Windows side hosts the USB/IP
+         * server, and "listener" reads as something eavesdropping to anyone who
+         * does not know the networking sense. ⚠️ "Server" alone would be worse
+         * -- this setup already has a streaming server, a PC, and a network
+         * full of them. The repeated "USB" is the price of being unambiguous. */
+        /* ⭐ SAY "online", do not merely imply it with an address. The glue
+         * already returns the literal "offline" when the server is down, so the
+         * failing case read correctly and the working one just showed an IP --
+         * leaving a user to infer that an address means it is up. */
+        /* ⭐ The address shows either way -- OFFLINE says nothing is answering
+         * there, not that the address has gone. ⓘ rhoquinn8217, 2026-08-20. */
+        s_ctm_server_known = ctm_bridge_agent_probed();
+        s_ctm_server_online = ctm_bridge_agent_online();
+        lv_label_set_text_fmt(s_ctm_status_lbl, "USB Server: %s", listener);
+        if (!s_ctm_server_known) {
+            lv_label_set_text(s_ctm_state_lbl, "- N/A");
+            lv_obj_set_style_text_color(s_ctm_state_lbl, CTM_COL_SUB, 0);
+        } else {
+            lv_label_set_text(s_ctm_state_lbl, s_ctm_server_online ? "- ONLINE" : "- OFFLINE");
+            lv_obj_set_style_text_color(s_ctm_state_lbl,
+                                        s_ctm_server_online ? CTM_COL_OK
+                                                            : lv_palette_main(LV_PALETTE_RED), 0);
+        }
     }
 
     if (s_ctm_ndev == 0) {
@@ -638,32 +824,68 @@ static void ctm_panel_refresh(void) {
         lv_label_set_long_mode(l, LV_LABEL_LONG_WRAP);
         lv_obj_set_width(l, LV_PCT(100));
     }
+    /* ⏸ NO COLLAPSING OF DUPLICATE HID INTERFACES -- tried 2026-08-17 and
+     * REVERTED the same evening because it emptied the list entirely.
+     *
+     * ⚠️ The observation behind it is real: one Razer Orochi appears three
+     * times and a wireless receiver adds more, because a modern mouse presents
+     * several HID interfaces and each is its own node. ⛔ But we do not yet know
+     * what those interfaces ARE, or which one a user would want bridged, and
+     * collapsing them was a guess dressed as a fix.
+     *
+     * ➡️ Understand the interfaces first. Then decide whether to merge, to
+     * label, or to leave them alone. */
     for (int i = 0; i < s_ctm_ndev; ++i) {
         s_ctm_dev_rows[i] = ctm_make_dev_row(&s_ctm_devs[i], i);
     }
-    lv_obj_t *divider = lv_obj_create(s_ctm_sidebar);
-    lv_obj_remove_style_all(divider);
-    lv_obj_set_size(divider, LV_PCT(100), LV_DPX(1));
-    lv_obj_set_style_bg_color(divider, CTM_COL_BORDER, 0);
-    lv_obj_set_style_bg_opa(divider, LV_OPA_COVER, 0);
-    ctm_make_action("Plug all", ctm_act_plugall_cb, lv_palette_darken(LV_PALETTE_GREEN, 2));
-    ctm_make_action("Unplug all", ctm_act_unplugall_cb, lv_palette_darken(LV_PALETTE_BLUE_GREY, 2));
+
+    /* ⭐ Say so when there is nothing, rather than offering to bridge it.
+     * "Bridge all" and "Release all" over an empty list imply devices exist. */
+    if (s_ctm_ndev == 0) {
+        lv_obj_t *none = lv_label_create(s_ctm_sidebar);
+        lv_label_set_text(none, "No devices connected");
+        lv_obj_set_style_text_color(none, CTM_COL_SUB, 0);
+        lv_obj_set_style_pad_all(none, LV_DPX(8), 0);
+    }
+    lv_obj_clean(s_ctm_actions);
+    if (s_ctm_ndev > 0) {
+        /* ⭐⭐ WITH THE SERVER OFFLINE, RELEASE ALL IS THE ONLY THING THAT HELPS.
+         *
+         * ⛔ Bridging cannot work, and trying it gives a refusal -- red flashes
+         * and a buzz, indistinguishable from a real failure. ⭐ Releasing is a
+         * teardown on this side and needs no host at all.
+         *
+         * ⚠️ AND IT IS WHAT THE TV NEEDS ANYWAY. Losing the listener does not
+         * currently tear anything down: the session loops back and retries
+         * forever, so a controller stays claimed and bridged, waiting for a host
+         * that is not coming. ⓘ rhoquinn8217, 2026-08-20: "when the listener is down,
+         * that's what the TV needs to do anyway." ➡️ T-127 makes it automatic;
+         * until then this is the way out. */
+        lv_obj_t *plug_all =
+                ctm_make_action("Bridge All", ctm_act_plugall_cb, CTM_COL_FULL);
+        if (plug_all && s_ctm_server_known && !s_ctm_server_online) {
+            /* ⛔ LV_STATE_DISABLED alone was barely visible -- it only shifts
+             * the theme's own opacity a little. ⭐ Paint it grey and fade it. */
+            lv_obj_add_state(plug_all, LV_STATE_DISABLED);
+            lv_obj_set_style_bg_color(plug_all, lv_color_hex(0x3a4552), 0);
+            lv_obj_set_style_opa(plug_all, LV_OPA_40, 0);
+        }
+        /* ⭐ RED, because it takes every device back at once. ⓘ It was blue-grey, which
+         * read as the neutral of the pair -- but Bridge All affects one thing at a
+         * time in practice and this affects all of them, so it is the one worth
+         * hesitating over. ⚠️ It stays available while the server is offline: that
+         * is exactly when it is needed. */
+        ctm_make_action("Release All", ctm_act_unplugall_cb, lv_palette_darken(LV_PALETTE_RED, 2));
+    }
 
     if (s_ctm_sel >= s_ctm_ndev) {
         s_ctm_sel = s_ctm_ndev > 0 ? s_ctm_ndev - 1 : 0;
     }
-    ctm_build_detail(s_ctm_ndev > 0 ? s_ctm_sel : -1);
 
-    /* Restore focus to the correct group after the rebuild. */
-    if (s_ctm_detail_open && s_ctm_nrows > 0) {
-        app_input_set_group(&s_ctm_owner->global->ui.input, s_ctm_detail_group);
-        lv_group_focus_obj(s_ctm_rows[0].row);
-        lv_obj_add_state(s_ctm_rows[0].row, LV_STATE_FOCUS_KEY);
-        if (s_ctm_dev_rows[s_ctm_sel]) {
-            lv_obj_add_state(s_ctm_dev_rows[s_ctm_sel], LV_STATE_CHECKED);
-        }
-    } else {
-        s_ctm_detail_open = false;
+    /* ⭐ ONE GROUP NOW. There is no second pane to hand focus to, so a refresh
+     * cannot leave focus somewhere that no longer exists -- which is what the
+     * branch here used to guard against. */
+    {
         app_input_set_group(&s_ctm_owner->global->ui.input, s_ctm_nav_group);
         if (s_ctm_ndev > 0 && s_ctm_dev_rows[s_ctm_sel]) {
             lv_group_focus_obj(s_ctm_dev_rows[s_ctm_sel]);
@@ -676,7 +898,6 @@ static void ctm_teardown_async(void *p) {
     LV_UNUSED(p);
     if (s_ctm_dead_panel)  { lv_obj_del(s_ctm_dead_panel);    s_ctm_dead_panel = NULL; }
     if (s_ctm_dead_nav)    { lv_group_del(s_ctm_dead_nav);    s_ctm_dead_nav = NULL; }
-    if (s_ctm_dead_detail) { lv_group_del(s_ctm_dead_detail); s_ctm_dead_detail = NULL; }
 }
 
 static void ctm_close_panel(void) {
@@ -692,15 +913,12 @@ static void ctm_close_panel(void) {
     }
     s_ctm_dead_panel = s_ctm_panel;
     s_ctm_dead_nav = s_ctm_nav_group;
-    s_ctm_dead_detail = s_ctm_detail_group;
     s_ctm_panel = NULL;
     s_ctm_sidebar = NULL;
-    s_ctm_detail = NULL;
+    s_ctm_actions = NULL;
     s_ctm_status_lbl = NULL;
+    s_ctm_state_lbl  = NULL;
     s_ctm_nav_group = NULL;
-    s_ctm_detail_group = NULL;
-    s_ctm_nrows = 0;
-    s_ctm_detail_open = false;
     s_ctm_owner = NULL;
     lv_async_call(ctm_teardown_async, NULL);
 }
@@ -710,6 +928,14 @@ static void ctm_request_close(void) { ctm_close_panel(); }
 
 static void ctm_refresh_async(void *p) { LV_UNUSED(p); ctm_panel_refresh(); }
 static void ctm_request_refresh(void)  { lv_async_call(ctm_refresh_async, NULL); }
+
+/* One-shot, for a bridge that completes after the press. See ctm_toggle_device. */
+static void ctm_late_refresh_cb(lv_timer_t *t) {
+    LV_UNUSED(t);
+    if (s_ctm_panel) {
+        ctm_request_refresh();
+    }
+}
 
 static void open_ctm_panel(lv_event_t *event) {
     /* The CTM button has LV_OBJ_FLAG_EVENT_BUBBLE; stop the CLICKED here so it
@@ -722,14 +948,10 @@ static void open_ctm_panel(lv_event_t *event) {
         return;
     }
     s_ctm_owner = controller;
-    s_ctm_detail_open = false;
     s_ctm_sel = 0;
-    s_ctm_nrows = 0;
 
     s_ctm_nav_group = lv_group_create();
-    s_ctm_detail_group = lv_group_create();
     lv_group_set_wrap(s_ctm_nav_group, false);
-    lv_group_set_wrap(s_ctm_detail_group, false);
 
     /* Full-screen dim backdrop on the act screen (detached_root) so it does NOT
      * flip the UI into key/gamepad mode the way a modal does (that hid the webOS
@@ -738,16 +960,36 @@ static void open_ctm_panel(lv_event_t *event) {
     s_ctm_panel = panel;
     lv_obj_remove_style_all(panel);
     lv_obj_set_size(panel, LV_PCT(100), LV_PCT(100));
-    lv_obj_set_style_bg_color(panel, lv_color_black(), 0);
-    lv_obj_set_style_bg_opa(panel, LV_OPA_60, 0);
+    /* ⭐ NO DIM. The backdrop used to darken the whole screen, and that is what
+     * made opening the panel feel like leaving the game. It is now an invisible
+     * layer that exists only to catch a click outside the strip and to hold it
+     * above the video. */
+    lv_obj_set_style_bg_opa(panel, LV_OPA_TRANSP, 0);
     lv_obj_clear_flag(panel, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_flag(panel, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_move_foreground(panel);
 
     lv_obj_t *card = lv_obj_create(panel);
     lv_obj_remove_style_all(card);
-    lv_obj_set_size(card, LV_PCT(82), LV_PCT(84));
-    lv_obj_center(card);
+    /* ⭐ A CORNER STRIP, NOT A DIALOGUE. Narrow, top-right, and only as tall as
+     * its contents -- three devices make a short strip and one makes a shorter
+     * one, with no dead space either way.
+     *
+     * ⚠️ Top-right rather than centred on purpose: it is something to glance at
+     * while a game is running, not something to stand in front of it. A
+     * full-screen card reads as "you have left the game" however little it
+     * contains.
+     *
+     * ⛔ THE CARD ITSELF IS NOT CAPPED. Capping both it and the list clipped
+     * the buttons off the bottom: the list filled the card's limit and the
+     * actions had nowhere left to go. The list is the only thing here that can
+     * grow without bound, so it is the only thing that needs a limit -- and the
+     * card is then always exactly as tall as its header, its list and its
+     * buttons. */
+    lv_obj_set_width(card, LV_PCT(30));
+    lv_obj_set_height(card, LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(card, LV_FLEX_FLOW_COLUMN);
+    lv_obj_align(card, LV_ALIGN_TOP_RIGHT, LV_DPX(-16), LV_DPX(16));
     lv_obj_set_style_bg_color(card, CTM_COL_CARD, 0);
     lv_obj_set_style_bg_opa(card, LV_OPA_COVER, 0);
     lv_obj_set_style_radius(card, LV_DPX(12), 0);
@@ -763,6 +1005,9 @@ static void open_ctm_panel(lv_event_t *event) {
     lv_obj_set_size(header, LV_PCT(100), LV_SIZE_CONTENT);
     lv_obj_set_flex_flow(header, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_gap(header, LV_DPX(2), 0);
+    /* The card's own padding already spaces the title from the top edge; the
+     * header was adding its own on top of it. */
+    lv_obj_set_style_pad_top(header, 0, 0);
     lv_obj_clear_flag(header, LV_OBJ_FLAG_SCROLLABLE);
 
     lv_obj_t *titlerow = lv_obj_create(header);
@@ -772,29 +1017,52 @@ static void open_ctm_panel(lv_event_t *event) {
     lv_obj_set_flex_align(titlerow, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_clear_flag(titlerow, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_t *title = lv_label_create(titlerow);
-    lv_label_set_text(title, "CTM Bridge");
+    lv_label_set_text(title, "USB Bridge");
     lv_obj_set_style_text_color(title, CTM_COL_TXT, 0);
     lv_obj_set_style_text_font(title, lv_theme_get_font_large(title), 0);
 
-    /* Real close button (pointer); keyboard/gamepad close with Back (B). */
-    lv_obj_t *closebtn = ctm_nice_btn(titlerow, "Close", lv_palette_darken(LV_PALETTE_RED, 3));
-    lv_obj_add_event_cb(closebtn, ctm_act_close_cb, LV_EVENT_CLICKED, NULL);
+    /* ⛔ NO CLOSE BUTTON. It could only ever be pressed with a pointer -- it was
+     * never in the navigation group, so a controller could not reach it at all.
+     * A control only a mouse can use has no place in something driven from a
+     * sofa, and there are two working ways out already: circle on a controller,
+     * back on the remote. */
 
-    s_ctm_status_lbl = lv_label_create(header);
+    /* ⭐ TWO LABELS, because only the STATE should carry colour. One label
+     * cannot be part grey and part green, and colouring the whole line makes
+     * the address look like it means something. */
+    lv_obj_t *statusrow = lv_obj_create(header);
+    lv_obj_remove_style_all(statusrow);
+    lv_obj_set_size(statusrow, LV_PCT(100), LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(statusrow, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(statusrow, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_gap(statusrow, LV_DPX(6), 0);
+    lv_obj_clear_flag(statusrow, LV_OBJ_FLAG_SCROLLABLE);
+
+    s_ctm_status_lbl = lv_label_create(statusrow);
     lv_obj_set_style_text_color(s_ctm_status_lbl, CTM_COL_SUB, 0);
-    lv_obj_set_style_text_font(s_ctm_status_lbl, lv_theme_get_font_small(header), 0);
+    lv_obj_set_style_text_font(s_ctm_status_lbl, lv_theme_get_font_small(statusrow), 0);
 
-    lv_obj_t *body = lv_obj_create(card);
-    lv_obj_remove_style_all(body);
-    lv_obj_set_width(body, LV_PCT(100));
-    lv_obj_set_flex_grow(body, 1);
-    lv_obj_set_flex_flow(body, LV_FLEX_FLOW_ROW);
-    lv_obj_set_style_pad_gap(body, LV_DPX(12), 0);
-    lv_obj_clear_flag(body, LV_OBJ_FLAG_SCROLLABLE);
+    s_ctm_state_lbl = lv_label_create(statusrow);
+    lv_obj_set_style_text_font(s_ctm_state_lbl, lv_theme_get_font_small(statusrow), 0);
 
-    s_ctm_sidebar = lv_obj_create(body);
+    /* ⭐ ONE COLUMN. The panel was a sidebar and a detail pane side by side; the
+     * detail pane is gone, so the list is the whole body and gets the width. */
+    s_ctm_sidebar = lv_obj_create(card);
     lv_obj_remove_style_all(s_ctm_sidebar);
-    lv_obj_set_size(s_ctm_sidebar, LV_PCT(38), LV_PCT(100));
+    lv_obj_set_width(s_ctm_sidebar, LV_PCT(100));
+/* ⛔⛔ SIZE_CONTENT, NOT GROW -- and getting this wrong made the panel LOOK
+     * EMPTY with devices connected.
+     *
+     * flex_grow means "take the leftover space", and a card sized to its own
+     * children HAS no leftover space. The list was given zero height, so every
+     * row was built correctly and drawn into nothing. So was the "no devices"
+     * label, which is how the mistake gave itself away.
+     *
+     * ⭐ Sized to its content instead, and capped: the card grows with the list
+     * until the cap bites, and past that the list scrolls inside the height it
+     * has. A short list makes a short strip either way. */
+    lv_obj_set_height(s_ctm_sidebar, LV_SIZE_CONTENT);
+    lv_obj_set_style_max_height(s_ctm_sidebar, LV_DPX(320), 0);
     lv_obj_set_flex_flow(s_ctm_sidebar, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_all(s_ctm_sidebar, LV_DPX(8), 0);
     lv_obj_set_style_pad_gap(s_ctm_sidebar, LV_DPX(8), 0);
@@ -807,16 +1075,14 @@ static void open_ctm_panel(lv_event_t *event) {
     /* Back backstop: any focusable child bubbles CANCEL up here -> close panel. */
     lv_obj_add_event_cb(s_ctm_sidebar, ctm_nav_cancel_cb, LV_EVENT_CANCEL, NULL);
 
-    s_ctm_detail = lv_obj_create(body);
-    lv_obj_remove_style_all(s_ctm_detail);
-    lv_obj_set_height(s_ctm_detail, LV_PCT(100));
-    lv_obj_set_flex_grow(s_ctm_detail, 1);
-    lv_obj_set_flex_flow(s_ctm_detail, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_style_pad_all(s_ctm_detail, LV_DPX(8), 0);
-    lv_obj_set_style_pad_gap(s_ctm_detail, LV_DPX(8), 0);
-    lv_obj_set_scrollbar_mode(s_ctm_detail, LV_SCROLLBAR_MODE_AUTO);
-    /* Back backstop: a focused detail card bubbles CANCEL up here -> back to sidebar. */
-    lv_obj_add_event_cb(s_ctm_detail, ctm_detail_cancel_cb, LV_EVENT_CANCEL, NULL);
+    /* Pinned below the list, so four devices cannot push these off the panel. */
+    s_ctm_actions = lv_obj_create(card);
+    lv_obj_remove_style_all(s_ctm_actions);
+    lv_obj_set_size(s_ctm_actions, LV_PCT(100), LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(s_ctm_actions, LV_FLEX_FLOW_ROW);
+    lv_obj_set_style_pad_gap(s_ctm_actions, LV_DPX(8), 0);
+    lv_obj_clear_flag(s_ctm_actions, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_event_cb(s_ctm_actions, ctm_nav_cancel_cb, LV_EVENT_CANCEL, NULL);
 
     app_input_set_group(&controller->global->ui.input, s_ctm_nav_group);
     ctm_panel_refresh();
@@ -825,7 +1091,33 @@ static void open_ctm_panel(lv_event_t *event) {
 /* ---- the seam ---------------------------------------------------------- */
 
 void ctm_panel_open(lv_event_t *event) {
+    /* ⭐⭐ ASK FOR A FRESH READING AS THE PANEL OPENS -- the one moment somebody
+     * is definitely reading it. ⓘ rhoquinn8217's suggestion, 2026-08-20.
+     *
+     * ⛔ IT ONLY ASKS. The probe blocks for up to a second against a host that
+     * is not answering, and this runs on the interface thread; doing it here
+     * would freeze the overlay for that second. ⭐ The answer arrives on the
+     * panel's next refresh, a moment later.
+     *
+     * ⓘ Without this, a listener started mid-stream went unnoticed until the
+     * probe's own interval came round. */
+    ctm_bridge_agent_recheck();
     open_ctm_panel(event);
+
+    /* ⭐ Watches the online flag while the panel is up. See ctm_online_tick.
+     *
+     * ⛔ CREATED HERE, ON THE OPEN PATH. A first attempt put it in
+     * ctm_toggle_device by matching the wrong ctm_request_refresh() call -- so
+     * it only started when a row was pressed, which is precisely when nobody
+     * needs it.
+     *
+     * ⭐ Any previous timer is deleted first rather than guarded against: a
+     * stale non-NULL pointer would otherwise mean no timer is ever made
+     * again. */
+    if (s_ctm_online_timer) {
+        lv_timer_del(s_ctm_online_timer);
+    }
+    s_ctm_online_timer = lv_timer_create(ctm_online_tick, 1000, NULL);
 }
 
 /* Called from the owner fragment's teardown, which is not ours to move.
@@ -837,19 +1129,22 @@ void ctm_panel_open(lv_event_t *event) {
 void ctm_panel_on_owner_deleted(streaming_controller_t *controller) {
     if (s_ctm_owner == controller) {
         if (s_ctm_nav_group)    { lv_group_del(s_ctm_nav_group);    s_ctm_nav_group = NULL; }
-        if (s_ctm_detail_group) { lv_group_del(s_ctm_detail_group); s_ctm_detail_group = NULL; }
+        /* ⛔ The online timer must go with the labels it writes to, or it fires
+         * against freed objects. ⓘ The flash timer deletes itself when it runs
+         * out; this one does not, because it never stops on its own. */
+        if (s_ctm_online_timer) { lv_timer_del(s_ctm_online_timer); s_ctm_online_timer = NULL; }
+        if (s_ctm_flash_timer)  { lv_timer_del(s_ctm_flash_timer);  s_ctm_flash_timer = NULL; }
+        s_ctm_flash_left = 0;
         s_ctm_panel = NULL;
         s_ctm_sidebar = NULL;
-        s_ctm_detail = NULL;
+        s_ctm_actions = NULL;
         s_ctm_status_lbl = NULL;
+        s_ctm_state_lbl  = NULL;
         s_ctm_owner = NULL;
-        s_ctm_detail_open = false;
-        s_ctm_nrows = 0;
     }
     /* Cancel any in-flight panel teardown; the dead panel is freed with the
      * fragment's detached_root, but its groups must be released here. */
     lv_async_call_cancel(ctm_teardown_async, NULL);
     if (s_ctm_dead_nav)    { lv_group_del(s_ctm_dead_nav);    s_ctm_dead_nav = NULL; }
-    if (s_ctm_dead_detail) { lv_group_del(s_ctm_dead_detail); s_ctm_dead_detail = NULL; }
     s_ctm_dead_panel = NULL;
 }

@@ -43,23 +43,81 @@ typedef struct app_settings_t {
     bool quitappafter;
     bool autoresume;
     bool viewonly;
-    bool ctm_bridge;
-    /* ⛔ EXPERIMENTAL: Bluetooth microphone capture. Default off, and it stays
-     * off unless the user ticks it and confirms a warning. Sampled once, as
-     * the bridge starts -- a change applies to the next stream. */
-    bool bt_mic_capture;
+    /* ⭐ CAN A DEVICE BE HANDED TO THE PC AT ALL? Defaults ON.
+     *
+     * ⓘ The gesture and the USB Bridge panel are the only two ways to ask for a
+     * bridge, so this switches both and nothing else. A stream behaves the same
+     * either way -- keyboards, mice and controllers all reach the PC as usual.
+     *
+     * ⛔ NOT the old "use CTM Bridge" switch, removed 2026-08-19: that stopped
+     * Moonlight announcing any gamepad for the whole session, so an ordinary
+     * stream behaved differently and a second controller had no route at all. */
+    bool bridge_enable;
+
+    /* ⭐ The touchpad chord, on by default. Only meaningful while bridge_enable
+     * is set, and the settings screen greys it out when that is off.
+     *
+     * ⓘ The USB Bridge PANEL has no switch of its own, deliberately: a panel
+     * hidden while gestures still worked would look like the feature had
+     * broken, with nothing to explain it. bridge_enable covers both. */
+    bool bridge_gesture;
+
+    /* ⭐ THE SIGNALS AND THE MICROPHONE. All on for now.
+     *
+     * ⓘ These are "I do not want that" switches, not a battery feature. A
+     * bright light in a dark room, a buzz at midnight, a chirp while someone is
+     * asleep, a microphone nobody asked for -- four reasons, one shape. ⚠️ The
+     * battery saving is real for the microphone, small for rumble and the tone,
+     * and negligible for the lightbar, so it is not what they are sold on.
+     *
+     * ⛔ TURN ALL THREE SIGNALS OFF AND A REFUSAL IS INVISIBLE: the chord does
+     * nothing and there is no way to tell that from a gesture that was not
+     * recognised. Said in the section description rather than per switch.
+     *
+     * ⚠️ DEFAULTS ARE NOT SETTLED. Everything is on while this is being worked
+     * on so testing is not gated behind ticking boxes. ⓘ Microphone capture is
+     * expected to end up OFF -- it is only for voice chat through the
+     * controller itself, and most people will not want it. */
+    bool bridge_signal_light;
+    bool bridge_signal_rumble;
+    bool bridge_signal_tone;
+    /* ⭐⭐ WIRED AND BLUETOOTH ARE SEPARATE SETTINGS, deliberately.
+     *
+     * ⛔ They were one, called "microphone capture", and it silently meant
+     * WIRED ONLY -- the core refuses Bluetooth outright and says so in the log:
+     * `mic: capture not started -- not a wired connection`. ⚠️ A single
+     * checkbox hid a distinction that matters enormously.
+     *
+     * ⛔⛔ WHY IT MATTERS: arming the microphone over Bluetooth triggers an
+     * INPUT STORM through webOS's own hid-playstation driver -- the same
+     * unfixed flag-check omission SDL has. The controller floods input and
+     * becomes unusable. ⓘ We fixed it in an SDL fork, but that fork cannot go
+     * upstream: it would ask GuiDev1994 to maintain a workaround for a fault in
+     * the platform's driver. ➡️ So stable ships stock SDL and simply does not
+     * arm it.
+     *
+     * ⚠️ bridge_mic_bt EXISTS ON THIS BRANCH but can never be set: the settings
+     * screen greys it out. ⭐ It is here so the two branches differ ONLY by the
+     * arming code itself -- see upstream-direction.md, 2026-08-21. ⛔ Do not
+     * "tidy" it away; that reintroduces the divergence it exists to prevent. */
+    bool bridge_mic_wired;
+    bool bridge_mic_bt;
     bool absmouse;
     bool hardware_mouse;
     bool virtual_mouse;
     bool swap_abxy;
     bool syskey_capture;
-    bool hdr;   /* HDR10 (PQ) over HEVC Main10 when host and decoder support it */
+    bool hdr;   /* HDR10 (PQ) over HEVC Main10 or AV1 Main10 when host and decoder support it */
     bool force_full_color_range; /* SDR only: request full-range YUV (0-255) from host. No effect when HDR is on. */
     bool hevc;
+    /** Sunshine/Apollo: negotiate AV1 Main8/Main10 when decoder exposes SS4S_VIDEO_AV1. */
+    bool av1;
     /** Periodic HEVC IDR refresh interval in ms (0 = off, min 500 when enabled, step 500). */
     int idr_refresh_interval_ms;
     bool show_stats_on_start;
     bool show_stats_compact;
+    /** On-screen log overlay preference (Yellow cycles Off/Live/Frozen). */
+    bool show_logs;
     int stick_deadzone;
     /**
      * Sent to host as STREAM_CONFIGURATION.clientRefreshRateX100 (Hz * 100, e.g. 11994 = 119.94 Hz).
@@ -73,6 +131,11 @@ typedef struct app_settings_t {
     bool use_ntsc_refresh;
     bool auto_adjust_bitrate;
     int abr_mode;
+    /**
+     * webOS rooted only: switch picture/sound to Game for the stream (not HDMI ALLM).
+     * Default on; UI row only shown when Homebrew Channel elevated service is present.
+     */
+    bool game_mode;
     char *conf_dir;
     char *ini_path;
     char *condb_path;

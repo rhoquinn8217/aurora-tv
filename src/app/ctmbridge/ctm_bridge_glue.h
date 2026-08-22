@@ -34,6 +34,21 @@ void ctm_bridge_set_capture_enabled(bool on);
 bool ctm_bridge_start(void);
 
 /* Stop bridging: unplug all sessions and stop the keep-alive thread. Idempotent. */
+/* Switch the UNBRIDGE chord on or off. ⭐ The app owns the setting and the
+ * bridge half of the gesture; this passes the other half to the core. */
+void ctm_bridge_set_gesture_enabled(bool enabled);
+
+/* Hold a bridged controller's input while the TV's overlay is open, so
+ * navigating the panel does not also play the game. ⭐ Reports are blanked, not
+ * dropped -- a held button is released rather than left stuck. */
+/* Which confirmation signals the bridge may make, and whether it captures the
+ * controller's microphone. ⭐ Set when a stream starts. */
+void ctm_bridge_set_signals(bool light, bool rumble, bool tone);
+
+void ctm_bridge_set_mic_capture(bool on);
+
+void ctm_bridge_set_input_held(bool held);
+
 void ctm_bridge_stop(void);
 
 /* True while the bridge is active. */
@@ -52,11 +67,28 @@ typedef struct {
     char kind[8];   /* "ds5" / "ds4" / "xbox" / "puck" / "hid" */
     char bus[8];    /* "USB" / "BT" */
     char mac[24];   /* BT MAC (e.g. "58:10:31:..."), empty for USB */
+    /* ⭐ The hidraw node, which is the identity everything else in this project
+     * speaks -- SDL returns it as the controller path on webOS, and the bridge
+     * plugs by it. `index` above is only valid until the next enumerate; this
+     * is not. */
+    char node[64];
     bool plugged;
 } ctm_bridge_dev_t;
 
 /* Write the discovered Windows agent host (or "offline") into out (NUL-terminated).
  * For the overlay header. */
+/* Is the USB server answering? ⓘ Its address is reported by ctm_bridge_agent()
+ * whether or not it is. */
+/* Ask for a fresh reading of whether the USB server is answering. ⭐ Returns at
+ * once; the answer lands on the next refresh. */
+void ctm_bridge_agent_recheck(void);
+
+/* True once a probe or a command has reached a verdict about the USB server.
+ * ⭐ Until then the answer to ctm_bridge_agent_online() means nothing. */
+bool ctm_bridge_agent_probed(void);
+
+bool ctm_bridge_agent_online(void);
+
 void ctm_bridge_agent(char *out, size_t out_len);
 
 /* Re-enumerate and fill out[0..max-1] with the detected devices; returns the
