@@ -176,7 +176,9 @@ bool session_start_input(session_t *session) {
         ctm_bridge_set_signals(app_configuration->bridge_signal_light,
                                app_configuration->bridge_signal_rumble,
                                app_configuration->bridge_signal_tone);
-        ctm_bridge_set_mic_capture(app_configuration->bridge_mic_capture);
+        /* ⓘ Wired only. The Bluetooth setting is greyed out on this branch and
+         * the core refuses it regardless -- see app_settings.h. */
+        ctm_bridge_set_mic_capture(app_configuration->bridge_mic_wired);
 
         if (ctm_bridge_active()) {
             // Stream came back after an auto-reconnect: the bridge was left

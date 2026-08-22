@@ -162,7 +162,8 @@ void settings_initialize(app_settings_t *config, char *conf_dir) {
     config->bridge_signal_light = true;
     config->bridge_signal_rumble = true;
     config->bridge_signal_tone = true;
-    config->bridge_mic_capture = true;
+    config->bridge_mic_wired = true;
+    config->bridge_mic_bt = false;   /* never armed on this branch */
     config->rotate = 0;
     config->absmouse = true;
     config->virtual_mouse = false;
@@ -242,7 +243,8 @@ bool settings_save(app_settings_t *config) {
     ini_write_bool(fp, "bridge_signal_light", config->bridge_signal_light);
     ini_write_bool(fp, "bridge_signal_rumble", config->bridge_signal_rumble);
     ini_write_bool(fp, "bridge_signal_tone", config->bridge_signal_tone);
-    ini_write_bool(fp, "bridge_mic_capture", config->bridge_mic_capture);
+    ini_write_bool(fp, "bridge_mic_wired", config->bridge_mic_wired);
+    ini_write_bool(fp, "bridge_mic_bt", config->bridge_mic_bt);
 
     ini_write_section(fp, "input");
     ini_write_bool(fp, "absmouse", config->absmouse);
@@ -449,8 +451,10 @@ static int settings_parse(app_settings_t *config, const char *section, const cha
         config->bridge_signal_rumble = INI_IS_TRUE(value);
     } else if (INI_NAME_MATCH("bridge_signal_tone")) {
         config->bridge_signal_tone = INI_IS_TRUE(value);
-    } else if (INI_NAME_MATCH("bridge_mic_capture")) {
-        config->bridge_mic_capture = INI_IS_TRUE(value);
+    } else if (INI_NAME_MATCH("bridge_mic_wired")) {
+        config->bridge_mic_wired = INI_IS_TRUE(value);
+    } else if (INI_NAME_MATCH("bridge_mic_bt")) {
+        config->bridge_mic_bt = INI_IS_TRUE(value);
     } else if (INI_NAME_MATCH("absmouse")) {
         config->absmouse = INI_IS_TRUE(value);
     } else if (INI_NAME_MATCH("virtual_mouse")) {

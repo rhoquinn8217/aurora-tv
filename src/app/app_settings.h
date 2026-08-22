@@ -81,7 +81,27 @@ typedef struct app_settings_t {
     bool bridge_signal_light;
     bool bridge_signal_rumble;
     bool bridge_signal_tone;
-    bool bridge_mic_capture;
+    /* ⭐⭐ WIRED AND BLUETOOTH ARE SEPARATE SETTINGS, deliberately.
+     *
+     * ⛔ They were one, called "microphone capture", and it silently meant
+     * WIRED ONLY -- the core refuses Bluetooth outright and says so in the log:
+     * `mic: capture not started -- not a wired connection`. ⚠️ A single
+     * checkbox hid a distinction that matters enormously.
+     *
+     * ⛔⛔ WHY IT MATTERS: arming the microphone over Bluetooth triggers an
+     * INPUT STORM through webOS's own hid-playstation driver -- the same
+     * unfixed flag-check omission SDL has. The controller floods input and
+     * becomes unusable. ⓘ We fixed it in an SDL fork, but that fork cannot go
+     * upstream: it would ask GuiDev1994 to maintain a workaround for a fault in
+     * the platform's driver. ➡️ So stable ships stock SDL and simply does not
+     * arm it.
+     *
+     * ⚠️ bridge_mic_bt EXISTS ON THIS BRANCH but can never be set: the settings
+     * screen greys it out. ⭐ It is here so the two branches differ ONLY by the
+     * arming code itself -- see upstream-direction.md, 2026-08-21. ⛔ Do not
+     * "tidy" it away; that reintroduces the divergence it exists to prevent. */
+    bool bridge_mic_wired;
+    bool bridge_mic_bt;
     bool absmouse;
     bool hardware_mouse;
     bool virtual_mouse;

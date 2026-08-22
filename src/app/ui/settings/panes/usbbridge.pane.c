@@ -15,6 +15,15 @@
 
 #include "pref_obj.h"
 
+/* ⭐ 0 on this branch: the Bluetooth microphone arming code does not exist here.
+ * The experimental branch defines it 1. ⓘ See upstream-direction.md,
+ * 2026-08-21 -- the branches are meant to differ by the arming and nothing
+ * else, so anything that has to change with it is gated on this rather than
+ * kept in step by hand. */
+#ifndef CTM_BT_MIC_ARMING
+#define CTM_BT_MIC_ARMING 0
+#endif
+
 #include "util/i18n.h"
 #include "ui/settings/settings.controller.h"
 
@@ -232,11 +241,69 @@ static lv_obj_t *create_obj(lv_fragment_t *self, lv_obj_t *container) {
      * was the wrong rule applied. ⓘ Measure before claiming is for OUR
      * behaviour; this is a property of the hardware. */
     usbb_gap(view);
-    dependent_checkbox(pane, view, locstr("Enable Microphone Capture"),
-                       &app_configuration->bridge_mic_capture);
+    dependent_checkbox(pane, view, locstr("Enable Wired Microphone"),
+                       &app_configuration->bridge_mic_wired);
     pref_desc_label(view, locstr(
             "Warning: While the DualSense microphone is on, the controller drains its battery "
             "even when it is not in use."), false);
+
+    /* ⭐⭐ PRESENT, AND PERMANENTLY OFF ON THIS BRANCH.
+     *
+     * ⛔ Showing it rather than hiding it is deliberate. ⓘ rhoquinn8217, 2026-08-21:
+     * hiding it "begs the question we can just answer". ⭐ Somebody wondering why
+     * their Bluetooth controller's microphone does nothing finds the answer
+     * here, instead of concluding the feature is broken.
+     *
+     * ⭐ The wording says NOT READY rather than offering an excuse. It is true:
+     * arming over Bluetooth makes the controller flood input through the TV's
+     * own driver, and that has no fix from our side that could be shipped -- the
+     * one we have lives in an SDL fork that cannot go upstream.
+     *
+     * ⚠️ IT IS ALSO WHAT KEEPS THE TWO BRANCHES ONE LINE APART. The experimental
+     * branch shows the same control, selectable. ⛔ Deleting it here would put a
+     * whole feature back between them. */
+    usbb_gap(view);
+    /* ⭐ "(Unavailable)" IN THE LABEL, not just a grey box. ⛔ Greying alone is
+     * easy to miss on a television across a room, and it says nothing about
+     * why. ⓘ "Unavailable" rather than "Disabled": nobody switched it off --
+     * this build cannot offer it. ⭐ It also matches the first words of the
+     * description below.
+     *
+     * ⚠️ Gated like everything else that changes with the arming, so the file
+     * stays identical on both branches. */
+    lv_obj_t *bt_mic = pref_checkbox(view,
+#if CTM_BT_MIC_ARMING
+                                     locstr("Enable BT Microphone"),
+#else
+                                     locstr("Enable BT Microphone (Unavailable)"),
+#endif
+                                     &app_configuration->bridge_mic_bt, false);
+#if CTM_BT_MIC_ARMING
+    /* ⓘ Selectable only where the arming code exists. */
+    (void) bt_mic;
+#else
+    lv_obj_add_state(bt_mic, LV_STATE_DISABLED);
+#endif
+    pref_desc_label(view, locstr(
+            "A bug in webOS's input driver causes Bluetooth microphone audio to be read as "
+            "controller inputs, resulting in a flood of random inputs that can reach the host "
+            "during a stream. Because webOS's input driver is system-locked, a permanent fix "
+            "can only be done with root level access."), false);
+#if CTM_BT_MIC_ARMING
+    /* ⭐⭐ THE EXPERIMENTAL BRANCH ONLY, and the distinction matters: this build
+     * ships STOCK SDL. Saying a workaround "has been applied" here would tell a
+     * reader they are protected when they are not.
+     *
+     * ⓘ Behind the same condition that makes the checkbox selectable, so the
+     * FILE is identical on both branches and only the define differs -- which is
+     * the whole point of keeping them one line apart. ⛔ Two strings that had to
+     * be kept in step by memory is how the microphone setting came to be built
+     * twice on 2026-08-20. */
+    pref_desc_label(view, locstr(
+            "An app-level fix has been applied that provides a workaround, but only in Aurora. "
+            "Leaving the app while the controller's microphone is enabled will result in a "
+            "flood of random inputs."), false);
+#endif
 
     /* ⓘ Last, and together: three opt-outs in a row read consistently among
      * themselves even though the two above them read the other way. ⓘ rhoquinn8217,
