@@ -60,12 +60,25 @@ static void usbbridge_apply_enabled(usbbridge_pane_t *pane) {
 /* Add a switch that only means anything while bridging is on. */
 /* ⓘ The space that separates one setting-plus-description from the next.
  * ⚠️ An object rather than padding -- see the note in create_obj. */
-static void usbb_gap(lv_obj_t *view)
+static void usbb_gap_of(lv_obj_t *view, lv_coord_t h)
 {
     lv_obj_t *sp = lv_obj_create(view);
     lv_obj_remove_style_all(sp);
-    lv_obj_set_size(sp, LV_PCT(100), LV_DPX(14));
+    lv_obj_set_size(sp, LV_PCT(100), h);
     lv_obj_clear_flag(sp, LV_OBJ_FLAG_SCROLLABLE);
+}
+
+/* ⭐ A break BETWEEN TWO PARAGRAPHS of the same setting -- smaller than the gap
+ * that separates one setting from the next, so it reads as a pause rather than
+ * a new group. */
+static void usbb_break(lv_obj_t *view)
+{
+    usbb_gap_of(view, LV_DPX(7));
+}
+
+static void usbb_gap(lv_obj_t *view)
+{
+    usbb_gap_of(view, LV_DPX(14));
 }
 
 static lv_obj_t *dependent_checkbox_ex(usbbridge_pane_t *pane, lv_obj_t *view,
@@ -299,6 +312,7 @@ static lv_obj_t *create_obj(lv_fragment_t *self, lv_obj_t *container) {
      * the whole point of keeping them one line apart. ⛔ Two strings that had to
      * be kept in step by memory is how the microphone setting came to be built
      * twice on 2026-08-20. */
+    usbb_break(view);
     pref_desc_label(view, locstr(
             "An app-level fix has been applied that provides a workaround, but only in Aurora. "
             "Leaving the app while the controller's microphone is enabled will result in a "
