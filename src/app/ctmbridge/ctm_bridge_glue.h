@@ -123,6 +123,11 @@ bool ctm_bridge_plug_node(const char *node);
 
 /* Manually plug / unplug the device at the given list index. */
 bool ctm_bridge_plug_index(int index);
+/* ⭐ Release any controller whose host has gone (T-127). ⓘ Cheap -- walks the
+ * session table, never enumerates. Call it from a tick; it returns how many it
+ * released so the caller can log only when it acts. */
+int ctm_bridge_reap_gone_hosts(void);
+
 void ctm_bridge_unplug_index(int index);
 
 /* Plug every recognised controller (skips already-plugged); returns count newly

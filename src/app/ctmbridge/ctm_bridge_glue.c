@@ -487,6 +487,62 @@ bool ctm_bridge_plug_index(int index)
     return ok;
 }
 
+/* ⭐⭐ RELEASE A CONTROLLER WHOSE HOST HAS GONE. T-127, 2026-08-23.
+ *
+ * ⛔ THE FAULT: close the listener's window and the controller stayed claimed by
+ * a host that no longer exists -- no speaker, no triggers, no microphone, and
+ * nothing on screen saying why. **The only way out was knowing to press
+ * Release.**
+ *
+ * ⓘ THE CORE ALREADY GIVES UP. After fifteen seconds of a host that will not
+ * answer it stops retrying and reports `host_gone` in its status. ⛔ But it
+ * CANNOT release itself: retiring the emulated pad, restoring moonlight's input,
+ * updating the panel row and pulsing the light are all app-side, and
+ * `stop_session()` joins the session thread -- **which that thread cannot do to
+ * itself.** ➡️ So the core raises a flag and this reaps it, from a safe thread.
+ *
+ * ⭐ WHY THIS NEEDS NOTHING ELSE: `plug_key_is_set()` asks whether a SESSION
+ * EXISTS rather than reading a stored flag -- its own comment says so, *"it
+ * mirrors live pointer state rather than a persisted flag so a stale 'plugged'
+ * cannot strand the row"*. ➡️ **Once the session is stopped the device reports
+ * unplugged, and the gesture's existing watcher does the whole app-side release
+ * on its own.**
+ *
+ * ⚠️ DELIBERATELY CHEAP. It walks the session table -- an in-memory array of at
+ * most a handful of entries -- and does NOT enumerate. ⓘ The gesture tick calls
+ * this every frame, and `ctm_glue_enumerate()` has been measured at 5,144 ms on
+ * a C3. **Anything that enumerated here would be a freeze of its own.**
+ *
+ * ➡️ Returns the number released, so the caller can log it once rather than per
+ * frame. */
+int ctm_bridge_reap_gone_hosts(void)
+{
+    int reaped = 0;
+    char gone[MAX_SESSIONS][96];
+    int gone_count = 0;
+
+    pthread_mutex_lock(&s_dev_mutex);
+    for (int i = 0; i < g_session_count && gone_count < MAX_SESSIONS; ++i) {
+        ctm_controller_t *c = g_sessions[i].controller;
+        if (!c) continue;
+        ctm_controller_status_t st;
+        ctm_controller_get_status(c, &st);
+        if (!st.host_gone) continue;
+        snprintf(gone[gone_count], sizeof(gone[gone_count]), "%s", g_sessions[i].key);
+        ++gone_count;
+    }
+    /* ⚠️ Collected first, stopped second. `stop_session()` removes entries from
+     * the very table being walked, so stopping inside the loop would skip the
+     * entry that shifts down into the current index. */
+    for (int i = 0; i < gone_count; ++i) {
+        log_append("ctm glue: host gone -- releasing '%s'", gone[i]);
+        stop_session(gone[i]);
+        ++reaped;
+    }
+    pthread_mutex_unlock(&s_dev_mutex);
+    return reaped;
+}
+
 void ctm_bridge_unplug_index(int index)
 {
     pthread_mutex_lock(&s_dev_mutex);
