@@ -1344,6 +1344,28 @@ bool ctm_bridge_gesture_request_bridge(const char *node) {
 
 void ctm_bridge_gesture_tick(struct app_input_t *input, struct session_t *session,
                              bool overlay_open) {
+    /* ⭐⭐ RELEASE ANYTHING WHOSE HOST HAS GONE. T-127, 2026-08-23.
+     *
+     * ⛔ Close the listener's window and the controller used to stay claimed by
+     * a host that no longer exists. The core gives up after fifteen seconds and
+     * raises a flag; this is the safe thread that acts on it, because the core
+     * cannot release itself -- stopping a session joins the session thread.
+     *
+     * ⭐ Nothing else is needed: once the session stops, the device reports
+     * unplugged, and the watcher further down does the full app-side release --
+     * the pad retired, moonlight restored, the row updated, the yellow pulse.
+     *
+     * ⚠️ FIRST IN THE TICK, deliberately. Everything below reasons about which
+     * controllers are bridged, and a controller whose host has gone is not one.
+     *
+     * ⓘ Cheap by design -- a walk of the session table, no enumeration. */
+    {
+        const int reaped = ctm_bridge_reap_gone_hosts();
+        if (reaped > 0) {
+            gesture_log("host gone: released %d controller(s) -- the USB server stopped answering", reaped);
+        }
+    }
+
     /* ⭐⭐ HOLD A BRIDGED CONTROLLER'S INPUT WHILE THE OVERLAY IS UP.
      *
      * ⛔ THE FAULT: with the overlay open, a bridged controller's presses still
