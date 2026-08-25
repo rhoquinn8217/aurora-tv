@@ -4,6 +4,8 @@
 #include "ui/settings/settings.controller.h"
 #include "util/i18n.h"
 #include "util/log_overlay.h"
+#include "lvgl/util/lv_app_utils.h"
+#include "app_settings.h"
 
 #if TARGET_WEBOS
 #include "platform/webos/game_mode.h"
@@ -18,6 +20,8 @@ typedef struct experimental_pane_t {
     lv_obj_t *idr_slider;
     lv_obj_t *idr_hint;
     int idr_refresh_slider_value;
+    lv_obj_t *abr_dropdown;
+    pref_dropdown_int_entry_t abr_entries[3];
 } experimental_pane_t;
 
 static void pane_ctor(lv_fragment_t *self, void *args);
@@ -25,6 +29,16 @@ static void pane_ctor(lv_fragment_t *self, void *args);
 static lv_obj_t *create_obj(lv_fragment_t *self, lv_obj_t *container);
 
 static void on_show_logs_changed(lv_event_t *e);
+
+static void reconnect_cb(lv_event_t *e);
+
+static void reset_defaults_clicked(lv_event_t *e);
+
+static void reset_defaults_confirm_cb(lv_event_t *e);
+
+static void abr_state_update(experimental_pane_t *pane);
+
+static void abr_checkbox_cb(lv_event_t *e);
 
 static void idr_refresh_state_update(experimental_pane_t *pane);
 
@@ -43,6 +57,9 @@ const lv_fragment_class_t settings_pane_experimental_cls = {
 static void pane_ctor(lv_fragment_t *self, void *args) {
     experimental_pane_t *pane = (experimental_pane_t *) self;
     pane->parent = args;
+    pane->abr_entries[0] = (pref_dropdown_int_entry_t) {locstr("Balanced"), 0, true};
+    pane->abr_entries[1] = (pref_dropdown_int_entry_t) {locstr("Quality"), 1, false};
+    pane->abr_entries[2] = (pref_dropdown_int_entry_t) {locstr("Low latency"), 2, false};
 }
 
 static lv_obj_t *create_obj(lv_fragment_t *self, lv_obj_t *container) {
@@ -72,6 +89,14 @@ static lv_obj_t *create_obj(lv_fragment_t *self, lv_obj_t *container) {
 
     pref_header(view, locstr("Video"));
 
+    lv_obj_t *full_range = pref_checkbox(view, locstr("Full range YUV (SDR only)"),
+                                         &app_configuration->force_full_color_range, false);
+    pref_desc_label(view,
+                    locstr("Ask the host for full-range levels. Wrong for most TVs, which expect limited "
+                           "range — turn on only if SDR looks washed out."),
+                    false);
+    lv_obj_add_event_cb(full_range, reconnect_cb, LV_EVENT_VALUE_CHANGED, pane);
+
     lv_obj_t *idr_checkbox = lv_checkbox_create(view);
     lv_checkbox_set_text(idr_checkbox, locstr("Periodic decoder refresh (HEVC)"));
     if (app_configuration->idr_refresh_interval_ms >= 500) {
@@ -92,7 +117,92 @@ static lv_obj_t *create_obj(lv_fragment_t *self, lv_obj_t *container) {
     lv_obj_add_event_cb(idr_slider, idr_refresh_slider_cb, LV_EVENT_VALUE_CHANGED, pane);
     idr_refresh_state_update(pane);
 
+#if TARGET_WEBOS
+    pref_header(view, locstr("Audio"));
+
+    lv_obj_t *pcm_checkbox = pref_checkbox(view, locstr("Decode 5.1 in the client (PCM)"),
+                                           &app_configuration->surround_pcm, false);
+    pref_desc_label(view,
+                    locstr("Decode 5.1 to PCM in the client (needed on eARC Atmos). Channel order is "
+                           "E, PD, D, PE, C, Sub. Leave off for stereo."),
+                    false);
+    lv_obj_add_event_cb(pcm_checkbox, reconnect_cb, LV_EVENT_VALUE_CHANGED, pane);
+#endif
+
+    pref_header(view, locstr("Bitrate"));
+
+    lv_obj_t *abr_checkbox = pref_checkbox(view, locstr("Adaptive bitrate"),
+                                           &app_configuration->auto_adjust_bitrate, false);
+    pane->abr_dropdown = pref_dropdown_int(view, pane->abr_entries,
+                                           sizeof(pane->abr_entries) / sizeof(pane->abr_entries[0]),
+                                           &app_configuration->abr_mode, NULL);
+    lv_obj_set_width(pane->abr_dropdown, LV_PCT(100));
+    pref_desc_label(view,
+                    locstr("Let the host lower the bitrate when the link drops packets, then ramp back up. "
+                           "Requires a Sunshine build with ABR support."),
+                    false);
+    lv_obj_add_event_cb(abr_checkbox, abr_checkbox_cb, LV_EVENT_VALUE_CHANGED, pane);
+    lv_obj_add_event_cb(pane->abr_dropdown, reconnect_cb, LV_EVENT_VALUE_CHANGED, pane);
+    abr_state_update(pane);
+
+    pref_header(view, locstr("Reset"));
+    lv_obj_t *reset_btn = lv_btn_create(view);
+    lv_obj_set_width(reset_btn, LV_PCT(100));
+    lv_obj_t *reset_lbl = lv_label_create(reset_btn);
+    lv_label_set_text(reset_lbl, locstr("Reset all settings to defaults"));
+    lv_obj_center(reset_lbl);
+    pref_desc_label(view,
+                    locstr("Restores built-in defaults and rewrites moonlight.ini. Pairing keys are kept. "
+                           "Reconnect the stream after this."),
+                    false);
+    lv_obj_add_event_cb(reset_btn, reset_defaults_clicked, LV_EVENT_CLICKED, pane);
+
     return view;
+}
+
+static void reconnect_cb(lv_event_t *e) {
+    experimental_pane_t *pane = lv_event_get_user_data(e);
+    if (pane->parent) {
+        pane->parent->needs_stream_reconnect = true;
+    }
+}
+
+static void reset_defaults_clicked(lv_event_t *e) {
+    static const char *btns[] = {translatable("Cancel"), translatable("Reset"), ""};
+    lv_obj_t *mbox = lv_msgbox_create_i18n(NULL, locstr("Reset settings"),
+                                           locstr("Restore all settings to defaults? Pairing is kept. "
+                                                  "You must reconnect the stream."),
+                                           btns, false);
+    lv_obj_center(mbox);
+    lv_obj_add_event_cb(mbox, reset_defaults_confirm_cb, LV_EVENT_VALUE_CHANGED,
+                        lv_event_get_user_data(e));
+}
+
+static void reset_defaults_confirm_cb(lv_event_t *e) {
+    experimental_pane_t *pane = lv_event_get_user_data(e);
+    lv_obj_t *mbox = lv_event_get_current_target(e);
+    if (lv_msgbox_get_active_btn(mbox) == 1 && app_configuration != NULL) {
+        settings_restore_defaults(app_configuration);
+        if (pane->parent) {
+            pane->parent->needs_stream_reconnect = true;
+        }
+        log_overlay_set_enabled(app_configuration->show_logs);
+    }
+    lv_msgbox_close_async(mbox);
+}
+
+static void abr_state_update(experimental_pane_t *pane) {
+    if (app_configuration->auto_adjust_bitrate) {
+        lv_obj_clear_state(pane->abr_dropdown, LV_STATE_DISABLED);
+    } else {
+        lv_obj_add_state(pane->abr_dropdown, LV_STATE_DISABLED);
+    }
+}
+
+static void abr_checkbox_cb(lv_event_t *e) {
+    experimental_pane_t *pane = lv_event_get_user_data(e);
+    reconnect_cb(e);
+    abr_state_update(pane);
 }
 
 static void on_show_logs_changed(lv_event_t *e) {

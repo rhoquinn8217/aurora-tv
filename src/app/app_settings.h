@@ -108,12 +108,23 @@ typedef struct app_settings_t {
     bool swap_abxy;
     bool syskey_capture;
     bool hdr;   /* HDR10 (PQ) over HEVC Main10 or AV1 Main10 when host and decoder support it */
+    /** Negotiate HEVC/AV1 Main10 without requiring HDR (SDR 10-bit; less banding). */
+    bool force_10bit;
     bool force_full_color_range; /* SDR only: request full-range YUV (0-255) from host. No effect when HDR is on. */
+    /** Report pad battery to host (Vibepollo/Sunshine virtual gamepads). Default on. */
+    bool report_gamepad_battery;
     bool hevc;
     /** Sunshine/Apollo: negotiate AV1 Main8/Main10 when decoder exposes SS4S_VIDEO_AV1. */
     bool av1;
     /** Periodic HEVC IDR refresh interval in ms (0 = off, min 500 when enabled, step 500). */
     int idr_refresh_interval_ms;
+    /**
+     * Retired. Future-PTS V-Sync made PAN hitch worse on C5. Always 0 (present
+     * on arrival). Old moonlight.ini keys are ignored.
+     */
+    int render_queue_frames;
+    /** Decode surround Opus in the client and feed PCM, skipping backend transcode. */
+    bool surround_pcm;
     bool show_stats_on_start;
     bool show_stats_compact;
     /** On-screen log overlay preference (Yellow cycles Off/Live/Frozen). */
@@ -169,6 +180,9 @@ extern const size_t audio_config_len;
 #define VDEC_REASSEMBLY_BUFFER_MB 2
 
 void settings_initialize(app_settings_t *config, char *conf_dir);
+
+/** Re-apply built-in defaults and rewrite moonlight.ini. Keeps pairing keys. */
+void settings_restore_defaults(app_settings_t *config);
 
 bool settings_read(app_settings_t *config);
 

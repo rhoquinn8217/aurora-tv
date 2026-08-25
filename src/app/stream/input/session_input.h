@@ -52,6 +52,7 @@ typedef struct stream_input_t {
      * working prototype, which stores it. */
     uint16_t moonlightExcludedMask;
     uint8_t stick_deadzone;
+    bool report_gamepad_battery;
     session_input_vmouse_t vmouse;
 #if FEATURE_INPUT_EVMOUSE
     session_evmouse_t evmouse;

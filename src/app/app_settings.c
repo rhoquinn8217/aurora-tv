@@ -168,10 +168,14 @@ void settings_initialize(app_settings_t *config, char *conf_dir) {
     config->absmouse = true;
     config->virtual_mouse = false;
     config->hdr = false;
+    config->force_10bit = false;
     config->force_full_color_range = false;
+    config->report_gamepad_battery = true;
     config->hevc = true;
     config->av1 = false;
     config->idr_refresh_interval_ms = 0;
+    config->render_queue_frames = 0;
+    config->surround_pcm = false;
     config->show_stats_on_start = false;
     config->show_stats_compact = false;
     config->show_logs = false;
@@ -183,8 +187,11 @@ void settings_initialize(app_settings_t *config, char *conf_dir) {
     config->game_mode = true;
 
 #if defined(TARGET_WEBOS)
-    /* Auto pairs audio with the video module (SMP/NDL). Both remaps 5.1 PCM for LFE. */
+    /* Auto pairs audio with the video module (SMP/NDL). */
     set_string(&config->audio_backend, "auto");
+    /* eARC Atmos on C5/G5: Opus 5.1 with a stub OpusHead clips; PCM + remap is
+     * the verified path. Stereo still works (surround_pcm only applies to >2ch). */
+    config->surround_pcm = true;
     settings_apply_ntsc_preset_refresh(config, config->stream.fps);
 #endif
 
@@ -192,6 +199,14 @@ void settings_initialize(app_settings_t *config, char *conf_dir) {
     config->ini_path = path_join(conf_dir, CONF_NAME_MOONLIGHT);
     config->condb_path = path_join(conf_dir, "gamecontrollerdb.txt");
     config->key_dir = path_join(conf_dir, "key");
+}
+
+void settings_restore_defaults(app_settings_t *config) {
+    char *conf_dir = config->conf_dir;
+    /* settings_initialize memset()s the struct; conf_dir is a parameter so it
+     * survives. Pairing keys live under key_dir on disk and are not wiped. */
+    settings_initialize(config, conf_dir);
+    settings_save(config);
 }
 
 bool settings_read(app_settings_t *config) {
@@ -255,14 +270,17 @@ bool settings_save(app_settings_t *config) {
     ini_write_bool(fp, "swap_abxy", config->swap_abxy);
     ini_write_int(fp, "stick_deadzone", config->stick_deadzone);
     ini_write_bool(fp, "syskey_capture", config->syskey_capture);
+    ini_write_bool(fp, "report_gamepad_battery", config->report_gamepad_battery);
 
     ini_write_section(fp, "video");
     ini_write_string(fp, "decoder", config->decoder);
     ini_write_bool(fp, "hdr", config->hdr);
+    ini_write_bool(fp, "force_10bit", config->force_10bit);
     ini_write_bool(fp, "force_full_color_range", config->force_full_color_range);
     ini_write_bool(fp, "hevc", config->hevc);
     ini_write_bool(fp, "av1", config->av1);
     ini_write_int(fp, "idr_refresh_interval_ms", config->idr_refresh_interval_ms);
+    ini_write_int(fp, "render_queue_frames", config->render_queue_frames);
     ini_write_bool(fp, "show_stats_on_start", config->show_stats_on_start);
     ini_write_bool(fp, "show_stats_compact", config->show_stats_compact);
     ini_write_bool(fp, "show_logs", config->show_logs);
@@ -276,6 +294,7 @@ bool settings_save(app_settings_t *config) {
         ini_write_string(fp, "device", config->audio_device);
     }
     ini_write_string(fp, "surround", serialize_audio_config(config->stream.audioConfiguration));
+    ini_write_bool(fp, "surround_pcm", config->surround_pcm);
 
     if (!config->fullscreen) {
         ini_write_section(fp, "window");
@@ -407,6 +426,8 @@ static int settings_parse(app_settings_t *config, const char *section, const cha
         config->show_logs = INI_IS_TRUE(value);
     } else if (INI_NAME_MATCH("hdr")) {
         config->hdr = INI_IS_TRUE(value);
+    } else if (INI_NAME_MATCH("force_10bit")) {
+        config->force_10bit = INI_IS_TRUE(value);
     } else if (INI_FULL_MATCH("video", "client_refresh_rate_x100")) {
         set_int(&config->client_refresh_rate_x100, value);
         if (config->client_refresh_rate_x100 < 0) {
@@ -424,11 +445,17 @@ static int settings_parse(app_settings_t *config, const char *section, const cha
                INI_FULL_MATCH("video", "smooth_frame_pacing") ||
                INI_FULL_MATCH("video", "soft_recovery") ||
                INI_FULL_MATCH("video", "experimental_frame_pacer") ||
+               INI_FULL_MATCH("video", "vsync_pacing") ||
                INI_NAME_MATCH("stream_hud") ||
                INI_NAME_MATCH("high_priority_stream")) {
         /* Legacy keys ignored (removed from settings). */
     } else if (INI_FULL_MATCH("video", "force_full_color_range")) {
         config->force_full_color_range = INI_IS_TRUE(value);
+    } else if (INI_FULL_MATCH("video", "render_queue_frames")) {
+        /* Retired V-Sync queue: keep 0 so old ini files cannot re-enable it. */
+        config->render_queue_frames = 0;
+    } else if (INI_FULL_MATCH("audio", "surround_pcm")) {
+        config->surround_pcm = INI_IS_TRUE(value);
     } else if (INI_NAME_MATCH("surround")) {
         config->stream.audioConfiguration = parse_audio_config(value);
     } else if (INI_NAME_MATCH("sops")) {
@@ -472,6 +499,8 @@ static int settings_parse(app_settings_t *config, const char *section, const cha
         }
     } else if (INI_NAME_MATCH("swap_abxy")) {
         config->swap_abxy = INI_IS_TRUE(value);
+    } else if (INI_NAME_MATCH("report_gamepad_battery")) {
+        config->report_gamepad_battery = INI_IS_TRUE(value);
     } else if (INI_NAME_MATCH("syskey_capture")) {
         config->syskey_capture = INI_IS_TRUE(value);
     } else if (INI_FULL_MATCH("video", "decoder")) {
