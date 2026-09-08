@@ -29,6 +29,7 @@
 #include "input/ctm_bridge_gesture.h"
 
 #include <string.h>
+#include <stdio.h>      /* ⚠️ TEMPORARY, for the T-155 width measurement */
 
 /* Which setting a detail row edits. ⚠️ This lived one line above the block that
  * was lifted and was missed on the first pass -- the whole build failed on it. */
@@ -187,6 +188,11 @@ static streaming_controller_t *s_ctm_owner = NULL;
 
 static ctm_bridge_dev_t s_ctm_devs[16];
 static lv_obj_t        *s_ctm_dev_rows[16];
+/* The badge that is NOT lit on each row, and that row's name label. The first
+ * is recoloured when the selection moves (LVGL v8 does not give a child the
+ * parent's state, so this cannot be a style); the second is measured. */
+static lv_obj_t        *s_ctm_dev_offbadge[16];
+static lv_obj_t        *s_ctm_dev_name[16];
 static int  s_ctm_ndev = 0;
 static int  s_ctm_sel  = 0;
 
@@ -393,6 +399,17 @@ static void ctm_dev_focus_cb(lv_event_t *e) {
         if (!s_ctm_dev_rows[i]) continue;
         if (i == row) lv_obj_add_state(s_ctm_dev_rows[i], LV_STATE_CHECKED);
         else          lv_obj_clear_state(s_ctm_dev_rows[i], LV_STATE_CHECKED);
+        /* ⭐ The unlit badge outlines in grey on the SELECTED row only
+         * (rhoquinn8217, 2026-09-08). Its usual CTM_COL_BORDER goes muddy
+         * against the selected row's lighter back, and a single brighter grey
+         * on every row would make a list of four rows shout. ⛔ This CANNOT be
+         * a style state: LVGL v8 does not propagate a parent's state to its
+         * children, so the badge never sees LV_STATE_CHECKED and only this
+         * loop -- which already runs on every focus change -- can do it. */
+        if (s_ctm_dev_offbadge[i]) {
+            lv_obj_set_style_border_color(s_ctm_dev_offbadge[i],
+                                          i == row ? CTM_COL_SUB : CTM_COL_BORDER, 0);
+        }
     }
 }
 
@@ -475,10 +492,30 @@ static void ctm_close_click_cb(lv_event_t *e) {
     ctm_request_close();
 }
 
+/* BASIC clicked means release, FULL clicked means bridge -- the same absolute
+ * directions the Left and Right keys give, so a pointer and a d-pad say the
+ * same thing. ⓘ Each refuses a press that would not change anything. */
+static void ctm_badge_basic_cb(lv_event_t *e) {
+    ctm_release_device((int) (intptr_t) lv_event_get_user_data(e));
+}
+
+static void ctm_badge_full_cb(lv_event_t *e) {
+    ctm_bridge_device((int) (intptr_t) lv_event_get_user_data(e));
+}
+
 /* One state badge. Lit, it is the state the row is in; unlit, it is an outline
- * of the other state, so the pair reads as a switch with two positions. */
-static void ctm_make_badge(lv_obj_t *parent, const char *text, bool lit,
-                           lv_color_t lit_bg, lv_color_t lit_txt) {
+ * of the other state, so the pair reads as a switch with two positions.
+ *
+ * ⭐ A POINTER TARGET, BUT NOT A NAVIGATION STOP (rhoquinn8217, 2026-09-08).
+ * Clickable and navigable are independent in LVGL, so the badge takes a click
+ * without ever joining the group: a remote with a pointer gains two targets,
+ * and a remote with only a d-pad -- the worst case, and the one to design for
+ * -- gains no extra presses. ⛔ Do NOT lv_group_add_obj() these.
+ *
+ * Returns the badge so the caller can keep the unlit one for recolouring. */
+static lv_obj_t *ctm_make_badge(lv_obj_t *parent, const char *text, bool lit,
+                                lv_color_t lit_bg, lv_color_t lit_txt,
+                                lv_event_cb_t cb, int idx) {
     lv_obj_t *badge = lv_obj_create(parent);
     lv_obj_remove_style_all(badge);
     lv_obj_set_size(badge, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
@@ -490,10 +527,16 @@ static void ctm_make_badge(lv_obj_t *parent, const char *text, bool lit,
     lv_obj_set_style_bg_color(badge, lit_bg, 0);
     lv_obj_set_style_bg_opa(badge, lit ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
     lv_obj_clear_flag(badge, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(badge, LV_OBJ_FLAG_CLICKABLE);
+    /* ⛔ Not click-focusable: the badge is outside the group, so taking focus
+     * on a click would move it nowhere and steal it from the row. */
+    lv_obj_clear_flag(badge, LV_OBJ_FLAG_CLICK_FOCUSABLE);
+    lv_obj_add_event_cb(badge, cb, LV_EVENT_CLICKED, (void *) (intptr_t) idx);
     lv_obj_t *st = lv_label_create(badge);
     lv_label_set_text(st, text);
     lv_obj_set_style_text_color(st, lit ? lit_txt : CTM_COL_SUB, 0);
     lv_obj_set_style_text_font(st, lv_theme_get_font_normal(parent), 0);
+    return badge;
 }
 
 /* Short sidebar label: kind badge for known controllers, device name for HID. */
@@ -617,6 +660,9 @@ static lv_obj_t *ctm_make_dev_row(const ctm_bridge_dev_t *d, int idx) {
      * a ROW, grow means leftover WIDTH, which is what is wanted here. */
     lv_obj_set_width(name, 1);
     lv_obj_set_flex_grow(name, 1);
+    if (idx >= 0 && idx < 16) {
+        s_ctm_dev_name[idx] = name;
+    }
     lv_obj_set_style_text_color(name, CTM_COL_TXT, 0);
     lv_obj_set_style_text_font(name, lv_theme_get_font_normal(textcol), 0);
 
@@ -648,8 +694,15 @@ static lv_obj_t *ctm_make_dev_row(const ctm_bridge_dev_t *d, int idx) {
      * outline, so the pair reads as a switch with two positions rather than a
      * word that changes. ⓘ It used to show one badge, FULL purple or BASIC
      * grey, and the row had to be re-read to know which of the two it was. */
-    ctm_make_badge(textcol, "BASIC", !d->plugged, lv_color_hex(0x4a5866), CTM_COL_SUB);
-    ctm_make_badge(textcol, "FULL",   d->plugged, CTM_COL_FULL,           CTM_COL_TXT);
+    lv_obj_t *b_basic = ctm_make_badge(textcol, "BASIC", !d->plugged,
+                                       lv_color_hex(0x4a5866), CTM_COL_SUB,
+                                       ctm_badge_basic_cb, idx);
+    lv_obj_t *b_full  = ctm_make_badge(textcol, "FULL", d->plugged,
+                                       CTM_COL_FULL, CTM_COL_TXT,
+                                       ctm_badge_full_cb, idx);
+    if (idx >= 0 && idx < 16) {
+        s_ctm_dev_offbadge[idx] = d->plugged ? b_basic : b_full;
+    }
 
     lv_obj_t *act = lv_obj_create(row);
     lv_obj_remove_style_all(act);
@@ -760,7 +813,11 @@ static void ctm_panel_refresh(void) {
      * back into the group first: Up from the first row reaches it. */
     if (s_ctm_close_btn) lv_group_add_obj(s_ctm_nav_group, s_ctm_close_btn);
     lv_obj_clean(s_ctm_sidebar);
-    for (int i = 0; i < 16; ++i) s_ctm_dev_rows[i] = NULL;
+    for (int i = 0; i < 16; ++i) {
+        s_ctm_dev_rows[i] = NULL;
+        s_ctm_dev_offbadge[i] = NULL;
+        s_ctm_dev_name[i] = NULL;
+    }
 
     /* ⭐ Two headings, laid out like the rows beneath them -- name on the left,
      * status on the right -- so the FULL/BASIC column reads as something rather
@@ -951,6 +1008,45 @@ static void ctm_late_refresh_cb(lv_timer_t *t) {
     }
 }
 
+/* ⚠️⚠️ TEMPORARY -- DELETE ONCE THE CARD WIDTH IS SET (T-155).
+ *
+ * The name label is flex_grow(1), so it takes whatever the row has left and
+ * then truncates with LONG_DOT. That makes the right width impossible to
+ * eyeball: too wide leaves a blank gap after the name, too narrow silently
+ * eats the end of it. ➡️ So measure instead of guessing -- one build, one
+ * panel open, then read the numbers off the TV and set the width once.
+ *
+ * text_w is the name's NATURAL width, label_w the room it actually got:
+ *   text_w  > label_w  -> truncating; widen the card by the difference
+ *   label_w > text_w   -> that difference IS the blank gap; narrow by it
+ * Runs once per open, after a beat, because the layout is not computed until
+ * LVGL has been round the loop. */
+static void ctm_measure_cb(lv_timer_t *t) {
+    lv_obj_t *card = (lv_obj_t *) t->user_data;
+    if (card == NULL) {
+        return;
+    }
+    lv_obj_update_layout(card);
+    FILE *f = fopen("/tmp/ctm-panel-metrics.log", "a");
+    if (f == NULL) {
+        return;
+    }
+    fprintf(f, "card_w=%d (the width being tried)\n", (int) lv_obj_get_width(card));
+    for (int i = 0; i < s_ctm_ndev && i < 16; ++i) {
+        if (s_ctm_dev_name[i] == NULL) {
+            continue;
+        }
+        const char *txt = lv_label_get_text(s_ctm_dev_name[i]);
+        lv_point_t sz;
+        lv_txt_get_size(&sz, txt,
+                        lv_obj_get_style_text_font(s_ctm_dev_name[i], LV_PART_MAIN),
+                        0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+        fprintf(f, "  row%d label_w=%d text_w=%d name=[%s]\n",
+                i, (int) lv_obj_get_width(s_ctm_dev_name[i]), (int) sz.x, txt);
+    }
+    fclose(f);
+}
+
 static void open_ctm_panel(lv_event_t *event) {
     /* The CTM button has LV_OBJ_FLAG_EVENT_BUBBLE; stop the CLICKED here so it
      * never reaches the overlay root's hide_overlay handler. hide_overlay calls
@@ -1003,10 +1099,16 @@ static void open_ctm_panel(lv_event_t *event) {
     /* ⭐ Wider (rhoquinn8217, 2026-09-08): two badges on the first line and an
      * Auto Bridge box on the second, with "(1) DualSense Edge" still fitting
      * beside them. Anything longer than that truncates. */
-    lv_obj_set_width(card, LV_PCT(36));
+    /* ⚠️ PROVISIONAL, to be set from the measurement below (T-155). The old
+     * 36 and the 302 build's 44 are both void: each was measured while the
+     * auto-bridge control still sat in the row, and that control has gone to
+     * the settings pane. */
+    lv_obj_set_width(card, LV_PCT(38));
     lv_obj_set_height(card, LV_SIZE_CONTENT);
     lv_obj_set_flex_flow(card, LV_FLEX_FLOW_COLUMN);
-    lv_obj_align(card, LV_ALIGN_TOP_RIGHT, LV_DPX(-16), LV_DPX(16));
+    /* ⭐ In from the corner (rhoquinn8217, 2026-09-08): the TV's overscan was
+     * clipping the right edge of the card off the picture. */
+    lv_obj_align(card, LV_ALIGN_TOP_RIGHT, LV_DPX(-48), LV_DPX(24));
     lv_obj_set_style_bg_color(card, CTM_COL_CARD, 0);
     lv_obj_set_style_bg_opa(card, LV_OPA_COVER, 0);
     lv_obj_set_style_radius(card, LV_DPX(12), 0);
@@ -1031,7 +1133,9 @@ static void open_ctm_panel(lv_event_t *event) {
     lv_obj_remove_style_all(titlerow);
     lv_obj_set_size(titlerow, LV_PCT(100), LV_SIZE_CONTENT);
     lv_obj_set_flex_flow(titlerow, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(titlerow, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    /* ⭐ The title centres (rhoquinn8217, 2026-09-08); the close corner is taken
+     * out of the flow below and pinned right, so it cannot push it off centre. */
+    lv_obj_set_flex_align(titlerow, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_clear_flag(titlerow, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_t *title = lv_label_create(titlerow);
     lv_label_set_text(title, "USB Bridge");
@@ -1054,6 +1158,8 @@ static void open_ctm_panel(lv_event_t *event) {
     lv_obj_set_style_border_color(s_ctm_close_btn, CTM_COL_BORDER, 0);
     lv_obj_set_style_border_color(s_ctm_close_btn, CTM_COL_FOCUS, LV_STATE_FOCUS_KEY);
     lv_obj_add_flag(s_ctm_close_btn, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_flag(s_ctm_close_btn, LV_OBJ_FLAG_IGNORE_LAYOUT);   /* pinned, not flowed */
+    lv_obj_align(s_ctm_close_btn, LV_ALIGN_RIGHT_MID, 0, 0);
     lv_obj_add_event_cb(s_ctm_close_btn, ctm_close_click_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_add_event_cb(s_ctm_close_btn, ctm_nav_key_cb, LV_EVENT_KEY, (void *) (intptr_t) -1);
     lv_obj_add_event_cb(s_ctm_close_btn, ctm_nav_cancel_cb, LV_EVENT_CANCEL, NULL);
@@ -1124,6 +1230,10 @@ static void open_ctm_panel(lv_event_t *event) {
 
     app_input_set_group(&controller->global->ui.input, s_ctm_nav_group);
     ctm_panel_refresh();
+
+    /* ⚠️ TEMPORARY (T-155): see ctm_measure_cb. Delete with it. */
+    lv_timer_t *measure = lv_timer_create(ctm_measure_cb, 900, card);
+    lv_timer_set_repeat_count(measure, 1);
 }
 
 /* ---- the seam ---------------------------------------------------------- */
