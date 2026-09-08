@@ -96,14 +96,9 @@ static int glue_plug_all_locked(void)
 static void glue_hotplug_cb(void *ud, const ctm_controller_dev_t *dev, int present)
 {
     (void) ud; (void) dev; (void) present;
-    /* ⭐ A CABLE'S AUDIO IS NOT READY THE MOMENT IT APPEARS -- measured at
-     * several seconds -- so the core is told when each node showed up and works
-     * out for itself whether a tone should wait. ⓘ Before the s_active check on
-     * purpose: the clock should start when the device appears, whatever the
-     * bridge happens to be doing. */
-    if (present && dev && dev->path[0]) {
-        ctm_feedback_note_appeared(dev->path);
-    }
+    /* ⓘ Until 2026-09-08 this told the core when a node appeared, so a tone
+     * could wait for a fresh cable's audio to "become usable". The core plays
+     * the signal twice on a fresh cable instead and needs no clock. */
     if (!s_active) {
         return;
     }
