@@ -92,6 +92,11 @@ void ctm_bridge_agent(char *out, size_t out_len);
  * next ctm_bridge_list() call. */
 int ctm_bridge_list(ctm_bridge_dev_t *out, int max);
 
+/* The same list, but WITHOUT bringing the bridge core up: no stopSniff worker
+ * and no broadcast for an agent that cannot exist before a host is chosen.
+ * ⭐ For the settings pane, which lists devices with no stream running. */
+int ctm_bridge_list_quiet(ctm_bridge_dev_t *out, int max);
+
 /* Is the controller behind this hidraw node already bridged? A plug attempt
  * cannot answer this -- it returns false both when already plugged and when
  * genuinely refused. */

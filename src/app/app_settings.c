@@ -28,6 +28,13 @@ static void set_string(char **field, const char *value);
 
 static void set_int(int *field, const char *value);
 
+void settings_set_auto_macs(app_settings_t *config, const char *csv) {
+    if (config == NULL) {
+        return;
+    }
+    set_string(&config->bridge_auto_macs, csv ? csv : "");
+}
+
 void settings_sync_refresh_rate(app_settings_t *config) {
     settings_reconcile_refresh_rate(config);
 }
@@ -157,13 +164,23 @@ void settings_initialize(app_settings_t *config, char *conf_dir) {
     config->quitappafter = false;
     config->autoresume = false;
     config->viewonly = false;
-    config->bridge_enable = true;
+    /* ⭐⭐ OFF ON A FRESH INSTALL (rhoquinn8217, 2026-09-08). Bridging needs a
+     * listener running on the PC, so it cannot work until someone has set that
+     * up; shipping it on means a feature that appears broken to everyone who
+     * has not. ➡️ Turning it on is the moment the Auto Bridge section is first
+     * met, which is why that section sits directly under this switch.
+     * ✅ Existing installs are untouched: settings_load applies these defaults
+     * and THEN lets the file override them, and the conf directory survives an
+     * ipk install -- verified on the C1, whose pairing keys predate every
+     * install since. */
+    config->bridge_enable = false;
     config->bridge_gesture = true;
     config->bridge_signal_light = true;
     config->bridge_signal_rumble = true;
     config->bridge_signal_tone = true;
     config->bridge_mic_wired = true;
     config->bridge_mic_bt = false;   /* never armed on this branch */
+    set_string(&config->bridge_auto_macs, "");
     config->rotate = 0;
     config->absmouse = true;
     config->virtual_mouse = false;
@@ -260,6 +277,8 @@ bool settings_save(app_settings_t *config) {
     ini_write_bool(fp, "bridge_signal_tone", config->bridge_signal_tone);
     ini_write_bool(fp, "bridge_mic_wired", config->bridge_mic_wired);
     ini_write_bool(fp, "bridge_mic_bt", config->bridge_mic_bt);
+    ini_write_string(fp, "bridge_auto_macs",
+                     config->bridge_auto_macs ? config->bridge_auto_macs : "");
 
     ini_write_section(fp, "input");
     ini_write_bool(fp, "absmouse", config->absmouse);
@@ -482,6 +501,8 @@ static int settings_parse(app_settings_t *config, const char *section, const cha
         config->bridge_mic_wired = INI_IS_TRUE(value);
     } else if (INI_NAME_MATCH("bridge_mic_bt")) {
         config->bridge_mic_bt = INI_IS_TRUE(value);
+    } else if (INI_NAME_MATCH("bridge_auto_macs")) {
+        set_string(&config->bridge_auto_macs, value);
     } else if (INI_NAME_MATCH("absmouse")) {
         config->absmouse = INI_IS_TRUE(value);
     } else if (INI_NAME_MATCH("virtual_mouse")) {

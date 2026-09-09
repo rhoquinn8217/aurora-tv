@@ -102,6 +102,21 @@ typedef struct app_settings_t {
      * "tidy" it away; that reintroduces the divergence it exists to prevent. */
     bool bridge_mic_wired;
     bool bridge_mic_bt;
+    /* ⭐ WHICH CONTROLLERS BRIDGE THEMSELVES when a stream starts, by the
+     * controller's own MAC, comma-separated. Chosen in the USB Bridge settings
+     * pane; empty means none.
+     *
+     * ⛔ MACs, NOT the core's `uniq`, and the difference is the whole feature.
+     * Measured on the C1 2026-09-08: `uniq` is EMPTY for a directly cabled
+     * DualSense Edge and is the DS5DONGLE'S OWN SERIAL through a dongle -- it
+     * follows the dongle, so keying on it would mark the dongle rather than the
+     * pad. Move the pad and its mark stays behind; put another pad on that
+     * dongle and it bridges itself by mistake. ➡️ The MAC comes from SDL
+     * (feature report 0x09) and is the pad's own on every path.
+     *
+     * ⛔ Empty means NONE. Never "whatever is present" -- that is the auto-plug
+     * that was removed for taking devices away from the TV unasked. */
+    char *bridge_auto_macs;
     bool absmouse;
     bool hardware_mouse;
     bool virtual_mouse;
@@ -190,6 +205,11 @@ bool settings_save(app_settings_t *config);
 
 /** Keep stream.fps aligned with client_refresh_rate_x100 when a fractional rate is set. */
 void settings_sync_refresh_rate(app_settings_t *config);
+
+/* Replace the auto-bridge list. ⓘ A setter because the field is an owned
+ * string and set_string is private to app_settings.c; the settings pane must
+ * not free and strdup it by hand. */
+void settings_set_auto_macs(app_settings_t *config, const char *csv);
 
 /** webOS: apply NTSC x100 only when use_ntsc_refresh for 30/60/120/240; else clear for presets. */
 void settings_reconcile_refresh_rate(app_settings_t *config);

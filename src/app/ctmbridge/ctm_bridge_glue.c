@@ -260,12 +260,9 @@ bool ctm_bridge_start(void)
     return true;
 }
 
-int ctm_bridge_list(ctm_bridge_dev_t *out, int max)
+/* The listing itself. Enumerates and fills; brings NOTHING up. */
+static int glue_list_locked_body(ctm_bridge_dev_t *out, int max)
 {
-    if (out == NULL || max <= 0) {
-        return 0;
-    }
-    ctm_glue_ensure_core();
     pthread_mutex_lock(&s_dev_mutex);
     ctm_glue_enumerate();
     int n = 0;
@@ -301,6 +298,31 @@ int ctm_bridge_list(ctm_bridge_dev_t *out, int max)
     }
     pthread_mutex_unlock(&s_dev_mutex);
     return n;
+}
+
+int ctm_bridge_list(ctm_bridge_dev_t *out, int max)
+{
+    if (out == NULL || max <= 0) {
+        return 0;
+    }
+    ctm_glue_ensure_core();
+    return glue_list_locked_body(out, max);
+}
+
+/* ⭐⭐ THE SAME LIST WITHOUT WAKING ANYTHING (T-135, 2026-09-08).
+ *
+ * ⛔ ctm_bridge_list() calls ctm_glue_ensure_core(), which starts the stopSniff
+ * worker and runs discover_agent_once() -- a BROADCAST for an agent that
+ * cannot exist yet, because the host is not chosen until a stream starts.
+ * ⚠️ The settings pane lists devices with no stream running, so it must not go
+ * through that door: showing a list is not a reason to bring the bridge up.
+ * ➡️ This enumerates and reports, and nothing else. */
+int ctm_bridge_list_quiet(ctm_bridge_dev_t *out, int max)
+{
+    if (out == NULL || max <= 0) {
+        return 0;
+    }
+    return glue_list_locked_body(out, max);
 }
 
 /* Is the controller behind this hidraw node already bridged?

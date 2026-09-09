@@ -27,11 +27,17 @@
 #include "util/i18n.h"
 #include "ui/settings/settings.controller.h"
 
+#if defined(TARGET_WEBOS)
+#include "ui/settings/auto_bridge_window.h"
+#endif
+
 typedef struct {
     lv_fragment_t base;
     /* ⭐ Everything that depends on bridging being enabled, so one callback can
-     * grey the lot. Add to this rather than to a second mechanism. */
-    lv_obj_t *dependent[5];
+     * grey the lot. Add to this rather than to a second mechanism.
+     * ⓘ Sized for the fixed switches plus a device list; auto-bridge rows
+     * register here too, so they grey with everything else. */
+    lv_obj_t *dependent[8];
     int dependent_count;
 } usbbridge_pane_t;
 
@@ -107,6 +113,25 @@ const lv_fragment_class_t settings_pane_usbbridge_cls = {
         .create_obj_cb = create_obj,
         .instance_size = sizeof(usbbridge_pane_t),
 };
+
+#if defined(TARGET_WEBOS)
+
+/* ⛔ THE DEVICE LIST IS NOT DRAWN HERE. It was, for one build, and it was the
+ * wrong shape: a settings pane is a column of switches, and a list of hardware
+ * that appears and disappears does not belong in one (rhoquinn8217,
+ * 2026-09-08). ➡️ This row opens the Auto Bridge window instead -- the USB
+ * Bridge panel cut down to device, address and a box -- so the devices are
+ * read where a device list reads naturally. */
+static void usbb_auto_open_cb(lv_event_t *e)
+{
+    LV_UNUSED(e);
+    if (!app_configuration->bridge_enable) {
+        return;   /* the row is greyed with the rest, but never trust that alone */
+    }
+    auto_bridge_window_open();
+}
+
+#endif /* TARGET_WEBOS */
 
 static void pane_ctor(lv_fragment_t *self, void *args) {
     (void) self;
@@ -186,6 +211,44 @@ static lv_obj_t *create_obj(lv_fragment_t *self, lv_obj_t *container) {
             "Allows device bridging with the USB Bridge Overlay Panel or gestures "
             "(DualSense/DualSense Edge Only)."), false);
     lv_obj_add_event_cb(enable_checkbox, enable_state_update_cb, LV_EVENT_VALUE_CHANGED, pane);
+
+#if defined(TARGET_WEBOS)
+    /* ⭐⭐ FIRST UNDER THE SWITCH, and that is the point (rhoquinn8217,
+     * 2026-09-08): bridging ships OFF, so the first thing anyone meets after
+     * turning it on is the way to never think about it again.
+     *
+     * ⭐ The line teaches the idea before the preference. A mark does nothing
+     * visible when it is made -- the effect arrives at the NEXT stream -- so
+     * without a sentence saying when, a ticked box looks like it did nothing.
+     * ⓘ That deferral is also why this lives in settings and not in the overlay
+     * panel: here, "takes effect next time" is what every control means. */
+    /* ⭐ THE HEADING IS THE DOOR (rhoquinn8217, 2026-09-08). ⛔ A full-width
+     * "Choose devices..." row under a heading was two things saying one thing,
+     * and the row stretched the width of the pane for a label three words long.
+     * ➡️ One control: the section title opens the window. ⓘ Sized to its text
+     * rather than the pane, so it reads as a button and not as a bar. */
+    usbb_gap(view);
+    lv_obj_t *auto_row = lv_btn_create(view);
+    lv_obj_set_size(auto_row, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+    lv_obj_set_style_pad_hor(auto_row, LV_DPX(14), 0);
+    lv_obj_set_style_pad_ver(auto_row, LV_DPX(8), 0);
+    lv_obj_set_style_radius(auto_row, LV_DPX(8), 0);
+    {
+        lv_obj_t *l = lv_label_create(auto_row);
+        lv_label_set_text(l, locstr("Auto Bridge"));
+        lv_obj_center(l);
+    }
+    lv_obj_add_event_cb(auto_row, usbb_auto_open_cb, LV_EVENT_CLICKED, pane);
+    if (pane->dependent_count < (int) (sizeof(pane->dependent) / sizeof(pane->dependent[0]))) {
+        pane->dependent[pane->dependent_count++] = auto_row;
+    }
+    pref_desc_label(view, locstr(
+            "Allow devices to automatically bridge to the host machine when the "
+            "stream starts."), false);
+    /* ⓘ The pane's gap is zero so a description sits tight under its own
+     * setting; without this the next heading sits tight under it too. */
+    usbb_gap(view);
+#endif
 
     /* ⭐ A heading, so the four below do not each need to say "DualSense only".
      * ⓘ They are controller features -- a keyboard has no touchpad, no lightbar
