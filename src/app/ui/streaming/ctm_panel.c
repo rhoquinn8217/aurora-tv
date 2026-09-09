@@ -27,6 +27,8 @@
 #include "ctm_bridge_glue.h"
 #include "ctm_panel.h"
 #include "input/ctm_bridge_gesture.h"
+#include "lvgl/font/material_icons_regular_symbols.h"
+#include "lvgl/theme/lv_theme_moonlight.h"
 
 #include <string.h>
 
@@ -77,6 +79,7 @@ static lv_obj_t   *s_ctm_sidebar    = NULL;   /* the device list */
  * ⭐ They stay in the SAME focus group, so Down from the last device still
  * reaches them; they simply stay visible while the list moves above. */
 static lv_obj_t   *s_ctm_actions    = NULL;
+static lv_obj_t   *s_ctm_close_btn  = NULL;   /* the X in the title row; in the nav group */
 static lv_obj_t   *s_ctm_status_lbl = NULL;   /* "USB Server: <addr> -" */
 static lv_obj_t   *s_ctm_state_lbl  = NULL;   /* ONLINE / OFFLINE, the only coloured part */
 /* ⭐ The same fact the label shows, kept so the rows and Bridge All can act on
@@ -186,6 +189,10 @@ static streaming_controller_t *s_ctm_owner = NULL;
 
 static ctm_bridge_dev_t s_ctm_devs[16];
 static lv_obj_t        *s_ctm_dev_rows[16];
+/* The badge that is NOT lit on each row, and that row's name label. The first
+ * is recoloured when the selection moves (LVGL v8 does not give a child the
+ * parent's state, so this cannot be a style); the second is measured. */
+static lv_obj_t        *s_ctm_dev_offbadge[16];
 static int  s_ctm_ndev = 0;
 static int  s_ctm_sel  = 0;
 
@@ -392,6 +399,17 @@ static void ctm_dev_focus_cb(lv_event_t *e) {
         if (!s_ctm_dev_rows[i]) continue;
         if (i == row) lv_obj_add_state(s_ctm_dev_rows[i], LV_STATE_CHECKED);
         else          lv_obj_clear_state(s_ctm_dev_rows[i], LV_STATE_CHECKED);
+        /* ⭐ The unlit badge outlines in grey on the SELECTED row only
+         * (rhoquinn8217, 2026-09-08). Its usual CTM_COL_BORDER goes muddy
+         * against the selected row's lighter back, and a single brighter grey
+         * on every row would make a list of four rows shout. ⛔ This CANNOT be
+         * a style state: LVGL v8 does not propagate a parent's state to its
+         * children, so the badge never sees LV_STATE_CHECKED and only this
+         * loop -- which already runs on every focus change -- can do it. */
+        if (s_ctm_dev_offbadge[i]) {
+            lv_obj_set_style_border_color(s_ctm_dev_offbadge[i],
+                                          i == row ? CTM_COL_SUB : CTM_COL_BORDER, 0);
+        }
     }
 }
 
@@ -466,6 +484,67 @@ static void ctm_nav_key_cb(lv_event_t *e) {
 static void ctm_nav_cancel_cb(lv_event_t *e) {
     LV_UNUSED(e);
     ctm_request_close();
+}
+
+/* The close corner was pressed, by pointer or by Select. */
+static void ctm_close_click_cb(lv_event_t *e) {
+    LV_UNUSED(e);
+    ctm_request_close();
+}
+
+/* BASIC clicked means release, FULL clicked means bridge -- the same absolute
+ * directions the Left and Right keys give, so a pointer and a d-pad say the
+ * same thing. ⓘ Each refuses a press that would not change anything. */
+static void ctm_badge_basic_cb(lv_event_t *e) {
+    ctm_release_device((int) (intptr_t) lv_event_get_user_data(e));
+}
+
+static void ctm_badge_full_cb(lv_event_t *e) {
+    ctm_bridge_device((int) (intptr_t) lv_event_get_user_data(e));
+}
+
+/* One state badge. Lit, it is the state the row is in; unlit, it is an outline
+ * of the other state, so the pair reads as a switch with two positions.
+ *
+ * ⭐ A POINTER TARGET, BUT NOT A NAVIGATION STOP (rhoquinn8217, 2026-09-08).
+ * Clickable and navigable are independent in LVGL, so the badge takes a click
+ * without ever joining the group: a remote with a pointer gains two targets,
+ * and a remote with only a d-pad -- the worst case, and the one to design for
+ * -- gains no extra presses. ⛔ Do NOT lv_group_add_obj() these.
+ *
+ * Returns the badge so the caller can keep the unlit one for recolouring. */
+static lv_obj_t *ctm_make_badge(lv_obj_t *parent, const char *text, bool lit,
+                                lv_color_t lit_bg, lv_color_t lit_txt,
+                                lv_event_cb_t cb, int idx) {
+    lv_obj_t *badge = lv_obj_create(parent);
+    lv_obj_remove_style_all(badge);
+    lv_obj_set_size(badge, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+    lv_obj_set_style_pad_hor(badge, LV_DPX(10), 0);
+    lv_obj_set_style_pad_ver(badge, LV_DPX(3), 0);
+    lv_obj_set_style_radius(badge, LV_DPX(4), 0);
+    lv_obj_set_style_border_width(badge, LV_DPX(1), 0);
+    lv_obj_set_style_border_color(badge, lit ? lit_bg : CTM_COL_BORDER, 0);
+    lv_obj_set_style_bg_color(badge, lit_bg, 0);
+    lv_obj_set_style_bg_opa(badge, lit ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
+    lv_obj_clear_flag(badge, LV_OBJ_FLAG_SCROLLABLE);
+    /* ⭐ Darkens under the press, the way the action buttons do, so a click
+     * that lands is felt (rhoquinn8217, 2026-09-08). ⓘ The unlit badge has no
+     * fill to darken, so it GAINS one for the press instead -- without it a
+     * click on BASIC gave no feedback at all. ✅ Unlike the selection grey
+     * above, PRESSED is the badge's own state, so this one is a plain style. */
+    lv_obj_set_style_bg_color(badge, lv_color_darken(lit ? lit_bg : CTM_COL_ROW, LV_OPA_40),
+                              LV_STATE_PRESSED);
+    lv_obj_set_style_bg_opa(badge, LV_OPA_COVER, LV_STATE_PRESSED);
+    lv_obj_add_flag(badge, LV_OBJ_FLAG_CLICKABLE);
+    /* ⛔ Not click-focusable: the badge is outside the group, so taking focus
+     * on a click would move it nowhere and steal it from the row. */
+    lv_obj_clear_flag(badge, LV_OBJ_FLAG_CLICK_FOCUSABLE);
+    lv_obj_add_event_cb(badge, cb, LV_EVENT_CLICKED, (void *) (intptr_t) idx);
+    lv_obj_t *st = lv_label_create(badge);
+    lv_label_set_text(st, text);
+    lv_obj_set_style_text_color(st, lit ? lit_txt : CTM_COL_SUB, 0);
+    lv_obj_set_style_text_font(st, lv_theme_get_font_normal(parent), 0);
+    return badge;
 }
 
 /* Short sidebar label: kind badge for known controllers, device name for HID. */
@@ -548,10 +627,13 @@ static lv_obj_t *ctm_make_dev_row(const ctm_bridge_dev_t *d, int idx) {
      * ⭐ Full width, height from its contents. */
     lv_obj_set_width(textcol, LV_PCT(100));
     lv_obj_set_height(textcol, LV_SIZE_CONTENT);
-    /* ⭐ Name on the left, tag on the right under its heading. */
+    /* ⭐ Two columns: what the device IS on the left, what STATE it is in on
+     * the right, each stacked under its own heading. ⓘ They are aligned to
+     * their TOPS, so the name and the badges share a line and what sits under
+     * each is free to differ in height. */
     lv_obj_set_flex_flow(textcol, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(textcol, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER,
-                          LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_flex_align(textcol, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_START,
+                          LV_FLEX_ALIGN_START);
     lv_obj_set_style_pad_gap(textcol, LV_DPX(8), 0);
     lv_obj_set_style_pad_all(textcol, 0, 0);
     lv_obj_clear_flag(textcol, LV_OBJ_FLAG_SCROLLABLE);
@@ -561,7 +643,23 @@ static lv_obj_t *ctm_make_dev_row(const ctm_bridge_dev_t *d, int idx) {
      * SDL numbers them from zero and the bridge core knows nothing about SDL,
      * so the hidraw node is the join. ⓘ A mouse or a keyboard has no player
      * number and simply shows none. */
-    lv_obj_t *name = lv_label_create(textcol);
+    /* ⭐ The identity column. ⛔ The grow belongs HERE, not on the name: textcol
+     * is a ROW so grow takes leftover WIDTH, which is what the name wants --
+     * but the name now lives one level down in a COLUMN, where grow would take
+     * HEIGHT and stretch it down the list (the 2026-08-20 bug, one level in). */
+    lv_obj_t *namecol = lv_obj_create(textcol);
+    lv_obj_remove_style_all(namecol);
+    lv_obj_set_width(namecol, 1);
+    lv_obj_set_flex_grow(namecol, 1);
+    lv_obj_set_height(namecol, LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(namecol, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(namecol, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START,
+                          LV_FLEX_ALIGN_START);
+    lv_obj_set_style_pad_all(namecol, 0, 0);
+    lv_obj_set_style_pad_gap(namecol, LV_DPX(2), 0);
+    lv_obj_clear_flag(namecol, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *name = lv_label_create(namecol);
     {
         /* ⭐ "(1) DualSense" rather than "DualSense  1st". Shorter, which the
          * row needs -- and the number reads as an identifier rather than a
@@ -587,10 +685,52 @@ static lv_obj_t *ctm_make_dev_row(const ctm_bridge_dev_t *d, int idx) {
      * Controller" took three lines. */
     /* ⓘ Takes what the tag leaves, and truncates rather than wrapping -- inside
      * a ROW, grow means leftover WIDTH, which is what is wanted here. */
-    lv_obj_set_width(name, 1);
-    lv_obj_set_flex_grow(name, 1);
+    /* ⓘ Full width OF THE COLUMN, which is what LONG_DOT needs to truncate
+     * against. The column is what grows; this just fills it. */
+    lv_obj_set_width(name, LV_PCT(100));
     lv_obj_set_style_text_color(name, CTM_COL_TXT, 0);
     lv_obj_set_style_text_font(name, lv_theme_get_font_normal(textcol), 0);
+
+    /* ⭐ THE ADDRESS, UNDER THE NAME (rhoquinn8217, 2026-09-08). It fills the
+     * space the action label left when it moved right, and it earns the room:
+     * it is the identity the whole project keys on, and the only thing that
+     * tells two identically named controllers apart.
+     *
+     * ⭐⭐ THE MAC, NOT THE CORE'S `uniq`, AND THAT IS THE WHOLE POINT
+     * (rhoquinn8217, 2026-09-08).
+     *
+     * ⛔⛔ `uniq` DOES NOT IDENTIFY THE CONTROLLER. Ever. Measured on the C1
+     * 2026-09-08 with one of each connection:
+     *
+     *   Edge, direct USB cable   uniq = (empty)            SDL = 14-3a-9a-cb-f6-9d
+     *   DualSense, DS5dongle     uniq = 948D3F0AD521619B2  SDL = 7c-66-ef-82-10-ed
+     *
+     * ➡️ Cabled it is EMPTY, and through a dongle it is the DONGLE'S OWN serial
+     * -- the Pico 2 W's, not the pad's. ⚠️ rhoquinn8217 found this: the
+     * 17-character strings that looked like controller serials were dongles all
+     * along, and they follow the DONGLE across a controller swap.
+     * ⭐ The MAC is the pad's own, identical on both paths and over Bluetooth,
+     * so it is what belongs here and what a mark must key on. ⛔ Keying on uniq
+     * would mark the dongle: move the pad and the mark stays behind.
+     *
+     * ⓘ It comes from SDL, which reads feature report 0x09 -- available cabled,
+     * confirmed on hardware. ⚠️ Only for devices SDL opens as controllers, so a
+     * mouse or a headset falls back to whatever the core reported, and anything
+     * with nothing at all gets a dash rather than an empty line, so every row
+     * keeps the same height. Printed exactly as reported, never prettified. */
+    lv_obj_t *mac = lv_label_create(namecol);
+    {
+        char addr[64];
+        if (ctm_bridge_gesture_mac_for_node(d->node, addr, sizeof addr)) {
+            lv_label_set_text(mac, addr);
+        } else {
+            lv_label_set_text(mac, d->mac[0] ? d->mac : "--");
+        }
+    }
+    lv_label_set_long_mode(mac, LV_LABEL_LONG_DOT);
+    lv_obj_set_width(mac, LV_PCT(100));
+    lv_obj_set_style_text_color(mac, CTM_COL_SUB, 0);
+    lv_obj_set_style_text_font(mac, lv_theme_get_font_small(textcol), 0);
 
     /* What the device can do, not what we did to it. FULL is a bridged device:
      * speaker, haptics, adaptive triggers, microphone. BASIC is anything
@@ -613,42 +753,58 @@ static lv_obj_t *ctm_make_dev_row(const ctm_bridge_dev_t *d, int idx) {
      *
      * ⭐ A box rather than green text, so the good state is the one that stands
      * out -- BASIC is the absence of it rather than a warning of its own. */
-    lv_obj_t *st;
-    if (d->plugged) {
-        lv_obj_t *badge = lv_obj_create(textcol);
-        lv_obj_remove_style_all(badge);
-        lv_obj_set_size(badge, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
-        lv_obj_set_style_pad_hor(badge, LV_DPX(10), 0);
-        lv_obj_set_style_pad_ver(badge, LV_DPX(3), 0);
-        lv_obj_set_style_radius(badge, LV_DPX(4), 0);
-        lv_obj_set_style_bg_color(badge, CTM_COL_FULL, 0);
-        lv_obj_set_style_bg_opa(badge, LV_OPA_COVER, 0);
-        lv_obj_clear_flag(badge, LV_OBJ_FLAG_SCROLLABLE);
-        st = lv_label_create(badge);
-        lv_label_set_text(st, "FULL");
-        lv_obj_set_style_text_color(st, CTM_COL_TXT, 0);
-    } else {
-        /* ⭐ A box too, so the two states are the same shape and only the
-         * colour differs -- a boxed FULL beside a bare BASIC made the row look
-         * lopsided. */
-        lv_obj_t *badge = lv_obj_create(textcol);
-        lv_obj_remove_style_all(badge);
-        lv_obj_set_size(badge, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
-        lv_obj_set_style_pad_hor(badge, LV_DPX(10), 0);
-        lv_obj_set_style_pad_ver(badge, LV_DPX(3), 0);
-        lv_obj_set_style_radius(badge, LV_DPX(4), 0);
-        lv_obj_set_style_bg_color(badge, lv_color_hex(0x4a5866), 0);
-        lv_obj_set_style_bg_opa(badge, LV_OPA_COVER, 0);
-        lv_obj_clear_flag(badge, LV_OBJ_FLAG_SCROLLABLE);
-        st = lv_label_create(badge);
-        lv_label_set_text(st, "BASIC");
-        lv_obj_set_style_text_color(st, CTM_COL_SUB, 0);
-    }
-    lv_obj_set_style_text_font(st, lv_theme_get_font_normal(textcol), 0);
+    /* ⭐⭐ BOTH BADGES, ALWAYS, THE CURRENT ONE LIT (rhoquinn8217, 2026-09-08).
+     * BASIC then FULL, in the direction the arrow key sends a controller. Not
+     * controls: the row is the target, and the keys are Left to release, Right
+     * to bridge, Select to toggle. The lit badge is the state; the other is an
+     * outline, so the pair reads as a switch with two positions rather than a
+     * word that changes. ⓘ It used to show one badge, FULL purple or BASIC
+     * grey, and the row had to be re-read to know which of the two it was. */
+    /* ⭐ The state column. ⓘ Its width comes from the badge pair, which is the
+     * widest thing in it, so CENTRE-aligning its children puts the action label
+     * under the middle of the badges no matter what either of them says. ⛔ That
+     * is why this is a container and not a padding: a padding would have to be
+     * re-guessed every time a word changed. */
+    lv_obj_t *statecol = lv_obj_create(textcol);
+    lv_obj_remove_style_all(statecol);
+    lv_obj_set_size(statecol, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(statecol, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(statecol, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER,
+                          LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_all(statecol, 0, 0);
+    lv_obj_set_style_pad_gap(statecol, LV_DPX(2), 0);
+    lv_obj_clear_flag(statecol, LV_OBJ_FLAG_SCROLLABLE);
 
-    lv_obj_t *act = lv_obj_create(row);
+    lv_obj_t *badgerow = lv_obj_create(statecol);
+    lv_obj_remove_style_all(badgerow);
+    lv_obj_set_size(badgerow, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(badgerow, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(badgerow, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER,
+                          LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_all(badgerow, 0, 0);
+    lv_obj_set_style_pad_gap(badgerow, LV_DPX(8), 0);
+    lv_obj_clear_flag(badgerow, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *b_basic = ctm_make_badge(badgerow, "BASIC", !d->plugged,
+                                       lv_color_hex(0x4a5866), CTM_COL_SUB,
+                                       ctm_badge_basic_cb, idx);
+    lv_obj_t *b_full  = ctm_make_badge(badgerow, "FULL", d->plugged,
+                                       CTM_COL_FULL, CTM_COL_TXT,
+                                       ctm_badge_full_cb, idx);
+    if (idx >= 0 && idx < 16) {
+        s_ctm_dev_offbadge[idx] = d->plugged ? b_basic : b_full;
+    }
+
+    /* ⭐ CENTRED UNDER THE BADGES (rhoquinn8217, 2026-09-08), by living inside
+     * the state column rather than on a full-width line of its own. It began
+     * left under the name, where its arrows pointed at nothing, then
+     * right-aligned, which lined up its END rather than its middle. ➡️ In the
+     * column the centring is structural and needs no number. */
+    lv_obj_t *act = lv_obj_create(statecol);
     lv_obj_remove_style_all(act);
     lv_obj_set_size(act, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(act, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(act, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     /* ⛔ THE ROW'S OWN PADDING WAS NEVER THE HEIGHT. Its children carried their
      * own, so trimming the row alone changed nothing visible -- measured
      * 2026-08-20 after a first attempt did exactly that. */
@@ -681,7 +837,9 @@ static lv_obj_t *ctm_make_dev_row(const ctm_bridge_dev_t *d, int idx) {
      *
      * ⛔ PLAIN CHARACTERS, NOT LV_SYMBOL_*. LV_SYMBOL_LEFT rendered as an empty
      * box -- the small theme font on these rows has no symbol range. */
-    lv_label_set_text(actlbl, d->plugged ? "< Click to Release" : "Click to Bridge >");
+    /* ⭐ Shorter (rhoquinn8217, 2026-09-08): the badges now say the state and the
+     * arrow says the direction, so "Click to" was carrying nothing. */
+    lv_label_set_text(actlbl, d->plugged ? "< Release" : "Bridge >");
     lv_obj_set_style_text_color(actlbl, CTM_COL_TXT, 0);
     lv_obj_set_style_text_font(actlbl, lv_theme_get_font_small(act), 0);
     lv_obj_set_style_text_color(actlbl, CTM_COL_SUB, 0);
@@ -745,8 +903,14 @@ static void ctm_panel_refresh(void) {
     s_ctm_ndev = ctm_bridge_list(s_ctm_devs, 16);
 
     lv_group_remove_all_objs(s_ctm_nav_group);
+    /* The close corner lives in the header, which is not rebuilt, so it goes
+     * back into the group first: Up from the first row reaches it. */
+    if (s_ctm_close_btn) lv_group_add_obj(s_ctm_nav_group, s_ctm_close_btn);
     lv_obj_clean(s_ctm_sidebar);
-    for (int i = 0; i < 16; ++i) s_ctm_dev_rows[i] = NULL;
+    for (int i = 0; i < 16; ++i) {
+        s_ctm_dev_rows[i] = NULL;
+        s_ctm_dev_offbadge[i] = NULL;
+    }
 
     /* ⭐ Two headings, laid out like the rows beneath them -- name on the left,
      * status on the right -- so the FULL/BASIC column reads as something rather
@@ -771,6 +935,10 @@ static void ctm_panel_refresh(void) {
      * ⛔ As "Features" it sat over the action button and named nothing. */
     lv_obj_t *capfeat = lv_label_create(caprow);
     lv_label_set_text(capfeat, "Feature Set");
+    /* ⭐ In from the right by about four characters (rhoquinn8217, 2026-09-08),
+     * so it sits over the BASIC/FULL pair instead of past the end of it. The
+     * badges stop short of the row's edge; hard right looked hung off it. */
+    lv_obj_set_style_pad_right(capfeat, LV_DPX(26), 0);
     lv_obj_set_style_text_color(capfeat, CTM_COL_SUB, 0);
     lv_obj_set_style_text_font(capfeat, lv_theme_get_font_small(capfeat), 0);
 
@@ -986,10 +1154,21 @@ static void open_ctm_panel(lv_event_t *event) {
      * grow without bound, so it is the only thing that needs a limit -- and the
      * card is then always exactly as tall as its header, its list and its
      * buttons. */
-    lv_obj_set_width(card, LV_PCT(30));
+    /* ⭐ Wider (rhoquinn8217, 2026-09-08): two badges on the first line and an
+     * Auto Bridge box on the second, with "(1) DualSense Edge" still fitting
+     * beside them. Anything longer than that truncates. */
+    /* ⭐ 38%, MEASURED ON THE C1 rather than guessed (2026-09-08). At 1920 that
+     * is a 729px card, in which "(1) DualSense Edge" is given 298px and needs
+     * 280 -- an 18px margin, enough that a slightly longer name does not
+     * truncate and small enough that no blank gap shows. ⛔ The old 36 and the
+     * 302 build's 44 are both void: both were measured while the auto-bridge
+     * control still sat in the row, and that has gone to the settings pane. */
+    lv_obj_set_width(card, LV_PCT(38));
     lv_obj_set_height(card, LV_SIZE_CONTENT);
     lv_obj_set_flex_flow(card, LV_FLEX_FLOW_COLUMN);
-    lv_obj_align(card, LV_ALIGN_TOP_RIGHT, LV_DPX(-16), LV_DPX(16));
+    /* ⭐ In from the corner (rhoquinn8217, 2026-09-08): the TV's overscan was
+     * clipping the right edge of the card off the picture. */
+    lv_obj_align(card, LV_ALIGN_TOP_RIGHT, LV_DPX(-48), LV_DPX(24));
     lv_obj_set_style_bg_color(card, CTM_COL_CARD, 0);
     lv_obj_set_style_bg_opa(card, LV_OPA_COVER, 0);
     lv_obj_set_style_radius(card, LV_DPX(12), 0);
@@ -1014,18 +1193,56 @@ static void open_ctm_panel(lv_event_t *event) {
     lv_obj_remove_style_all(titlerow);
     lv_obj_set_size(titlerow, LV_PCT(100), LV_SIZE_CONTENT);
     lv_obj_set_flex_flow(titlerow, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(titlerow, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    /* ⭐ The title centres (rhoquinn8217, 2026-09-08); the close corner is taken
+     * out of the flow below and pinned right, so it cannot push it off centre. */
+    lv_obj_set_flex_align(titlerow, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_clear_flag(titlerow, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_t *title = lv_label_create(titlerow);
     lv_label_set_text(title, "USB Bridge");
     lv_obj_set_style_text_color(title, CTM_COL_TXT, 0);
     lv_obj_set_style_text_font(title, lv_theme_get_font_large(title), 0);
 
-    /* ⛔ NO CLOSE BUTTON. It could only ever be pressed with a pointer -- it was
-     * never in the navigation group, so a controller could not reach it at all.
-     * A control only a mouse can use has no place in something driven from a
-     * sofa, and there are two working ways out already: circle on a controller,
-     * back on the remote. */
+    /* ⭐ A CLOSE CORNER (rhoquinn8217, 2026-09-08). ⓘ The objection that kept one
+     * out until now was that a close button only a pointer could press had no
+     * place in something driven from a sofa. This one is in the navigation
+     * group -- Up from the first row reaches it, Select closes -- and the pointer
+     * can click it too. Circle and Back still close as before. */
+    s_ctm_close_btn = lv_btn_create(titlerow);
+    lv_obj_remove_style_all(s_ctm_close_btn);
+    lv_obj_set_size(s_ctm_close_btn, LV_DPX(30), LV_DPX(30));
+    /* ⭐ A CIRCLE, like the close on the settings window (rhoquinn8217,
+     * 2026-09-08), so the two read as the same control. */
+    lv_obj_set_style_radius(s_ctm_close_btn, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_bg_color(s_ctm_close_btn, CTM_COL_ROW, 0);
+    lv_obj_set_style_bg_opa(s_ctm_close_btn, LV_OPA_COVER, 0);
+    lv_obj_set_style_bg_color(s_ctm_close_btn, CTM_COL_FOCUS, LV_STATE_FOCUS_KEY);
+    lv_obj_set_style_border_width(s_ctm_close_btn, LV_DPX(1), 0);
+    lv_obj_set_style_border_color(s_ctm_close_btn, CTM_COL_BORDER, 0);
+    lv_obj_set_style_border_color(s_ctm_close_btn, CTM_COL_FOCUS, LV_STATE_FOCUS_KEY);
+    lv_obj_add_flag(s_ctm_close_btn, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_flag(s_ctm_close_btn, LV_OBJ_FLAG_IGNORE_LAYOUT);   /* pinned, not flowed */
+    lv_obj_align(s_ctm_close_btn, LV_ALIGN_RIGHT_MID, 0, 0);
+    lv_obj_add_event_cb(s_ctm_close_btn, ctm_close_click_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_add_event_cb(s_ctm_close_btn, ctm_nav_key_cb, LV_EVENT_KEY, (void *) (intptr_t) -1);
+    lv_obj_add_event_cb(s_ctm_close_btn, ctm_nav_cancel_cb, LV_EVENT_CANCEL, NULL);
+    {
+        /* ⭐⭐ THE REAL GLYPH, AND WHY IT WORKS HERE WHEN THE ROWS CANNOT.
+         *
+         * ⛔ LV_SYMBOL_CLOSE drew an empty box, which is what put a letter "X"
+         * here. The cause was never the symbol, it was the FONT: these rows
+         * take the theme's text font, which carries no symbol range at all.
+         * ➡️ MAT_SYMBOL_CLOSE paired with the theme's ICON font renders,
+         * exactly as the settings window's close does.
+         * ⚠️ Only glyphs listed in res/iconfonts/MaterialIcons-Regular.list are
+         * compiled in -- `close` is, `menu` is NOT, which is why MAT_SYMBOL_MENU
+         * drew as tofu on build 302. Adding one means regenerating the font. */
+        lv_obj_t *x = lv_label_create(s_ctm_close_btn);
+        lv_label_set_text_static(x, MAT_SYMBOL_CLOSE);
+        lv_obj_set_style_text_font(x, lv_theme_moonlight_get_iconfont_small(s_ctm_close_btn), 0);
+        lv_obj_set_style_text_color(x, CTM_COL_TXT, 0);
+        lv_obj_clear_flag(x, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_center(x);
+    }
 
     /* ⭐ TWO LABELS, because only the STATE should carry colour. One label
      * cannot be part grey and part green, and colouring the whole line makes
