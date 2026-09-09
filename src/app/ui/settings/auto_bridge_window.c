@@ -111,14 +111,25 @@ static void abw_close_cb(lv_event_t *e) {
 }
 
 static void abw_key_cb(lv_event_t *e) {
-    /* ⓘ Up and Down only. Left and Right mean bridge and release in the panel
-     * this is cut down from, and there is nothing here for them to do. */
+    /* ⭐ LEFT AND RIGHT MOVE TOO, and they have to (rhoquinn8217, 2026-09-08).
+     * The two buttons at the foot sit SIDE BY SIDE, so reaching for right to
+     * get from one to the other is the obvious thing to do -- and it did
+     * nothing, because they are merely consecutive in the group and only up and
+     * down walked it. ➡️ Where two things are drawn beside each other, the key
+     * that points that way should go there. ⓘ The USB Bridge panel reached the
+     * same conclusion for Bridge All and Release All on 2026-08-20.
+     *
+     * ⛔ Left and right cannot mean bridge and release here, as they do in the
+     * panel this is cut down from: there is no host to bridge to outside a
+     * stream, so they are free to navigate. */
     switch (lv_event_get_key(e)) {
         case LV_KEY_UP:
+        case LV_KEY_LEFT:
             lv_group_focus_prev(s_group);
             lv_obj_scroll_to_view(lv_group_get_focused(s_group), LV_ANIM_ON);
             break;
         case LV_KEY_DOWN:
+        case LV_KEY_RIGHT:
             lv_group_focus_next(s_group);
             lv_obj_scroll_to_view(lv_group_get_focused(s_group), LV_ANIM_ON);
             break;
@@ -343,8 +354,11 @@ void auto_bridge_window_open(void) {
         lv_obj_set_flex_flow(foot, LV_FLEX_FLOW_ROW);
         lv_obj_set_style_pad_gap(foot, LV_DPX(8), 0);
         lv_obj_clear_flag(foot, LV_OBJ_FLAG_SCROLLABLE);
-        abw_make_all_btn(foot, locstr("Auto bridge all"), abw_all_auto_cb);
-        abw_make_all_btn(foot, locstr("Manual bridge all"), abw_all_manual_cb);
+        /* ⓘ Named for what they DO to the list rather than for the two modes:
+         * every address, or none. "Manual bridge all" described the state left
+         * behind rather than the action taken. */
+        abw_make_all_btn(foot, locstr("All MAC addresses"), abw_all_auto_cb);
+        abw_make_all_btn(foot, locstr("Clear all"), abw_all_manual_cb);
     }
 
     /* ⛔⛔ PUSH A MODAL GROUP. app_input_set_group() sets the BASE group, and

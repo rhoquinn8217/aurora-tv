@@ -245,6 +245,9 @@ static lv_obj_t *create_obj(lv_fragment_t *self, lv_obj_t *container) {
     pref_desc_label(view, locstr(
             "Allow devices to automatically bridge to the host machine when the "
             "stream starts."), false);
+    /* ⓘ The pane's gap is zero so a description sits tight under its own
+     * setting; without this the next heading sits tight under it too. */
+    usbb_gap(view);
 #endif
 
     /* ⭐ A heading, so the four below do not each need to say "DualSense only".

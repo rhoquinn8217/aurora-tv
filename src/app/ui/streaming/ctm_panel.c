@@ -492,6 +492,35 @@ static void ctm_close_click_cb(lv_event_t *e) {
     ctm_request_close();
 }
 
+/* ⭐⭐ THE CLOSE CORNER NEEDS ITS OWN KEYS, and not having them was a bug
+ * (rhoquinn8217, 2026-09-08: "selecting the x does not close the panel, it
+ * moves the halo back to the first setting").
+ *
+ * ⛔ It used to share ctm_nav_key_cb with row == -1, which is written for the
+ * two action BUTTONS: there, left and right move focus between them, and
+ * nothing acts on Select at all. On a lone corner that is wrong twice over --
+ * it has no neighbour to move to, and Select is the only thing anyone will
+ * press on it. ➡️ Up and Down still walk the group; Left and Right do nothing,
+ * because there is nothing beside it; Select and Back both close. */
+static void ctm_close_key_cb(lv_event_t *e) {
+    switch (lv_event_get_key(e)) {
+        case LV_KEY_UP:
+            lv_group_focus_prev(s_ctm_nav_group);
+            lv_obj_scroll_to_view(lv_group_get_focused(s_ctm_nav_group), LV_ANIM_ON);
+            break;
+        case LV_KEY_DOWN:
+            lv_group_focus_next(s_ctm_nav_group);
+            lv_obj_scroll_to_view(lv_group_get_focused(s_ctm_nav_group), LV_ANIM_ON);
+            break;
+        case LV_KEY_ENTER:
+        case LV_KEY_ESC:
+            ctm_request_close();
+            break;
+        default:
+            break;
+    }
+}
+
 /* BASIC clicked means release, FULL clicked means bridge -- the same absolute
  * directions the Left and Right keys give, so a pointer and a d-pad say the
  * same thing. ⓘ Each refuses a press that would not change anything. */
@@ -1223,7 +1252,7 @@ static void open_ctm_panel(lv_event_t *event) {
     lv_obj_add_flag(s_ctm_close_btn, LV_OBJ_FLAG_IGNORE_LAYOUT);   /* pinned, not flowed */
     lv_obj_align(s_ctm_close_btn, LV_ALIGN_RIGHT_MID, 0, 0);
     lv_obj_add_event_cb(s_ctm_close_btn, ctm_close_click_cb, LV_EVENT_CLICKED, NULL);
-    lv_obj_add_event_cb(s_ctm_close_btn, ctm_nav_key_cb, LV_EVENT_KEY, (void *) (intptr_t) -1);
+    lv_obj_add_event_cb(s_ctm_close_btn, ctm_close_key_cb, LV_EVENT_KEY, NULL);
     lv_obj_add_event_cb(s_ctm_close_btn, ctm_nav_cancel_cb, LV_EVENT_CANCEL, NULL);
     {
         /* ⭐⭐ THE REAL GLYPH, AND WHY IT WORKS HERE WHEN THE ROWS CANNOT.
