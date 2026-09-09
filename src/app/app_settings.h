@@ -27,6 +27,15 @@ typedef struct window_state_t {
     int x, y, w, h;
 } window_state_t;
 
+enum {
+    TOUCHPAD_MODE_MOUSE = 0,
+    TOUCHPAD_MODE_NATIVE = 1,
+};
+
+#define TOUCHPAD_SPEED_MIN 25
+#define TOUCHPAD_SPEED_MAX 200
+#define TOUCHPAD_SPEED_DEFAULT 100
+
 typedef struct app_settings_t {
     STREAM_CONFIGURATION stream;
     int debug_level;
@@ -46,6 +55,10 @@ typedef struct app_settings_t {
     bool absmouse;
     bool hardware_mouse;
     bool virtual_mouse;
+    int touchpad_mode;
+    int touchpad_speed;
+    bool touchpad_multitouch;
+    bool touchpad_natural_scroll;
     bool swap_abxy;
     bool syskey_capture;
     bool hdr;   /* HDR10 (PQ) over HEVC Main10 or AV1 Main10 when host and decoder support it */

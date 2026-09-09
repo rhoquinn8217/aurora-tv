@@ -22,11 +22,19 @@ static const char *serialize_audio_config(int config);
 
 static int parse_audio_config(const char *value);
 
+static const char *indexed_setting_serialize(const char *const values[], size_t count, int value, int fallback);
+
+static int indexed_setting_parse(const char *value, const char *const values[], size_t count, int fallback);
+
 static int settings_parse(app_settings_t *config, const char *section, const char *name, const char *value);
 
 static void set_string(char **field, const char *value);
 
 static void set_int(int *field, const char *value);
+
+#define SETTINGS_COUNT(values) (sizeof(values) / sizeof((values)[0]))
+
+static const char *const touchpad_mode_values[] = {"mouse", "native"};
 
 void settings_sync_refresh_rate(app_settings_t *config) {
     settings_reconcile_refresh_rate(config);
@@ -160,6 +168,10 @@ void settings_initialize(app_settings_t *config, char *conf_dir) {
     config->rotate = 0;
     config->absmouse = true;
     config->virtual_mouse = false;
+    config->touchpad_mode = TOUCHPAD_MODE_NATIVE;
+    config->touchpad_speed = TOUCHPAD_SPEED_DEFAULT;
+    config->touchpad_multitouch = true;
+    config->touchpad_natural_scroll = true;
     config->hdr = false;
     config->force_10bit = false;
     config->force_full_color_range = false;
@@ -246,6 +258,13 @@ bool settings_save(app_settings_t *config) {
     ini_write_section(fp, "input");
     ini_write_bool(fp, "absmouse", config->absmouse);
     ini_write_bool(fp, "virtual_mouse", config->virtual_mouse);
+    ini_write_string(fp, "touchpad_mode",
+                     indexed_setting_serialize(touchpad_mode_values,
+                                               SETTINGS_COUNT(touchpad_mode_values),
+                                               config->touchpad_mode, TOUCHPAD_MODE_NATIVE));
+    ini_write_int(fp, "touchpad_speed", config->touchpad_speed);
+    ini_write_bool(fp, "touchpad_multitouch", config->touchpad_multitouch);
+    ini_write_bool(fp, "touchpad_natural_scroll", config->touchpad_natural_scroll);
 #if FEATURE_INPUT_EVMOUSE
     ini_write_bool(fp, "hardware_mouse", config->hardware_mouse);
 #endif
@@ -341,6 +360,26 @@ int find_ch_idx_by_value(const char *value) {
         }
     }
     return -1;
+}
+
+static const char *indexed_setting_serialize(const char *const values[], size_t count,
+                                             int value, int fallback) {
+    if ((unsigned int) value >= count) {
+        value = fallback;
+    }
+    return values[value];
+}
+
+static int indexed_setting_parse(const char *value, const char *const values[],
+                                 size_t count, int fallback) {
+    if (value != NULL) {
+        for (size_t i = 0; i < count; ++i) {
+            if (strcmp(value, values[i]) == 0) {
+                return (int) i;
+            }
+        }
+    }
+    return fallback;
 }
 
 static int settings_parse(app_settings_t *config, const char *section, const char *name, const char *value) {
@@ -453,6 +492,21 @@ static int settings_parse(app_settings_t *config, const char *section, const cha
         config->absmouse = INI_IS_TRUE(value);
     } else if (INI_NAME_MATCH("virtual_mouse")) {
         config->virtual_mouse = INI_IS_TRUE(value);
+    } else if (INI_NAME_MATCH("touchpad_mode")) {
+        config->touchpad_mode = indexed_setting_parse(
+                value, touchpad_mode_values, SETTINGS_COUNT(touchpad_mode_values),
+                TOUCHPAD_MODE_NATIVE);
+    } else if (INI_NAME_MATCH("touchpad_speed")) {
+        set_int(&config->touchpad_speed, value);
+        if (config->touchpad_speed < TOUCHPAD_SPEED_MIN) {
+            config->touchpad_speed = TOUCHPAD_SPEED_MIN;
+        } else if (config->touchpad_speed > TOUCHPAD_SPEED_MAX) {
+            config->touchpad_speed = TOUCHPAD_SPEED_MAX;
+        }
+    } else if (INI_NAME_MATCH("touchpad_multitouch")) {
+        config->touchpad_multitouch = INI_IS_TRUE(value);
+    } else if (INI_NAME_MATCH("touchpad_natural_scroll")) {
+        config->touchpad_natural_scroll = INI_IS_TRUE(value);
     } else if (INI_NAME_MATCH("hardware_mouse")) {
 #if FEATURE_INPUT_EVMOUSE
         config->hardware_mouse = INI_IS_TRUE(value);
