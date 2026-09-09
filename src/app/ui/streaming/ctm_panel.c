@@ -696,10 +696,19 @@ static lv_obj_t *ctm_make_dev_row(const ctm_bridge_dev_t *d, int idx) {
      * it is the identity the whole project keys on, and the only thing that
      * tells two identically named controllers apart.
      *
-     * ⚠️ It is whatever the device reports as its HID `uniq`, which a DualSense
-     * gives as its Bluetooth MAC even over a cable -- but plenty of devices
-     * report nothing at all. ➡️ A dash for those, rather than an empty line, so
-     * every row keeps the same height. */
+     * ⚠️⚠️ IT IS NOT A MAC ADDRESS, whatever the field is called. It is the HID
+     * `uniq`, and what that holds depends on how the device arrived: measured
+     * on the C1 2026-09-08, a CABLED DualSense Edge gives its 17-character USB
+     * serial (`63635E6BF4E30DE12`) and a cabled DualSense another
+     * (`948D3F0AD521619B2`). Over Bluetooth the same field carries a real MAC.
+     * ⛔ So one controller has TWO identities depending on how it is connected,
+     * and the MAC-shaped string in the gesture log is a third thing again --
+     * SDL's, read from feature report 0x09, which the bridge does not use.
+     *
+     * ⭐ Printed EXACTLY as reported, never prettified: the listener's config
+     * window on the PC shows this same string, and matching them by eye is the
+     * point. ⓘ Plenty of devices report nothing at all; those get a dash rather
+     * than an empty line, so every row keeps the same height. */
     lv_obj_t *mac = lv_label_create(namecol);
     lv_label_set_text(mac, d->mac[0] ? d->mac : "--");
     lv_label_set_long_mode(mac, LV_LABEL_LONG_DOT);
