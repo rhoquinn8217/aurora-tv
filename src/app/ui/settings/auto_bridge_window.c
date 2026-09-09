@@ -177,7 +177,10 @@ static lv_obj_t *abw_make_row(lv_obj_t *parent, const char *name, const char *ma
 
     lv_obj_t *ad = lv_label_create(col);
     lv_label_set_text(ad, mac);
-    lv_label_set_long_mode(ad, LV_LABEL_LONG_DOT);
+    /* ⭐ The reason WRAPS, an address TRUNCATES. A device that cannot be marked
+     * gets a sentence rather than a shrug, and a sentence cut off at one line
+     * would be the shrug again. */
+    lv_label_set_long_mode(ad, idx < 0 ? LV_LABEL_LONG_WRAP : LV_LABEL_LONG_DOT);
     lv_obj_set_width(ad, LV_PCT(100));
     lv_obj_set_style_text_color(ad, ABW_COL_SUB, 0);
     lv_obj_set_style_text_font(ad, lv_theme_get_font_small(parent), 0);
@@ -301,7 +304,8 @@ void auto_bridge_window_open(void) {
     lv_obj_t *sub = lv_label_create(card);
     lv_label_set_text(sub, locstr(
             "Selected devices that will automatically bridge when the stream starts. "
-            "Requires the CTM-USBIP running before the stream starts."));
+            "Requires a device with a mac address and the CTM-USBIP running before "
+            "the stream starts."));
     lv_label_set_long_mode(sub, LV_LABEL_LONG_WRAP);
     lv_obj_set_width(sub, LV_PCT(100));
     lv_obj_set_style_text_color(sub, ABW_COL_SUB, 0);
@@ -327,7 +331,12 @@ void auto_bridge_window_open(void) {
         const bool has = devs[i].node[0] != '\0' &&
                          ctm_bridge_gesture_mac_for_node(devs[i].node, mac, sizeof mac);
         if (!has) {
-            abw_make_row(list, abw_short_name(&devs[i]), locstr("no address"), -1);
+            /* ⭐ Say WHY, not just that (rhoquinn8217, 2026-09-08). "no address"
+             * states a fact and leaves the reader to guess whether it is a
+             * fault, a wait, or a rule. */
+            abw_make_row(list, abw_short_name(&devs[i]),
+                         locstr("no mac address - auto bridge can only target "
+                                "devices with mac addresses"), -1);
             shown++;
             continue;
         }
