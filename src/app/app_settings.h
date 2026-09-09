@@ -64,8 +64,6 @@ typedef struct app_settings_t {
      * on arrival). Old moonlight.ini keys are ignored.
      */
     int render_queue_frames;
-    /** Decode surround Opus in the client and feed PCM, skipping backend transcode. */
-    bool surround_pcm;
     bool show_stats_on_start;
     bool show_stats_compact;
     /** On-screen log overlay preference (Yellow cycles Off/Live/Frozen). */

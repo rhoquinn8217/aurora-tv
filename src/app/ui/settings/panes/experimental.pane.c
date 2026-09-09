@@ -149,18 +149,6 @@ static lv_obj_t *create_obj(lv_fragment_t *self, lv_obj_t *container) {
     lv_obj_add_event_cb(idr_slider, idr_refresh_slider_cb, LV_EVENT_VALUE_CHANGED, pane);
     idr_refresh_state_update(pane);
 
-#if TARGET_WEBOS
-    pref_header(view, locstr("Audio"));
-
-    lv_obj_t *pcm_checkbox = pref_checkbox(view, locstr("Decode 5.1 in the client (PCM)"),
-                                           &app_configuration->surround_pcm, false);
-    pref_desc_label(view,
-                    locstr("Decode 5.1 to PCM in the client (needed on eARC Atmos). Channel order is "
-                           "E, PD, D, PE, C, Sub. Leave off for stereo."),
-                    false);
-    lv_obj_add_event_cb(pcm_checkbox, reconnect_cb, LV_EVENT_VALUE_CHANGED, pane);
-#endif
-
     pref_header(view, locstr("Bitrate"));
 
     lv_obj_t *abr_checkbox = pref_checkbox(view, locstr("Adaptive bitrate"),

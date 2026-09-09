@@ -168,7 +168,6 @@ void settings_initialize(app_settings_t *config, char *conf_dir) {
     config->av1 = false;
     config->idr_refresh_interval_ms = 0;
     config->render_queue_frames = 0;
-    config->surround_pcm = false;
     config->show_stats_on_start = false;
     config->show_stats_compact = false;
     config->show_logs = false;
@@ -182,9 +181,6 @@ void settings_initialize(app_settings_t *config, char *conf_dir) {
 #if defined(TARGET_WEBOS)
     /* Auto pairs audio with the video module (SMP/NDL). */
     set_string(&config->audio_backend, "auto");
-    /* eARC Atmos on C5/G5: Opus 5.1 with a stub OpusHead clips; PCM + remap is
-     * the verified path. Stereo still works (surround_pcm only applies to >2ch). */
-    config->surround_pcm = true;
     settings_apply_ntsc_preset_refresh(config, config->stream.fps);
 #endif
 
@@ -280,7 +276,6 @@ bool settings_save(app_settings_t *config) {
         ini_write_string(fp, "device", config->audio_device);
     }
     ini_write_string(fp, "surround", serialize_audio_config(config->stream.audioConfiguration));
-    ini_write_bool(fp, "surround_pcm", config->surround_pcm);
 
     if (!config->fullscreen) {
         ini_write_section(fp, "window");
@@ -441,7 +436,7 @@ static int settings_parse(app_settings_t *config, const char *section, const cha
         /* Retired V-Sync queue: keep 0 so old ini files cannot re-enable it. */
         config->render_queue_frames = 0;
     } else if (INI_FULL_MATCH("audio", "surround_pcm")) {
-        config->surround_pcm = INI_IS_TRUE(value);
+        /* Legacy: ignored; webOS 5.1 uses host surroundParams + NDL Opus passthrough. */
     } else if (INI_NAME_MATCH("surround")) {
         config->stream.audioConfiguration = parse_audio_config(value);
     } else if (INI_NAME_MATCH("sops")) {
