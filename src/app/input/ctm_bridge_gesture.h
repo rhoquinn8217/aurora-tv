@@ -81,6 +81,23 @@ bool ctm_bridge_gesture_light_busy(SDL_GameController *controller);
  * SDL. The hidraw node is what both sides speak, so it is the join. */
 int ctm_bridge_gesture_player_for_node(const char *node);
 
+/* The controller's own ADDRESS -- its Bluetooth MAC -- for the controller
+ * behind this hidraw node, written NUL-terminated into out. True if there was
+ * one. False leaves out untouched.
+ *
+ * ⭐⭐ WHY SDL AND NOT THE CORE'S OWN FIELD (rhoquinn8217, 2026-09-08).
+ * The core reports the HID `uniq`, and what that holds depends on how the
+ * controller arrived: cabled it is the USB serial, over Bluetooth it is the
+ * MAC. ⛔ So `uniq` gives ONE CONTROLLER TWO IDENTITIES and nothing can tell
+ * that the pad on the cable is the pad that was just on Bluetooth.
+ * ➡️ The MAC is the same either way, so it is the identity worth keying on.
+ * ⓘ SDL's PlayStation driver reads it from feature report 0x09 and hands it
+ * back as the joystick serial, so it is available the moment the controller
+ * appears -- cabled included, measured on the C1.
+ * ⚠️ Only for devices SDL opens as controllers. A mouse, a keyboard or a
+ * headset has none, and the caller falls back to what the core reported. */
+bool ctm_bridge_gesture_mac_for_node(const char *node, char *out, size_t out_len);
+
 #else
 
 #define ctm_bridge_gesture_tick(input, session) ((void)0)

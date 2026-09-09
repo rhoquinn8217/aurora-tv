@@ -1272,6 +1272,31 @@ int ctm_bridge_gesture_player_for_node(const char *node) {
     return -1;
 }
 
+bool ctm_bridge_gesture_mac_for_node(const char *node, char *out, size_t out_len) {
+    if (!node || !node[0] || !out || out_len == 0 || !s_gesture_input) {
+        return false;
+    }
+#if SDL_VERSION_ATLEAST(2, 0, 14)
+    int n = (int) app_input_get_max_gamepads(s_gesture_input);
+    for (int i = 0; i < n; ++i) {
+        SDL_GameController *gc = s_gesture_input->gamepads[i].controller;
+        if (!gc) continue;
+        const char *dev_path = SDL_GameControllerPath(gc);
+        if (!dev_path || !dev_path[0]) continue;
+        char found[64];
+        if (!hidraw_node_for_event(dev_path, found, sizeof(found))) continue;
+        if (strcmp(found, node) != 0) continue;
+        const char *serial = SDL_JoystickGetSerial(SDL_GameControllerGetJoystick(gc));
+        if (!serial || !serial[0]) return false;
+        snprintf(out, out_len, "%s", serial);
+        return true;
+    }
+#else
+    (void) out_len;
+#endif
+    return false;
+}
+
 bool ctm_bridge_gesture_request_bridge(const char *node) {
     if (!node || !node[0] || !s_gesture_input) {
         return false;

@@ -696,21 +696,31 @@ static lv_obj_t *ctm_make_dev_row(const ctm_bridge_dev_t *d, int idx) {
      * it is the identity the whole project keys on, and the only thing that
      * tells two identically named controllers apart.
      *
-     * ⚠️⚠️ IT IS NOT A MAC ADDRESS, whatever the field is called. It is the HID
-     * `uniq`, and what that holds depends on how the device arrived: measured
-     * on the C1 2026-09-08, a CABLED DualSense Edge gives its 17-character USB
-     * serial (`63635E6BF4E30DE12`) and a cabled DualSense another
-     * (`948D3F0AD521619B2`). Over Bluetooth the same field carries a real MAC.
-     * ⛔ So one controller has TWO identities depending on how it is connected,
-     * and the MAC-shaped string in the gesture log is a third thing again --
-     * SDL's, read from feature report 0x09, which the bridge does not use.
+     * ⭐⭐ THE MAC, NOT THE CORE'S `uniq`, AND THAT IS THE WHOLE POINT
+     * (rhoquinn8217, 2026-09-08).
      *
-     * ⭐ Printed EXACTLY as reported, never prettified: the listener's config
-     * window on the PC shows this same string, and matching them by eye is the
-     * point. ⓘ Plenty of devices report nothing at all; those get a dash rather
-     * than an empty line, so every row keeps the same height. */
+     * ⛔ `uniq` changes with the cable. Measured on the C1: a CABLED DualSense
+     * Edge reports the USB serial `63635E6BF4E30DE12`, a cabled DualSense
+     * `948D3F0AD521619B2`; over Bluetooth the same field is the MAC instead.
+     * ➡️ So `uniq` gives ONE CONTROLLER TWO IDENTITIES, and neither the TV nor
+     * the listener can tell that the pad on the cable is the pad that was on
+     * Bluetooth a moment ago. ⭐ The MAC does not change with the transport,
+     * which is why it is what belongs here and what a mark should key on.
+     *
+     * ⓘ It comes from SDL, which reads feature report 0x09 -- available cabled,
+     * confirmed on hardware. ⚠️ Only for devices SDL opens as controllers, so a
+     * mouse or a headset falls back to whatever the core reported, and anything
+     * with nothing at all gets a dash rather than an empty line, so every row
+     * keeps the same height. Printed exactly as reported, never prettified. */
     lv_obj_t *mac = lv_label_create(namecol);
-    lv_label_set_text(mac, d->mac[0] ? d->mac : "--");
+    {
+        char addr[64];
+        if (ctm_bridge_gesture_mac_for_node(d->node, addr, sizeof addr)) {
+            lv_label_set_text(mac, addr);
+        } else {
+            lv_label_set_text(mac, d->mac[0] ? d->mac : "--");
+        }
+    }
     lv_label_set_long_mode(mac, LV_LABEL_LONG_DOT);
     lv_obj_set_width(mac, LV_PCT(100));
     lv_obj_set_style_text_color(mac, CTM_COL_SUB, 0);
