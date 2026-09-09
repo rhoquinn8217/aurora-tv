@@ -627,10 +627,13 @@ static lv_obj_t *ctm_make_dev_row(const ctm_bridge_dev_t *d, int idx) {
      * ⭐ Full width, height from its contents. */
     lv_obj_set_width(textcol, LV_PCT(100));
     lv_obj_set_height(textcol, LV_SIZE_CONTENT);
-    /* ⭐ Name on the left, tag on the right under its heading. */
+    /* ⭐ Two columns: what the device IS on the left, what STATE it is in on
+     * the right, each stacked under its own heading. ⓘ They are aligned to
+     * their TOPS, so the name and the badges share a line and what sits under
+     * each is free to differ in height. */
     lv_obj_set_flex_flow(textcol, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(textcol, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER,
-                          LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_flex_align(textcol, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_START,
+                          LV_FLEX_ALIGN_START);
     lv_obj_set_style_pad_gap(textcol, LV_DPX(8), 0);
     lv_obj_set_style_pad_all(textcol, 0, 0);
     lv_obj_clear_flag(textcol, LV_OBJ_FLAG_SCROLLABLE);
@@ -640,7 +643,23 @@ static lv_obj_t *ctm_make_dev_row(const ctm_bridge_dev_t *d, int idx) {
      * SDL numbers them from zero and the bridge core knows nothing about SDL,
      * so the hidraw node is the join. ⓘ A mouse or a keyboard has no player
      * number and simply shows none. */
-    lv_obj_t *name = lv_label_create(textcol);
+    /* ⭐ The identity column. ⛔ The grow belongs HERE, not on the name: textcol
+     * is a ROW so grow takes leftover WIDTH, which is what the name wants --
+     * but the name now lives one level down in a COLUMN, where grow would take
+     * HEIGHT and stretch it down the list (the 2026-08-20 bug, one level in). */
+    lv_obj_t *namecol = lv_obj_create(textcol);
+    lv_obj_remove_style_all(namecol);
+    lv_obj_set_width(namecol, 1);
+    lv_obj_set_flex_grow(namecol, 1);
+    lv_obj_set_height(namecol, LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(namecol, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(namecol, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START,
+                          LV_FLEX_ALIGN_START);
+    lv_obj_set_style_pad_all(namecol, 0, 0);
+    lv_obj_set_style_pad_gap(namecol, LV_DPX(2), 0);
+    lv_obj_clear_flag(namecol, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *name = lv_label_create(namecol);
     {
         /* ⭐ "(1) DualSense" rather than "DualSense  1st". Shorter, which the
          * row needs -- and the number reads as an identifier rather than a
@@ -666,10 +685,27 @@ static lv_obj_t *ctm_make_dev_row(const ctm_bridge_dev_t *d, int idx) {
      * Controller" took three lines. */
     /* ⓘ Takes what the tag leaves, and truncates rather than wrapping -- inside
      * a ROW, grow means leftover WIDTH, which is what is wanted here. */
-    lv_obj_set_width(name, 1);
-    lv_obj_set_flex_grow(name, 1);
+    /* ⓘ Full width OF THE COLUMN, which is what LONG_DOT needs to truncate
+     * against. The column is what grows; this just fills it. */
+    lv_obj_set_width(name, LV_PCT(100));
     lv_obj_set_style_text_color(name, CTM_COL_TXT, 0);
     lv_obj_set_style_text_font(name, lv_theme_get_font_normal(textcol), 0);
+
+    /* ⭐ THE ADDRESS, UNDER THE NAME (rhoquinn8217, 2026-09-08). It fills the
+     * space the action label left when it moved right, and it earns the room:
+     * it is the identity the whole project keys on, and the only thing that
+     * tells two identically named controllers apart.
+     *
+     * ⚠️ It is whatever the device reports as its HID `uniq`, which a DualSense
+     * gives as its Bluetooth MAC even over a cable -- but plenty of devices
+     * report nothing at all. ➡️ A dash for those, rather than an empty line, so
+     * every row keeps the same height. */
+    lv_obj_t *mac = lv_label_create(namecol);
+    lv_label_set_text(mac, d->mac[0] ? d->mac : "--");
+    lv_label_set_long_mode(mac, LV_LABEL_LONG_DOT);
+    lv_obj_set_width(mac, LV_PCT(100));
+    lv_obj_set_style_text_color(mac, CTM_COL_SUB, 0);
+    lv_obj_set_style_text_font(mac, lv_theme_get_font_small(textcol), 0);
 
     /* What the device can do, not what we did to it. FULL is a bridged device:
      * speaker, haptics, adaptive triggers, microphone. BASIC is anything
@@ -699,27 +735,51 @@ static lv_obj_t *ctm_make_dev_row(const ctm_bridge_dev_t *d, int idx) {
      * outline, so the pair reads as a switch with two positions rather than a
      * word that changes. ⓘ It used to show one badge, FULL purple or BASIC
      * grey, and the row had to be re-read to know which of the two it was. */
-    lv_obj_t *b_basic = ctm_make_badge(textcol, "BASIC", !d->plugged,
+    /* ⭐ The state column. ⓘ Its width comes from the badge pair, which is the
+     * widest thing in it, so CENTRE-aligning its children puts the action label
+     * under the middle of the badges no matter what either of them says. ⛔ That
+     * is why this is a container and not a padding: a padding would have to be
+     * re-guessed every time a word changed. */
+    lv_obj_t *statecol = lv_obj_create(textcol);
+    lv_obj_remove_style_all(statecol);
+    lv_obj_set_size(statecol, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(statecol, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(statecol, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER,
+                          LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_all(statecol, 0, 0);
+    lv_obj_set_style_pad_gap(statecol, LV_DPX(2), 0);
+    lv_obj_clear_flag(statecol, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *badgerow = lv_obj_create(statecol);
+    lv_obj_remove_style_all(badgerow);
+    lv_obj_set_size(badgerow, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(badgerow, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(badgerow, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER,
+                          LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_all(badgerow, 0, 0);
+    lv_obj_set_style_pad_gap(badgerow, LV_DPX(8), 0);
+    lv_obj_clear_flag(badgerow, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *b_basic = ctm_make_badge(badgerow, "BASIC", !d->plugged,
                                        lv_color_hex(0x4a5866), CTM_COL_SUB,
                                        ctm_badge_basic_cb, idx);
-    lv_obj_t *b_full  = ctm_make_badge(textcol, "FULL", d->plugged,
+    lv_obj_t *b_full  = ctm_make_badge(badgerow, "FULL", d->plugged,
                                        CTM_COL_FULL, CTM_COL_TXT,
                                        ctm_badge_full_cb, idx);
     if (idx >= 0 && idx < 16) {
         s_ctm_dev_offbadge[idx] = d->plugged ? b_basic : b_full;
     }
 
-    lv_obj_t *act = lv_obj_create(row);
+    /* ⭐ CENTRED UNDER THE BADGES (rhoquinn8217, 2026-09-08), by living inside
+     * the state column rather than on a full-width line of its own. It began
+     * left under the name, where its arrows pointed at nothing, then
+     * right-aligned, which lined up its END rather than its middle. ➡️ In the
+     * column the centring is structural and needs no number. */
+    lv_obj_t *act = lv_obj_create(statecol);
     lv_obj_remove_style_all(act);
-    /* ⭐ RIGHT-ALIGNED (rhoquinn8217, 2026-09-08). It sat left, under the name,
-     * where its arrows pointed at nothing. Under the badges the two agree:
-     * "< Release" points back at BASIC and "Bridge >" on at FULL, in the same
-     * order the badges sit and the keys move. ⓘ SPACE_BETWEEN was for the auto
-     * control that used to share this line; with one child left it just meant
-     * "left". */
-    lv_obj_set_size(act, LV_PCT(100), LV_SIZE_CONTENT);
+    lv_obj_set_size(act, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
     lv_obj_set_flex_flow(act, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(act, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_flex_align(act, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     /* ⛔ THE ROW'S OWN PADDING WAS NEVER THE HEIGHT. Its children carried their
      * own, so trimming the row alone changed nothing visible -- measured
      * 2026-08-20 after a first attempt did exactly that. */
