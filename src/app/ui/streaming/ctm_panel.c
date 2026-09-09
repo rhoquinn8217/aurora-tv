@@ -699,13 +699,19 @@ static lv_obj_t *ctm_make_dev_row(const ctm_bridge_dev_t *d, int idx) {
      * ⭐⭐ THE MAC, NOT THE CORE'S `uniq`, AND THAT IS THE WHOLE POINT
      * (rhoquinn8217, 2026-09-08).
      *
-     * ⛔ `uniq` changes with the cable. Measured on the C1: a CABLED DualSense
-     * Edge reports the USB serial `63635E6BF4E30DE12`, a cabled DualSense
-     * `948D3F0AD521619B2`; over Bluetooth the same field is the MAC instead.
-     * ➡️ So `uniq` gives ONE CONTROLLER TWO IDENTITIES, and neither the TV nor
-     * the listener can tell that the pad on the cable is the pad that was on
-     * Bluetooth a moment ago. ⭐ The MAC does not change with the transport,
-     * which is why it is what belongs here and what a mark should key on.
+     * ⛔⛔ `uniq` DOES NOT IDENTIFY THE CONTROLLER. Ever. Measured on the C1
+     * 2026-09-08 with one of each connection:
+     *
+     *   Edge, direct USB cable   uniq = (empty)            SDL = 14-3a-9a-cb-f6-9d
+     *   DualSense, DS5dongle     uniq = 948D3F0AD521619B2  SDL = 7c-66-ef-82-10-ed
+     *
+     * ➡️ Cabled it is EMPTY, and through a dongle it is the DONGLE'S OWN serial
+     * -- the Pico 2 W's, not the pad's. ⚠️ rhoquinn8217 found this: the
+     * 17-character strings that looked like controller serials were dongles all
+     * along, and they follow the DONGLE across a controller swap.
+     * ⭐ The MAC is the pad's own, identical on both paths and over Bluetooth,
+     * so it is what belongs here and what a mark must key on. ⛔ Keying on uniq
+     * would mark the dongle: move the pad and the mark stays behind.
      *
      * ⓘ It comes from SDL, which reads feature report 0x09 -- available cabled,
      * confirmed on hardware. ⚠️ Only for devices SDL opens as controllers, so a
