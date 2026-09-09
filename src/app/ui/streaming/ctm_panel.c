@@ -27,9 +27,10 @@
 #include "ctm_bridge_glue.h"
 #include "ctm_panel.h"
 #include "input/ctm_bridge_gesture.h"
+#include "lvgl/font/material_icons_regular_symbols.h"
+#include "lvgl/theme/lv_theme_moonlight.h"
 
 #include <string.h>
-#include <stdio.h>      /* ⚠️ TEMPORARY, for the T-155 width measurement */
 
 /* Which setting a detail row edits. ⚠️ This lived one line above the block that
  * was lifted and was missed on the first pass -- the whole build failed on it. */
@@ -192,7 +193,6 @@ static lv_obj_t        *s_ctm_dev_rows[16];
  * is recoloured when the selection moves (LVGL v8 does not give a child the
  * parent's state, so this cannot be a style); the second is measured. */
 static lv_obj_t        *s_ctm_dev_offbadge[16];
-static lv_obj_t        *s_ctm_dev_name[16];
 static int  s_ctm_ndev = 0;
 static int  s_ctm_sel  = 0;
 
@@ -527,6 +527,14 @@ static lv_obj_t *ctm_make_badge(lv_obj_t *parent, const char *text, bool lit,
     lv_obj_set_style_bg_color(badge, lit_bg, 0);
     lv_obj_set_style_bg_opa(badge, lit ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
     lv_obj_clear_flag(badge, LV_OBJ_FLAG_SCROLLABLE);
+    /* ⭐ Darkens under the press, the way the action buttons do, so a click
+     * that lands is felt (rhoquinn8217, 2026-09-08). ⓘ The unlit badge has no
+     * fill to darken, so it GAINS one for the press instead -- without it a
+     * click on BASIC gave no feedback at all. ✅ Unlike the selection grey
+     * above, PRESSED is the badge's own state, so this one is a plain style. */
+    lv_obj_set_style_bg_color(badge, lv_color_darken(lit ? lit_bg : CTM_COL_ROW, LV_OPA_40),
+                              LV_STATE_PRESSED);
+    lv_obj_set_style_bg_opa(badge, LV_OPA_COVER, LV_STATE_PRESSED);
     lv_obj_add_flag(badge, LV_OBJ_FLAG_CLICKABLE);
     /* ⛔ Not click-focusable: the badge is outside the group, so taking focus
      * on a click would move it nowhere and steal it from the row. */
@@ -660,9 +668,6 @@ static lv_obj_t *ctm_make_dev_row(const ctm_bridge_dev_t *d, int idx) {
      * a ROW, grow means leftover WIDTH, which is what is wanted here. */
     lv_obj_set_width(name, 1);
     lv_obj_set_flex_grow(name, 1);
-    if (idx >= 0 && idx < 16) {
-        s_ctm_dev_name[idx] = name;
-    }
     lv_obj_set_style_text_color(name, CTM_COL_TXT, 0);
     lv_obj_set_style_text_font(name, lv_theme_get_font_normal(textcol), 0);
 
@@ -706,11 +711,15 @@ static lv_obj_t *ctm_make_dev_row(const ctm_bridge_dev_t *d, int idx) {
 
     lv_obj_t *act = lv_obj_create(row);
     lv_obj_remove_style_all(act);
-    /* ⭐ Full width now, a row: the action on the left and, when there is one,
-     * the Auto Bridge box on the right (rhoquinn8217, 2026-09-08). */
+    /* ⭐ RIGHT-ALIGNED (rhoquinn8217, 2026-09-08). It sat left, under the name,
+     * where its arrows pointed at nothing. Under the badges the two agree:
+     * "< Release" points back at BASIC and "Bridge >" on at FULL, in the same
+     * order the badges sit and the keys move. ⓘ SPACE_BETWEEN was for the auto
+     * control that used to share this line; with one child left it just meant
+     * "left". */
     lv_obj_set_size(act, LV_PCT(100), LV_SIZE_CONTENT);
     lv_obj_set_flex_flow(act, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(act, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_flex_align(act, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     /* ⛔ THE ROW'S OWN PADDING WAS NEVER THE HEIGHT. Its children carried their
      * own, so trimming the row alone changed nothing visible -- measured
      * 2026-08-20 after a first attempt did exactly that. */
@@ -816,7 +825,6 @@ static void ctm_panel_refresh(void) {
     for (int i = 0; i < 16; ++i) {
         s_ctm_dev_rows[i] = NULL;
         s_ctm_dev_offbadge[i] = NULL;
-        s_ctm_dev_name[i] = NULL;
     }
 
     /* ⭐ Two headings, laid out like the rows beneath them -- name on the left,
@@ -842,6 +850,10 @@ static void ctm_panel_refresh(void) {
      * ⛔ As "Features" it sat over the action button and named nothing. */
     lv_obj_t *capfeat = lv_label_create(caprow);
     lv_label_set_text(capfeat, "Feature Set");
+    /* ⭐ In from the right by about four characters (rhoquinn8217, 2026-09-08),
+     * so it sits over the BASIC/FULL pair instead of past the end of it. The
+     * badges stop short of the row's edge; hard right looked hung off it. */
+    lv_obj_set_style_pad_right(capfeat, LV_DPX(26), 0);
     lv_obj_set_style_text_color(capfeat, CTM_COL_SUB, 0);
     lv_obj_set_style_text_font(capfeat, lv_theme_get_font_small(capfeat), 0);
 
@@ -1008,45 +1020,6 @@ static void ctm_late_refresh_cb(lv_timer_t *t) {
     }
 }
 
-/* ⚠️⚠️ TEMPORARY -- DELETE ONCE THE CARD WIDTH IS SET (T-155).
- *
- * The name label is flex_grow(1), so it takes whatever the row has left and
- * then truncates with LONG_DOT. That makes the right width impossible to
- * eyeball: too wide leaves a blank gap after the name, too narrow silently
- * eats the end of it. ➡️ So measure instead of guessing -- one build, one
- * panel open, then read the numbers off the TV and set the width once.
- *
- * text_w is the name's NATURAL width, label_w the room it actually got:
- *   text_w  > label_w  -> truncating; widen the card by the difference
- *   label_w > text_w   -> that difference IS the blank gap; narrow by it
- * Runs once per open, after a beat, because the layout is not computed until
- * LVGL has been round the loop. */
-static void ctm_measure_cb(lv_timer_t *t) {
-    lv_obj_t *card = (lv_obj_t *) t->user_data;
-    if (card == NULL) {
-        return;
-    }
-    lv_obj_update_layout(card);
-    FILE *f = fopen("/tmp/ctm-panel-metrics.log", "a");
-    if (f == NULL) {
-        return;
-    }
-    fprintf(f, "card_w=%d (the width being tried)\n", (int) lv_obj_get_width(card));
-    for (int i = 0; i < s_ctm_ndev && i < 16; ++i) {
-        if (s_ctm_dev_name[i] == NULL) {
-            continue;
-        }
-        const char *txt = lv_label_get_text(s_ctm_dev_name[i]);
-        lv_point_t sz;
-        lv_txt_get_size(&sz, txt,
-                        lv_obj_get_style_text_font(s_ctm_dev_name[i], LV_PART_MAIN),
-                        0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
-        fprintf(f, "  row%d label_w=%d text_w=%d name=[%s]\n",
-                i, (int) lv_obj_get_width(s_ctm_dev_name[i]), (int) sz.x, txt);
-    }
-    fclose(f);
-}
-
 static void open_ctm_panel(lv_event_t *event) {
     /* The CTM button has LV_OBJ_FLAG_EVENT_BUBBLE; stop the CLICKED here so it
      * never reaches the overlay root's hide_overlay handler. hide_overlay calls
@@ -1099,10 +1072,12 @@ static void open_ctm_panel(lv_event_t *event) {
     /* ⭐ Wider (rhoquinn8217, 2026-09-08): two badges on the first line and an
      * Auto Bridge box on the second, with "(1) DualSense Edge" still fitting
      * beside them. Anything longer than that truncates. */
-    /* ⚠️ PROVISIONAL, to be set from the measurement below (T-155). The old
-     * 36 and the 302 build's 44 are both void: each was measured while the
-     * auto-bridge control still sat in the row, and that control has gone to
-     * the settings pane. */
+    /* ⭐ 38%, MEASURED ON THE C1 rather than guessed (2026-09-08). At 1920 that
+     * is a 729px card, in which "(1) DualSense Edge" is given 298px and needs
+     * 280 -- an 18px margin, enough that a slightly longer name does not
+     * truncate and small enough that no blank gap shows. ⛔ The old 36 and the
+     * 302 build's 44 are both void: both were measured while the auto-bridge
+     * control still sat in the row, and that has gone to the settings pane. */
     lv_obj_set_width(card, LV_PCT(38));
     lv_obj_set_height(card, LV_SIZE_CONTENT);
     lv_obj_set_flex_flow(card, LV_FLEX_FLOW_COLUMN);
@@ -1150,7 +1125,9 @@ static void open_ctm_panel(lv_event_t *event) {
     s_ctm_close_btn = lv_btn_create(titlerow);
     lv_obj_remove_style_all(s_ctm_close_btn);
     lv_obj_set_size(s_ctm_close_btn, LV_DPX(30), LV_DPX(30));
-    lv_obj_set_style_radius(s_ctm_close_btn, LV_DPX(6), 0);
+    /* ⭐ A CIRCLE, like the close on the settings window (rhoquinn8217,
+     * 2026-09-08), so the two read as the same control. */
+    lv_obj_set_style_radius(s_ctm_close_btn, LV_RADIUS_CIRCLE, 0);
     lv_obj_set_style_bg_color(s_ctm_close_btn, CTM_COL_ROW, 0);
     lv_obj_set_style_bg_opa(s_ctm_close_btn, LV_OPA_COVER, 0);
     lv_obj_set_style_bg_color(s_ctm_close_btn, CTM_COL_FOCUS, LV_STATE_FOCUS_KEY);
@@ -1164,10 +1141,21 @@ static void open_ctm_panel(lv_event_t *event) {
     lv_obj_add_event_cb(s_ctm_close_btn, ctm_nav_key_cb, LV_EVENT_KEY, (void *) (intptr_t) -1);
     lv_obj_add_event_cb(s_ctm_close_btn, ctm_nav_cancel_cb, LV_EVENT_CANCEL, NULL);
     {
-        /* ⛔ A plain X, not LV_SYMBOL_CLOSE: the theme font has no symbol range. */
+        /* ⭐⭐ THE REAL GLYPH, AND WHY IT WORKS HERE WHEN THE ROWS CANNOT.
+         *
+         * ⛔ LV_SYMBOL_CLOSE drew an empty box, which is what put a letter "X"
+         * here. The cause was never the symbol, it was the FONT: these rows
+         * take the theme's text font, which carries no symbol range at all.
+         * ➡️ MAT_SYMBOL_CLOSE paired with the theme's ICON font renders,
+         * exactly as the settings window's close does.
+         * ⚠️ Only glyphs listed in res/iconfonts/MaterialIcons-Regular.list are
+         * compiled in -- `close` is, `menu` is NOT, which is why MAT_SYMBOL_MENU
+         * drew as tofu on build 302. Adding one means regenerating the font. */
         lv_obj_t *x = lv_label_create(s_ctm_close_btn);
-        lv_label_set_text(x, "X");
+        lv_label_set_text_static(x, MAT_SYMBOL_CLOSE);
+        lv_obj_set_style_text_font(x, lv_theme_moonlight_get_iconfont_small(s_ctm_close_btn), 0);
         lv_obj_set_style_text_color(x, CTM_COL_TXT, 0);
+        lv_obj_clear_flag(x, LV_OBJ_FLAG_CLICKABLE);
         lv_obj_center(x);
     }
 
@@ -1230,10 +1218,6 @@ static void open_ctm_panel(lv_event_t *event) {
 
     app_input_set_group(&controller->global->ui.input, s_ctm_nav_group);
     ctm_panel_refresh();
-
-    /* ⚠️ TEMPORARY (T-155): see ctm_measure_cb. Delete with it. */
-    lv_timer_t *measure = lv_timer_create(ctm_measure_cb, 900, card);
-    lv_timer_set_repeat_count(measure, 1);
 }
 
 /* ---- the seam ---------------------------------------------------------- */
