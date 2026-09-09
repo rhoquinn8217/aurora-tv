@@ -222,25 +222,29 @@ static lv_obj_t *create_obj(lv_fragment_t *self, lv_obj_t *container) {
      * without a sentence saying when, a ticked box looks like it did nothing.
      * ⓘ That deferral is also why this lives in settings and not in the overlay
      * panel: here, "takes effect next time" is what every control means. */
+    /* ⭐ THE HEADING IS THE DOOR (rhoquinn8217, 2026-09-08). ⛔ A full-width
+     * "Choose devices..." row under a heading was two things saying one thing,
+     * and the row stretched the width of the pane for a label three words long.
+     * ➡️ One control: the section title opens the window. ⓘ Sized to its text
+     * rather than the pane, so it reads as a button and not as a bar. */
     usbb_gap(view);
-    pref_title_label(view, locstr("Auto Bridge"));
-    pref_desc_label(view, locstr(
-            "Choose devices that bridge themselves to your gaming PC when a "
-            "stream starts, without opening the USB Bridge panel."), false);
-
     lv_obj_t *auto_row = lv_btn_create(view);
-    lv_obj_set_size(auto_row, LV_PCT(100), LV_DPX(72));
-    lv_obj_set_style_pad_hor(auto_row, LV_DPX(12), 0);
+    lv_obj_set_size(auto_row, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+    lv_obj_set_style_pad_hor(auto_row, LV_DPX(14), 0);
+    lv_obj_set_style_pad_ver(auto_row, LV_DPX(8), 0);
     lv_obj_set_style_radius(auto_row, LV_DPX(8), 0);
     {
         lv_obj_t *l = lv_label_create(auto_row);
-        lv_label_set_text(l, locstr("Choose devices..."));
-        lv_obj_align(l, LV_ALIGN_LEFT_MID, 0, 0);
+        lv_label_set_text(l, locstr("Auto Bridge"));
+        lv_obj_center(l);
     }
     lv_obj_add_event_cb(auto_row, usbb_auto_open_cb, LV_EVENT_CLICKED, pane);
     if (pane->dependent_count < (int) (sizeof(pane->dependent) / sizeof(pane->dependent[0]))) {
         pane->dependent[pane->dependent_count++] = auto_row;
     }
+    pref_desc_label(view, locstr(
+            "Allow devices to automatically bridge to the host machine when the "
+            "stream starts."), false);
 #endif
 
     /* ⭐ A heading, so the four below do not each need to say "DualSense only".

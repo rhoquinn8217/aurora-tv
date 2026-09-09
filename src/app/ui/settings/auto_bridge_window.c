@@ -29,12 +29,13 @@
 
 static lv_obj_t   *s_win;
 static lv_group_t *s_group;
-static lv_group_t *s_prev_group;
 static lv_obj_t   *s_box[ABW_MAX];
 static char        s_mac[ABW_MAX][64];
 static int         s_count;
 
 static void abw_close(void);
+static void abw_close_cb(lv_event_t *e);
+static void abw_key_cb(lv_event_t *e);
 
 /* ⭐ A short name: the reported one is unusable in a row -- "Sony Interactive
  * Entertainment DualSense Edge Wireless Controller" is most of a screen. */
@@ -61,20 +62,47 @@ static void abw_row_click_cb(lv_event_t *e) {
     abw_mark(row, !lv_obj_has_state(s_box[row], LV_STATE_CHECKED));
 }
 
-/* ⭐ Mark everything; when everything already is, clear it. One control for
- * both directions, rather than a second button that only says "none". */
-static void abw_all_click_cb(lv_event_t *e) {
+/* ⭐ TWO BUTTONS, EACH DOING ONE THING (rhoquinn8217, 2026-09-08). ⛔ One
+ * button that marked everything and then un-marked everything on the next press
+ * was worse: from across a room you cannot see which way it will go, so the
+ * safe move was always to press it and watch. Naming both directions means
+ * neither has to be discovered. */
+static void abw_all_auto_cb(lv_event_t *e) {
     LV_UNUSED(e);
-    bool all = true;
     for (int i = 0; i < s_count; ++i) {
-        if (!auto_bridge_list_has(app_configuration->bridge_auto_macs, s_mac[i])) {
-            all = false;
-            break;
-        }
+        abw_mark(i, true);
     }
+}
+
+static void abw_all_manual_cb(lv_event_t *e) {
+    LV_UNUSED(e);
     for (int i = 0; i < s_count; ++i) {
-        abw_mark(i, !all);
+        abw_mark(i, false);
     }
+}
+
+/* One of the pair at the foot of the window. */
+static void abw_make_all_btn(lv_obj_t *parent, const char *text, lv_event_cb_t cb) {
+    lv_obj_t *b = lv_btn_create(parent);
+    lv_obj_remove_style_all(b);
+    lv_obj_set_width(b, 1);
+    lv_obj_set_flex_grow(b, 1);
+    lv_obj_set_height(b, LV_SIZE_CONTENT);
+    lv_obj_set_style_pad_all(b, LV_DPX(10), 0);
+    lv_obj_set_style_radius(b, LV_DPX(6), 0);
+    lv_obj_set_style_bg_color(b, ABW_COL_ROW, 0);
+    lv_obj_set_style_bg_opa(b, LV_OPA_COVER, 0);
+    lv_obj_set_style_bg_color(b, ABW_COL_FOCUS, LV_STATE_FOCUS_KEY);
+    lv_obj_set_style_border_width(b, LV_DPX(1), 0);
+    lv_obj_set_style_border_color(b, ABW_COL_BORDER, 0);
+    lv_obj_t *l = lv_label_create(b);
+    lv_label_set_text(l, text);
+    lv_obj_set_style_text_color(l, ABW_COL_TXT, 0);
+    lv_obj_center(l);
+    lv_obj_add_event_cb(b, cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_add_event_cb(b, abw_key_cb, LV_EVENT_KEY, NULL);
+    lv_obj_add_event_cb(b, abw_close_cb, LV_EVENT_CANCEL, NULL);
+    lv_group_add_obj(s_group, b);
 }
 
 static void abw_close_cb(lv_event_t *e) {
@@ -176,14 +204,16 @@ static void abw_close(void) {
     if (s_win == NULL) {
         return;
     }
-    app_input_set_group(&global->ui.input, s_prev_group);
+    /* ⛔⛔ REMOVE THE MODAL GROUP, do not "restore" the old one. See the push
+     * in open() -- the stack owns what is focused, and popping is what hands
+     * the settings screen its keys back. */
+    app_input_remove_modal_group(&global->ui.input, s_group);
     lv_obj_del(s_win);
     s_win = NULL;
     if (s_group) {
         lv_group_del(s_group);
         s_group = NULL;
     }
-    s_prev_group = NULL;
     s_count = 0;
 }
 
@@ -193,7 +223,6 @@ void auto_bridge_window_open(void) {
     }
     s_count = 0;
     s_group = lv_group_create();
-    s_prev_group = app_input_get_group(&global->ui.input);
 
     /* ⓘ On the top layer, so it sits over the settings screen without being
      * part of it and cannot be disturbed by the pane rebuilding beneath. */
@@ -260,7 +289,8 @@ void auto_bridge_window_open(void) {
      * the NEXT stream, so without it a ticked box looks like it did nothing. */
     lv_obj_t *sub = lv_label_create(card);
     lv_label_set_text(sub, locstr(
-            "These devices bridge themselves to your gaming PC when a stream starts."));
+            "Selected devices that will automatically bridge when the stream starts. "
+            "Requires the CTM-USBIP running before the stream starts."));
     lv_label_set_long_mode(sub, LV_LABEL_LONG_WRAP);
     lv_obj_set_width(sub, LV_PCT(100));
     lv_obj_set_style_text_color(sub, ABW_COL_SUB, 0);
@@ -306,28 +336,25 @@ void auto_bridge_window_open(void) {
         lv_obj_set_style_text_color(none, ABW_COL_SUB, 0);
     }
 
-    if (s_count > 1) {
-        lv_obj_t *all = lv_btn_create(card);
-        lv_obj_remove_style_all(all);
-        lv_obj_set_size(all, LV_PCT(100), LV_SIZE_CONTENT);
-        lv_obj_set_style_pad_all(all, LV_DPX(10), 0);
-        lv_obj_set_style_radius(all, LV_DPX(6), 0);
-        lv_obj_set_style_bg_color(all, ABW_COL_ROW, 0);
-        lv_obj_set_style_bg_opa(all, LV_OPA_COVER, 0);
-        lv_obj_set_style_bg_color(all, ABW_COL_FOCUS, LV_STATE_FOCUS_KEY);
-        lv_obj_set_style_border_width(all, LV_DPX(1), 0);
-        lv_obj_set_style_border_color(all, ABW_COL_BORDER, 0);
-        lv_obj_t *al = lv_label_create(all);
-        lv_label_set_text(al, locstr("Auto bridge all"));
-        lv_obj_set_style_text_color(al, ABW_COL_TXT, 0);
-        lv_obj_center(al);
-        lv_obj_add_event_cb(all, abw_all_click_cb, LV_EVENT_CLICKED, NULL);
-        lv_obj_add_event_cb(all, abw_key_cb, LV_EVENT_KEY, NULL);
-        lv_obj_add_event_cb(all, abw_close_cb, LV_EVENT_CANCEL, NULL);
-        lv_group_add_obj(s_group, all);
+    if (s_count > 0) {
+        lv_obj_t *foot = lv_obj_create(card);
+        lv_obj_remove_style_all(foot);
+        lv_obj_set_size(foot, LV_PCT(100), LV_SIZE_CONTENT);
+        lv_obj_set_flex_flow(foot, LV_FLEX_FLOW_ROW);
+        lv_obj_set_style_pad_gap(foot, LV_DPX(8), 0);
+        lv_obj_clear_flag(foot, LV_OBJ_FLAG_SCROLLABLE);
+        abw_make_all_btn(foot, locstr("Auto bridge all"), abw_all_auto_cb);
+        abw_make_all_btn(foot, locstr("Manual bridge all"), abw_all_manual_cb);
     }
 
-    app_input_set_group(&global->ui.input, s_group);
+    /* ⛔⛔ PUSH A MODAL GROUP. app_input_set_group() sets the BASE group, and
+     * app_input_get_group() returns the modal stack's tail in preference to it
+     * -- so on 2026-09-08 this window drew, took pointer clicks, and never saw
+     * a single key: the settings screen's own group was still on top and every
+     * press went to the pane behind. ➡️ A window over another screen is a
+     * MODAL, and the stack is what the launcher's popup and the settings detail
+     * pane already use. */
+    app_input_push_modal_group(&global->ui.input, s_group);
     if (s_count > 0) {
         lv_group_focus_next(s_group);
     }
