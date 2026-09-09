@@ -1,5 +1,6 @@
 #if defined(TARGET_WEBOS)
 #include "input/ctm_bridge_gesture.h"
+#include "input/auto_bridge.h"
 #endif
 #include "app.h"
 #include "app_settings.h"
@@ -196,6 +197,17 @@ bool session_start_input(session_t *session) {
             // over the internet is never found.
             ctm_bridge_set_host(session->server->serverInfo.address, 0);
             ctm_bridge_start();
+            /* ⭐ The controllers the user marked bridge themselves now, and only
+             * now. ⓘ Deliberately AFTER ctm_bridge_start, not inside it: the
+             * mark keys on the controller's own MAC, which only SDL knows, and
+             * the glue cannot see SDL. ⛔ Not in the reconnect branch above --
+             * that is a stream resuming, and its controllers never left. */
+            {
+                const int n = auto_bridge_run(app_configuration->bridge_auto_macs);
+                if (n > 0) {
+                    commons_log_info("Session", "auto bridge: asked for %d marked controller(s)", n);
+                }
+            }
         }
     }
     return true;
