@@ -69,7 +69,7 @@ if (BUILD_TESTS)
     enable_testing()
 endif ()
 
-set(I18N_LOCALES "cs" "de" "fr" "it" "nl" "pl" "pt-BR" "ro" "ru" "ja" "zh-CN")
+set(I18N_LOCALES "cs" "de" "es-ES" "fr" "it" "nl" "pl" "pt-BR" "ro" "ru" "ja" "tr" "zh-CN")
 list(LENGTH I18N_LOCALES I18N_LOCALES_LEN)
 
 set(FEATURE_FORCE_FULLSCREEN OFF)
@@ -147,7 +147,7 @@ set(BUILD_SHARED_CORE_LIBS OFF)
 
 if (TARGET_WEBOS)
     set(CMAKE_INSTALL_LIBDIR lib/backports)
-    set(SDL2_BACKPORT_RELEASE "release-2.30.12-webos.5")
+    set(SDL2_BACKPORT_RELEASE "release-2.30.12-webos.6")
     include(ExternalSDL2BackportForWebOS)
     unset(CMAKE_INSTALL_LIBDIR)
 else ()

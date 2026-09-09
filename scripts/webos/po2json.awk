@@ -1,115 +1,73 @@
 #!/usr/bin/awk -f
-# Convert gettext .po (subset) to JSON for webOS resBundle (cstrings.json).
+#
+# Converts a gettext .po catalog into the flat JSON that webOS's resBundle
+# loads from resources/<lang>[/<region>]/cstrings.json.
+#
+# Entries with an empty msgstr are skipped, so an untranslated string falls
+# back to its msgid (English) at runtime instead of rendering blank.
+#
+# Continuation lines have to be joined. gettext splits long strings across
+# several quoted lines, but the C compiler concatenates the literals, so
+# locstr() looks up the joined string at runtime. Emitting only the first
+# line produces a key that can never match, silently dropping the
+# translation for exactly the longest messages.
 
-function po_finalize(s) {
-    gsub(/\\n/, "\n", s)
-    gsub(/\\t/, "\t", s)
-    gsub(/\\r/, "\r", s)
-    gsub(/\\"/, "\"", s)
-    gsub(/\\\\/, "\\", s)
-    return s
+function unquote(line,   first) {
+    first = index(line, "\"")
+    return substr(line, first + 1, length(line) - first - 1)
 }
 
-function json_escape(s,    i, c, out) {
-    out = ""
-    for (i = 1; i <= length(s); i++) {
-        c = substr(s, i, 1)
-        if (c == "\\") {
-            out = out "\\\\"
-        } else if (c == "\"") {
-            out = out "\\\""
-        } else if (c == "\n") {
-            out = out "\\n"
-        } else if (c == "\r") {
-            out = out "\\r"
-        } else if (c == "\t") {
-            out = out "\\t"
-        } else {
-            out = out c
-        }
+function flush(   sep) {
+    # The header entry has an empty msgid and carries the .po metadata in its
+    # msgstr; skipping empty keys drops it along with untranslated entries.
+    if (key != "" && val != "") {
+        sep = (count > 0) ? ",\n" : ""
+        printf("%s  \"%s\": \"%s\"", sep, key, val)
+        count++
     }
-    return out
-}
-
-function emit(msgid, msgstr) {
-    msgid = po_finalize(msgid)
-    msgstr = po_finalize(msgstr)
-    if (msgid == "" || msgstr == "") {
-        return
-    }
-    if (entry_count > 0) {
-        printf(",\n")
-    }
-    printf("  \"%s\": \"%s\"", json_escape(msgid), json_escape(msgstr))
-    entry_count++
-}
-
-function reset_entry() {
-    mode = 0
-    cur_id = ""
-    buf = ""
+    key = ""
+    val = ""
+    state = ""
 }
 
 BEGIN {
-    mode = 0
-    entry_count = 0
-    print("{")
+    count = 0
+    key = ""
+    val = ""
+    state = ""
+    print ("{")
 }
 
-/^msgid / {
-    if (mode == 2) {
-        emit(cur_id, buf)
-    }
-    mode = 1
-    buf = ""
-    if ($0 == "msgid \"\"") {
-        next
-    }
-    line = $0
-    sub(/^msgid "/, "", line)
-    sub(/"$/, "", line)
-    buf = line
+# Tolerate CRLF checkouts, which would otherwise leave a stray carriage
+# return inside the emitted JSON string.
+{ sub(/\r$/, "") }
+
+/^msgid[ \t]+"/ {
+    flush()
+    key = unquote($0)
+    state = "id"
     next
 }
 
-/^msgstr / {
-    if (mode != 1) {
-        next
-    }
-    cur_id = buf
-    buf = ""
-    mode = 2
-    if ($0 == "msgstr \"\"") {
-        next
-    }
-    line = $0
-    sub(/^msgstr "/, "", line)
-    sub(/"$/, "", line)
-    buf = line
+/^msgstr[ \t]+"/ {
+    val = unquote($0)
+    state = "str"
     next
 }
 
 /^"/ {
-    if (mode != 1 && mode != 2) {
-        next
+    if (state == "id") {
+        key = key unquote($0)
+    } else if (state == "str") {
+        val = val unquote($0)
     }
-    line = $0
-    sub(/^"/, "", line)
-    sub(/"$/, "", line)
-    buf = buf line
     next
 }
 
-/^$/ {
-    if (mode == 2) {
-        emit(cur_id, buf)
-    }
-    reset_entry()
-}
+# Anything else - blank line, comment, obsolete entry - ends the current one.
+{ flush() }
 
 END {
-    if (mode == 2) {
-        emit(cur_id, buf)
-    }
-    print("\n}")
+    flush()
+    print ("\n}")
 }
