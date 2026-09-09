@@ -28,9 +28,7 @@
 #include "ui/settings/settings.controller.h"
 
 #if defined(TARGET_WEBOS)
-#include "ctm_bridge_glue.h"
-#include "input/ctm_bridge_gesture.h"
-#include "input/auto_bridge.h"
+#include "ui/settings/auto_bridge_window.h"
 #endif
 
 typedef struct {
@@ -39,15 +37,8 @@ typedef struct {
      * grey the lot. Add to this rather than to a second mechanism.
      * ⓘ Sized for the fixed switches plus a device list; auto-bridge rows
      * register here too, so they grey with everything else. */
-    lv_obj_t *dependent[24];
+    lv_obj_t *dependent[8];
     int dependent_count;
-#if defined(TARGET_WEBOS)
-    /* One marked-or-not row per listed device. The MAC is the identity the
-     * mark is stored under, kept here so a row's callback knows its own. */
-    char auto_mac[16][64];
-    lv_obj_t *auto_box[16];
-    int auto_count;
-#endif
 } usbbridge_pane_t;
 
 static void pane_ctor(lv_fragment_t *self, void *args);
@@ -125,171 +116,19 @@ const lv_fragment_class_t settings_pane_usbbridge_cls = {
 
 #if defined(TARGET_WEBOS)
 
-/* ⭐ A short name. ⛔ The reported one is unusable on a checkbox: a checkbox
- * label does NOT wrap and the box has a fixed height, so "Sony Interactive
- * Entertainment DualSense Edge Wireless Controller" runs off the edge -- the
- * same trap this pane's own comments record for its descriptions. */
-static const char *usbb_short_name(const ctm_bridge_dev_t *d)
+/* ⛔ THE DEVICE LIST IS NOT DRAWN HERE. It was, for one build, and it was the
+ * wrong shape: a settings pane is a column of switches, and a list of hardware
+ * that appears and disappears does not belong in one (rhoquinn8217,
+ * 2026-09-08). ➡️ This row opens the Auto Bridge window instead -- the USB
+ * Bridge panel cut down to device, address and a box -- so the devices are
+ * read where a device list reads naturally. */
+static void usbb_auto_open_cb(lv_event_t *e)
 {
-    if (strcmp(d->vid, "054c") == 0 && strcmp(d->pid, "0ce6") == 0) return "DualSense";
-    if (strcmp(d->vid, "054c") == 0 && strcmp(d->pid, "0df2") == 0) return "DualSense Edge";
-    return d->name;
-}
-
-static void usbb_store_macs(const char *csv)
-{
-    /* ⓘ set_string's job, done through the same door every other setting uses,
-     * so the file is written by the usual path. */
-    settings_set_auto_macs(app_configuration, csv);
-}
-
-/* One row toggled. ⓘ CLICKED, never VALUE_CHANGED, and the checkbox is not
- * CHECKABLE -- the pattern pref_checkbox already uses here, because a
- * self-checking box was exactly the bug the overlay panel hit on 2026-09-08
- * when focus moved onto it. */
-static void usbb_auto_toggle_cb(lv_event_t *e)
-{
-    usbbridge_pane_t *pane = (usbbridge_pane_t *) lv_event_get_user_data(e);
-    lv_obj_t *box = lv_event_get_target(e);
-    if (pane == NULL || !app_configuration->bridge_enable) {
-        return;
+    LV_UNUSED(e);
+    if (!app_configuration->bridge_enable) {
+        return;   /* the row is greyed with the rest, but never trust that alone */
     }
-    for (int i = 0; i < pane->auto_count; ++i) {
-        if (pane->auto_box[i] != box) {
-            continue;
-        }
-        const bool now = !lv_obj_has_state(box, LV_STATE_CHECKED);
-        char out[512];
-        auto_bridge_list_set(app_configuration->bridge_auto_macs,
-                             pane->auto_mac[i], now, out, sizeof out);
-        usbb_store_macs(out);
-        if (now) {
-            lv_obj_add_state(box, LV_STATE_CHECKED);
-        } else {
-            lv_obj_clear_state(box, LV_STATE_CHECKED);
-        }
-        return;
-    }
-}
-
-/* ⭐ Mark everything markable; when everything already is, clear it instead, so
- * one control covers both directions without a second button for "none". */
-static void usbb_auto_all_cb(lv_event_t *e)
-{
-    usbbridge_pane_t *pane = (usbbridge_pane_t *) lv_event_get_user_data(e);
-    if (pane == NULL || pane->auto_count == 0 || !app_configuration->bridge_enable) {
-        return;
-    }
-    bool all = true;
-    for (int i = 0; i < pane->auto_count; ++i) {
-        if (!auto_bridge_list_has(app_configuration->bridge_auto_macs, pane->auto_mac[i])) {
-            all = false;
-            break;
-        }
-    }
-    const bool want = !all;
-    char cur[512];
-    snprintf(cur, sizeof cur, "%s",
-             app_configuration->bridge_auto_macs ? app_configuration->bridge_auto_macs : "");
-    for (int i = 0; i < pane->auto_count; ++i) {
-        char out[512];
-        auto_bridge_list_set(cur, pane->auto_mac[i], want, out, sizeof out);
-        snprintf(cur, sizeof cur, "%s", out);
-        if (want) {
-            lv_obj_add_state(pane->auto_box[i], LV_STATE_CHECKED);
-        } else {
-            lv_obj_clear_state(pane->auto_box[i], LV_STATE_CHECKED);
-        }
-    }
-    usbb_store_macs(cur);
-}
-
-static void usbb_dependent_add(usbbridge_pane_t *pane, lv_obj_t *obj)
-{
-    const int max = (int) (sizeof(pane->dependent) / sizeof(pane->dependent[0]));
-    if (pane->dependent_count < max) {
-        pane->dependent[pane->dependent_count++] = obj;
-    }
-}
-
-/* The device list, one row each, built when the pane opens.
- *
- * ⛔ ctm_bridge_list_QUIET, not ctm_bridge_list: the ordinary one brings the
- * core up, which starts the sniff worker and BROADCASTS for an agent that
- * cannot exist yet, because no host is chosen until a stream starts. Drawing a
- * list is not a reason to wake the bridge.
- *
- * ⛔ And the mark keys on the MAC from SDL, never on ctm_bridge_dev_t.mac --
- * that field is the HID `uniq`, which is empty on a direct cable and the
- * DS5DONGLE'S serial through a dongle, so it would mark the dongle. */
-static void usbb_auto_build(usbbridge_pane_t *pane, lv_obj_t *view)
-{
-    ctm_bridge_dev_t devs[16];
-    const int n = ctm_bridge_list_quiet(devs, 16);
-    pane->auto_count = 0;
-
-    int listed = 0;
-    for (int i = 0; i < n && pane->auto_count < 16; ++i) {
-        char mac[64];
-        const bool has_mac = devs[i].node[0] != '\0' &&
-                             ctm_bridge_gesture_mac_for_node(devs[i].node, mac, sizeof mac);
-        if (!has_mac) {
-            /* ⭐ Shown, not hidden, and said plainly. A device missing from the
-             * list looks like a fault; one that says why cannot be marked
-             * reads as a limit. ⓘ Anything SDL does not open as a controller
-             * has no address to key on -- a mouse, a keyboard, a headset. */
-            char line[192];
-            snprintf(line, sizeof line, "%s  --  no address, cannot auto bridge",
-                     usbb_short_name(&devs[i]));
-            pref_desc_label(view, line, false);
-            listed++;
-            continue;
-        }
-        const int row = pane->auto_count;
-        snprintf(pane->auto_mac[row], sizeof pane->auto_mac[row], "%s", mac);
-        lv_obj_t *box = lv_checkbox_create(view);
-        lv_checkbox_set_text(box, usbb_short_name(&devs[i]));
-        lv_obj_set_size(box, LV_PCT(100), LV_DPX(72));
-        lv_obj_set_style_pad_hor(box, LV_DPX(12), 0);
-        lv_obj_set_style_pad_ver(box, LV_DPX(10), 0);
-        lv_obj_set_style_radius(box, LV_DPX(8), 0);
-        lv_obj_clear_flag(box, LV_OBJ_FLAG_CHECKABLE);
-        pref_checkbox_prepare_for_dpad(box);
-        lv_obj_add_flag(box, LV_OBJ_FLAG_CLICKABLE);
-        if (auto_bridge_list_has(app_configuration->bridge_auto_macs, mac)) {
-            lv_obj_add_state(box, LV_STATE_CHECKED);
-        }
-        lv_obj_add_event_cb(box, usbb_auto_toggle_cb, LV_EVENT_CLICKED, pane);
-        pane->auto_box[row] = box;
-        pane->auto_count++;
-        usbb_dependent_add(pane, box);
-        /* ⭐ The address under its device, exactly as reported. It is what the
-         * mark is stored under, and it is the only thing that separates two
-         * controllers with the same name. */
-        pref_desc_label(view, mac, false);
-        listed++;
-    }
-
-    if (listed == 0) {
-        pref_desc_label(view, locstr(
-                "No devices are connected. Connect a controller and open this "
-                "screen again."), false);
-        return;
-    }
-    if (pane->auto_count > 1) {
-        usbb_gap(view);
-        lv_obj_t *all = lv_checkbox_create(view);
-        lv_checkbox_set_text(all, locstr("Auto all"));
-        lv_obj_set_size(all, LV_PCT(100), LV_DPX(72));
-        lv_obj_set_style_pad_hor(all, LV_DPX(12), 0);
-        lv_obj_set_style_pad_ver(all, LV_DPX(10), 0);
-        lv_obj_set_style_radius(all, LV_DPX(8), 0);
-        lv_obj_clear_flag(all, LV_OBJ_FLAG_CHECKABLE);
-        pref_checkbox_prepare_for_dpad(all);
-        lv_obj_add_flag(all, LV_OBJ_FLAG_CLICKABLE);
-        lv_obj_add_event_cb(all, usbb_auto_all_cb, LV_EVENT_CLICKED, pane);
-        usbb_dependent_add(pane, all);
-    }
+    auto_bridge_window_open();
 }
 
 #endif /* TARGET_WEBOS */
@@ -379,17 +218,29 @@ static lv_obj_t *create_obj(lv_fragment_t *self, lv_obj_t *container) {
      * turning it on is the way to never think about it again.
      *
      * ⭐ The line teaches the idea before the preference. A mark does nothing
-     * visible when you make it -- the effect arrives at the NEXT stream -- so
+     * visible when it is made -- the effect arrives at the NEXT stream -- so
      * without a sentence saying when, a ticked box looks like it did nothing.
-     * ⓘ That deferral is also why this lives here and not in the overlay panel:
-     * in settings, "takes effect next time" is what every control already
-     * means. */
+     * ⓘ That deferral is also why this lives in settings and not in the overlay
+     * panel: here, "takes effect next time" is what every control means. */
     usbb_gap(view);
     pref_title_label(view, locstr("Auto Bridge"));
     pref_desc_label(view, locstr(
-            "Marked devices bridge themselves to your gaming PC when a stream "
-            "starts, without opening the USB Bridge panel."), false);
-    usbb_auto_build(pane, view);
+            "Choose devices that bridge themselves to your gaming PC when a "
+            "stream starts, without opening the USB Bridge panel."), false);
+
+    lv_obj_t *auto_row = lv_btn_create(view);
+    lv_obj_set_size(auto_row, LV_PCT(100), LV_DPX(72));
+    lv_obj_set_style_pad_hor(auto_row, LV_DPX(12), 0);
+    lv_obj_set_style_radius(auto_row, LV_DPX(8), 0);
+    {
+        lv_obj_t *l = lv_label_create(auto_row);
+        lv_label_set_text(l, locstr("Choose devices..."));
+        lv_obj_align(l, LV_ALIGN_LEFT_MID, 0, 0);
+    }
+    lv_obj_add_event_cb(auto_row, usbb_auto_open_cb, LV_EVENT_CLICKED, pane);
+    if (pane->dependent_count < (int) (sizeof(pane->dependent) / sizeof(pane->dependent[0]))) {
+        pane->dependent[pane->dependent_count++] = auto_row;
+    }
 #endif
 
     /* ⭐ A heading, so the four below do not each need to say "DualSense only".
