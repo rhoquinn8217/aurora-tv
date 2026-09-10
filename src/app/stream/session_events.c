@@ -74,3 +74,14 @@ bool session_handle_input_event(session_t *session, const SDL_Event *event) {
     }
     return true;
 }
+
+void session_update_touchpad_tap_hold(session_t *session) {
+    if (!session_accepting_input(session)) {
+        return;
+    }
+
+    stream_input_t *input = &session->input;
+    if (input->touchpads != NULL) {
+        stream_input_update_touchpad_tap_hold(input);
+    }
+}

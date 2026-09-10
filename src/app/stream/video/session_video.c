@@ -248,7 +248,7 @@ static int vdec_finish_feed(SS4S_VideoFeedResult result, PDECODE_UNIT decodeUnit
         if (vdec_stream_info.width == 0 || vdec_stream_info.height == 0) {
             stream_info_parse_size(decodeUnit, &vdec_stream_info);
         }
-        vdec_temp_stats.totalSubmitTime += LiGetMillis() - (unsigned long) (decodeUnit->enqueueTimeUs / 1000);
+        vdec_temp_stats.totalSubmitTime += (uint32_t) ((LiGetMicroseconds() - decodeUnit->enqueueTimeUs) / 1000);
         vdec_temp_stats.submittedFrames++;
         session_pacing_diag_on_present(decodeUnit, player, 1);
         if (need_idr_on_resume) {

@@ -853,11 +853,6 @@ msgid "AV1 can improve efficiency; requires host and decoder support."
 msgstr "O AV1 pode melhorar a eficiência; requer suporte no host e no decoder."
 
 #: src/app/ui/settings/panes/video.pane.c
-#, c-format
-msgid "%s decoder doesn't support AV1 codec."
-msgstr "O decoder %s não suporta o codec AV1."
-
-#: src/app/ui/settings/panes/video.pane.c
 msgid "Enable H265 and/or AV1 (if supported) to stream HDR10 from the host."
 msgstr "Ative H265 e/ou AV1 (se suportados) para HDR10 a partir do host."
 
@@ -872,10 +867,6 @@ msgstr ""
 #: src/app/ui/settings/panes/basic.pane.c
 msgid "Client refresh rate (Hz)"
 msgstr "Taxa de atualização do cliente (Hz)"
-
-#: src/app/ui/settings/panes/basic.pane.c
-msgid "Auto"
-msgstr "Automático"
 
 #: src/app/ui/settings/panes/basic.pane.c
 msgid ""
@@ -899,9 +890,6 @@ msgstr "Ping"
 
 msgid "Latency"
 msgstr "Latência"
-
-msgid "Language"
-msgstr "Idioma"
 
 msgid "Applies as soon as you change it. System Language follows the TV."
 msgstr "Aplica na hora. Idioma do sistema segue a TV."

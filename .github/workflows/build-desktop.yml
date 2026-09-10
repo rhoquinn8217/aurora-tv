@@ -1,7 +1,23 @@
 name: Build (Desktop)
 
 on:
+  push:
+    # Don't run for tags
+    tags-ignore:
+      - 'v*.*.*'
+    branches:
+      - main
+      - 'release/**'
+  pull_request:
+    branches:
+      - main
   workflow_dispatch:
+
+# Drop superseded builds for the same ref so stuck/queued runners do not pile up.
+concurrency:
+  group: build-desktop-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 env:
   # Customize the CMake build type here (Release, Debug, RelWithDebInfo, etc.)
   BUILD_TYPE: Debug

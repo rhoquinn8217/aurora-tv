@@ -291,6 +291,10 @@ void session_config_init(app_t *app, session_config_t *config, const SERVER_DATA
         config->stream.clientRefreshRateX100 = 0;
     }
     config->vmouse = app_config->virtual_mouse;
+    config->touchpad_mode = app_config->touchpad_mode;
+    config->touchpad_speed = app_config->touchpad_speed;
+    config->touchpad_multitouch = app_config->touchpad_multitouch;
+    config->touchpad_natural_scroll = app_config->touchpad_natural_scroll;
     config->hardware_mouse = app_config->hardware_mouse;
     config->local_audio = app_config->localaudio;
     config->view_only = app_config->viewonly;
