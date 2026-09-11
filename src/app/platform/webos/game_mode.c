@@ -115,16 +115,21 @@ static char *exec_root_cmd(const char *command) {
     return stdout_s;
 }
 
-static char *exec_root_luna(const char *method, const char *inner_body_json) {
+static char *exec_root_luna_uri(const char *uri, const char *inner_body_json) {
     char command[1400];
     int n = snprintf(command, sizeof(command),
-                     "luna-send -n 1 luna://com.webos.settingsservice/%s '%s'",
-                     method, inner_body_json);
+                     "luna-send -n 1 %s '%s'", uri, inner_body_json);
     if (n < 0 || (size_t) n >= sizeof(command)) {
         commons_log_error("GameMode", "luna-send command too long");
         return NULL;
     }
     return exec_root_cmd(command);
+}
+
+static char *exec_root_luna(const char *method, const char *inner_body_json) {
+    char uri[256];
+    snprintf(uri, sizeof(uri), "luna://com.webos.settingsservice/%s", method);
+    return exec_root_luna_uri(uri, inner_body_json);
 }
 
 static char *parse_json_string_path(const char *json, const char *obj_key, const char *field) {
@@ -326,6 +331,11 @@ webos_game_mode_state_t *webos_game_mode_enter(bool hdr) {
     }
 
     commons_log_info("GameMode", "app Game+IGR (not HDMI ALLM; overlay D= is NDL queue, unchanged)");
+    /* Snapshot sound before picture. Switching pictureMode to game makes the TV
+     * also flip soundMode to game; a get after that would save "game" and never
+     * restore the user's previous sound. */
+    char *sound_prev = get_setting("sound", "soundMode");
+
     /* Connecting UI is still SDR. hdrGame is rejected ("no matched extended item")
      * until HDR actually engages — start with SDR Game, then HDR aliases. */
     static const char *pic_sdr[] = {"game", "hdrGame", "dolbyHdrGame"};
@@ -334,7 +344,18 @@ webos_game_mode_state_t *webos_game_mode_enter(bool hdr) {
                                            pic_sdr, sizeof(pic_sdr) / sizeof(pic_sdr[0]), true);
 
     static const char *sound_vals[] = {"game", "standard"};
-    apply_one_any(state, "sound", "soundMode", sound_vals, sizeof(sound_vals) / sizeof(sound_vals[0]), true);
+    if (sound_prev != NULL && strcmp(sound_prev, "game") == 0) {
+        apply_one_any(state, "sound", "soundMode", sound_vals, sizeof(sound_vals) / sizeof(sound_vals[0]), true);
+        free(sound_prev);
+    } else if (set_setting("sound", "soundMode", "game")) {
+        commons_log_info("GameMode", "sound.soundMode -> game (was %s)",
+                         sound_prev ? sound_prev : "(unknown)");
+        state_push(state, "sound", "soundMode", sound_prev);
+    } else {
+        commons_log_warn("GameMode", "failed to set sound.soundMode=game");
+        apply_one_any(state, "sound", "soundMode", sound_vals, sizeof(sound_vals) / sizeof(sound_vals[0]), true);
+        free(sound_prev);
+    }
 
     if (state->picture_mode_ok) {
         static const char *off_vals[] = {"off"};
@@ -364,13 +385,10 @@ void webos_game_mode_on_hdr(webos_game_mode_state_t *state, bool hdr) {
     }
 }
 
-void webos_game_mode_restore(webos_game_mode_state_t *state) {
-    if (state == NULL) {
-        return;
-    }
+static void restore_matching(webos_game_mode_state_t *state, const char *category) {
     for (size_t i = state->count; i > 0; i--) {
         applied_setting_t *a = &state->items[i - 1];
-        if (a->restore_to == NULL) {
+        if (a->restore_to == NULL || strcmp(a->category, category) != 0) {
             continue;
         }
         if (set_setting(a->category, a->key, a->restore_to)) {
@@ -380,6 +398,44 @@ void webos_game_mode_restore(webos_game_mode_state_t *state) {
                              a->restore_to);
         }
         free(a->restore_to);
+        a->restore_to = NULL;
+    }
+}
+
+void webos_game_mode_restore(webos_game_mode_state_t *state) {
+    if (state == NULL) {
+        return;
+    }
+    /* Picture first. Restoring sound while picture is still Game makes the TV
+     * immediately force soundMode back to game (C5). */
+    char *sound_again = NULL;
+    const char *sound_key = "soundMode";
+    for (size_t i = 0; i < state->count; i++) {
+        if (strcmp(state->items[i].category, "sound") == 0 && state->items[i].restore_to != NULL) {
+            sound_again = strdup(state->items[i].restore_to);
+            sound_key = state->items[i].key;
+            break;
+        }
+    }
+    restore_matching(state, "picture");
+    restore_matching(state, "sound");
+    if (sound_again != NULL) {
+        if (set_setting("sound", sound_key, sound_again)) {
+            commons_log_info("GameMode", "sound.%s restore retry=%s", sound_key, sound_again);
+        }
+        free(sound_again);
+    }
+    restore_matching(state, "config");
+    for (size_t i = 0; i < state->count; i++) {
+        applied_setting_t *a = &state->items[i];
+        if (a->restore_to == NULL) {
+            continue;
+        }
+        if (set_setting(a->category, a->key, a->restore_to)) {
+            commons_log_info("GameMode", "restored %s.%s=%s", a->category, a->key, a->restore_to);
+        }
+        free(a->restore_to);
+        a->restore_to = NULL;
     }
     free(state->items);
     free(state);

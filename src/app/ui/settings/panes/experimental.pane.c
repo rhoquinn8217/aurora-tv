@@ -12,6 +12,7 @@
 #endif
 
 #include <stdio.h>
+#include <string.h>
 
 typedef struct experimental_pane_t {
     lv_fragment_t base;
@@ -22,11 +23,21 @@ typedef struct experimental_pane_t {
     int idr_refresh_slider_value;
     lv_obj_t *abr_dropdown;
     pref_dropdown_int_entry_t abr_entries[3];
+#if FEATURE_I18N_LANGUAGE_SETTINGS
+    pref_dropdown_string_entry_t lang_entries[16];
+    int lang_entries_len;
+#endif
 } experimental_pane_t;
 
 static void pane_ctor(lv_fragment_t *self, void *args);
 
 static lv_obj_t *create_obj(lv_fragment_t *self, lv_obj_t *container);
+
+#if FEATURE_I18N_LANGUAGE_SETTINGS
+static void language_changed_cb(lv_event_t *e);
+
+static void reload_ui_after_locale(void *userdata);
+#endif
 
 static void on_show_logs_changed(lv_event_t *e);
 
@@ -60,6 +71,16 @@ static void pane_ctor(lv_fragment_t *self, void *args) {
     pane->abr_entries[0] = (pref_dropdown_int_entry_t) {locstr("Balanced"), 0, true};
     pane->abr_entries[1] = (pref_dropdown_int_entry_t) {locstr("Quality"), 1, false};
     pane->abr_entries[2] = (pref_dropdown_int_entry_t) {locstr("Low latency"), 2, false};
+#if FEATURE_I18N_LANGUAGE_SETTINGS
+    pane->lang_entries_len = 0;
+    for (int i = 0; i18n_entry_at(i)->locale && pane->lang_entries_len < 16; i++) {
+        const i18n_entry_t *e = i18n_entry_at(i);
+        pane->lang_entries[pane->lang_entries_len].name = locstr(e->name);
+        pane->lang_entries[pane->lang_entries_len].value = e->locale;
+        pane->lang_entries[pane->lang_entries_len].fallback = strcmp(e->locale, "auto") == 0;
+        pane->lang_entries_len++;
+    }
+#endif
 }
 
 static lv_obj_t *create_obj(lv_fragment_t *self, lv_obj_t *container) {
@@ -70,6 +91,17 @@ static lv_obj_t *create_obj(lv_fragment_t *self, lv_obj_t *container) {
     lv_obj_set_flex_align(view, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
 
     pref_header(view, locstr("Experimental"));
+
+#if FEATURE_I18N_LANGUAGE_SETTINGS
+    pref_header(view, locstr("Language"));
+    lv_obj_t *lang_dd = pref_dropdown_string(view, pane->lang_entries, (size_t) pane->lang_entries_len,
+                                            &app_configuration->language);
+    lv_obj_set_width(lang_dd, LV_PCT(100));
+    pref_desc_label(view,
+                    locstr("Applies as soon as you change it. System Language follows the TV."),
+                    false);
+    lv_obj_add_event_cb(lang_dd, language_changed_cb, LV_EVENT_VALUE_CHANGED, pane);
+#endif
 
     lv_obj_t *logs = pref_checkbox(view, locstr("Show logs"),
                                    &app_configuration->show_logs, false);
@@ -117,18 +149,6 @@ static lv_obj_t *create_obj(lv_fragment_t *self, lv_obj_t *container) {
     lv_obj_add_event_cb(idr_slider, idr_refresh_slider_cb, LV_EVENT_VALUE_CHANGED, pane);
     idr_refresh_state_update(pane);
 
-#if TARGET_WEBOS
-    pref_header(view, locstr("Audio"));
-
-    lv_obj_t *pcm_checkbox = pref_checkbox(view, locstr("Decode 5.1 in the client (PCM)"),
-                                           &app_configuration->surround_pcm, false);
-    pref_desc_label(view,
-                    locstr("Decode 5.1 to PCM in the client (needed on eARC Atmos). Channel order is "
-                           "E, PD, D, PE, C, Sub. Leave off for stereo."),
-                    false);
-    lv_obj_add_event_cb(pcm_checkbox, reconnect_cb, LV_EVENT_VALUE_CHANGED, pane);
-#endif
-
     pref_header(view, locstr("Bitrate"));
 
     lv_obj_t *abr_checkbox = pref_checkbox(view, locstr("Adaptive bitrate"),
@@ -159,6 +179,32 @@ static lv_obj_t *create_obj(lv_fragment_t *self, lv_obj_t *container) {
 
     return view;
 }
+
+#if FEATURE_I18N_LANGUAGE_SETTINGS
+static void language_changed_cb(lv_event_t *e) {
+    experimental_pane_t *pane = lv_event_get_user_data(e);
+    if (pane->parent) {
+        pane->parent->needs_locale_reapply = true;
+    }
+    settings_save(app_configuration);
+    if (app_configuration->language == NULL || app_configuration->language[0] == '\0' ||
+        strcmp(app_configuration->language, "auto") == 0) {
+        app_init_locale();
+    } else {
+        i18n_setlocale(app_configuration->language);
+    }
+    lv_async_call(reload_ui_after_locale, NULL);
+}
+
+static void reload_ui_after_locale(void *userdata) {
+    (void) userdata;
+    if (global == NULL) {
+        return;
+    }
+    app_ui_close(&global->ui);
+    app_ui_open(&global->ui, true, NULL);
+}
+#endif
 
 static void reconnect_cb(lv_event_t *e) {
     experimental_pane_t *pane = lv_event_get_user_data(e);
