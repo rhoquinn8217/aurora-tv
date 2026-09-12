@@ -345,6 +345,16 @@ void app_process_events(app_t *app) {
      * and the gyro is exactly what it deliberately leaves alone. Output is
      * unaffected either way. Nothing else could produce that pattern. */
     ctm_bridge_gesture_tick(&app->input, app->session, streaming_overlay_shown());
+
+    /* ⓘ Upstream v1.2.9's touchpad tap-hold, for its touchpad mouse mode. It
+     * reads the same SDL touchpad state our gesture polls above; neither
+     * consumes events, so the two coexist. ⚠️ With touchpad_mode = mouse a
+     * two-finger hold would bridge AND drive the host cursor -- the mode is
+     * opt-in and defaults to native, so that is a choice, not a collision. */
+    if (app->session != NULL) {
+        session_update_touchpad_tap_hold(app->session);
+    }
+
 }
 
 void app_quit_confirm() {

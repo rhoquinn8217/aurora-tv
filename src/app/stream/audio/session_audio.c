@@ -8,8 +8,6 @@
 #include "stream/session_priv.h"
 #include "logging.h"
 #include "config.h"
-#include "app.h"
-#include "app_settings.h"
 
 #define SAMPLES_PER_FRAME  240
 
@@ -22,6 +20,8 @@ static int frame_size = 0, unit_size = 0;
 AUDIO_INFO audio_stream_info;
 
 static size_t opus_head_serialize(const OPUS_MULTISTREAM_CONFIGURATION *config, unsigned char *data);
+
+static void aud_buffers_free(void);
 
 static int aud_init(int audioConfiguration, const POPUS_MULTISTREAM_CONFIGURATION opusConfig, void *context,
                     int arFlags) {
@@ -45,12 +45,7 @@ static int aud_init(int audioConfiguration, const POPUS_MULTISTREAM_CONFIGURATIO
                          opusConfig->mapping[0], opusConfig->mapping[1], opusConfig->mapping[2],
                          opusConfig->mapping[3], opusConfig->mapping[4], opusConfig->mapping[5]);
     }
-    /* Escape hatch for NDL Opus 5.1: decode here and Feed PCM. NDL's
-     * SS4S_WebOS_RemapPcm51ToDevice (ndl_audio.c) then maps WAVE to the C5
-     * 6-channel order E, PD, D, PE, C, Sub. Host still gets surroundParams. */
-    const bool force_pcm = app_configuration != NULL && app_configuration->surround_pcm &&
-                           opusConfig->channelCount > 2;
-    if (!force_pcm && session->audio_cap.codecs & SS4S_AUDIO_OPUS &&
+    if (session->audio_cap.codecs & SS4S_AUDIO_OPUS &&
         SS4S_GetAudioPreferredCodecs(&info) & SS4S_AUDIO_OPUS) {
         codec = SS4S_AUDIO_OPUS;
         decoder = NULL;
@@ -72,8 +67,7 @@ static int aud_init(int audioConfiguration, const POPUS_MULTISTREAM_CONFIGURATIO
         buffer = calloc(unit_size, frame_size);
         if (buffer == NULL) {
             commons_log_error("Session", "Audio init: failed to allocate decode buffer");
-            opus_multistream_decoder_destroy(decoder);
-            decoder = NULL;
+            aud_buffers_free();
             return -1;
         }
     }
@@ -95,7 +89,13 @@ static int aud_init(int audioConfiguration, const POPUS_MULTISTREAM_CONFIGURATIO
     info.codec = codec;
     info.codecData = buffer;
     info.codecDataLen = codecDataLen;
-    return SS4S_PlayerAudioOpen(player, &info);
+    // aud_cleanup only runs once the audio stream has started, so a failed init has to release
+    // what it allocated itself.
+    SS4S_AudioOpenResult result = SS4S_PlayerAudioOpen(player, &info);
+    if (result != SS4S_AUDIO_OPEN_OK) {
+        aud_buffers_free();
+    }
+    return result;
 }
 
 static void aud_cleanup() {
@@ -103,15 +103,17 @@ static void aud_cleanup() {
         SS4S_PlayerAudioClose(player);
         player = NULL;
     }
+    aud_buffers_free();
+    session = NULL;
+}
+
+static void aud_buffers_free(void) {
     if (decoder != NULL) {
         opus_multistream_decoder_destroy(decoder);
         decoder = NULL;
     }
-    if (buffer != NULL) {
-        free(buffer);
-        buffer = NULL;
-    }
-    session = NULL;
+    free(buffer);
+    buffer = NULL;
 }
 
 static void aud_feed(char *sampleData, int sampleLength) {

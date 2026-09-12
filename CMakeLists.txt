@@ -2,14 +2,14 @@ cmake_minimum_required(VERSION 3.19)
 set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
 
 # Keep the fork's upstream version; CTM changes bump only the build number,
-# shown as "1.2.5 (N)" in the app. appinfo/ipk stay at the numeric version.
+# shown as "1.2.9 (N)" in the app. appinfo/ipk stay at the numeric version.
 #
 # The version follows GuiDev1994's releases as they are merged forward. The
 # build number is ours, he does not have it, and it keeps counting across a
 # merge -- resetting it would make old builds and new ones share numbers, and
 # every log and test note that names one would become ambiguous.
-set(MOONLIGHT_VERSION "1.2.5")
-set(CTM_BUILD_NUMBER 311)
+set(MOONLIGHT_VERSION "1.2.9")
+set(CTM_BUILD_NUMBER 312)
 
 project(moonlight VERSION ${MOONLIGHT_VERSION} LANGUAGES C CXX)
 
@@ -77,7 +77,7 @@ if (BUILD_TESTS)
     enable_testing()
 endif ()
 
-set(I18N_LOCALES "cs" "de" "fr" "it" "nl" "pl" "pt-BR" "ro" "ru" "ja" "zh-CN")
+set(I18N_LOCALES "cs" "de" "es-ES" "fr" "it" "nl" "pl" "pt-BR" "ro" "ru" "ja" "tr" "zh-CN")
 list(LENGTH I18N_LOCALES I18N_LOCALES_LEN)
 
 set(FEATURE_FORCE_FULLSCREEN OFF)
@@ -86,6 +86,16 @@ set(FEATURE_I18N_LANGUAGE_SETTINGS OFF)
 set(FEATURE_SURROUND_SOUND ON)
 set(FEATURE_CHECK_MODULE_OS_VERSION OFF)
 set(FEATURE_INPUT_EVMOUSE OFF)
+# webOS routes controller touchpads into the touchscreen pipeline, where the
+# compositor consumes edge swipes as navigation gestures. Off elsewhere until
+# another platform is known to need it.
+if (TARGET_WEBOS)
+    set(GAMEPAD_TOUCHPAD_GRAB_DEFAULT ON)
+else ()
+    set(GAMEPAD_TOUCHPAD_GRAB_DEFAULT OFF)
+endif ()
+option(FEATURE_GAMEPAD_TOUCHPAD_GRAB "Take exclusive access of controller touchpad devices"
+        ${GAMEPAD_TOUCHPAD_GRAB_DEFAULT})
 set(FEATURE_INPUT_LIBCEC ON)
 set(FEATURE_EMBEDDED_SHELL OFF)
 set(FEATURE_WINDOW_FULLSCREEN_DESKTOP ON)
@@ -145,7 +155,7 @@ set(BUILD_SHARED_CORE_LIBS OFF)
 
 if (TARGET_WEBOS)
     set(CMAKE_INSTALL_LIBDIR lib/backports)
-    set(SDL2_BACKPORT_RELEASE "release-2.30.12-webos.5")
+    set(SDL2_BACKPORT_RELEASE "release-2.30.12-webos.6")
     include(ExternalSDL2BackportForWebOS)
     unset(CMAKE_INSTALL_LIBDIR)
 else ()
@@ -330,6 +340,12 @@ if (FEATURE_INPUT_EVMOUSE AND TARGET commons-evmouse)
     target_link_libraries(moonlight-lib PUBLIC commons-evmouse)
 else ()
     set(FEATURE_INPUT_EVMOUSE OFF)
+endif ()
+
+if (FEATURE_GAMEPAD_TOUCHPAD_GRAB AND TARGET commons-gamepad-touchpad)
+    target_link_libraries(moonlight-lib PUBLIC commons-gamepad-touchpad)
+else ()
+    set(FEATURE_GAMEPAD_TOUCHPAD_GRAB OFF)
 endif ()
 
 target_link_libraries(moonlight-lib PUBLIC commons-ss4s-modules-list commons-sps-parser)

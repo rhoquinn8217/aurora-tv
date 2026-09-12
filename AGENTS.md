@@ -109,16 +109,15 @@ Three conventions exist: GFE native, Moonlight WAVE (`FL FR C LFE RL RR`), and
 webOS NDL passthrough `{0,1,4,5,2,3}` (FL FR SL SR FC LFE packed as
 `surroundParams=642014523`).
 
-What is live on HEAD (LG C5, webOS 25, eARC Atmos bar, Windows 5.1 speaker test):
+What is live on HEAD (same as upstream moonlight-tv; user validated original
+Moonlight on their eARC setup — Aurora's client PCM + RemapPcm51 path was wrong):
 
 | Path | What it does | Result |
 |------|----------------|--------|
 | `surroundParams=642014523` in `session_worker.c` | Host advertises the mapping `IsOpusPassthroughSupported()` already expects | Required. Nulling it (v1.2.0–1.2.3) forced `opus_fix` re-encode and wrong speakers. |
-| PCM Feed `SS4S_WebOS_RemapPcm51ToDevice` | WAVE → NDL 6ch `E, PD, D, PE, C, Sub` | E/C/D/PD/Sub verified on C5. PE is the correct speaker but quieter; digital boost (×2.5 wrap or +3 dB saturate) distorted — leave unity gain. |
-| `surround_pcm` (Experimental) | Decode Opus in-process, skip NDL Opus/MAT | Needed on this eARC bar (Opus stub header clips). Default on for webOS. |
+| NDL Opus passthrough | Opus preferred when SS4S advertises it and host mapping matches | Correct 5.1 on user's setup. Do **not** force client PCM or RemapPcm51. |
 
 Do **not** send Sunshine `surround-params` a second time on top of `642014523`.
-Do **not** feed unpermuted CEA PCM (LFE at index 3) — Sub goes silent.
 Do not "fix" 5.1 by deleting `surroundParams` again.
 
 ## webOS frame pacing — read before attempting

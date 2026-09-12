@@ -30,7 +30,9 @@ jobs:
     steps:
       - name: Set Short Commit ID
         shell: bash
-        run: echo SHORT_SHA="${GITHUB_SHA:0:8}" >> $GITHUB_ENV
+        run: echo SHORT_SHA="${HEAD_SHA:0:8}" >> $GITHUB_ENV
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - name: Checkout Source
         uses: actions/checkout@v4

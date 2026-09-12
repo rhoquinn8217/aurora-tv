@@ -109,32 +109,50 @@ void i18n_setlocale(const char *locale) {
 
     char *base = SDL_GetBasePath();
     strip_trailing_slash(base);
+    char *base_parent = NULL;
+    if (base) {
+        char *slash = strrchr(base, '/');
+        if (slash && slash != base) {
+            base_parent = strdup(base);
+            if (base_parent) {
+                strrchr(base_parent, '/')[0] = '\0';
+            }
+        }
+    }
     const char *home = SDL_getenv("HOME");
 
-    const char *roots[3];
+    const char *roots[4];
     int nroots = 0;
-    if (base && base[0]) {
-        roots[nroots++] = base;
-    }
-    if (home && home[0] && (!base || strcmp(home, base) != 0)) {
+    if (home && home[0]) {
         roots[nroots++] = home;
+    }
+    if (base_parent && base_parent[0] && (!home || strcmp(base_parent, home) != 0)) {
+        roots[nroots++] = base_parent;
+    }
+    if (base && base[0] && (!home || strcmp(base, home) != 0)) {
+        roots[nroots++] = base;
     }
 
     bool loaded = false;
     for (int i = 0; i < nroots && !loaded; i++) {
-        char *resources = path_join(roots[i], "resources");
-        loaded = try_load_bundle(locale_path, resources);
+        /* Original moonlight-tv: locale "pt-BR" + app HOME (libwebosi18n adds resources/). */
+        loaded = try_load_bundle(locale, roots[i]);
         if (!loaded) {
+            char *resources = path_join(roots[i], "resources");
             loaded = try_load_bundle(locale, resources);
+            if (!loaded) {
+                loaded = try_load_bundle(locale_path, resources);
+            }
+            if (!loaded) {
+                loaded = try_load_bundle(locale_path, roots[i]);
+            }
+            free(resources);
         }
-        if (!loaded) {
-            loaded = try_load_bundle(locale, roots[i]);
-        }
-        free(resources);
     }
     if (base) {
         SDL_free(base);
     }
+    free(base_parent);
 
     if (!loaded) {
         commons_log_error("I18N", "Failed to load locale '%s'", locale);

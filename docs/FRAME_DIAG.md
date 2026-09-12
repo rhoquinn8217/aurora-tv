@@ -7,31 +7,24 @@ Does **not** change PTS generation, `pauseAtDecodeTime`, ABR, or UDP buffers.
 
 1. Install the IPK (Apps → Install).
 2. Open **Terminal** (root SSH via Homebrew Channel).
-3. Enable frame diag (flag file — launcher does not pass env vars):
+3. Enable present-to-present diag (flag file — the Home launcher does not pass env vars):
 
 ```sh
 touch /tmp/aurora_frame_diag.enable
-# optional A/B — hide LVGL overlay (restart stream after):
-touch /tmp/aurora_hide_overlay.enable
 ```
 
-4. Launch Aurora from the TV, start a stream, do a smooth camera pan (~30–60 s).
-5. Stop the stream (flushes the log).
-6. In Dev Manager **Files**, download:
-
-`/tmp/aurora_frame_diag.ndjson`
-
-Or from Terminal on the PC (with device configured):
+4. Launch Aurora from the TV, start a 120 FPS stream, pan the camera ~30–60 s.
+5. Watch PmLog (`aurora` / tag `Pacing`):
+   - one **1s summary** line per second (`fps_recv`, `fps_feed`, `present_avg`)
+   - extra lines only on anomalies: `WARNING` (>10 ms), `STUTTER` (>12.5 ms), `HITCH` (>=16 ms)
+   - each anomaly prints `[RECV] → [DECODE] → [QUEUE] → [PRESENT]`
+6. Disable when done:
 
 ```sh
-ares-pull -d webos /tmp/aurora_frame_diag.ndjson ./
+rm -f /tmp/aurora_frame_diag.enable
 ```
 
-7. Disable when done:
-
-```sh
-rm -f /tmp/aurora_frame_diag.enable /tmp/aurora_hide_overlay.enable
-```
+On NDL, `SS4S_PlayerVideoFeed` **is** present (direct submit). Present-to-present is Feed-to-Feed. Expected ~8.33 ms @ 120 Hz. Average FPS can still be 120 with irregular deltas.
 
 ### What to look for in the NDJSON
 

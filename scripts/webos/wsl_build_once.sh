@@ -100,38 +100,33 @@ rm -rf "$CPACK_OUT"
 mkdir -p "$CPACK_OUT"
 (cd "$CMAKE_BINARY_DIR" && cpack -D "CPACK_PACKAGE_DIRECTORY=$CPACK_OUT")
 
-mkdir -p "$PROJECT/dist"
-copied=0
-produced=0
-for ipk in "$CPACK_OUT"/*.ipk; do
-  [ -f "$ipk" ] || continue
-  produced=1
-  base="$(basename "$ipk")"
-  if cp -f "$ipk" "$PROJECT/dist/$base" 2>/dev/null; then
-    copied=1
-  else
-    alt="$PROJECT/dist/${base%.ipk}.panel-phase.ipk"
-    stamp="$PROJECT/dist/${base%.ipk}.$(date +%Y%m%d-%H%M%S).ipk"
-    if cp -f "$ipk" "$alt" 2>/dev/null; then
-      echo "Warning: $base locked; wrote $alt"
-      copied=1
-    elif cp -f "$ipk" "$stamp" 2>/dev/null; then
-      echo "Warning: $base locked; wrote $stamp"
-      copied=1
-    else
-      echo "Warning: could not copy $base to dist (Windows mount locked?)"
-      echo "IPK remains at $ipk"
-      echo "Copy from Windows: \\\\wsl$\\Ubuntu${ipk}"
-    fi
-  fi
-done
+DIST_DIR="$PROJECT/dist"
+mkdir -p "$DIST_DIR"
+python3 - "$CPACK_OUT" "$DIST_DIR" <<'PY'
+import glob, os, shutil, sys
+src, dst = sys.argv[1], sys.argv[2]
+os.makedirs(dst, exist_ok=True)
+ipks = glob.glob(os.path.join(src, "*.ipk"))
+if not ipks:
+    sys.exit("Error: no IPK produced")
+def copy_ipk(src, dest):
+    try:
+        shutil.copy2(src, dest)
+        return dest
+    except PermissionError:
+        alt = dest + ".new"
+        shutil.copy2(src, alt)
+        print("Warning: %s locked; wrote %s" % (dest, alt))
+        return alt
+
+for ipk in ipks:
+    name = os.path.basename(ipk)
+    out = copy_ipk(ipk, os.path.join(dst, name))
+    stable = copy_ipk(ipk, os.path.join(dst, "aurora.ipk"))
+    print("IPK %s (%d bytes)" % (out, os.path.getsize(out)))
+    print("IPK %s (stable name)" % stable)
+PY
 echo "=== IPKs ==="
-ls -la "$PROJECT/dist"/*.ipk 2>/dev/null || true
-ls -la "$CPACK_OUT"/*.ipk 2>/dev/null || true
-if [ "$produced" -eq 0 ]; then
-  echo "Error: no IPK produced"
-  exit 1
-fi
-if [ "$copied" -eq 0 ]; then
-  echo "Warning: IPK not copied to dist/, but available under $CPACK_OUT"
-fi
+ls -la "$DIST_DIR"/*.ipk 2>/dev/null || true
+echo "Install this file with Dev Manager: $DIST_DIR/aurora.ipk"
+echo "(Windows: C:\\Projetos\\moonlight\\lg\\moonlight-tv\\dist\\aurora.ipk)"

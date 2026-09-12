@@ -1,4 +1,5 @@
 #include "session_video.h"
+#include "session_pacing_diag.h"
 
 #include "config.h"
 
@@ -148,6 +149,7 @@ int vdec_delegate_setup(int videoFormat, int width, int height, int redrawRate, 
     frames_since_idr = 0;
     vdec_stream_target_fps = redrawRate > 0 ? redrawRate : 60;
     vdec_warned_near_buffer_limit = false;
+    session_pacing_diag_reset();
 
     if (videoFormat & VIDEO_FORMAT_MASK_AV1) {
         vdec_stream_info.width = width;
@@ -219,6 +221,7 @@ void vdec_delegate_cleanup(void) {
     buffer_size = 0;
     buffer_initial_size = 0;
     SS4S_PlayerVideoClose(player);
+    session_pacing_diag_reset();
     session = NULL;
 }
 
@@ -245,8 +248,9 @@ static int vdec_finish_feed(SS4S_VideoFeedResult result, PDECODE_UNIT decodeUnit
         if (vdec_stream_info.width == 0 || vdec_stream_info.height == 0) {
             stream_info_parse_size(decodeUnit, &vdec_stream_info);
         }
-        vdec_temp_stats.totalSubmitTime += LiGetMillis() - (unsigned long) (decodeUnit->enqueueTimeUs / 1000);
+        vdec_temp_stats.totalSubmitTime += (uint32_t) ((LiGetMicroseconds() - decodeUnit->enqueueTimeUs) / 1000);
         vdec_temp_stats.submittedFrames++;
+        session_pacing_diag_on_present(decodeUnit, player, 1);
         if (need_idr_on_resume) {
             need_idr_on_resume = false;
             commons_log_info("Session", "IDR reason: resume after decoder NOT_READY/BufferFull");
