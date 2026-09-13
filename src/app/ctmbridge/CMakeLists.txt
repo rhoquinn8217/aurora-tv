@@ -29,6 +29,7 @@ add_library(ctmbridge STATIC
     ${CTM_BRIDGE_DIR}/src/controllers/controller_ds5.c
     ${CTM_BRIDGE_DIR}/src/controllers/controller_ds4.c
     ${CTM_BRIDGE_DIR}/src/controllers/controller_xbox.c
+    ${CTM_BRIDGE_DIR}/src/controllers/controller_xpad.c
     ${CTM_BRIDGE_DIR}/src/controllers/controller_steam_puck.c
     ${CTM_BRIDGE_DIR}/src/controllers/controller_generic.c
     ${CTM_BRIDGE_DIR}/src/monitor/ctm_monitor.c

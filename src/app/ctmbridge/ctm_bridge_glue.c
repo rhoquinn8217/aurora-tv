@@ -57,30 +57,89 @@ static void ctm_glue_enumerate(void)
 static pthread_mutex_t s_dev_mutex = PTHREAD_MUTEX_INITIALIZER;
 static ctm_monitor_t *s_monitor = NULL;
 
-/* Plug every recognised, not-yet-plugged controller. Caller MUST hold s_dev_mutex. */
+/* ⭐⭐ WHAT A RECONNECT MAY PUT BACK: ONLY WHAT AN OUTAGE TOOK.
+ *
+ * ⛔ THE FAULT: when a stream came back from an auto-reconnect, every recognised
+ * controller that was not bridged got bridged, including ones nobody had asked
+ * for, and plugged directly, so their emulated pads stayed on the host too. It
+ * went unnoticed while most controllers could not be bridged anyway; a wired
+ * Xbox pad can be now (2026-09-13).
+ *
+ * ➡️ The reaper remembers each device it releases because the host went away,
+ * and the reconnect re-plugs exactly those. A device the user released is
+ * never on the list. Cleared whenever the bridge starts or stops.
+ *
+ * ⓘ Kept by logical device key: a per-node session's key is "<device>#<node>",
+ * and the part before the '#' is the device. Guarded by s_dev_mutex. */
+#define DROPPED_MAX 16
+static char s_dropped[DROPPED_MAX][96];
+static int s_dropped_count = 0;
+
+static void dropped_remember_locked(const char *session_key)
+{
+    char item_key[96];
+    snprintf(item_key, sizeof(item_key), "%s", session_key);
+    char *hash = strchr(item_key, '#');
+    if (hash) {
+        *hash = '\0';
+    }
+    for (int i = 0; i < s_dropped_count; ++i) {
+        if (strcmp(s_dropped[i], item_key) == 0) {
+            return;
+        }
+    }
+    if (s_dropped_count < DROPPED_MAX) {
+        snprintf(s_dropped[s_dropped_count++], sizeof(s_dropped[0]), "%s", item_key);
+    }
+}
+
+static int dropped_index_locked(const char *item_key)
+{
+    for (int i = 0; i < s_dropped_count; ++i) {
+        if (strcmp(s_dropped[i], item_key) == 0) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+static void dropped_forget_locked(int index)
+{
+    if (index < 0 || index >= s_dropped_count) {
+        return;
+    }
+    for (int i = index; i + 1 < s_dropped_count; ++i) {
+        memcpy(s_dropped[i], s_dropped[i + 1], sizeof(s_dropped[0]));
+    }
+    --s_dropped_count;
+}
+
+/* Re-plug what an outage dropped. Caller MUST hold s_dev_mutex. */
 static int glue_plug_all_locked(void)
 {
+    if (s_dropped_count == 0) {
+        return 0;   /* nothing was dropped: the common case, and no enumeration */
+    }
     ctm_glue_enumerate();
     int count = 0;
     for (int i = 0; i < g_devices.count; ++i) {
         logical_device_t *item = &g_devices.items[i];
-        const char *kind = bridge_kind_for_item(item);
-        if (kind == NULL) {
-            continue;
+        const int dropped = dropped_index_locked(item->key);
+        if (dropped < 0) {
+            continue;   /* never bridged, or released on purpose */
         }
-        if (strcmp(kind, "hid") == 0 &&
-            (item_is_tv_remote(item) || !item_is_mouse_or_keyboard(item))) {
-            /* Remote = the pointer synthesizer (plugged by ctm_bridge_start,
-             * never raw-relayed); other generic HID auto-plugs only when it
-             * is a real mouse/keyboard — vendor exotics stay manual. */
-            continue;
+        if (item_is_tv_remote(item)) {
+            continue;   /* the pointer synthesizer, plugged by ctm_bridge_start */
         }
         if (session_index_for_key(item->key) >= 0) {
+            dropped_forget_locked(dropped);
             continue;   /* already plugged */
         }
         if (plug_in_item(item)) {
             count++;
-            log_append("ctm glue: plugged '%s' (%s)", item->name, kind);
+            dropped_forget_locked(dropped);
+            log_append("ctm glue: re-plugged '%s' (%s) after an outage", item->name,
+                       bridge_kind_for_item(item));
         }
     }
     if (count > 0) {
@@ -208,6 +267,10 @@ bool ctm_bridge_start(void)
         return true;
     }
     ctm_glue_ensure_core();
+    /* A new bridge owes nothing to the last one's outages. */
+    pthread_mutex_lock(&s_dev_mutex);
+    s_dropped_count = 0;
+    pthread_mutex_unlock(&s_dev_mutex);
 
     /* ⭐⭐ START THE AGENT PROBE WHEN THE BRIDGE COMES UP, not when something is
      * first plugged.
@@ -410,13 +473,50 @@ bool ctm_bridge_signals_enabled(void)
  *   Wired: the sound card exists because the controller is plugged into the
  *     TV, not because a bridge succeeded. ⚠️ But with two plugged in there is
  *     no telling which card is which, so that case declines and falls back. */
+/* The bridge kind of the row behind a node, or NULL. Caller holds s_dev_mutex
+ * and has enumerated. */
+static const char *kind_for_node_locked(const char *node)
+{
+    for (int i = 0; i < g_devices.count; ++i) {
+        logical_device_t *item = &g_devices.items[i];
+        for (int k = 0; k < item->device_count; ++k) {
+            int j = item->device_indices[k];
+            if (j < 0 || j >= g_scan.count) {
+                continue;
+            }
+            if (strcmp(g_scan.devices[j].node, node) == 0) {
+                return bridge_kind_for_item(item);
+            }
+        }
+    }
+    return NULL;
+}
+
 bool ctm_bridge_signal_refused(const char *node)
 {
-    if (!ctm_bridge_signals_enabled()) return false;
-    if (ctm_bridge_node_is_bluetooth(node)) {
+    if (!ctm_bridge_signals_enabled() || !node || !node[0]) return false;
+    char kind[16] = "";
+    ctm_glue_ensure_core();
+    pthread_mutex_lock(&s_dev_mutex);
+    ctm_glue_enumerate();
+    const char *k = kind_for_node_locked(node);
+    if (k) {
+        snprintf(kind, sizeof(kind), "%s", k);
+    }
+    pthread_mutex_unlock(&s_dev_mutex);
+
+    if (strcmp(kind, "ds5") == 0 || strcmp(kind, "ds5e") == 0) {
         return ctm_signal_refused_bt(node) == 0;
     }
-    return ctm_signal_wired_no_session(node, 2 /* BTSIG_REFUSED */) == 0;
+    /* ⛔ The wired signal plays through a DualSense's sound card, taken by
+     * elimination when the node's own cannot be told apart. For any other
+     * controller that meant the refusal played on whichever DualSense was
+     * free. ➡️ Anything that is not a DualSense returns false, and gets the SDL
+     * buzz, which reaches every pad. */
+    if (strcmp(kind, "ds5_usb") == 0 || strcmp(kind, "ds5e_usb") == 0) {
+        return ctm_signal_wired_no_session(node, 2 /* BTSIG_REFUSED */) == 0;
+    }
+    return false;
 }
 
 bool ctm_bridge_node_signals_itself(const char *node)
@@ -434,22 +534,8 @@ bool ctm_bridge_node_is_bluetooth(const char *node)
     ctm_glue_ensure_core();
     pthread_mutex_lock(&s_dev_mutex);
     ctm_glue_enumerate();
-    bool bt = false;
-    for (int i = 0; i < g_devices.count && !bt; ++i) {
-        logical_device_t *item = &g_devices.items[i];
-        for (int k = 0; k < item->device_count; ++k) {
-            int j = item->device_indices[k];
-            if (j < 0 || j >= g_scan.count) {
-                continue;
-            }
-            if (strcmp(g_scan.devices[j].node, node) != 0) {
-                continue;
-            }
-            const char *kind = bridge_kind_for_item(item);
-            bt = (strcmp(kind, "ds5") == 0) || (strcmp(kind, "ds5e") == 0);
-            break;
-        }
-    }
+    const char *kind = kind_for_node_locked(node);
+    const bool bt = kind && (strcmp(kind, "ds5") == 0 || strcmp(kind, "ds5e") == 0);
     pthread_mutex_unlock(&s_dev_mutex);
     return bt;
 }
@@ -535,6 +621,7 @@ int ctm_bridge_reap_gone_hosts(void)
      * entry that shifts down into the current index. */
     for (int i = 0; i < gone_count; ++i) {
         log_append("ctm glue: host gone -- releasing '%s'", gone[i]);
+        dropped_remember_locked(gone[i]);   /* a reconnect may put it back */
         stop_session(gone[i]);
         ++reaped;
     }
@@ -651,6 +738,9 @@ void ctm_bridge_stop(void)
         s_monitor = NULL;
     }
     release_local_sessions_on_exit();
+    pthread_mutex_lock(&s_dev_mutex);
+    s_dropped_count = 0;
+    pthread_mutex_unlock(&s_dev_mutex);
     g_running = false;
     if (g_stop_sniff_thread_started) {
         pthread_join(g_stop_sniff_thread, NULL);

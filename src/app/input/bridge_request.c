@@ -19,10 +19,11 @@ bridge_request_result_t bridge_request_device(const ctm_bridge_dev_t *dev)
      * the controller powering itself off.
      *
      * ⚠️ The direct plug is the fallback for a device with no SDL controller
-     * behind its node, which was written with keyboards and mice in mind:
-     * nothing emulates them in the first place. ⛔ But the gesture only finds a
-     * controller SDL opened through hidraw, so an Xbox or generic pad lands here
-     * too, and its emulated pad is left in place.
+     * behind its node: keyboards and mice, whose input the core takes away
+     * from the TV by grabbing it. ⓘ Until 2026-09-13 the gesture found only a
+     * controller SDL opened through hidraw, so a wired Xbox pad or a pad SDL
+     * read through evdev landed here too and kept its emulated pad. It now
+     * joins those through their input device -- see controller_path_is_node.
      *
      * ⓘ No check that the node is set: an empty node is refused by the gesture
      * and still reaches the direct plug, which is how the TV remote's row has

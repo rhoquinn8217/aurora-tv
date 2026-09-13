@@ -628,9 +628,16 @@ static bool sys_input_dir_for_event(const char *dev_path, char *out, size_t out_
     return access(out, F_OK) == 0;
 }
 
-/* Walk up from the input device to the USB interface, then find the hidraw node
- * underneath it. The interface is the input device's parent's parent, matching
- * the layout confirmed on hardware. */
+/* From an evdev node to the hidraw node of the same HID device.
+ *
+ * ⛔ THIS USED TO WALK ONE LEVEL SHORT. /sys/class/input/eventN/device is the
+ * INPUT device (inputM); its parent is only the "input" folder, which holds no
+ * hidraw at any depth. So no controller SDL read through evdev was ever joined
+ * to its row, and each fell back to a plain plug that retired nothing.
+ * ➡️ The input device's own `device` is the HID device, whose hidraw directory
+ * names the node: the same walk the core makes from inputM. Read off the U5s
+ * 2026-09-13: event9/device/device/hidraw holds hidraw0 (the DS4) and event13's
+ * holds hidraw1 (the KMA2 keyboard). */
 static bool hidraw_node_for_event(const char *dev_path, char *out, size_t out_len) {
     /* On webOS, SDL opens the controller through hidraw and hands that node
      * straight back -- which is the thing we are looking for. Measured on C3,
@@ -647,45 +654,59 @@ static bool hidraw_node_for_event(const char *dev_path, char *out, size_t out_le
         return false;
     }
 
-    char iface[PATH_MAX];
-    snprintf(iface, sizeof(iface), "%s/..", sys_input);
-
-    char resolved[PATH_MAX];
-    if (!realpath(iface, resolved)) {
-        return false;
-    }
-
-    /* The interface directory holds one 0003:VVVV:PPPP.NNNN entry per HID
-     * device; the hidraw node lives inside it. The trailing number changes on
-     * every re-enumeration, so it is searched for rather than remembered. */
-    DIR *d = opendir(resolved);
-    if (!d) {
-        return false;
+    /* ⓘ Followed through the links rather than resolved with realpath, which is
+     * flaky inside the dev-mode jail. The hidraw number changes on every
+     * re-enumeration, so it is read rather than remembered. */
+    char hidraw_dir[PATH_MAX];
+    snprintf(hidraw_dir, sizeof(hidraw_dir), "%s/device/hidraw", sys_input);
+    DIR *hd = opendir(hidraw_dir);
+    if (!hd) {
+        return false;   /* no hidraw: an xpad pad, for one -- see below */
     }
     bool found = false;
-    struct dirent *ent;
-    while (!found && (ent = readdir(d)) != NULL) {
-        if (ent->d_name[0] == '.') {
-            continue;
+    struct dirent *hent;
+    while ((hent = readdir(hd)) != NULL) {
+        if (strncmp(hent->d_name, "hidraw", 6) == 0) {
+            snprintf(out, out_len, "/dev/%s", hent->d_name);
+            found = true;
+            break;
         }
-        char hidraw_dir[PATH_MAX];
-        snprintf(hidraw_dir, sizeof(hidraw_dir), "%s/%s/hidraw", resolved, ent->d_name);
-        DIR *hd = opendir(hidraw_dir);
-        if (!hd) {
-            continue;
-        }
-        struct dirent *hent;
-        while ((hent = readdir(hd)) != NULL) {
-            if (strncmp(hent->d_name, "hidraw", 6) == 0) {
-                snprintf(out, out_len, "/dev/%s", hent->d_name);
-                found = true;
-                break;
-            }
-        }
-        closedir(hd);
     }
-    closedir(d);
+    closedir(hd);
     return found;
+}
+
+/* ⭐⭐ IS THE SDL CONTROLLER AT dev_path THE DEVICE BEHIND THE ROW node?
+ *
+ * The one join, used by the bridge request, the player lookup and the MAC
+ * lookup, so the three cannot disagree about which controller a row is.
+ *
+ * 1. The same string: a DualSense, which SDL opens through hidraw.
+ * 2. The hidraw node of the evdev node SDL reports.
+ * 3. ⭐ A row that is itself an input node. A wired Xbox pad has no hidraw at
+ *    all: its row is /dev/input/jsN and SDL reports its sibling eventN. Both
+ *    are children of one input device, and eventN's `device` link IS that
+ *    device, so the pair is the same pad exactly when
+ *    /sys/class/input/eventN/device/jsN exists. Read off the U5s 2026-09-13:
+ *    event12/device/js7 exists (the Series pad), event12/device/js8 does not
+ *    (that is the One S pad's), and event17/device/js8 does. */
+static bool controller_path_is_node(const char *dev_path, const char *node) {
+    if (!dev_path || !dev_path[0] || !node || !node[0]) {
+        return false;
+    }
+    if (strcmp(dev_path, node) == 0) {
+        return true;
+    }
+    char found[64];
+    if (hidraw_node_for_event(dev_path, found, sizeof(found))) {
+        return strcmp(found, node) == 0;
+    }
+    if (strncmp(node, "/dev/input/", 11) != 0 || strncmp(dev_path, "/dev/input/event", 16) != 0) {
+        return false;
+    }
+    char sibling[PATH_MAX];
+    snprintf(sibling, sizeof(sibling), "/sys/class/input/%s/device/%s", dev_path + 11, node + 11);
+    return access(sibling, F_OK) == 0;
 }
 
 void ctm_bridge_gesture_reset(SDL_JoystickID id) {
@@ -1267,11 +1288,7 @@ int ctm_bridge_gesture_player_for_node(const char *node) {
     for (int i = 0; i < n; ++i) {
         SDL_GameController *gc = s_gesture_input->gamepads[i].controller;
         if (!gc) continue;
-        const char *dev_path = SDL_GameControllerPath(gc);
-        if (!dev_path || !dev_path[0]) continue;
-        char found[64];
-        if (!hidraw_node_for_event(dev_path, found, sizeof(found))) continue;
-        if (strcmp(found, node) != 0) continue;
+        if (!controller_path_is_node(SDL_GameControllerPath(gc), node)) continue;
         return SDL_GameControllerGetPlayerIndex(gc);
     }
     return -1;
@@ -1286,11 +1303,7 @@ bool ctm_bridge_gesture_mac_for_node(const char *node, char *out, size_t out_len
     for (int i = 0; i < n; ++i) {
         SDL_GameController *gc = s_gesture_input->gamepads[i].controller;
         if (!gc) continue;
-        const char *dev_path = SDL_GameControllerPath(gc);
-        if (!dev_path || !dev_path[0]) continue;
-        char found[64];
-        if (!hidraw_node_for_event(dev_path, found, sizeof(found))) continue;
-        if (strcmp(found, node) != 0) continue;
+        if (!controller_path_is_node(SDL_GameControllerPath(gc), node)) continue;
         const char *serial = SDL_JoystickGetSerial(SDL_GameControllerGetJoystick(gc));
         if (!serial || !serial[0]) return false;
         snprintf(out, out_len, "%s", serial);
@@ -1312,15 +1325,7 @@ bool ctm_bridge_gesture_request_bridge(const char *node) {
         if (!gc) {
             continue;
         }
-        const char *dev_path = SDL_GameControllerPath(gc);
-        if (!dev_path || !dev_path[0]) {
-            continue;
-        }
-        char found[64];
-        if (!hidraw_node_for_event(dev_path, found, sizeof(found))) {
-            continue;
-        }
-        if (strcmp(found, node) != 0) {
+        if (!controller_path_is_node(SDL_GameControllerPath(gc), node)) {
             continue;
         }
 
