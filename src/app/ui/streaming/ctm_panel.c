@@ -299,7 +299,11 @@ static void ctm_toggle_device(int row) {
      * bridge_request.c, and the reasons are written there. ⓘ It moved out of
      * this file on 2026-09-12 so Auto Bridge and the terminal control port take
      * exactly the same one, instead of each keeping a copy that could drift. */
-    (void) bridge_request_device(&s_ctm_devs[row]);
+    if (bridge_request_device(&s_ctm_devs[row]) == BRIDGE_REQUEST_FAILED) {
+        /* ⓘ A refused plug has nothing on its way, so the row should not grey
+         * for six seconds waiting for it. */
+        s_ctm_pending_index = -1;
+    }
     /* ⛔ ASKING IS NOT BRIDGING. The gesture takes over and the plug happens on
      * a later tick, so a refresh now reads the OLD state and the row still says
      * BASIC. That looked like the press had failed, and pressing again asked

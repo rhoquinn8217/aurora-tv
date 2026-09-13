@@ -353,7 +353,10 @@ static void report_request(control_job_t *job, const ctm_bridge_dev_t *d, bridge
             break;
         case BRIDGE_REQUEST_FAILED:
         default:
-            reply(job, "ERR the plug failed for %d (%s)\n", d->index, d->name);
+            /* ⓘ The core writes why -- a refusal names the node and the errno --
+             * to logs/ctm-gesture.log. */
+            reply(job, "ERR the plug failed for %d (%s) -- the reason is in logs/ctm-gesture.log\n",
+                  d->index, d->name);
             break;
     }
 }

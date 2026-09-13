@@ -51,11 +51,17 @@
  * bridge is the thing to watch for. */
 #define GESTURE_PLUG_HOLD_MS 1000
 
-/* The app's own log is not readable on webOS -- there is no journal and no
- * /var/log -- so gesture activity goes to a file of its own, beside the ones
- * the bridge core writes. Without it a failure here is completely silent,
- * which cost a build cycle to learn. */
-#define GESTURE_LOG "/tmp/ctm-gesture.log"
+/* Gesture activity goes to a file of its own, beside the ones the bridge core
+ * writes, so a gesture reads end to end in one place. Without it a failure here
+ * is completely silent, which cost a build cycle to learn.
+ *
+ * ⛔ NOT /tmp. webOS 26 made /tmp traverse-only, so on the U5s this file was
+ * never written at all. The core resolves its own logs to the app's logs
+ * directory, with /tmp kept only where that directory is not available, and
+ * this now asks it for the same file. Declared here rather than by including
+ * the core's state header, the way controller_common.c does. */
+#define GESTURE_LOG "ctm-gesture.log"
+FILE *ctm_log_open(const char *name, const char *mode);
 
 /* Every line carries the time it was written.
  *
@@ -66,7 +72,7 @@
  *
  * Same clock the bridge core uses, so lines from both interleave correctly. */
 static void gesture_log(const char *fmt, ...) {
-    FILE *f = fopen(GESTURE_LOG, "a");
+    FILE *f = ctm_log_open(GESTURE_LOG, "a");
     if (!f) {
         return;
     }
@@ -1241,9 +1247,8 @@ bool ctm_bridge_gesture_light_busy(SDL_GameController *controller) {
      * not route: most likely the kernel's own PlayStation driver, which no
      * gate of ours can reach.
      *
-     * ⓘ Once per app run. Reported here rather than at the call site because
-     * the app's own log cannot be read on webOS; this one lands in
-     * /tmp/ctm-gesture.log. */
+     * ⓘ Once per app run, and it lands in logs/ctm-gesture.log beside the
+     * core's own lines. */
     if (busy) {
         static int s_dropped;
         if (!s_dropped) {
