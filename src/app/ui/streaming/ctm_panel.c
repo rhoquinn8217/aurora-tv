@@ -27,6 +27,7 @@
 #include "ctm_bridge_glue.h"
 #include "ctm_panel.h"
 #include "input/ctm_bridge_gesture.h"
+#include "input/bridge_request.h"
 #include "lvgl/font/material_icons_regular_symbols.h"
 #include "lvgl/theme/lv_theme_moonlight.h"
 
@@ -282,25 +283,10 @@ static void ctm_toggle_device(int row) {
     s_ctm_pending_want = !s_ctm_devs[row].plugged;
     s_ctm_pending_until = lv_tick_get() + CTM_PENDING_MS;
     if (s_ctm_devs[row].plugged) {
-        ctm_bridge_unplug_index(index);
+        bridge_release_device(&s_ctm_devs[row]);
         ctm_request_refresh();
         return;
     }
-    /* ⭐⭐ ASK THE GESTURE TO DO IT, rather than plugging from here.
-     *
-     * Plugging directly diverged from the chord in ways that were invisible
-     * until they bit: the emulated pad was never retired, so the host saw the
-     * controller twice; the watcher did not know it owned the bridge, so it
-     * never restored anything afterwards; and releasing from the panel then
-     * skipped the sequence that ends a bridge properly, which over Bluetooth
-     * looked like the controller powering itself off.
-     *
-     * ⭐ Asking means there is one implementation and the two cannot drift.
-     *
-     * ⚠️ A keyboard or a mouse is not an SDL controller and has no gesture path
-     * to borrow, so the direct plug stays as the fallback -- it is what those
-     * devices have always used, and they have none of the problems above
-     * because nothing emulates them in the first place. */
     /* ⭐ Refuse the press rather than letting it fail. ⛔ With the server
      * offline a bridge cannot work, and attempting it answers with a refusal --
      * red flashes and a buzz, which look exactly like a real failure. ⓘ The row
@@ -309,9 +295,11 @@ static void ctm_toggle_device(int row) {
         ctm_flash_offline();
         return;
     }
-    if (!ctm_bridge_gesture_request_bridge(s_ctm_devs[row].node)) {
-        ctm_bridge_plug_index(index);
-    }
+    /* ⭐⭐ THE ROUTE -- ask the gesture, or plug directly -- is decided in
+     * bridge_request.c, and the reasons are written there. ⓘ It moved out of
+     * this file on 2026-09-12 so Auto Bridge and the terminal control port take
+     * exactly the same one, instead of each keeping a copy that could drift. */
+    (void) bridge_request_device(&s_ctm_devs[row]);
     /* ⛔ ASKING IS NOT BRIDGING. The gesture takes over and the plug happens on
      * a later tick, so a refresh now reads the OLD state and the row still says
      * BASIC. That looked like the press had failed, and pressing again asked
@@ -361,7 +349,7 @@ static void ctm_bridge_all(void) {
 static void ctm_release_all(void) {
     for (int i = 0; i < s_ctm_ndev; ++i) {
         if (s_ctm_devs[i].plugged) {
-            ctm_bridge_unplug_index(s_ctm_devs[i].index);
+            bridge_release_device(&s_ctm_devs[i]);
         }
     }
 }

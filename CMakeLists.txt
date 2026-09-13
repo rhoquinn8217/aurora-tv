@@ -96,6 +96,10 @@ else ()
 endif ()
 option(FEATURE_GAMEPAD_TOUCHPAD_GRAB "Take exclusive access of controller touchpad devices"
         ${GAMEPAD_TOUCHPAD_GRAB_DEFAULT})
+# A command port on 127.0.0.1 that lets a terminal on the TV launch a stream
+# and bridge devices without the remote. Loopback only; see
+# src/app/control_server.h.
+option(AURORA_TERMINAL_CONTROL "Listen on 127.0.0.1 for commands from a terminal on the TV" ON)
 set(FEATURE_INPUT_LIBCEC ON)
 set(FEATURE_EMBEDDED_SHELL OFF)
 set(FEATURE_WINDOW_FULLSCREEN_DESKTOP ON)
@@ -263,6 +267,9 @@ string(LENGTH ${CMAKE_SOURCE_DIR} SOURCE_DIR_LENGTH)
 target_compile_definitions(moonlight-lib PUBLIC SOURCE_DIR_LENGTH=${SOURCE_DIR_LENGTH})
 target_compile_definitions(moonlight-lib PUBLIC "APP_VERSION=\"${PROJECT_VERSION} (${CTM_BUILD_NUMBER})\"" APPLOG_HOST=1)
 target_compile_definitions(moonlight-lib PUBLIC LV_LVGL_H_INCLUDE_SIMPLE=1)
+if (AURORA_TERMINAL_CONTROL)
+    target_compile_definitions(moonlight-lib PUBLIC AURORA_TERMINAL_CONTROL=1)
+endif ()
 
 target_include_directories(moonlight-lib PUBLIC ${CMAKE_SOURCE_DIR}/core/libgamestream)
 

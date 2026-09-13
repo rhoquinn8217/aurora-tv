@@ -8,6 +8,7 @@
 
 #include "ctm_bridge_glue.h"
 #include "ctm_bridge_gesture.h"
+#include "bridge_request.h"
 #include "app.h"
 
 /* ⭐⭐ THE MATCHING LIVES HERE, NOT IN THE GLUE, AND THAT IS DELIBERATE.
@@ -126,12 +127,10 @@ int auto_bridge_run(const char *macs_csv)
             continue;
         }
         /* ⭐ THE SAME PATH THE PANEL USES, so a bridge that happens by itself
-         * and one a user asked for cannot drift apart. The gesture retires the
-         * emulated pad and records that it owns the bridge; the direct plug is
-         * the fallback for anything with no gesture path to borrow. */
-        if (!ctm_bridge_gesture_request_bridge(devs[i].node)) {
-            ctm_bridge_plug_index(devs[i].index);
-        }
+         * and one a user asked for cannot drift apart. ⓘ Since 2026-09-12 that
+         * is literally one function, bridge_request_device(), rather than a
+         * copy of the panel's decision kept here. */
+        (void) bridge_request_device(&devs[i]);
         asked++;
     }
     return asked;

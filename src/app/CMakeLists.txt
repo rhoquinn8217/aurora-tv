@@ -1,4 +1,5 @@
-target_sources(moonlight-lib PRIVATE app.c app_launch.c app_error.c app_session.c app_settings.c)
+target_sources(moonlight-lib PRIVATE app.c app_launch.c app_error.c app_session.c app_settings.c
+        control_server.c)
 target_include_directories(moonlight-lib PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 
 add_subdirectory(ctmbridge)
