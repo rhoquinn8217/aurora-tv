@@ -265,7 +265,8 @@ set_target_properties(moonlight-lib PROPERTIES
 target_compile_definitions(moonlight-lib PUBLIC "$<$<CONFIG:DEBUG>:DEBUG>")
 string(LENGTH ${CMAKE_SOURCE_DIR} SOURCE_DIR_LENGTH)
 target_compile_definitions(moonlight-lib PUBLIC SOURCE_DIR_LENGTH=${SOURCE_DIR_LENGTH})
-target_compile_definitions(moonlight-lib PUBLIC "APP_VERSION=\"${PROJECT_VERSION} (${CTM_BUILD_NUMBER})\"" APPLOG_HOST=1)
+# The version lives in a generated header, app_version.h -- see its template.
+target_compile_definitions(moonlight-lib PUBLIC APPLOG_HOST=1)
 target_compile_definitions(moonlight-lib PUBLIC LV_LVGL_H_INCLUDE_SIMPLE=1)
 if (AURORA_TERMINAL_CONTROL)
     target_compile_definitions(moonlight-lib PUBLIC AURORA_TERMINAL_CONTROL=1)
@@ -362,6 +363,7 @@ target_link_libraries(moonlight-lib PUBLIC commons-logging commons-gamecontrolle
         commons-sockaddr commons-hostport)
 
 configure_file(src/app/config.h.in ${CMAKE_CURRENT_BINARY_DIR}/config.h @ONLY)
+configure_file(src/app/app_version.h.in ${CMAKE_CURRENT_BINARY_DIR}/app_version.h @ONLY)
 target_include_directories(moonlight-lib PUBLIC ${CMAKE_CURRENT_BINARY_DIR})
 
 if (OS_WINDOWS)

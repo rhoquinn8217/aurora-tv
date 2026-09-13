@@ -20,6 +20,7 @@
 #include "lvgl.h"
 
 #include "app.h"
+#include "app_version.h"
 #include "logging.h"
 #include "util/bus.h"
 #include "backend/pcmanager.h"
@@ -106,7 +107,7 @@ static void cmd_help(control_job_t *job)
     reply(job, "OK commands\n"
                "status                  the build, the stream and the bridge\n"
                "hosts                   known hosts: uuid, state, address, name\n"
-               "stream <host> <app id>  start a stream; host is a uuid or a name\n"
+               "stream <host> <app id>  start a stream; host is a uuid or part of its name\n"
                "stop                    end the stream and leave the game running\n"
                "quit                    end the stream and quit the game on the host\n"
                "devices                 the USB Bridge list, with each device's SDL match\n"
@@ -175,22 +176,35 @@ static void cmd_stream(control_job_t *job, const char *args)
     char host[128] = "";
     char app_arg[32] = "";
     if (sscanf(args, "%127s %31s", host, app_arg) != 2 || !is_all_digits(app_arg)) {
-        reply(job, "ERR usage: stream <host uuid or name> <app id>\n");
+        reply(job, "ERR usage: stream <host uuid, or part of its name> <app id>\n");
         return;
     }
     if (s_app->session != NULL) {
         reply(job, "ERR a stream is already running; stop it first\n");
         return;
     }
+    /* ⓘ A uuid, or part of the name. Host names carry spaces -- "CAELUM
+     * (Apollo)" -- and the argument cannot, so a unique part of one is enough.
+     * ⛔ Two hosts matching is refused rather than guessed between. */
     const pclist_t *match = NULL;
+    int matches = 0;
     for (const pclist_t *cur = pcmanager_servers(pcmanager); cur != NULL; cur = cur->next) {
-        if (uuidstr_t_equals_s(&cur->id, host) || strcasecmp(host_name(cur), host) == 0) {
+        if (uuidstr_t_equals_s(&cur->id, host)) {
             match = cur;
+            matches = 1;
             break;
         }
+        if (host_name(cur)[0] != '\0' && contains_ci(host_name(cur), host)) {
+            match = cur;
+            ++matches;
+        }
     }
-    if (match == NULL) {
+    if (matches == 0) {
         reply(job, "ERR no host '%s'; see hosts\n", host);
+        return;
+    }
+    if (matches > 1) {
+        reply(job, "ERR '%s' matches %d hosts; use the uuid from hosts\n", host, matches);
         return;
     }
     /* ⭐ EXACTLY WHAT PRESSING THE APP'S TILE DOES (launcher_launch_game in
