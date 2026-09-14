@@ -81,10 +81,17 @@ static void abw_mark(int row, bool on) {
     char out[512];
     auto_bridge_list_set(app_configuration->bridge_auto_macs, s_mac[row], on, out, sizeof out);
     settings_set_auto_macs(app_configuration, out);
-    if (on) {
-        lv_obj_add_state(s_box[row], LV_STATE_CHECKED);
-    } else {
-        lv_obj_clear_state(s_box[row], LV_STATE_CHECKED);
+    /* ⭐ EVERY ROW WITH THE SAME IDENTITY FOLLOWS, not only the one pressed. A
+     * GameSir's pad and its keyboard interface are one USB device with one
+     * serial, so they share one mark: unticking either removes it for both, and
+     * a row left ticked would say it still bridges when it no longer does. */
+    for (int i = 0; i < s_count; ++i) {
+        if (s_box[i] == NULL) continue;
+        if (auto_bridge_list_has(app_configuration->bridge_auto_macs, s_mac[i])) {
+            lv_obj_add_state(s_box[i], LV_STATE_CHECKED);
+        } else {
+            lv_obj_clear_state(s_box[i], LV_STATE_CHECKED);
+        }
     }
 }
 
