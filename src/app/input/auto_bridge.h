@@ -1,8 +1,8 @@
-/* Bridging the controllers a user marked, when a stream starts.
+/* Bridging the devices a user marked, when a stream starts.
  *
- * ⭐ The mark is per CONTROLLER, by the controller's own MAC, and it is the
- * user's: nothing here decides that a device should be bridged. With no marked
- * controller connected this does nothing at all.
+ * ⭐ The mark is per DEVICE, and it is the user's: nothing here decides that a
+ * device should be bridged. With no marked device connected this does nothing
+ * at all.
  *
  * ⛔⛔ NOT THE AUTO-PLUG THAT WAS REMOVED. That bridged EVERYTHING on every
  * change and took working devices away from the TV without being asked. This
@@ -24,40 +24,34 @@
 
 #include "ctm_bridge_glue.h"
 
-/* What a mark keys on, written into out; false if the device cannot be marked.
- * A DualSense or Edge is its own MAC, and any other device its serial -- never
- * a blank or all-zeros one. Shared by the settings window, the panel and the
- * control port, so what is shown is what is matched. */
+/* The device's identity, written into out; false if it has none. A DualSense or
+ * Edge is its own MAC, and any other device its serial -- never a blank or
+ * all-zeros one. Shared by the settings window, the panel and the control port,
+ * so what is shown is what is matched. */
 bool auto_bridge_identity(const ctm_bridge_dev_t *d, char *out, size_t out_len);
 
-/* ⭐ MARKS THAT ARE NEVER SAVED, for a device with no identity to save it under
- * (rhoquinn8217, 2026-09-14): a device without a serial, or a DualSense without
- * a MAC, can still be chosen, and the choice lasts until the app closes.
- *
- * The key is the device's vendor and product with its node, such as
- * "04ca:00c3@/dev/hidraw0", which holds while the app runs and the device stays
- * put. ⓘ Another device that takes over the node has other ids and does not
- * match. */
-void auto_bridge_session_key(const ctm_bridge_dev_t *d, char *out, size_t out_len);
-bool auto_bridge_session_has(const char *key);
-void auto_bridge_session_set(const char *key, bool on);
+/* ⭐⭐ A MARK REMEMBERS THE IDENTITY AND THE NAME TOGETHER (rhoquinn8217,
+ * 2026-09-14), for every device: "3286967D|Generic X-Box pad". A device with no
+ * identity is remembered by its name alone, "|KMA2 LG RF dongle A2". The key a
+ * device is stored under goes into out. */
+void auto_bridge_mark_key(const ctm_bridge_dev_t *d, char *out, size_t out_len);
+
+/* Is this device marked in the stored list? Comma-separated. Identities match
+ * however they are punctuated and names without regard to case. ⓘ An entry
+ * saved before names were kept has no '|' and matches on the identity alone. */
+bool auto_bridge_marked(const char *macs_csv, const ctm_bridge_dev_t *d);
+
+/* The list with this device marked or unmarked, written into out. Every entry
+ * that matches the device goes when unmarking, an old identity-only one too.
+ * The order of the survivors is kept, so a rewrite does not shuffle the file. */
+void auto_bridge_mark_set(const char *macs_csv, const ctm_bridge_dev_t *d, bool on,
+                          char *out, size_t out_len);
 
 /* Bridge the devices the user chose, as a stream starts: with `all`, every
  * connected device that is not already bridged, marks or no marks; otherwise
- * each marked one -- by its saved identity in `macs_csv` (comma-separated; NULL
- * or empty marks nothing), or by an unsaved mark when it has no identity.
+ * each marked one. `macs_csv` is the stored list; NULL or empty marks nothing.
  * Returns how many were asked to bridge. */
 int auto_bridge_run(const char *macs_csv, bool all);
-
-/* Is this identity in the list? Comma-separated; case and punctuation do not
- * matter, so a MAC written with dashes matches one written with colons.
- * Shared with the settings pane so the two cannot disagree about membership. */
-bool auto_bridge_list_has(const char *macs_csv, const char *mac);
-
-/* The list with `mac` added or removed, written into out. The order of the
- * survivors is kept, so a rewrite does not shuffle the file. */
-void auto_bridge_list_set(const char *macs_csv, const char *mac, bool on,
-                          char *out, size_t out_len);
 
 #else
 

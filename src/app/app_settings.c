@@ -30,6 +30,8 @@ static int settings_parse(app_settings_t *config, const char *section, const cha
 
 static void set_string(char **field, const char *value);
 
+static void append_csv(char **field, const char *value);
+
 static void set_int(int *field, const char *value);
 
 #define SETTINGS_COUNT(values) (sizeof(values) / sizeof((values)[0]))
@@ -287,8 +289,24 @@ bool settings_save(app_settings_t *config) {
     ini_write_bool(fp, "bridge_signal_tone", config->bridge_signal_tone);
     ini_write_bool(fp, "bridge_mic_wired", config->bridge_mic_wired);
     ini_write_bool(fp, "bridge_mic_bt", config->bridge_mic_bt);
-    ini_write_string(fp, "bridge_auto_macs",
-                     config->bridge_auto_macs ? config->bridge_auto_macs : "");
+    /* ⭐ ONE LINE PER MARK, not the whole list on one. A mark carries the device's
+     * name since 2026-09-14, and the INI reader cuts a line at 200 characters
+     * (inih's INI_MAX_LINE), which three or four marks on one line would pass --
+     * losing the rest without a word. bridge_auto_macs, the old one-line list, is
+     * still read. */
+    if (config->bridge_auto_macs != NULL) {
+        char list[2048];
+        snprintf(list, sizeof list, "%s", config->bridge_auto_macs);
+        char *save = NULL;
+        for (char *tok = strtok_r(list, ",", &save); tok != NULL; tok = strtok_r(NULL, ",", &save)) {
+            while (*tok == ' ') {
+                tok++;
+            }
+            if (*tok != '\0') {
+                ini_write_string(fp, "bridge_auto_mark", tok);
+            }
+        }
+    }
     ini_write_bool(fp, "bridge_auto_all", config->bridge_auto_all);
 
     ini_write_section(fp, "input");
@@ -538,8 +556,10 @@ static int settings_parse(app_settings_t *config, const char *section, const cha
         config->bridge_mic_wired = INI_IS_TRUE(value);
     } else if (INI_NAME_MATCH("bridge_mic_bt")) {
         config->bridge_mic_bt = INI_IS_TRUE(value);
-    } else if (INI_NAME_MATCH("bridge_auto_macs")) {
-        set_string(&config->bridge_auto_macs, value);
+    } else if (INI_NAME_MATCH("bridge_auto_mark") || INI_NAME_MATCH("bridge_auto_macs")) {
+        /* ⓘ bridge_auto_mark is one mark a line; bridge_auto_macs is the old
+         * comma-separated list, read so marks saved before 2026-09-14 survive. */
+        append_csv(&config->bridge_auto_macs, value);
     } else if (INI_NAME_MATCH("bridge_auto_all")) {
         config->bridge_auto_all = INI_IS_TRUE(value);
     } else if (INI_NAME_MATCH("absmouse")) {
@@ -609,6 +629,25 @@ static int settings_parse(app_settings_t *config, const char *section, const cha
 static void set_string(char **field, const char *value) {
     free_nullable(*field);
     *field = value != NULL ? strdup(value) : NULL;
+}
+
+/* Adds value to a comma-separated list, as a new entry. */
+static void append_csv(char **field, const char *value) {
+    if (value == NULL || value[0] == '\0') {
+        return;
+    }
+    if (*field == NULL || (*field)[0] == '\0') {
+        set_string(field, value);
+        return;
+    }
+    const size_t len = strlen(*field) + 1 + strlen(value) + 1;
+    char *joined = malloc(len);
+    if (joined == NULL) {
+        return;
+    }
+    snprintf(joined, len, "%s,%s", *field, value);
+    free(*field);
+    *field = joined;
 }
 
 static void set_int(int *field, const char *value) {

@@ -13,7 +13,7 @@
 
 /* ⭐⭐ THE MATCHING LIVES HERE, NOT IN THE GLUE, AND THAT IS DELIBERATE.
  *
- * The mark keys on the controller's own MAC, and only SDL knows it -- it reads
+ * A DualSense's identity is its own MAC, and only SDL knows it -- it reads
  * feature report 0x09. ⛔ The glue is the seam to the bridge core and cannot
  * see SDL or the app's headers on purpose, so it must not learn to do this.
  * ➡️ So the pass runs up here, where both halves are visible, and drives the
@@ -27,11 +27,17 @@
  * behind, and the next controller on that dongle bridges itself uninvited.
  * Measured on the C1 2026-09-08 after it fooled two readings.
  *
- * ⭐⭐ EVERY OTHER DEVICE KEYS ON ITS SERIAL (rhoquinn8217, 2026-09-13).
- * SDL has no MAC for them -- a cabled Xbox pad could not be marked at all --
- * and they have none to give over USB. The core's serial is their uniq, or the
- * USB serial number where no driver filled uniq; a blank or all-zeros one marks
- * nothing. ⓘ The host's config auto link keys the same way, for controllers. */
+ * ⭐⭐ A MARK IS THE IDENTITY AND THE NAME TOGETHER, FOR EVERY DEVICE
+ * (rhoquinn8217, 2026-09-14). Auto bridge is not the listener's config auto
+ * link, where a DualSense's MAC has to follow the pad across Bluetooth, a cable
+ * and a dongle; here a device only has to be told from the others on the TV.
+ * - The identity is a DualSense's MAC or any other device's serial, and may be
+ *   blank: a device without one is remembered by its name alone. ⓘ Two such
+ *   devices with one name share a mark, which was judged unlikely to matter.
+ * - The name keeps two halves of one device apart: a GameSir's pad and its
+ *   keyboard interface share a serial but not a name.
+ * Stored as "identity|name". ⓘ A mark saved before 2026-09-14 has no '|' and
+ * matches on its identity alone, as it always did. */
 
 static void mac_trim(const char *in, char *out, size_t out_len)
 {
@@ -45,70 +51,55 @@ static void mac_trim(const char *in, char *out, size_t out_len)
     }
 }
 
-bool auto_bridge_list_has(const char *macs_csv, const char *mac)
+/* The longest name a mark stores. ⛔ Keeps a whole mark line in the settings
+ * file under the INI reader's 200 characters: "bridge_auto_mark = ", an identity
+ * of up to 63 and the '|' leave room for this and no more. */
+#define MARK_NAME_MAX 96
+
+/* The name a mark stores: the device's own, with the list's two separators
+ * blanked so a name cannot split an entry, and cut to MARK_NAME_MAX -- the same
+ * cut on both sides of a comparison, so a long name still matches itself. */
+static void mark_name(const ctm_bridge_dev_t *d, char *out, size_t out_len)
 {
-    if (macs_csv == NULL || mac == NULL || mac[0] == '\0') {
-        return false;
-    }
-    char list[512];
-    snprintf(list, sizeof(list), "%s", macs_csv);
-    char *save = NULL;
-    for (char *tok = strtok_r(list, ",", &save); tok != NULL;
-         tok = strtok_r(NULL, ",", &save)) {
-        char one[64];
-        mac_trim(tok, one, sizeof(one));
-        /* ⓘ Compared without case or punctuation: marks stored before
-         * 2026-09-13 are SDL's dashed MACs, and the kernel writes colons. */
-        if (one[0] != '\0' && bridge_identity_same(one, mac)) {
-            return true;
+    char raw[sizeof d->name];
+    snprintf(raw, sizeof raw, "%s", d->name);
+    for (char *p = raw; *p != '\0'; ++p) {
+        if (*p == ',' || *p == '|') {
+            *p = ' ';
         }
     }
-    return false;
+    if (strlen(raw) > MARK_NAME_MAX) {
+        raw[MARK_NAME_MAX] = '\0';
+    }
+    mac_trim(raw, out, out_len);
 }
 
-void auto_bridge_list_set(const char *macs_csv, const char *mac, bool on,
-                          char *out, size_t out_len)
+/* Does one stored entry name the device with this identity and name? */
+static bool entry_matches(const char *entry, const char *identity, const char *name)
 {
-    if (out == NULL || out_len == 0) {
-        return;
+    const char *bar = strchr(entry, '|');
+    if (bar == NULL) {
+        /* Saved before names were kept: the identity alone. */
+        return identity[0] != '\0' && bridge_identity_same(entry, identity);
     }
-    out[0] = '\0';
-    if (mac == NULL || mac[0] == '\0') {
-        snprintf(out, out_len, "%s", macs_csv ? macs_csv : "");
-        return;
+    char id_raw[64];
+    size_t id_len = (size_t) (bar - entry);
+    if (id_len >= sizeof id_raw) {
+        id_len = sizeof id_raw - 1;
     }
+    memcpy(id_raw, entry, id_len);
+    id_raw[id_len] = '\0';
+    char id[64];
+    mac_trim(id_raw, id, sizeof id);
+    char nm[128];
+    mac_trim(bar + 1, nm, sizeof nm);
 
-    /* ⭐ Rebuilt from the survivors rather than edited in place, so removing an
-     * entry cannot leave a stray comma and the order of the rest is kept --
-     * a rewritten file that reshuffles looks like something went wrong. */
-    char list[512];
-    snprintf(list, sizeof(list), "%s", macs_csv ? macs_csv : "");
-    char *save = NULL;
-    bool present = false;
-    for (char *tok = strtok_r(list, ",", &save); tok != NULL;
-         tok = strtok_r(NULL, ",", &save)) {
-        char one[64];
-        mac_trim(tok, one, sizeof(one));
-        if (one[0] == '\0') {
-            continue;
-        }
-        if (bridge_identity_same(one, mac)) {
-            present = true;
-            if (!on) {
-                continue;   /* dropping this one */
-            }
-        }
-        if (out[0] != '\0') {
-            strncat(out, ",", out_len - strlen(out) - 1);
-        }
-        strncat(out, one, out_len - strlen(out) - 1);
-    }
-    if (on && !present) {
-        if (out[0] != '\0') {
-            strncat(out, ",", out_len - strlen(out) - 1);
-        }
-        strncat(out, mac, out_len - strlen(out) - 1);
-    }
+    /* ⓘ Two blank identities ARE the same here, unlike in the core's rule: the
+     * name is what carries the match for a device without one. */
+    const bool same_id = (id[0] == '\0' || identity[0] == '\0')
+                             ? (id[0] == '\0' && identity[0] == '\0')
+                             : bridge_identity_same(id, identity);
+    return same_id && strcasecmp(nm, name) == 0;
 }
 
 bool auto_bridge_identity(const ctm_bridge_dev_t *d, char *out, size_t out_len)
@@ -149,37 +140,109 @@ bool auto_bridge_identity(const ctm_bridge_dev_t *d, char *out, size_t out_len)
     return true;
 }
 
-/* ⛔ NEVER WRITTEN TO THE SETTINGS FILE: this is the whole of an unsaved mark's
- * life, and closing the app is what ends it. The user is told so on the row. */
-static char s_session_marks[512];
-
-void auto_bridge_session_key(const ctm_bridge_dev_t *d, char *out, size_t out_len)
+void auto_bridge_mark_key(const ctm_bridge_dev_t *d, char *out, size_t out_len)
 {
     if (out == NULL || out_len == 0) {
         return;
     }
     out[0] = '\0';
-    if (d == NULL || d->node[0] == '\0') {
-        return;   /* nothing to bridge it by, so nothing to mark it by */
+    if (d == NULL) {
+        return;
     }
-    snprintf(out, out_len, "%s:%s@%s", d->vid, d->pid, d->node);
+    char identity[64];
+    if (!auto_bridge_identity(d, identity, sizeof identity)) {
+        identity[0] = '\0';
+    }
+    char name[128];
+    mark_name(d, name, sizeof name);
+    snprintf(out, out_len, "%s|%s", identity, name);
 }
 
-bool auto_bridge_session_has(const char *key)
+bool auto_bridge_marked(const char *macs_csv, const ctm_bridge_dev_t *d)
 {
-    return auto_bridge_list_has(s_session_marks, key);
+    if (macs_csv == NULL || macs_csv[0] == '\0' || d == NULL) {
+        return false;
+    }
+    char identity[64];
+    if (!auto_bridge_identity(d, identity, sizeof identity)) {
+        identity[0] = '\0';
+    }
+    char name[128];
+    mark_name(d, name, sizeof name);
+    if (identity[0] == '\0' && name[0] == '\0') {
+        return false;   /* nothing to know it by */
+    }
+
+    char list[2048];
+    snprintf(list, sizeof(list), "%s", macs_csv);
+    char *save = NULL;
+    for (char *tok = strtok_r(list, ",", &save); tok != NULL;
+         tok = strtok_r(NULL, ",", &save)) {
+        char one[256];
+        mac_trim(tok, one, sizeof(one));
+        if (one[0] != '\0' && entry_matches(one, identity, name)) {
+            return true;
+        }
+    }
+    return false;
 }
 
-void auto_bridge_session_set(const char *key, bool on)
+void auto_bridge_mark_set(const char *macs_csv, const ctm_bridge_dev_t *d, bool on,
+                          char *out, size_t out_len)
 {
-    char out[sizeof s_session_marks];
-    auto_bridge_list_set(s_session_marks, key, on, out, sizeof out);
-    snprintf(s_session_marks, sizeof s_session_marks, "%s", out);
+    if (out == NULL || out_len == 0) {
+        return;
+    }
+    out[0] = '\0';
+    if (d == NULL) {
+        snprintf(out, out_len, "%s", macs_csv ? macs_csv : "");
+        return;
+    }
+    char identity[64];
+    if (!auto_bridge_identity(d, identity, sizeof identity)) {
+        identity[0] = '\0';
+    }
+    char name[128];
+    mark_name(d, name, sizeof name);
+
+    /* ⭐ Rebuilt from the survivors rather than edited in place, so removing an
+     * entry cannot leave a stray comma and the order of the rest is kept --
+     * a rewritten file that reshuffles looks like something went wrong. */
+    char list[2048];
+    snprintf(list, sizeof(list), "%s", macs_csv ? macs_csv : "");
+    char *save = NULL;
+    bool present = false;
+    for (char *tok = strtok_r(list, ",", &save); tok != NULL;
+         tok = strtok_r(NULL, ",", &save)) {
+        char one[256];
+        mac_trim(tok, one, sizeof(one));
+        if (one[0] == '\0') {
+            continue;
+        }
+        if (entry_matches(one, identity, name)) {
+            present = true;
+            if (!on) {
+                continue;   /* dropping this one */
+            }
+        }
+        if (out[0] != '\0') {
+            strncat(out, ",", out_len - strlen(out) - 1);
+        }
+        strncat(out, one, out_len - strlen(out) - 1);
+    }
+    if (on && !present && (identity[0] != '\0' || name[0] != '\0')) {
+        char key[256];
+        auto_bridge_mark_key(d, key, sizeof key);
+        if (out[0] != '\0') {
+            strncat(out, ",", out_len - strlen(out) - 1);
+        }
+        strncat(out, key, out_len - strlen(out) - 1);
+    }
 }
 
 int auto_bridge_run(const char *macs_csv, bool all)
 {
-    if (!all && (macs_csv == NULL || macs_csv[0] == '\0') && s_session_marks[0] == '\0') {
+    if (!all && (macs_csv == NULL || macs_csv[0] == '\0')) {
         return 0;   /* nothing marked: the common case, and it costs nothing */
     }
 
@@ -195,20 +258,8 @@ int auto_bridge_run(const char *macs_csv, bool all)
         }
         /* ⭐ "Bridge all devices on startup" overrides the marks entirely: every
          * device, with a serial or without. Otherwise only a marked one. */
-        if (!all) {
-            char identity[64];
-            if (auto_bridge_identity(&devs[i], identity, sizeof identity)) {
-                if (!auto_bridge_list_has(macs_csv, identity)) {
-                    continue;
-                }
-            } else {
-                /* No identity to save: marked, if at all, for this run of the app. */
-                char key[96];
-                auto_bridge_session_key(&devs[i], key, sizeof key);
-                if (!auto_bridge_session_has(key)) {
-                    continue;
-                }
-            }
+        if (!all && !auto_bridge_marked(macs_csv, &devs[i])) {
+            continue;
         }
         /* ⭐ THE SAME PATH THE PANEL USES, so a bridge that happens by itself
          * and one a user asked for cannot drift apart. ⓘ Since 2026-09-12 that

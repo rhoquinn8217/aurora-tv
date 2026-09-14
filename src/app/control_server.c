@@ -269,21 +269,16 @@ static void cmd_devices(control_job_t *job)
             snprintf(sdl_mac, sizeof sdl_mac, "-");
         }
         /* ⭐ serial is the core's own (uniq, or the USB serial number where no
-         * driver filled uniq), and mark is what auto bridge keys on: a
-         * DualSense's MAC, any other controller's serial, "-" when nothing can
-         * be marked. */
+         * driver filled uniq), and mark is the identity half of what auto bridge
+         * keys on: a DualSense's MAC, any other device's serial, "-" when it has
+         * none. The name is the other half. */
         char mark[64] = "-";
-        /* ⓘ marked says whether auto bridge would take it at the next stream
-         * start: by its saved mark, or by an unsaved one when it has no identity. */
-        const char *marked = "no";
-        if (auto_bridge_identity(d, mark, sizeof mark)) {
-            if (auto_bridge_list_has(app_configuration->bridge_auto_macs, mark)) marked = "yes";
-        } else {
+        if (!auto_bridge_identity(d, mark, sizeof mark)) {
             snprintf(mark, sizeof mark, "-");
-            char key[96];
-            auto_bridge_session_key(d, key, sizeof key);
-            if (auto_bridge_session_has(key)) marked = "unsaved";
         }
+        /* ⓘ marked says whether auto bridge would take it at the next stream
+         * start: a mark is the identity above together with the name. */
+        const char *marked = auto_bridge_marked(app_configuration->bridge_auto_macs, d) ? "yes" : "no";
         reply(job, "%d bridged=%s kind=%s id=%s:%s bus=%s node=%s player=%d sdl_mac=%s uniq=%s "
                    "serial=%s controller=%s type=%s mark=%s marked=%s name=\"%s\"\n",
               d->index, d->plugged ? "yes" : "no", d->kind, d->vid, d->pid, d->bus,

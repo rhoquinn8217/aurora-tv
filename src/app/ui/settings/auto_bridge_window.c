@@ -4,7 +4,9 @@
 
 #include <ctype.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 
 #include "app.h"
 #include "ui/ui_input.h"
@@ -34,10 +36,8 @@
 static lv_obj_t   *s_win;
 static lv_group_t *s_group;
 static lv_obj_t   *s_box[ABW_MAX + 1];
-static char        s_mac[ABW_MAX][64];
-/* True when the row's mark is unsaved: the device has no identity, so s_mac
- * holds its session key instead and the mark ends when the app closes. */
-static bool        s_unsaved[ABW_MAX];
+/* The device behind each markable row: a mark is its identity and its name. */
+static ctm_bridge_dev_t s_dev[ABW_MAX];
 static int         s_count;
 /* Every device row, markable or not: "Bridge all devices on startup" greys them
  * all, since it bridges the ones that cannot be marked as well. */
@@ -78,28 +78,42 @@ static void abw_label_with_type(const ctm_bridge_dev_t *d, char *out, size_t out
     snprintf(out, out_len, "%s (%s)", name, upper);
 }
 
+/* One device as the list shows it, for sorting before the rows are built. */
+typedef struct {
+    ctm_bridge_dev_t dev;
+    char id[64];      /* its identity, or "" when it has none */
+    char label[160];  /* its name with the type in brackets */
+} abw_entry_t;
+
+/* Devices with an identity first, by identity, then the rest; same identity by
+ * label. Case is ignored, so a MAC and a serial sort as their characters. */
+static int abw_entry_cmp(const void *pa, const void *pb) {
+    const abw_entry_t *a = pa;
+    const abw_entry_t *b = pb;
+    const bool has_a = a->id[0] != '\0';
+    const bool has_b = b->id[0] != '\0';
+    if (has_a != has_b) return has_a ? -1 : 1;
+    const int by_id = strcasecmp(a->id, b->id);
+    if (by_id != 0) return by_id;
+    return strcasecmp(a->label, b->label);
+}
+
 static void abw_mark(int row, bool on) {
     /* ⛔ Overridden while "Bridge all devices on startup" is on: the rows are
      * greyed, and a press on one must not quietly change the marks beneath. */
     if (app_configuration->bridge_auto_all) {
         return;
     }
-    if (s_unsaved[row]) {
-        auto_bridge_session_set(s_mac[row], on);
-    } else {
-        char out[512];
-        auto_bridge_list_set(app_configuration->bridge_auto_macs, s_mac[row], on, out, sizeof out);
-        settings_set_auto_macs(app_configuration, out);
-    }
-    /* ⭐ EVERY ROW WITH THE SAME IDENTITY FOLLOWS, not only the one pressed. A
-     * GameSir's pad and its keyboard interface are one USB device with one
-     * serial, so they share one mark: unticking either removes it for both, and
-     * a row left ticked would say it still bridges when it no longer does. */
+    char out[2048];
+    auto_bridge_mark_set(app_configuration->bridge_auto_macs, &s_dev[row], on, out, sizeof out);
+    settings_set_auto_macs(app_configuration, out);
+    /* ⭐ EVERY ROW THE MARK COVERS FOLLOWS, not only the one pressed: rows with
+     * the same identity and name share one mark -- three "Razer Orochi V2" rows
+     * with no serial, say -- and a row left ticked would say it still bridges
+     * when it no longer does. */
     for (int i = 0; i < s_count; ++i) {
         if (s_box[i] == NULL) continue;
-        const bool marked = s_unsaved[i]
-                                ? auto_bridge_session_has(s_mac[i])
-                                : auto_bridge_list_has(app_configuration->bridge_auto_macs, s_mac[i]);
+        const bool marked = auto_bridge_marked(app_configuration->bridge_auto_macs, &s_dev[i]);
         if (marked) {
             lv_obj_add_state(s_box[i], LV_STATE_CHECKED);
         } else {
@@ -281,8 +295,8 @@ static lv_obj_t *abw_make_row(lv_obj_t *parent, const char *name, const char *ma
     if (idx < 0) {
         /* ⭐ Cannot be marked: shown, and told why. ⛔ Not a blank box -- that
          * reads as "not yet" when the truth is "cannot". Since 2026-09-14 only a
-         * device with no node lands here; one with no identity is marked for
-         * the session instead. */
+         * device with no node lands here; one with no identity is marked by its
+         * name. */
         lv_obj_t *dash = lv_label_create(row);
         lv_label_set_text(dash, "--");
         lv_obj_set_style_text_color(dash, ABW_COL_SUB, 0);
@@ -334,7 +348,7 @@ void auto_bridge_window_open(void) {
     s_dev_count = 0;
     s_foot_count = 0;
     memset(s_box, 0, sizeof s_box);
-    memset(s_unsaved, 0, sizeof s_unsaved);
+    memset(s_dev, 0, sizeof s_dev);
     memset(s_dev_row, 0, sizeof s_dev_row);
     s_group = lv_group_create();
 
@@ -404,8 +418,9 @@ void auto_bridge_window_open(void) {
     lv_obj_t *sub = lv_label_create(card);
     lv_label_set_text(sub, locstr(
             "Selected devices bridge automatically when the stream starts. "
-            "A DualSense is marked by its mac address and any other device by "
-            "its serial number. CTM-USBIP must be running before the stream starts."));
+            "Each device is remembered by its serial number, or a DualSense by its "
+            "mac address, together with its name. CTM-USBIP must be running before "
+            "the stream starts."));
     lv_label_set_long_mode(sub, LV_LABEL_LONG_WRAP);
     lv_obj_set_width(sub, LV_PCT(100));
     lv_obj_set_style_text_color(sub, ABW_COL_SUB, 0);
@@ -425,59 +440,48 @@ void auto_bridge_window_open(void) {
      * Drawing a list is not a reason to wake the bridge. */
     ctm_bridge_dev_t devs[ABW_MAX];
     const int n = ctm_bridge_list_quiet(devs, ABW_MAX);
+
+    /* ⭐ SORTED BY SERIAL (rhoquinn8217, 2026-09-14), so the rows of one device
+     * sit together and read as one: a GameSir's pad and its keyboard interface
+     * carry the same serial. Rows without one follow, by name. */
+    static abw_entry_t entries[ABW_MAX];
+    for (int i = 0; i < n; ++i) {
+        entries[i].dev = devs[i];
+        if (!auto_bridge_identity(&devs[i], entries[i].id, sizeof entries[i].id)) {
+            entries[i].id[0] = '\0';
+        }
+        abw_label_with_type(&devs[i], entries[i].label, sizeof entries[i].label);
+    }
+    qsort(entries, (size_t) n, sizeof entries[0], abw_entry_cmp);
+
     int shown = 0;
     for (int i = 0; i < n && s_count < ABW_MAX; ++i) {
-        char mac[64];
-        char label[160];
-        const bool dualsense = strncmp(devs[i].kind, "ds5", 3) == 0;
-        abw_label_with_type(&devs[i], label, sizeof label);
-        const int idx = s_count;
-        if (auto_bridge_identity(&devs[i], mac, sizeof mac)) {
-            snprintf(s_mac[idx], sizeof s_mac[idx], "%s", mac);
-            s_unsaved[idx] = false;
-            s_count++;
-            /* ⭐ A DualSense shows its MAC as it is; anything else says the string
-             * is a serial number, so the two are never read as the same kind of
-             * thing. */
-            char shown_id[96];
-            if (dualsense) {
-                snprintf(shown_id, sizeof shown_id, "%s", mac);
-            } else {
-                snprintf(shown_id, sizeof shown_id, "serial %s", mac);
-            }
-            s_dev_row[s_dev_count++] = abw_make_row(list, label, shown_id, idx, false);
-            if (auto_bridge_list_has(app_configuration->bridge_auto_macs, mac)) {
-                lv_obj_add_state(s_box[idx], LV_STATE_CHECKED);
-            }
-            shown++;
-            continue;
-        }
-
-        auto_bridge_session_key(&devs[i], s_mac[idx], sizeof s_mac[idx]);
-        if (s_mac[idx][0] == '\0') {
+        const abw_entry_t *e = &entries[i];
+        shown++;
+        if (e->dev.node[0] == '\0') {
             /* No node, so it cannot be bridged at all, by a mark or by hand. */
             s_dev_row[s_dev_count++] = abw_make_row(
-                    list, label, locstr("no device node - this device cannot be bridged"), -1, true);
-            shown++;
+                    list, e->label, locstr("no device node - this device cannot be bridged"), -1, true);
             continue;
         }
-        /* ⭐⭐ SELECTABLE ALL THE SAME, WITH A WARNING (rhoquinn8217, 2026-09-14):
-         * refusing a device for having no serial is a restriction users will not
-         * like. The mark is kept in memory only, and the row says it will not
-         * outlast the app. */
-        s_unsaved[idx] = true;
-        s_count++;
-        const char *warning =
-            dualsense
-                ? locstr("Since this device does not have a mac address, we cannot save "
-                         "this setting after aurora-tv closes.")
-                : locstr("Since this device does not have a serial, we cannot save this "
-                         "setting after aurora-tv closes.");
-        s_dev_row[s_dev_count++] = abw_make_row(list, label, warning, idx, true);
-        if (auto_bridge_session_has(s_mac[idx])) {
+        const int idx = s_count++;
+        s_dev[idx] = e->dev;
+        /* ⭐ A DualSense shows its MAC as it is; anything else says the string is a
+         * serial number, so the two are never read as the same kind of thing.
+         * ⓘ A device without one is still selectable, and saved, by its name
+         * (rhoquinn8217, 2026-09-14). */
+        char shown_id[96];
+        if (e->id[0] == '\0') {
+            snprintf(shown_id, sizeof shown_id, "%s", locstr("no serial number - remembered by its name"));
+        } else if (strncmp(e->dev.kind, "ds5", 3) == 0) {
+            snprintf(shown_id, sizeof shown_id, "%s", e->id);
+        } else {
+            snprintf(shown_id, sizeof shown_id, "serial %s", e->id);
+        }
+        s_dev_row[s_dev_count++] = abw_make_row(list, e->label, shown_id, idx, false);
+        if (auto_bridge_marked(app_configuration->bridge_auto_macs, &s_dev[idx])) {
             lv_obj_add_state(s_box[idx], LV_STATE_CHECKED);
         }
-        shown++;
     }
     if (shown == 0) {
         lv_obj_t *none = lv_label_create(list);
