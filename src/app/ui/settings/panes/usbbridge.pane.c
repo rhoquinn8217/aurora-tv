@@ -193,7 +193,7 @@ static lv_obj_t *create_obj(lv_fragment_t *self, lv_obj_t *container) {
             "connected to your TV. Bridged devices appear as if they are directly connected "
             "to the host PC."), false);
     pref_desc_label(view, locstr(
-            "Requires the CTM-USBIP relay running on your host PC."), false);
+            "Requires the DS5-USBIP relay running on your host PC."), false);
 
     /* ⭐⭐ THE ONLY WAYS TO BRIDGE ARE THE PANEL AND THE GESTURE, so switching
      * this off switches both and nothing can be handed over.

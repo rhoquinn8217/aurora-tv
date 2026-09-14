@@ -23,39 +23,44 @@
 #if defined(TARGET_WEBOS)
 
 #include "ctm_bridge_glue.h"
+#include "device_groups.h"
 
-/* The device's identity, written into out; false if it has none. A DualSense or
- * Edge is its own MAC, and any other device its serial -- never a blank or
- * all-zeros one. Shared by the settings window, the panel and the control port,
- * so what is shown is what is matched. */
+/* The longest stored list of marks the callers build. */
+#define AUTO_BRIDGE_LIST_MAX 4096
+
+/* One part's identity, written into out; false if it has none. A DualSense or
+ * Edge is its own MAC, and any other part its serial -- never a blank or
+ * all-zeros one. ⓘ A device's identity is decided from its parts in
+ * device_groups.c, which starts here. */
 bool auto_bridge_identity(const ctm_bridge_dev_t *d, char *out, size_t out_len);
 
-/* ⭐⭐ A MARK REMEMBERS THE IDENTITY AND THE NAME TOGETHER (rhoquinn8217,
- * 2026-09-14), for every device: "3286967D|Generic X-Box pad". A device with no
- * identity is remembered by its name alone, "|KMA2 LG RF dongle A2". The key a
- * device is stored under goes into out. */
-void auto_bridge_mark_key(const ctm_bridge_dev_t *d, char *out, size_t out_len);
+/* ⭐⭐ A MARK IS A DEVICE'S IDENTITY AND ITS NAME TOGETHER (rhoquinn8217,
+ * 2026-09-14): "<identity>|<name>". A device with no identity, or only zeros,
+ * is remembered by its name alone, "|<name>", and marks every connected device
+ * of that name. The key goes into out. */
+void auto_bridge_mark_key(const device_group_t *g, char *out, size_t out_len);
 
-/* Is this device marked in the stored list? Comma-separated. Identities match
- * however they are punctuated and names without regard to case. ⓘ An entry
- * saved before names were kept has no '|' and matches on the identity alone. */
-bool auto_bridge_marked(const char *macs_csv, const ctm_bridge_dev_t *d);
+/* Is this device marked in the stored list? Comma-separated. `devs` is the list
+ * the device was built from. Identities match however they are punctuated, and
+ * names without regard to case. ⓘ Marks saved by earlier builds still match:
+ * one part's identity and name (builds 324 to 326), or an identity alone. */
+bool auto_bridge_marked(const char *csv, const ctm_bridge_dev_t *devs, const device_group_t *g);
 
-/* The list with this device marked or unmarked, written into out. Every entry
- * that matches the device goes when unmarking, an old identity-only one too.
- * The order of the survivors is kept, so a rewrite does not shuffle the file. */
-void auto_bridge_mark_set(const char *macs_csv, const ctm_bridge_dev_t *d, bool on,
-                          char *out, size_t out_len);
+/* The list with this device marked or unmarked, written into out. Unmarking
+ * drops every entry that names the device, older ones too. The order of the
+ * rest is kept, so a rewrite does not shuffle the file. */
+void auto_bridge_mark_set(const char *csv, const ctm_bridge_dev_t *devs, const device_group_t *g,
+                          bool on, char *out, size_t out_len);
 
-/* Bridge the devices the user chose, as a stream starts: with `all`, every
- * connected device that is not already bridged, marks or no marks; otherwise
- * each marked one. `macs_csv` is the stored list; NULL or empty marks nothing.
- * Returns how many were asked to bridge. */
-int auto_bridge_run(const char *macs_csv, bool all);
+/* Bridge the devices the user chose, as a stream starts: with `all`, every part
+ * of every connected device that is not already bridged, marks or no marks;
+ * otherwise every part of each marked device. `csv` is the stored list; NULL or
+ * empty marks nothing. Returns how many parts were asked to bridge. */
+int auto_bridge_run(const char *csv, bool all);
 
 #else
 
-#define auto_bridge_run(macs_csv, all) (0)
+#define auto_bridge_run(csv, all) (0)
 
 #endif
 

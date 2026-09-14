@@ -3,6 +3,7 @@
 #if defined(TARGET_WEBOS)
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <strings.h>
 
@@ -31,13 +32,12 @@
  * (rhoquinn8217, 2026-09-14). Auto bridge is not the listener's config auto
  * link, where a DualSense's MAC has to follow the pad across Bluetooth, a cable
  * and a dongle; here a device only has to be told from the others on the TV.
- * - The identity is a DualSense's MAC or any other device's serial, and may be
- *   blank: a device without one is remembered by its name alone. ⓘ Two such
- *   devices with one name share a mark, which was judged unlikely to matter.
- * - The name keeps two halves of one device apart: a GameSir's pad and its
- *   keyboard interface share a serial but not a name.
- * Stored as "identity|name". ⓘ A mark saved before 2026-09-14 has no '|' and
- * matches on its identity alone, as it always did. */
+ * - The identity may be blank: a device without one is remembered by its name
+ *   alone, and every connected device of that name is bridged with it.
+ * - Since the same day a mark is a whole DEVICE, every part of it, rather than
+ *   one of its parts (device_groups.h).
+ * Stored as "identity|name". ⓘ Marks saved earlier still match -- see
+ * entry_matches. */
 
 static void mac_trim(const char *in, char *out, size_t out_len)
 {
@@ -56,13 +56,13 @@ static void mac_trim(const char *in, char *out, size_t out_len)
  * of up to 63 and the '|' leave room for this and no more. */
 #define MARK_NAME_MAX 96
 
-/* The name a mark stores: the device's own, with the list's two separators
+/* The name a mark stores: the name given, with the list's two separators
  * blanked so a name cannot split an entry, and cut to MARK_NAME_MAX -- the same
  * cut on both sides of a comparison, so a long name still matches itself. */
-static void mark_name(const ctm_bridge_dev_t *d, char *out, size_t out_len)
+static void mark_name(const char *name, char *out, size_t out_len)
 {
-    char raw[sizeof d->name];
-    snprintf(raw, sizeof raw, "%s", d->name);
+    char raw[128];
+    snprintf(raw, sizeof raw, "%s", name != NULL ? name : "");
     for (char *p = raw; *p != '\0'; ++p) {
         if (*p == ',' || *p == '|') {
             *p = ' ';
@@ -74,13 +74,47 @@ static void mark_name(const ctm_bridge_dev_t *d, char *out, size_t out_len)
     mac_trim(raw, out, out_len);
 }
 
-/* Does one stored entry name the device with this identity and name? */
-static bool entry_matches(const char *entry, const char *identity, const char *name)
+/* ⓘ Two identities that are both blank ARE the same here, unlike in the core's
+ * rule: the name is what carries the match for a device without one. A serial
+ * of zeros counts as blank. */
+static bool identities_match(const char *a, const char *b)
+{
+    const bool usable_a = bridge_identity_usable(a);
+    const bool usable_b = bridge_identity_usable(b);
+    if (!usable_a || !usable_b) {
+        return !usable_a && !usable_b;
+    }
+    return bridge_identity_same(a, b);
+}
+
+static void part_identity(const ctm_bridge_dev_t *d, char *out, size_t out_len)
+{
+    if (!auto_bridge_identity(d, out, out_len)) {
+        out[0] = '\0';
+    }
+}
+
+/* Does one stored entry name this device? */
+static bool entry_matches(const char *entry, const ctm_bridge_dev_t *devs, const device_group_t *g)
 {
     const char *bar = strchr(entry, '|');
     if (bar == NULL) {
-        /* Saved before names were kept: the identity alone. */
-        return identity[0] != '\0' && bridge_identity_same(entry, identity);
+        /* Saved before names were kept: an identity alone, the device's or one
+         * of its parts'. */
+        if (!bridge_identity_usable(entry)) {
+            return false;
+        }
+        if (bridge_identity_same(entry, g->identity)) {
+            return true;
+        }
+        for (int p = 0; p < g->part_count; ++p) {
+            char id[64];
+            part_identity(&devs[g->part[p]], id, sizeof id);
+            if (bridge_identity_same(entry, id)) {
+                return true;
+            }
+        }
+        return false;
     }
     char id_raw[64];
     size_t id_len = (size_t) (bar - entry);
@@ -94,12 +128,27 @@ static bool entry_matches(const char *entry, const char *identity, const char *n
     char nm[128];
     mac_trim(bar + 1, nm, sizeof nm);
 
-    /* ⓘ Two blank identities ARE the same here, unlike in the core's rule: the
-     * name is what carries the match for a device without one. */
-    const bool same_id = (id[0] == '\0' || identity[0] == '\0')
-                             ? (id[0] == '\0' && identity[0] == '\0')
-                             : bridge_identity_same(id, identity);
-    return same_id && strcasecmp(nm, name) == 0;
+    char device[128];
+    mark_name(g->name, device, sizeof device);
+    if (identities_match(id, g->identity) && strcasecmp(nm, device) == 0) {
+        return true;
+    }
+    /* ⓘ Builds 324 to 326 marked one PART, by that part's identity and name.
+     * Such a mark now stands for the device the part belongs to. */
+    for (int p = 0; p < g->part_count; ++p) {
+        const ctm_bridge_dev_t *d = &devs[g->part[p]];
+        char part[128];
+        mark_name(d->name, part, sizeof part);
+        if (strcasecmp(nm, part) != 0) {
+            continue;
+        }
+        char pid[64];
+        part_identity(d, pid, sizeof pid);
+        if (identities_match(id, pid) || identities_match(id, g->identity)) {
+            return true;
+        }
+    }
+    return false;
 }
 
 bool auto_bridge_identity(const ctm_bridge_dev_t *d, char *out, size_t out_len)
@@ -140,76 +189,64 @@ bool auto_bridge_identity(const ctm_bridge_dev_t *d, char *out, size_t out_len)
     return true;
 }
 
-void auto_bridge_mark_key(const ctm_bridge_dev_t *d, char *out, size_t out_len)
+void auto_bridge_mark_key(const device_group_t *g, char *out, size_t out_len)
 {
     if (out == NULL || out_len == 0) {
         return;
     }
     out[0] = '\0';
-    if (d == NULL) {
+    if (g == NULL) {
         return;
     }
-    char identity[64];
-    if (!auto_bridge_identity(d, identity, sizeof identity)) {
-        identity[0] = '\0';
-    }
     char name[128];
-    mark_name(d, name, sizeof name);
-    snprintf(out, out_len, "%s|%s", identity, name);
+    mark_name(g->name, name, sizeof name);
+    snprintf(out, out_len, "%s|%s", bridge_identity_usable(g->identity) ? g->identity : "", name);
 }
 
-bool auto_bridge_marked(const char *macs_csv, const ctm_bridge_dev_t *d)
+bool auto_bridge_marked(const char *csv, const ctm_bridge_dev_t *devs, const device_group_t *g)
 {
-    if (macs_csv == NULL || macs_csv[0] == '\0' || d == NULL) {
+    if (csv == NULL || csv[0] == '\0' || devs == NULL || g == NULL || g->part_count == 0) {
         return false;
     }
-    char identity[64];
-    if (!auto_bridge_identity(d, identity, sizeof identity)) {
-        identity[0] = '\0';
-    }
     char name[128];
-    mark_name(d, name, sizeof name);
-    if (identity[0] == '\0' && name[0] == '\0') {
+    mark_name(g->name, name, sizeof name);
+    if (!bridge_identity_usable(g->identity) && name[0] == '\0') {
         return false;   /* nothing to know it by */
     }
 
-    char list[2048];
-    snprintf(list, sizeof(list), "%s", macs_csv);
+    char list[AUTO_BRIDGE_LIST_MAX];
+    snprintf(list, sizeof(list), "%s", csv);
     char *save = NULL;
     for (char *tok = strtok_r(list, ",", &save); tok != NULL;
          tok = strtok_r(NULL, ",", &save)) {
         char one[256];
         mac_trim(tok, one, sizeof(one));
-        if (one[0] != '\0' && entry_matches(one, identity, name)) {
+        if (one[0] != '\0' && entry_matches(one, devs, g)) {
             return true;
         }
     }
     return false;
 }
 
-void auto_bridge_mark_set(const char *macs_csv, const ctm_bridge_dev_t *d, bool on,
-                          char *out, size_t out_len)
+void auto_bridge_mark_set(const char *csv, const ctm_bridge_dev_t *devs, const device_group_t *g,
+                          bool on, char *out, size_t out_len)
 {
     if (out == NULL || out_len == 0) {
         return;
     }
     out[0] = '\0';
-    if (d == NULL) {
-        snprintf(out, out_len, "%s", macs_csv ? macs_csv : "");
+    if (devs == NULL || g == NULL || g->part_count == 0) {
+        snprintf(out, out_len, "%s", csv ? csv : "");
         return;
     }
-    char identity[64];
-    if (!auto_bridge_identity(d, identity, sizeof identity)) {
-        identity[0] = '\0';
-    }
     char name[128];
-    mark_name(d, name, sizeof name);
+    mark_name(g->name, name, sizeof name);
 
     /* ⭐ Rebuilt from the survivors rather than edited in place, so removing an
      * entry cannot leave a stray comma and the order of the rest is kept --
      * a rewritten file that reshuffles looks like something went wrong. */
-    char list[2048];
-    snprintf(list, sizeof(list), "%s", macs_csv ? macs_csv : "");
+    char list[AUTO_BRIDGE_LIST_MAX];
+    snprintf(list, sizeof(list), "%s", csv ? csv : "");
     char *save = NULL;
     bool present = false;
     for (char *tok = strtok_r(list, ",", &save); tok != NULL;
@@ -219,7 +256,7 @@ void auto_bridge_mark_set(const char *macs_csv, const ctm_bridge_dev_t *d, bool 
         if (one[0] == '\0') {
             continue;
         }
-        if (entry_matches(one, identity, name)) {
+        if (entry_matches(one, devs, g)) {
             present = true;
             if (!on) {
                 continue;   /* dropping this one */
@@ -230,9 +267,9 @@ void auto_bridge_mark_set(const char *macs_csv, const ctm_bridge_dev_t *d, bool 
         }
         strncat(out, one, out_len - strlen(out) - 1);
     }
-    if (on && !present && (identity[0] != '\0' || name[0] != '\0')) {
+    if (on && !present && (bridge_identity_usable(g->identity) || name[0] != '\0')) {
         char key[256];
-        auto_bridge_mark_key(d, key, sizeof key);
+        auto_bridge_mark_key(g, key, sizeof key);
         if (out[0] != '\0') {
             strncat(out, ",", out_len - strlen(out) - 1);
         }
@@ -240,34 +277,52 @@ void auto_bridge_mark_set(const char *macs_csv, const ctm_bridge_dev_t *d, bool 
     }
 }
 
-int auto_bridge_run(const char *macs_csv, bool all)
+int auto_bridge_run(const char *csv, bool all)
 {
-    if (!all && (macs_csv == NULL || macs_csv[0] == '\0')) {
+    if (!all && (csv == NULL || csv[0] == '\0')) {
         return 0;   /* nothing marked: the common case, and it costs nothing */
     }
 
-    ctm_bridge_dev_t devs[16];
+    /* ⓘ On the heap: two lists of this size are too much to put on whichever
+     * thread starts the stream. */
+    ctm_bridge_dev_t *devs = calloc(DEVICE_PARTS_MAX, sizeof *devs);
+    device_group_t *groups = calloc(DEVICE_GROUPS_MAX, sizeof *groups);
+    if (devs == NULL || groups == NULL) {
+        free(devs);
+        free(groups);
+        return 0;
+    }
     /* ⓘ The full list, not the quiet one: a stream is starting, so the core is
      * up already and ctm_bridge_start has just enumerated. */
-    const int n = ctm_bridge_list(devs, 16);
+    const int n = ctm_bridge_list(devs, DEVICE_PARTS_MAX);
+    const int count = device_groups_build(devs, n, groups, DEVICE_GROUPS_MAX);
     int asked = 0;
 
-    for (int i = 0; i < n; ++i) {
-        if (devs[i].plugged || devs[i].node[0] == '\0') {
+    for (int k = 0; k < count; ++k) {
+        const device_group_t *g = &groups[k];
+        /* ⭐ "Bridge all devices when the stream starts" overrides the marks
+         * entirely: every device, with a serial or without. Otherwise only a
+         * marked one. */
+        if (!all && !auto_bridge_marked(csv, devs, g)) {
             continue;
         }
-        /* ⭐ "Bridge all devices on startup" overrides the marks entirely: every
-         * device, with a serial or without. Otherwise only a marked one. */
-        if (!all && !auto_bridge_marked(macs_csv, &devs[i])) {
-            continue;
+        /* ⭐⭐ EVERY PART OF IT, each on its own. */
+        for (int p = 0; p < g->part_count; ++p) {
+            const ctm_bridge_dev_t *d = &devs[g->part[p]];
+            if (d->plugged || d->node[0] == '\0') {
+                continue;
+            }
+            /* ⭐ THE SAME PATH THE PANEL USES, so a bridge that happens by
+             * itself and one a user asked for cannot drift apart. ⓘ Since
+             * 2026-09-12 that is literally one function,
+             * bridge_request_device(), rather than a copy of the panel's
+             * decision kept here. */
+            (void) bridge_request_device(d);
+            asked++;
         }
-        /* ⭐ THE SAME PATH THE PANEL USES, so a bridge that happens by itself
-         * and one a user asked for cannot drift apart. ⓘ Since 2026-09-12 that
-         * is literally one function, bridge_request_device(), rather than a
-         * copy of the panel's decision kept here. */
-        (void) bridge_request_device(&devs[i]);
-        asked++;
     }
+    free(groups);
+    free(devs);
     return asked;
 }
 

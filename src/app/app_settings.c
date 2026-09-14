@@ -295,7 +295,7 @@ bool settings_save(app_settings_t *config) {
      * losing the rest without a word. bridge_auto_macs, the old one-line list, is
      * still read. */
     if (config->bridge_auto_macs != NULL) {
-        char list[2048];
+        char list[4096];
         snprintf(list, sizeof list, "%s", config->bridge_auto_macs);
         char *save = NULL;
         for (char *tok = strtok_r(list, ",", &save); tok != NULL; tok = strtok_r(NULL, ",", &save)) {

@@ -32,6 +32,7 @@
 #include "input/auto_bridge.h"
 #include "input/bridge_request.h"
 #include "input/ctm_bridge_gesture.h"
+#include "input/device_groups.h"
 #endif
 
 #define CONTROL_LINE_MAX 256
@@ -111,11 +112,14 @@ static void cmd_help(control_job_t *job)
                "stream <host> <app id>  start a stream; host is a uuid or part of its name\n"
                "stop                    end the stream and leave the game running\n"
                "quit                    end the stream and quit the game on the host\n"
-               "devices                 the USB Bridge list, with each device's SDL match\n"
-               "bridge <device>         bridge one device, exactly as its panel row does\n"
-               "release <device>        release one device, exactly as its panel row does\n"
-               "bridge-all, release-all every device, as the panel's buttons do\n"
-               "<device> is its number, its node, its vid:pid, or part of its name\n");
+               "devices                 every part the core lists, with its SDL match and its group\n"
+               "groups                  the devices those parts make up, as the panel's rows show them\n"
+               "bridge <device>         bridge one part\n"
+               "release <device>        release one part\n"
+               "bridge-group <n>        bridge every part of a device, exactly as its panel row does\n"
+               "release-group <n>       release every part of a device, exactly as its panel row does\n"
+               "bridge-all, release-all every part, as the panel's buttons do\n"
+               "<device> is its number, its node, its vid:pid, or part of its name; <n> is from groups\n");
 }
 
 static void cmd_status(control_job_t *job)
@@ -252,10 +256,34 @@ static int list_devices(ctm_bridge_dev_t *devs)
                                : ctm_bridge_list_quiet(devs, CONTROL_MAX_DEVICES);
 }
 
+/* The devices the parts make up, in the order the panel's rows and the Auto
+ * Bridge window's cards show them. ⓘ Static, because commands run one at a
+ * time on the UI thread. */
+static device_group_t s_groups[DEVICE_GROUPS_MAX];
+
+static int list_groups(const ctm_bridge_dev_t *devs, int n)
+{
+    return device_groups_build(devs, n, s_groups, DEVICE_GROUPS_MAX);
+}
+
+/* The number of the group a part is in, or -1. */
+static int group_of_part(int count, int part)
+{
+    for (int k = 0; k < count; ++k) {
+        for (int p = 0; p < s_groups[k].part_count; ++p) {
+            if (s_groups[k].part[p] == part) {
+                return k;
+            }
+        }
+    }
+    return -1;
+}
+
 static void cmd_devices(control_job_t *job)
 {
     ctm_bridge_dev_t devs[CONTROL_MAX_DEVICES];
     const int n = list_devices(devs);
+    const int count = list_groups(devs, n);
     reply(job, "OK %d device(s)\n", n);
     for (int i = 0; i < n; ++i) {
         const ctm_bridge_dev_t *d = &devs[i];
@@ -277,15 +305,43 @@ static void cmd_devices(control_job_t *job)
             snprintf(mark, sizeof mark, "-");
         }
         /* ⓘ marked says whether auto bridge would take it at the next stream
-         * start: a mark is the identity above together with the name. */
-        const char *marked = auto_bridge_marked(app_configuration->bridge_auto_macs, d) ? "yes" : "no";
+         * start, which since 2026-09-14 is decided for its whole device: group
+         * is that device's number in groups, and iface the part's interface. */
+        const int g = group_of_part(count, i);
+        const char *marked = g >= 0 && auto_bridge_marked(app_configuration->bridge_auto_macs, devs,
+                                                          &s_groups[g]) ? "yes" : "no";
         reply(job, "%d bridged=%s kind=%s id=%s:%s bus=%s node=%s player=%d sdl_mac=%s uniq=%s "
-                   "serial=%s controller=%s type=%s mark=%s marked=%s name=\"%s\"\n",
+                   "serial=%s controller=%s type=%s mark=%s marked=%s group=%d iface=%d name=\"%s\"\n",
               d->index, d->plugged ? "yes" : "no", d->kind, d->vid, d->pid, d->bus,
               d->node[0] != '\0' ? d->node : "-", ctm_bridge_gesture_player_for_node(d->node),
               sdl_mac, d->mac[0] != '\0' ? d->mac : "-",
               d->serial[0] != '\0' ? d->serial : "-", d->controller ? "yes" : "no",
-              d->type[0] != '\0' ? d->type : "-", mark, marked, d->name);
+              d->type[0] != '\0' ? d->type : "-", mark, marked, g, d->iface, d->name);
+    }
+}
+
+/* ⭐ The devices as the panel's rows show them: the name and the line under it,
+ * the state its badge shows, what a mark for it is stored as, and its parts by
+ * their numbers in devices. */
+static void cmd_groups(control_job_t *job)
+{
+    ctm_bridge_dev_t devs[CONTROL_MAX_DEVICES];
+    const int n = list_devices(devs);
+    const int count = list_groups(devs, n);
+    reply(job, "OK %d device group(s)\n", count);
+    for (int k = 0; k < count; ++k) {
+        const device_group_t *g = &s_groups[k];
+        const char *state = g->plugged == 0 ? "BASIC" : g->plugged == g->part_count ? "FULL" : "PARTIAL";
+        const bool marked = auto_bridge_marked(app_configuration->bridge_auto_macs, devs, g);
+        char key[256];
+        auto_bridge_mark_key(g, key, sizeof key);
+        reply(job, "%d state=%s bridged=%d/%d identity=%s marked=%s key=\"%s\" shown=\"%s\" name=\"%s\" parts=",
+              k, state, g->plugged, g->part_count, g->identity[0] != '\0' ? g->identity : "-",
+              marked ? "yes" : "no", key, g->shown, g->name);
+        for (int p = 0; p < g->part_count; ++p) {
+            reply(job, "%s%d", p > 0 ? "," : "", devs[g->part[p]].index);
+        }
+        reply(job, "\n");
     }
 }
 
@@ -445,6 +501,72 @@ static void cmd_release_all(control_job_t *job)
     reply(job, "OK released %d device(s)\n", released);
 }
 
+/* A device by its number in groups. Returns its position, or -1 with the
+ * reason already written. */
+static int select_group(control_job_t *job, int count, const char *sel)
+{
+    if (sel == NULL || !is_all_digits(sel)) {
+        reply(job, "ERR name a device by its number in groups\n");
+        return -1;
+    }
+    const int k = atoi(sel);
+    if (k < 0 || k >= count) {
+        reply(job, "ERR there is no device %s in groups\n", sel);
+        return -1;
+    }
+    return k;
+}
+
+static void cmd_bridge_group(control_job_t *job, const char *sel)
+{
+    if (!bridge_possible(job)) {
+        return;
+    }
+    ctm_bridge_dev_t devs[CONTROL_MAX_DEVICES];
+    const int n = list_devices(devs);
+    const int k = select_group(job, list_groups(devs, n), sel);
+    if (k < 0) {
+        return;
+    }
+    const device_group_t *g = &s_groups[k];
+    if (g->plugged == g->part_count) {
+        reply(job, "OK already bridged: %d (%s)\n", k, g->name);
+        return;
+    }
+    reply(job, "OK bridging %d of %d part(s) of %d (%s)\n", g->part_count - g->plugged, g->part_count, k,
+          g->name);
+    for (int p = 0; p < g->part_count; ++p) {
+        const ctm_bridge_dev_t *d = &devs[g->part[p]];
+        if (!d->plugged) {
+            report_request(job, d, bridge_request_device(d));
+        }
+    }
+}
+
+static void cmd_release_group(control_job_t *job, const char *sel)
+{
+    ctm_bridge_dev_t devs[CONTROL_MAX_DEVICES];
+    const int n = list_devices(devs);
+    const int k = select_group(job, list_groups(devs, n), sel);
+    if (k < 0) {
+        return;
+    }
+    const device_group_t *g = &s_groups[k];
+    if (g->plugged == 0) {
+        reply(job, "OK not bridged: %d (%s)\n", k, g->name);
+        return;
+    }
+    int released = 0;
+    for (int p = 0; p < g->part_count; ++p) {
+        const ctm_bridge_dev_t *d = &devs[g->part[p]];
+        if (d->plugged) {
+            bridge_release_device(d);
+            ++released;
+        }
+    }
+    reply(job, "OK released %d part(s) of %d (%s)\n", released, k, g->name);
+}
+
 #endif /* TARGET_WEBOS */
 
 static void run_command(control_job_t *job)
@@ -479,6 +601,12 @@ static void run_command(control_job_t *job)
 #if defined(TARGET_WEBOS)
     } else if (strcasecmp(verb, "devices") == 0) {
         cmd_devices(job);
+    } else if (strcasecmp(verb, "groups") == 0) {
+        cmd_groups(job);
+    } else if (strcasecmp(verb, "bridge-group") == 0) {
+        cmd_bridge_group(job, args);
+    } else if (strcasecmp(verb, "release-group") == 0) {
+        cmd_release_group(job, args);
     } else if (strcasecmp(verb, "bridge") == 0) {
         cmd_bridge(job, args);
     } else if (strcasecmp(verb, "release") == 0) {
