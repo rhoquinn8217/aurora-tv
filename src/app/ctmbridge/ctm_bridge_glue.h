@@ -75,9 +75,15 @@ typedef struct {
     char serial[64];
     /* A game controller rather than a keyboard, mouse or other device. */
     bool controller;
-    /* "controller", "keyboard", "mouse", or "" -- what its HID description says
-     * it is, for a person reading the row. */
+    /* "controller", "keyboard", "mouse" or "other" -- what its HID description
+     * says it is, for a person reading the row. */
     char type[12];
+    /* ⭐ WHICH PHYSICAL DEVICE THIS PART IS PART OF (2026-09-14). Every part of
+     * one USB device has the same `group`; anything not on USB is its own. */
+    char group[96];
+    char device_name[128];   /* the USB device's maker and product, or "" */
+    char usb_serial[64];     /* the USB device's own serial, zeros and all, or "" */
+    int iface;               /* the USB interface number, -1 when unknown */
 } ctm_bridge_dev_t;
 
 /* ⭐ Identity strings, answered by the core's own rules so the TV and the bridge

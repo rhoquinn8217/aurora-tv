@@ -348,14 +348,27 @@ static int glue_list_locked_body(ctm_bridge_dev_t *out, int max)
         snprintf(out[n].serial, sizeof(out[n].serial), "%s", item->serial);
         out[n].controller = item_is_controller(item);
         snprintf(out[n].type, sizeof(out[n].type), "%s", item_type_label(item));
-        /* The first backing node is the one the bridge plugs. */
+        /* The first backing node is the one the bridge plugs, and the device it
+         * belongs to is read from it. */
         out[n].node[0] = '\0';
+        out[n].group[0] = '\0';
+        out[n].device_name[0] = '\0';
+        out[n].usb_serial[0] = '\0';
+        out[n].iface = -1;
         for (int k = 0; k < item->device_count; ++k) {
             int j = item->device_indices[k];
             if (j >= 0 && j < g_scan.count && g_scan.devices[j].node[0]) {
-                snprintf(out[n].node, sizeof(out[n].node), "%s", g_scan.devices[j].node);
+                const device_info_t *dev = &g_scan.devices[j];
+                snprintf(out[n].node, sizeof(out[n].node), "%s", dev->node);
+                snprintf(out[n].group, sizeof(out[n].group), "%s", dev->group);
+                snprintf(out[n].device_name, sizeof(out[n].device_name), "%s", dev->device_name);
+                snprintf(out[n].usb_serial, sizeof(out[n].usb_serial), "%s", dev->usb_serial);
+                out[n].iface = dev->iface_num;
                 break;
             }
+        }
+        if (!out[n].group[0]) {
+            snprintf(out[n].group, sizeof(out[n].group), "item:%s", item->key);
         }
         /* The TV's own Magic Remote row IS the pointer synthesizer (raw relay
          * of its LG-vendor descriptor would code-10 on Windows). */
