@@ -203,9 +203,11 @@ bool session_start_input(session_t *session) {
              * the glue cannot see SDL. ⛔ Not in the reconnect branch above --
              * that is a stream resuming, and its controllers never left. */
             {
-                const int n = auto_bridge_run(app_configuration->bridge_auto_macs);
+                const int n = auto_bridge_run(app_configuration->bridge_auto_macs,
+                                              app_configuration->bridge_auto_all);
                 if (n > 0) {
-                    commons_log_info("Session", "auto bridge: asked for %d marked controller(s)", n);
+                    commons_log_info("Session", "auto bridge: asked for %d %s device(s)", n,
+                                     app_configuration->bridge_auto_all ? "connected" : "marked");
                 }
             }
         }

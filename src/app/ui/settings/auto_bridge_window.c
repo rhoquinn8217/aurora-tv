@@ -2,6 +2,7 @@
 
 #if defined(TARGET_WEBOS)
 
+#include <ctype.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -26,16 +27,23 @@
 #define ABW_COL_MARK    lv_palette_main(LV_PALETTE_PURPLE)
 
 #define ABW_MAX 16
+/* ⓘ The row index of "Bridge all devices on startup": one past the device rows,
+ * so it shares their builder and their click handler. */
+#define ABW_ALL ABW_MAX
 
 static lv_obj_t   *s_win;
 static lv_group_t *s_group;
-static lv_obj_t   *s_box[ABW_MAX];
+static lv_obj_t   *s_box[ABW_MAX + 1];
+static lv_obj_t   *s_row[ABW_MAX + 1];
 static char        s_mac[ABW_MAX][64];
 static int         s_count;
+static lv_obj_t   *s_foot_btn[2];
+static int         s_foot_count;
 
 static void abw_close(void);
 static void abw_close_cb(lv_event_t *e);
 static void abw_key_cb(lv_event_t *e);
+static void abw_apply_all(void);
 
 /* ⭐ A short name: the reported one is unusable in a row -- "Sony Interactive
  * Entertainment DualSense Edge Wireless Controller" is most of a screen. */
@@ -45,7 +53,31 @@ static const char *abw_short_name(const ctm_bridge_dev_t *d) {
     return d->name;
 }
 
+/* ⭐ The name with what the device is in brackets -- "Microsoft Xbox 360 for
+ * Windows Controller (KEYBOARD)" -- so a row named like a controller that is
+ * really a keyboard gives the reader a hint (rhoquinn8217, 2026-09-13). No
+ * bracket when its description names nothing recognisable. */
+static void abw_label_with_type(const ctm_bridge_dev_t *d, char *out, size_t out_len) {
+    const char *name = abw_short_name(d);
+    if (d->type[0] == '\0') {
+        snprintf(out, out_len, "%s", name);
+        return;
+    }
+    char upper[sizeof d->type];
+    size_t i = 0;
+    for (; d->type[i] != '\0' && i + 1 < sizeof upper; ++i) {
+        upper[i] = (char) toupper((unsigned char) d->type[i]);
+    }
+    upper[i] = '\0';
+    snprintf(out, out_len, "%s (%s)", name, upper);
+}
+
 static void abw_mark(int row, bool on) {
+    /* ⛔ Overridden while "Bridge all devices on startup" is on: the rows are
+     * greyed, and a press on one must not quietly change the marks beneath. */
+    if (app_configuration->bridge_auto_all) {
+        return;
+    }
     char out[512];
     auto_bridge_list_set(app_configuration->bridge_auto_macs, s_mac[row], on, out, sizeof out);
     settings_set_auto_macs(app_configuration, out);
@@ -56,8 +88,44 @@ static void abw_mark(int row, bool on) {
     }
 }
 
+/* ⭐ While "Bridge all devices on startup" is on, the list above it is
+ * overridden: its rows and the two buttons are greyed and do nothing, and the
+ * marks underneath are kept, so turning it off brings them back unchanged. */
+static void abw_apply_all(void) {
+    const bool all = app_configuration->bridge_auto_all;
+    if (s_box[ABW_ALL] != NULL) {
+        if (all) {
+            lv_obj_add_state(s_box[ABW_ALL], LV_STATE_CHECKED);
+        } else {
+            lv_obj_clear_state(s_box[ABW_ALL], LV_STATE_CHECKED);
+        }
+    }
+    for (int i = 0; i < s_count; ++i) {
+        if (s_row[i] == NULL) continue;
+        if (all) {
+            lv_obj_add_state(s_row[i], LV_STATE_DISABLED);
+        } else {
+            lv_obj_clear_state(s_row[i], LV_STATE_DISABLED);
+        }
+        lv_obj_set_style_opa(s_row[i], all ? LV_OPA_40 : LV_OPA_COVER, 0);
+    }
+    for (int i = 0; i < s_foot_count; ++i) {
+        if (all) {
+            lv_obj_add_state(s_foot_btn[i], LV_STATE_DISABLED);
+        } else {
+            lv_obj_clear_state(s_foot_btn[i], LV_STATE_DISABLED);
+        }
+        lv_obj_set_style_opa(s_foot_btn[i], all ? LV_OPA_40 : LV_OPA_COVER, 0);
+    }
+}
+
 static void abw_row_click_cb(lv_event_t *e) {
     const int row = (int) (intptr_t) lv_event_get_user_data(e);
+    if (row == ABW_ALL) {
+        app_configuration->bridge_auto_all = !app_configuration->bridge_auto_all;
+        abw_apply_all();
+        return;
+    }
     if (row < 0 || row >= s_count) return;
     abw_mark(row, !lv_obj_has_state(s_box[row], LV_STATE_CHECKED));
 }
@@ -103,6 +171,9 @@ static void abw_make_all_btn(lv_obj_t *parent, const char *text, lv_event_cb_t c
     lv_obj_add_event_cb(b, abw_key_cb, LV_EVENT_KEY, NULL);
     lv_obj_add_event_cb(b, abw_close_cb, LV_EVENT_CANCEL, NULL);
     lv_group_add_obj(s_group, b);
+    if (s_foot_count < 2) {
+        s_foot_btn[s_foot_count++] = b;   /* greyed while Bridge all is on */
+    }
 }
 
 static void abw_close_cb(lv_event_t *e) {
@@ -180,7 +251,7 @@ static lv_obj_t *abw_make_row(lv_obj_t *parent, const char *name, const char *ma
     /* ⭐ The reason WRAPS, an address TRUNCATES. A device that cannot be marked
      * gets a sentence rather than a shrug, and a sentence cut off at one line
      * would be the shrug again. */
-    lv_label_set_long_mode(ad, idx < 0 ? LV_LABEL_LONG_WRAP : LV_LABEL_LONG_DOT);
+    lv_label_set_long_mode(ad, (idx < 0 || idx == ABW_ALL) ? LV_LABEL_LONG_WRAP : LV_LABEL_LONG_DOT);
     lv_obj_set_width(ad, LV_PCT(100));
     lv_obj_set_style_text_color(ad, ABW_COL_SUB, 0);
     lv_obj_set_style_text_font(ad, lv_theme_get_font_small(parent), 0);
@@ -206,6 +277,7 @@ static lv_obj_t *abw_make_row(lv_obj_t *parent, const char *name, const char *ma
     lv_obj_set_style_bg_color(box, ABW_COL_MARK, LV_PART_INDICATOR | LV_STATE_CHECKED);
     lv_obj_set_style_border_color(box, ABW_COL_SUB, LV_PART_INDICATOR);
     s_box[idx] = box;
+    s_row[idx] = row;
 
     lv_obj_add_event_cb(row, abw_row_click_cb, LV_EVENT_CLICKED, (void *) (intptr_t) idx);
     lv_obj_add_event_cb(row, abw_key_cb, LV_EVENT_KEY, NULL);
@@ -236,6 +308,9 @@ void auto_bridge_window_open(void) {
         return;
     }
     s_count = 0;
+    s_foot_count = 0;
+    memset(s_box, 0, sizeof s_box);
+    memset(s_row, 0, sizeof s_row);
     s_group = lv_group_create();
 
     /* ⓘ On the top layer, so it sits over the settings screen without being
@@ -303,8 +378,8 @@ void auto_bridge_window_open(void) {
      * the NEXT stream, so without it a ticked box looks like it did nothing. */
     lv_obj_t *sub = lv_label_create(card);
     lv_label_set_text(sub, locstr(
-            "Selected controllers bridge automatically when the stream starts. "
-            "A DualSense is marked by its mac address and any other controller by "
+            "Selected devices bridge automatically when the stream starts. "
+            "A DualSense is marked by its mac address and any other device by "
             "its serial number. CTM-USBIP must be running before the stream starts."));
     lv_label_set_long_mode(sub, LV_LABEL_LONG_WRAP);
     lv_obj_set_width(sub, LV_PCT(100));
@@ -328,19 +403,19 @@ void auto_bridge_window_open(void) {
     int shown = 0;
     for (int i = 0; i < n && s_count < ABW_MAX; ++i) {
         char mac[64];
+        char label[160];
         const bool dualsense = strncmp(devs[i].kind, "ds5", 3) == 0;
+        abw_label_with_type(&devs[i], label, sizeof label);
         if (!auto_bridge_identity(&devs[i], mac, sizeof mac)) {
             /* ⭐ Say WHY, not just that (rhoquinn8217, 2026-09-08). "no address"
              * states a fact and leaves the reader to guess whether it is a
              * fault, a wait, or a rule. */
             const char *why =
-                !devs[i].controller
-                    ? locstr("not a controller - auto bridge is only for controllers")
-                : dualsense
+                dualsense
                     ? locstr("no mac address - a DualSense is marked by its mac address")
-                    : locstr("no serial number - auto bridge needs a controller that "
+                    : locstr("no serial number - auto bridge needs a device that "
                              "reports one");
-            abw_make_row(list, abw_short_name(&devs[i]), why, -1);
+            abw_make_row(list, label, why, -1);
             shown++;
             continue;
         }
@@ -355,7 +430,7 @@ void auto_bridge_window_open(void) {
         } else {
             snprintf(shown_id, sizeof shown_id, "serial %s", mac);
         }
-        lv_obj_t *row = abw_make_row(list, abw_short_name(&devs[i]), shown_id, idx);
+        lv_obj_t *row = abw_make_row(list, label, shown_id, idx);
         LV_UNUSED(row);
         if (auto_bridge_list_has(app_configuration->bridge_auto_macs, mac)) {
             lv_obj_add_state(s_box[idx], LV_STATE_CHECKED);
@@ -367,6 +442,15 @@ void auto_bridge_window_open(void) {
         lv_label_set_text(none, locstr("No devices are connected."));
         lv_obj_set_style_text_color(none, ABW_COL_SUB, 0);
     }
+
+    /* ⭐⭐ LAST IN THE LIST, AND IT OVERRIDES THE LIST (rhoquinn8217,
+     * 2026-09-13): when a stream starts, bridge every device, with a serial or
+     * without. While it is ticked the rows above are greyed and left as they
+     * were. */
+    abw_make_row(list, locstr("Bridge all devices on startup"),
+                 locstr("Bridges every device when the stream starts, including ones "
+                        "without a serial number. Overrides the selections above."),
+                 ABW_ALL);
 
     if (s_count > 0) {
         lv_obj_t *foot = lv_obj_create(card);
@@ -390,9 +474,9 @@ void auto_bridge_window_open(void) {
      * MODAL, and the stack is what the launcher's popup and the settings detail
      * pane already use. */
     app_input_push_modal_group(&global->ui.input, s_group);
-    if (s_count > 0) {
-        lv_group_focus_next(s_group);
-    }
+    abw_apply_all();
+    /* ⓘ There is always a row to land on now: Bridge all is one, device or not. */
+    lv_group_focus_next(s_group);
 }
 
 #endif /* TARGET_WEBOS */

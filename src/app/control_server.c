@@ -277,11 +277,12 @@ static void cmd_devices(control_job_t *job)
             snprintf(mark, sizeof mark, "-");
         }
         reply(job, "%d bridged=%s kind=%s id=%s:%s bus=%s node=%s player=%d sdl_mac=%s uniq=%s "
-                   "serial=%s controller=%s mark=%s name=\"%s\"\n",
+                   "serial=%s controller=%s type=%s mark=%s name=\"%s\"\n",
               d->index, d->plugged ? "yes" : "no", d->kind, d->vid, d->pid, d->bus,
               d->node[0] != '\0' ? d->node : "-", ctm_bridge_gesture_player_for_node(d->node),
               sdl_mac, d->mac[0] != '\0' ? d->mac : "-",
-              d->serial[0] != '\0' ? d->serial : "-", d->controller ? "yes" : "no", mark, d->name);
+              d->serial[0] != '\0' ? d->serial : "-", d->controller ? "yes" : "no",
+              d->type[0] != '\0' ? d->type : "-", mark, d->name);
     }
 }
 

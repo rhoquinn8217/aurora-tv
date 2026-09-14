@@ -25,16 +25,16 @@
 #include "ctm_bridge_glue.h"
 
 /* What a mark keys on, written into out; false if the device cannot be marked.
- * A DualSense or Edge is its own MAC, every other controller its serial (never
- * a blank or all-zeros one), and anything that is not a controller nothing.
- * Shared by the settings window, the panel and the control port, so what is
- * shown is what is matched. */
+ * A DualSense or Edge is its own MAC, and any other device its serial -- never
+ * a blank or all-zeros one. Shared by the settings window, the panel and the
+ * control port, so what is shown is what is matched. */
 bool auto_bridge_identity(const ctm_bridge_dev_t *d, char *out, size_t out_len);
 
-/* Bridge every marked controller that is connected and not already bridged.
- * `macs_csv` is the stored list, comma-separated; NULL or empty does nothing.
- * Returns how many were asked to bridge. Call once, as a stream starts. */
-int auto_bridge_run(const char *macs_csv);
+/* Bridge the devices the user chose, as a stream starts: with `all`, every
+ * connected device that is not already bridged, marks or no marks; otherwise
+ * each marked one. `macs_csv` is the stored list, comma-separated; NULL or
+ * empty marks nothing. Returns how many were asked to bridge. */
+int auto_bridge_run(const char *macs_csv, bool all);
 
 /* Is this identity in the list? Comma-separated; case and punctuation do not
  * matter, so a MAC written with dashes matches one written with colons.
@@ -48,7 +48,7 @@ void auto_bridge_list_set(const char *macs_csv, const char *mac, bool on,
 
 #else
 
-#define auto_bridge_run(macs_csv) (0)
+#define auto_bridge_run(macs_csv, all) (0)
 
 #endif
 

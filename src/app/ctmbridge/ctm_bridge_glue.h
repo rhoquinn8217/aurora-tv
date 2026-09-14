@@ -75,6 +75,9 @@ typedef struct {
     char serial[64];
     /* A game controller rather than a keyboard, mouse or other device. */
     bool controller;
+    /* "controller", "keyboard", "mouse", or "" -- what its HID description says
+     * it is, for a person reading the row. */
+    char type[12];
 } ctm_bridge_dev_t;
 
 /* ⭐ Identity strings, answered by the core's own rules so the TV and the bridge

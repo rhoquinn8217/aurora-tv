@@ -126,6 +126,11 @@ typedef struct app_settings_t {
      * ⛔ Empty means NONE. Never "whatever is present" -- that is the auto-plug
      * that was removed for taking devices away from the TV unasked. */
     char *bridge_auto_macs;
+    /* ⭐ "Bridge all devices on startup" (rhoquinn8217, 2026-09-13): when a stream
+     * starts, bridge EVERY device, serial or not, and ignore the marks above --
+     * which are kept, so turning this off brings them back. ⛔ Off by default:
+     * it is the user's explicit choice, never the unasked auto-plug. */
+    bool bridge_auto_all;
     bool absmouse;
     bool hardware_mouse;
     bool virtual_mouse;

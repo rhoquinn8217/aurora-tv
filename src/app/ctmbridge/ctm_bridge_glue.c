@@ -347,6 +347,7 @@ static int glue_list_locked_body(ctm_bridge_dev_t *out, int max)
         snprintf(out[n].mac, sizeof(out[n].mac), "%s", item->mac);
         snprintf(out[n].serial, sizeof(out[n].serial), "%s", item->serial);
         out[n].controller = item_is_controller(item);
+        snprintf(out[n].type, sizeof(out[n].type), "%s", item_type_label(item));
         /* The first backing node is the one the bridge plugs. */
         out[n].node[0] = '\0';
         for (int k = 0; k < item->device_count; ++k) {

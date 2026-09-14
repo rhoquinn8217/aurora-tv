@@ -27,11 +27,11 @@
  * behind, and the next controller on that dongle bridges itself uninvited.
  * Measured on the C1 2026-09-08 after it fooled two readings.
  *
- * ⭐⭐ EVERY OTHER CONTROLLER KEYS ON ITS SERIAL (rhoquinn8217, 2026-09-13).
+ * ⭐⭐ EVERY OTHER DEVICE KEYS ON ITS SERIAL (rhoquinn8217, 2026-09-13).
  * SDL has no MAC for them -- a cabled Xbox pad could not be marked at all --
  * and they have none to give over USB. The core's serial is their uniq, or the
  * USB serial number where no driver filled uniq; a blank or all-zeros one marks
- * nothing. ⓘ The same rules the host's config auto link follows. */
+ * nothing. ⓘ The host's config auto link keys the same way, for controllers. */
 
 static void mac_trim(const char *in, char *out, size_t out_len)
 {
@@ -117,10 +117,11 @@ bool auto_bridge_identity(const ctm_bridge_dev_t *d, char *out, size_t out_len)
         return false;
     }
     out[0] = '\0';
-    /* ⛔ Only controllers are marked (rhoquinn8217, 2026-09-13). */
-    if (!d->controller) {
-        return false;
-    }
+    /* ⓘ NOT limited to controllers. Build 321 was, and it refused the GameSir's
+     * keyboard half, which reports a serial. rhoquinn8217, 2026-09-13: "It
+     * should be able to auto bridge if it is a DS5 device or a device that has
+     * a serial that is not blank or all zeros." Configs are what keep to
+     * controllers, and that is the listener's rule, not this one. */
 
     /* A DualSense or Edge: its own MAC. ⓘ The kind is "ds5", "ds5_usb", "ds5e"
      * or "ds5e_usb", so its first three letters are enough. */
@@ -140,7 +141,7 @@ bool auto_bridge_identity(const ctm_bridge_dev_t *d, char *out, size_t out_len)
         return false;
     }
 
-    /* Every other controller: its serial. */
+    /* Every other device: its serial. */
     if (!bridge_identity_usable(d->serial)) {
         return false;
     }
@@ -148,9 +149,9 @@ bool auto_bridge_identity(const ctm_bridge_dev_t *d, char *out, size_t out_len)
     return true;
 }
 
-int auto_bridge_run(const char *macs_csv)
+int auto_bridge_run(const char *macs_csv, bool all)
 {
-    if (macs_csv == NULL || macs_csv[0] == '\0') {
+    if (!all && (macs_csv == NULL || macs_csv[0] == '\0')) {
         return 0;   /* nothing marked: the common case, and it costs nothing */
     }
 
@@ -164,12 +165,16 @@ int auto_bridge_run(const char *macs_csv)
         if (devs[i].plugged || devs[i].node[0] == '\0') {
             continue;
         }
-        char identity[64];
-        if (!auto_bridge_identity(&devs[i], identity, sizeof identity)) {
-            continue;   /* not a controller, or nothing to key a mark on */
-        }
-        if (!auto_bridge_list_has(macs_csv, identity)) {
-            continue;
+        /* ⭐ "Bridge all devices on startup" overrides the marks entirely: every
+         * device, with a serial or without. Otherwise only a marked one. */
+        if (!all) {
+            char identity[64];
+            if (!auto_bridge_identity(&devs[i], identity, sizeof identity)) {
+                continue;   /* nothing to key a mark on */
+            }
+            if (!auto_bridge_list_has(macs_csv, identity)) {
+                continue;
+            }
         }
         /* ⭐ THE SAME PATH THE PANEL USES, so a bridge that happens by itself
          * and one a user asked for cannot drift apart. ⓘ Since 2026-09-12 that
