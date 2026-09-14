@@ -34,9 +34,12 @@
 static lv_obj_t   *s_win;
 static lv_group_t *s_group;
 static lv_obj_t   *s_box[ABW_MAX + 1];
-static lv_obj_t   *s_row[ABW_MAX + 1];
 static char        s_mac[ABW_MAX][64];
 static int         s_count;
+/* Every device row, markable or not: "Bridge all devices on startup" greys them
+ * all, since it bridges the ones that cannot be marked as well. */
+static lv_obj_t   *s_dev_row[ABW_MAX];
+static int         s_dev_count;
 static lv_obj_t   *s_foot_btn[2];
 static int         s_foot_count;
 
@@ -97,7 +100,9 @@ static void abw_mark(int row, bool on) {
 
 /* ⭐ While "Bridge all devices on startup" is on, the list above it is
  * overridden: its rows and the two buttons are greyed and do nothing, and the
- * marks underneath are kept, so turning it off brings them back unchanged. */
+ * marks underneath are kept, so turning it off brings them back unchanged.
+ * ⛔ EVERY row greys, the unmarkable ones too: they bridge as well, and a row
+ * left bright saying "no serial number" would read as left out. */
 static void abw_apply_all(void) {
     const bool all = app_configuration->bridge_auto_all;
     if (s_box[ABW_ALL] != NULL) {
@@ -107,14 +112,14 @@ static void abw_apply_all(void) {
             lv_obj_clear_state(s_box[ABW_ALL], LV_STATE_CHECKED);
         }
     }
-    for (int i = 0; i < s_count; ++i) {
-        if (s_row[i] == NULL) continue;
+    for (int i = 0; i < s_dev_count; ++i) {
+        if (s_dev_row[i] == NULL) continue;
         if (all) {
-            lv_obj_add_state(s_row[i], LV_STATE_DISABLED);
+            lv_obj_add_state(s_dev_row[i], LV_STATE_DISABLED);
         } else {
-            lv_obj_clear_state(s_row[i], LV_STATE_DISABLED);
+            lv_obj_clear_state(s_dev_row[i], LV_STATE_DISABLED);
         }
-        lv_obj_set_style_opa(s_row[i], all ? LV_OPA_40 : LV_OPA_COVER, 0);
+        lv_obj_set_style_opa(s_dev_row[i], all ? LV_OPA_40 : LV_OPA_COVER, 0);
     }
     for (int i = 0; i < s_foot_count; ++i) {
         if (all) {
@@ -284,7 +289,6 @@ static lv_obj_t *abw_make_row(lv_obj_t *parent, const char *name, const char *ma
     lv_obj_set_style_bg_color(box, ABW_COL_MARK, LV_PART_INDICATOR | LV_STATE_CHECKED);
     lv_obj_set_style_border_color(box, ABW_COL_SUB, LV_PART_INDICATOR);
     s_box[idx] = box;
-    s_row[idx] = row;
 
     lv_obj_add_event_cb(row, abw_row_click_cb, LV_EVENT_CLICKED, (void *) (intptr_t) idx);
     lv_obj_add_event_cb(row, abw_key_cb, LV_EVENT_KEY, NULL);
@@ -308,6 +312,7 @@ static void abw_close(void) {
         s_group = NULL;
     }
     s_count = 0;
+    s_dev_count = 0;
 }
 
 void auto_bridge_window_open(void) {
@@ -315,9 +320,10 @@ void auto_bridge_window_open(void) {
         return;
     }
     s_count = 0;
+    s_dev_count = 0;
     s_foot_count = 0;
     memset(s_box, 0, sizeof s_box);
-    memset(s_row, 0, sizeof s_row);
+    memset(s_dev_row, 0, sizeof s_dev_row);
     s_group = lv_group_create();
 
     /* ⓘ On the top layer, so it sits over the settings screen without being
@@ -422,7 +428,7 @@ void auto_bridge_window_open(void) {
                     ? locstr("no mac address - a DualSense is marked by its mac address")
                     : locstr("no serial number - auto bridge needs a device that "
                              "reports one");
-            abw_make_row(list, label, why, -1);
+            s_dev_row[s_dev_count++] = abw_make_row(list, label, why, -1);
             shown++;
             continue;
         }
@@ -437,8 +443,7 @@ void auto_bridge_window_open(void) {
         } else {
             snprintf(shown_id, sizeof shown_id, "serial %s", mac);
         }
-        lv_obj_t *row = abw_make_row(list, label, shown_id, idx);
-        LV_UNUSED(row);
+        s_dev_row[s_dev_count++] = abw_make_row(list, label, shown_id, idx);
         if (auto_bridge_list_has(app_configuration->bridge_auto_macs, mac)) {
             lv_obj_add_state(s_box[idx], LV_STATE_CHECKED);
         }
