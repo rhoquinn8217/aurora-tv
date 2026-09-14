@@ -52,6 +52,12 @@ const lv_font_t *lv_theme_moonlight_get_iconfont_small(lv_obj_t *obj) {
     return ((app_t *) th->user_data)->ui.fonts.icons.small;
 }
 
+const lv_font_t *lv_theme_moonlight_get_font_small_bold(lv_obj_t *obj) {
+    lv_theme_t *th = lv_theme_get_from_obj(obj);
+    const lv_font_t *bold = ((app_t *) th->user_data)->ui.fonts.fonts.small_bold;
+    return bold != NULL ? bold : th->font_small;
+}
+
 static void apply_cb(lv_theme_t *theme, lv_obj_t *obj) {
     app_t *app = theme->user_data;
     bool set_font = true;
