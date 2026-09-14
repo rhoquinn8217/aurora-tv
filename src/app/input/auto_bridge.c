@@ -149,9 +149,37 @@ bool auto_bridge_identity(const ctm_bridge_dev_t *d, char *out, size_t out_len)
     return true;
 }
 
+/* ⛔ NEVER WRITTEN TO THE SETTINGS FILE: this is the whole of an unsaved mark's
+ * life, and closing the app is what ends it. The user is told so on the row. */
+static char s_session_marks[512];
+
+void auto_bridge_session_key(const ctm_bridge_dev_t *d, char *out, size_t out_len)
+{
+    if (out == NULL || out_len == 0) {
+        return;
+    }
+    out[0] = '\0';
+    if (d == NULL || d->node[0] == '\0') {
+        return;   /* nothing to bridge it by, so nothing to mark it by */
+    }
+    snprintf(out, out_len, "%s:%s@%s", d->vid, d->pid, d->node);
+}
+
+bool auto_bridge_session_has(const char *key)
+{
+    return auto_bridge_list_has(s_session_marks, key);
+}
+
+void auto_bridge_session_set(const char *key, bool on)
+{
+    char out[sizeof s_session_marks];
+    auto_bridge_list_set(s_session_marks, key, on, out, sizeof out);
+    snprintf(s_session_marks, sizeof s_session_marks, "%s", out);
+}
+
 int auto_bridge_run(const char *macs_csv, bool all)
 {
-    if (!all && (macs_csv == NULL || macs_csv[0] == '\0')) {
+    if (!all && (macs_csv == NULL || macs_csv[0] == '\0') && s_session_marks[0] == '\0') {
         return 0;   /* nothing marked: the common case, and it costs nothing */
     }
 
@@ -169,11 +197,17 @@ int auto_bridge_run(const char *macs_csv, bool all)
          * device, with a serial or without. Otherwise only a marked one. */
         if (!all) {
             char identity[64];
-            if (!auto_bridge_identity(&devs[i], identity, sizeof identity)) {
-                continue;   /* nothing to key a mark on */
-            }
-            if (!auto_bridge_list_has(macs_csv, identity)) {
-                continue;
+            if (auto_bridge_identity(&devs[i], identity, sizeof identity)) {
+                if (!auto_bridge_list_has(macs_csv, identity)) {
+                    continue;
+                }
+            } else {
+                /* No identity to save: marked, if at all, for this run of the app. */
+                char key[96];
+                auto_bridge_session_key(&devs[i], key, sizeof key);
+                if (!auto_bridge_session_has(key)) {
+                    continue;
+                }
             }
         }
         /* ⭐ THE SAME PATH THE PANEL USES, so a bridge that happens by itself

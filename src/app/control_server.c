@@ -273,16 +273,24 @@ static void cmd_devices(control_job_t *job)
          * DualSense's MAC, any other controller's serial, "-" when nothing can
          * be marked. */
         char mark[64] = "-";
-        if (!auto_bridge_identity(d, mark, sizeof mark)) {
+        /* ⓘ marked says whether auto bridge would take it at the next stream
+         * start: by its saved mark, or by an unsaved one when it has no identity. */
+        const char *marked = "no";
+        if (auto_bridge_identity(d, mark, sizeof mark)) {
+            if (auto_bridge_list_has(app_configuration->bridge_auto_macs, mark)) marked = "yes";
+        } else {
             snprintf(mark, sizeof mark, "-");
+            char key[96];
+            auto_bridge_session_key(d, key, sizeof key);
+            if (auto_bridge_session_has(key)) marked = "unsaved";
         }
         reply(job, "%d bridged=%s kind=%s id=%s:%s bus=%s node=%s player=%d sdl_mac=%s uniq=%s "
-                   "serial=%s controller=%s type=%s mark=%s name=\"%s\"\n",
+                   "serial=%s controller=%s type=%s mark=%s marked=%s name=\"%s\"\n",
               d->index, d->plugged ? "yes" : "no", d->kind, d->vid, d->pid, d->bus,
               d->node[0] != '\0' ? d->node : "-", ctm_bridge_gesture_player_for_node(d->node),
               sdl_mac, d->mac[0] != '\0' ? d->mac : "-",
               d->serial[0] != '\0' ? d->serial : "-", d->controller ? "yes" : "no",
-              d->type[0] != '\0' ? d->type : "-", mark, d->name);
+              d->type[0] != '\0' ? d->type : "-", mark, marked, d->name);
     }
 }
 

@@ -30,10 +30,23 @@
  * control port, so what is shown is what is matched. */
 bool auto_bridge_identity(const ctm_bridge_dev_t *d, char *out, size_t out_len);
 
+/* ⭐ MARKS THAT ARE NEVER SAVED, for a device with no identity to save it under
+ * (rhoquinn8217, 2026-09-14): a device without a serial, or a DualSense without
+ * a MAC, can still be chosen, and the choice lasts until the app closes.
+ *
+ * The key is the device's vendor and product with its node, such as
+ * "04ca:00c3@/dev/hidraw0", which holds while the app runs and the device stays
+ * put. ⓘ Another device that takes over the node has other ids and does not
+ * match. */
+void auto_bridge_session_key(const ctm_bridge_dev_t *d, char *out, size_t out_len);
+bool auto_bridge_session_has(const char *key);
+void auto_bridge_session_set(const char *key, bool on);
+
 /* Bridge the devices the user chose, as a stream starts: with `all`, every
  * connected device that is not already bridged, marks or no marks; otherwise
- * each marked one. `macs_csv` is the stored list, comma-separated; NULL or
- * empty marks nothing. Returns how many were asked to bridge. */
+ * each marked one -- by its saved identity in `macs_csv` (comma-separated; NULL
+ * or empty marks nothing), or by an unsaved mark when it has no identity.
+ * Returns how many were asked to bridge. */
 int auto_bridge_run(const char *macs_csv, bool all);
 
 /* Is this identity in the list? Comma-separated; case and punctuation do not
