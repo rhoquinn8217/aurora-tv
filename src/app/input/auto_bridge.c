@@ -20,12 +20,18 @@
  * glue through the SAME public calls the panel uses. Nothing new was added to
  * the core or the glue for it.
  *
- * ⛔ AND IT MUST NOT KEY ON ctm_bridge_dev_t.mac. That field is the HID `uniq`,
- * which is EMPTY for a directly cabled DualSense Edge and is the DS5DONGLE'S
- * OWN SERIAL through a dongle -- it follows the dongle, not the pad. Keying on
- * it would mark the dongle: move the controller and its mark stays behind, and
- * the next controller on that dongle bridges itself uninvited. Measured on the
- * C1 2026-09-08 after it fooled two readings. */
+ * ⛔ AND A DUALSENSE MUST NOT KEY ON ctm_bridge_dev_t.mac. That field is the HID
+ * `uniq`, which is EMPTY for a directly cabled DualSense Edge and is the
+ * DS5DONGLE'S OWN SERIAL through a dongle -- it follows the dongle, not the pad.
+ * Keying on it would mark the dongle: move the controller and its mark stays
+ * behind, and the next controller on that dongle bridges itself uninvited.
+ * Measured on the C1 2026-09-08 after it fooled two readings.
+ *
+ * ⭐⭐ EVERY OTHER CONTROLLER KEYS ON ITS SERIAL (rhoquinn8217, 2026-09-13).
+ * SDL has no MAC for them -- a cabled Xbox pad could not be marked at all --
+ * and they have none to give over USB. The core's serial is their uniq, or the
+ * USB serial number where no driver filled uniq; a blank or all-zeros one marks
+ * nothing. ⓘ The same rules the host's config auto link follows. */
 
 static void mac_trim(const char *in, char *out, size_t out_len)
 {
@@ -51,7 +57,9 @@ bool auto_bridge_list_has(const char *macs_csv, const char *mac)
          tok = strtok_r(NULL, ",", &save)) {
         char one[64];
         mac_trim(tok, one, sizeof(one));
-        if (one[0] != '\0' && strcasecmp(one, mac) == 0) {
+        /* ⓘ Compared without case or punctuation: marks stored before
+         * 2026-09-13 are SDL's dashed MACs, and the kernel writes colons. */
+        if (one[0] != '\0' && bridge_identity_same(one, mac)) {
             return true;
         }
     }
@@ -84,7 +92,7 @@ void auto_bridge_list_set(const char *macs_csv, const char *mac, bool on,
         if (one[0] == '\0') {
             continue;
         }
-        if (strcasecmp(one, mac) == 0) {
+        if (bridge_identity_same(one, mac)) {
             present = true;
             if (!on) {
                 continue;   /* dropping this one */
@@ -103,6 +111,43 @@ void auto_bridge_list_set(const char *macs_csv, const char *mac, bool on,
     }
 }
 
+bool auto_bridge_identity(const ctm_bridge_dev_t *d, char *out, size_t out_len)
+{
+    if (d == NULL || out == NULL || out_len == 0) {
+        return false;
+    }
+    out[0] = '\0';
+    /* ⛔ Only controllers are marked (rhoquinn8217, 2026-09-13). */
+    if (!d->controller) {
+        return false;
+    }
+
+    /* A DualSense or Edge: its own MAC. ⓘ The kind is "ds5", "ds5_usb", "ds5e"
+     * or "ds5e_usb", so its first three letters are enough. */
+    if (strncmp(d->kind, "ds5", 3) == 0) {
+        if (d->node[0] != '\0' && ctm_bridge_gesture_mac_for_node(d->node, out, out_len) &&
+            bridge_identity_usable(out)) {
+            return true;
+        }
+        /* ⓘ SDL has no MAC for it -- it was not opened as a controller, as when
+         * Aurora already holds four -- so the kernel's uniq, but ONLY if it is a
+         * MAC. Through a dongle on the C1 it was the dongle's serial. */
+        if (bridge_identity_mac_shaped(d->mac)) {
+            snprintf(out, out_len, "%s", d->mac);
+            return true;
+        }
+        out[0] = '\0';
+        return false;
+    }
+
+    /* Every other controller: its serial. */
+    if (!bridge_identity_usable(d->serial)) {
+        return false;
+    }
+    snprintf(out, out_len, "%s", d->serial);
+    return true;
+}
+
 int auto_bridge_run(const char *macs_csv)
 {
     if (macs_csv == NULL || macs_csv[0] == '\0') {
@@ -119,11 +164,11 @@ int auto_bridge_run(const char *macs_csv)
         if (devs[i].plugged || devs[i].node[0] == '\0') {
             continue;
         }
-        char mac[64];
-        if (!ctm_bridge_gesture_mac_for_node(devs[i].node, mac, sizeof mac)) {
-            continue;   /* no MAC: not an SDL controller, cannot be marked */
+        char identity[64];
+        if (!auto_bridge_identity(&devs[i], identity, sizeof identity)) {
+            continue;   /* not a controller, or nothing to key a mark on */
         }
-        if (!auto_bridge_list_has(macs_csv, mac)) {
+        if (!auto_bridge_list_has(macs_csv, identity)) {
             continue;
         }
         /* ⭐ THE SAME PATH THE PANEL USES, so a bridge that happens by itself

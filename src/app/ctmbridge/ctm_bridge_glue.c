@@ -13,6 +13,7 @@
 #include "ctm_state.h"   /* core API + shared globals (g_running, g_scan, ...) */
 #include "ctm_hostmouse.h" /* TV-pointer synthesizer feed (kind "hid") */
 #include "ctm_monitor.h" /* hotplug: connect/disconnect watch thread */
+#include "device_identity.inl" /* the identity rules, shared with the core */
 
 static bool s_active = false;
 
@@ -344,6 +345,8 @@ static int glue_list_locked_body(ctm_bridge_dev_t *out, int max)
         snprintf(out[n].kind, sizeof(out[n].kind), "%s", kind ? kind : "hid");
         snprintf(out[n].bus, sizeof(out[n].bus), "%s", item->bus);
         snprintf(out[n].mac, sizeof(out[n].mac), "%s", item->mac);
+        snprintf(out[n].serial, sizeof(out[n].serial), "%s", item->serial);
+        out[n].controller = item_is_controller(item);
         /* The first backing node is the one the bridge plugs. */
         out[n].node[0] = '\0';
         for (int k = 0; k < item->device_count; ++k) {
@@ -490,6 +493,21 @@ static const char *kind_for_node_locked(const char *node)
         }
     }
     return NULL;
+}
+
+bool bridge_identity_usable(const char *s)
+{
+    return identity_usable(s) != 0;
+}
+
+bool bridge_identity_same(const char *a, const char *b)
+{
+    return identity_same(a, b) != 0;
+}
+
+bool bridge_identity_mac_shaped(const char *s)
+{
+    return identity_mac_shaped(s) != 0;
 }
 
 bool ctm_bridge_signal_refused(const char *node)

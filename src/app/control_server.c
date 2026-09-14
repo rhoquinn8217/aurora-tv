@@ -29,6 +29,7 @@
 
 #if defined(TARGET_WEBOS)
 #include "ctm_bridge_glue.h"
+#include "input/auto_bridge.h"
 #include "input/bridge_request.h"
 #include "input/ctm_bridge_gesture.h"
 #endif
@@ -267,10 +268,20 @@ static void cmd_devices(control_job_t *job)
         if (!ctm_bridge_gesture_mac_for_node(d->node, sdl_mac, sizeof sdl_mac)) {
             snprintf(sdl_mac, sizeof sdl_mac, "-");
         }
-        reply(job, "%d bridged=%s kind=%s id=%s:%s bus=%s node=%s player=%d sdl_mac=%s uniq=%s name=\"%s\"\n",
+        /* ⭐ serial is the core's own (uniq, or the USB serial number where no
+         * driver filled uniq), and mark is what auto bridge keys on: a
+         * DualSense's MAC, any other controller's serial, "-" when nothing can
+         * be marked. */
+        char mark[64] = "-";
+        if (!auto_bridge_identity(d, mark, sizeof mark)) {
+            snprintf(mark, sizeof mark, "-");
+        }
+        reply(job, "%d bridged=%s kind=%s id=%s:%s bus=%s node=%s player=%d sdl_mac=%s uniq=%s "
+                   "serial=%s controller=%s mark=%s name=\"%s\"\n",
               d->index, d->plugged ? "yes" : "no", d->kind, d->vid, d->pid, d->bus,
               d->node[0] != '\0' ? d->node : "-", ctm_bridge_gesture_player_for_node(d->node),
-              sdl_mac, d->mac[0] != '\0' ? d->mac : "-", d->name);
+              sdl_mac, d->mac[0] != '\0' ? d->mac : "-",
+              d->serial[0] != '\0' ? d->serial : "-", d->controller ? "yes" : "no", mark, d->name);
     }
 }
 

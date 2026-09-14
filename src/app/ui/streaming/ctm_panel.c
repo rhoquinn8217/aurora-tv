@@ -28,6 +28,7 @@
 #include "ctm_panel.h"
 #include "input/ctm_bridge_gesture.h"
 #include "input/bridge_request.h"
+#include "input/auto_bridge.h"
 #include "lvgl/font/material_icons_regular_symbols.h"
 #include "lvgl/theme/lv_theme_moonlight.h"
 
@@ -741,11 +742,19 @@ static lv_obj_t *ctm_make_dev_row(const ctm_bridge_dev_t *d, int idx) {
      * keeps the same height. Printed exactly as reported, never prettified. */
     lv_obj_t *mac = lv_label_create(namecol);
     {
+        /* ⭐⭐ THE IDENTITY A MARK KEYS ON, SINCE 2026-09-13 (rhoquinn8217): a
+         * DualSense's MAC as above, every other controller's serial number, and
+         * a dash for anything else -- the same function the Auto Bridge window
+         * uses, so what this row shows is what a mark would match. */
         char addr[64];
-        if (ctm_bridge_gesture_mac_for_node(d->node, addr, sizeof addr)) {
-            lv_label_set_text(mac, addr);
+        if (auto_bridge_identity(d, addr, sizeof addr)) {
+            if (strncmp(d->kind, "ds5", 3) == 0) {
+                lv_label_set_text(mac, addr);
+            } else {
+                lv_label_set_text_fmt(mac, "serial %s", addr);
+            }
         } else {
-            lv_label_set_text(mac, d->mac[0] ? d->mac : "--");
+            lv_label_set_text(mac, "--");
         }
     }
     lv_label_set_long_mode(mac, LV_LABEL_LONG_DOT);

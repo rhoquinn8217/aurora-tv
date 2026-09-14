@@ -303,9 +303,9 @@ void auto_bridge_window_open(void) {
      * the NEXT stream, so without it a ticked box looks like it did nothing. */
     lv_obj_t *sub = lv_label_create(card);
     lv_label_set_text(sub, locstr(
-            "Selected devices that will automatically bridge when the stream starts. "
-            "Requires a device with a mac address and the CTM-USBIP running before "
-            "the stream starts."));
+            "Selected controllers bridge automatically when the stream starts. "
+            "A DualSense is marked by its mac address and any other controller by "
+            "its serial number. CTM-USBIP must be running before the stream starts."));
     lv_label_set_long_mode(sub, LV_LABEL_LONG_WRAP);
     lv_obj_set_width(sub, LV_PCT(100));
     lv_obj_set_style_text_color(sub, ABW_COL_SUB, 0);
@@ -328,22 +328,34 @@ void auto_bridge_window_open(void) {
     int shown = 0;
     for (int i = 0; i < n && s_count < ABW_MAX; ++i) {
         char mac[64];
-        const bool has = devs[i].node[0] != '\0' &&
-                         ctm_bridge_gesture_mac_for_node(devs[i].node, mac, sizeof mac);
-        if (!has) {
+        const bool dualsense = strncmp(devs[i].kind, "ds5", 3) == 0;
+        if (!auto_bridge_identity(&devs[i], mac, sizeof mac)) {
             /* ⭐ Say WHY, not just that (rhoquinn8217, 2026-09-08). "no address"
              * states a fact and leaves the reader to guess whether it is a
              * fault, a wait, or a rule. */
-            abw_make_row(list, abw_short_name(&devs[i]),
-                         locstr("no mac address - auto bridge can only target "
-                                "devices with mac addresses"), -1);
+            const char *why =
+                !devs[i].controller
+                    ? locstr("not a controller - auto bridge is only for controllers")
+                : dualsense
+                    ? locstr("no mac address - a DualSense is marked by its mac address")
+                    : locstr("no serial number - auto bridge needs a controller that "
+                             "reports one");
+            abw_make_row(list, abw_short_name(&devs[i]), why, -1);
             shown++;
             continue;
         }
         const int idx = s_count;
         snprintf(s_mac[idx], sizeof s_mac[idx], "%s", mac);
         s_count++;
-        lv_obj_t *row = abw_make_row(list, abw_short_name(&devs[i]), mac, idx);
+        /* ⭐ A DualSense shows its MAC as it is; anything else says the string is
+         * a serial number, so the two are never read as the same kind of thing. */
+        char shown_id[96];
+        if (dualsense) {
+            snprintf(shown_id, sizeof shown_id, "%s", mac);
+        } else {
+            snprintf(shown_id, sizeof shown_id, "serial %s", mac);
+        }
+        lv_obj_t *row = abw_make_row(list, abw_short_name(&devs[i]), shown_id, idx);
         LV_UNUSED(row);
         if (auto_bridge_list_has(app_configuration->bridge_auto_macs, mac)) {
             lv_obj_add_state(s_box[idx], LV_STATE_CHECKED);
@@ -366,7 +378,7 @@ void auto_bridge_window_open(void) {
         /* ⓘ Named for what they DO to the list rather than for the two modes:
          * every address, or none. "Manual bridge all" described the state left
          * behind rather than the action taken. */
-        abw_make_all_btn(foot, locstr("All MAC addresses"), abw_all_auto_cb);
+        abw_make_all_btn(foot, locstr("Select all"), abw_all_auto_cb);
         abw_make_all_btn(foot, locstr("Clear all"), abw_all_manual_cb);
     }
 

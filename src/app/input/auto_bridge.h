@@ -22,12 +22,22 @@
 
 #if defined(TARGET_WEBOS)
 
+#include "ctm_bridge_glue.h"
+
+/* What a mark keys on, written into out; false if the device cannot be marked.
+ * A DualSense or Edge is its own MAC, every other controller its serial (never
+ * a blank or all-zeros one), and anything that is not a controller nothing.
+ * Shared by the settings window, the panel and the control port, so what is
+ * shown is what is matched. */
+bool auto_bridge_identity(const ctm_bridge_dev_t *d, char *out, size_t out_len);
+
 /* Bridge every marked controller that is connected and not already bridged.
  * `macs_csv` is the stored list, comma-separated; NULL or empty does nothing.
  * Returns how many were asked to bridge. Call once, as a stream starts. */
 int auto_bridge_run(const char *macs_csv);
 
-/* Is this MAC in the list? Comma-separated, case-insensitive, spaces ignored.
+/* Is this identity in the list? Comma-separated; case and punctuation do not
+ * matter, so a MAC written with dashes matches one written with colons.
  * Shared with the settings pane so the two cannot disagree about membership. */
 bool auto_bridge_list_has(const char *macs_csv, const char *mac);
 

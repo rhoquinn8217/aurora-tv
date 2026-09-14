@@ -69,7 +69,20 @@ typedef struct {
      * is not. */
     char node[64];
     bool plugged;
+    /* ⭐ The core's serial for the device: its uniq, or the USB serial number
+     * where no driver filled uniq. What every controller but a DualSense is
+     * known by. */
+    char serial[64];
+    /* A game controller rather than a keyboard, mouse or other device. */
+    bool controller;
 } ctm_bridge_dev_t;
+
+/* ⭐ Identity strings, answered by the core's own rules so the TV and the bridge
+ * cannot disagree. Usable: some letter or digit that is not a zero. Same: equal
+ * once case and punctuation are gone. MAC-shaped: six hex pairs. */
+bool bridge_identity_usable(const char *s);
+bool bridge_identity_same(const char *a, const char *b);
+bool bridge_identity_mac_shaped(const char *s);
 
 /* Write the discovered Windows agent host (or "offline") into out (NUL-terminated).
  * For the overlay header. */
