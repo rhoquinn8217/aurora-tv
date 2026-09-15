@@ -263,12 +263,11 @@ static lv_obj_t *create_obj(lv_fragment_t *self, lv_obj_t *container) {
      * ⓘ They are controller features -- a keyboard has no touchpad, no lightbar
      * and no speaker.
      *
-     * ⚠️ LEFT UNCHANGED ON 2026-09-15, for rhoquinn8217 to word, when the switch
-     * description above gained the DualShock 4. A cabled DS4 now has the gesture
-     * and the lightbar and rumble signals below, but not the microphone or the
-     * tone: adding it to this heading claims those too, and leaving it off says
-     * the DS4 has none of them. */
-    pref_title_label(view, locstr("DualSense/DualSense Edge Options"));
+     * ⭐ WORDED BY rhoquinn8217, 2026-09-15: *"Change it to 'DS5/DS5E and DS4
+     * Options'"*, once a cabled DS4 had the gesture and the lightbar and rumble
+     * signals below. ⓘ It still has no microphone or tone, and the heading was
+     * chosen knowing that. */
+    pref_title_label(view, locstr("DS5/DS5E and DS4 Options"));
 
     /* ⭐⭐ CAPABILITIES FIRST, OPT-OUTS LAST, and the wording follows the same
      * split.
