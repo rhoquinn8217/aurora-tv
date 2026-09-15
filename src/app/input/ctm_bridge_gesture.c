@@ -130,7 +130,13 @@ typedef struct {
     uint8_t buzz_left;   /* half-steps of the refusal rumble still to run */
     uint32_t buzz_next;  /* SDL ticks when the next buzz half-step is due */
     uint32_t flash_next; /* SDL ticks when the next half-step is due */
+    /* SDL's player index when this side last painted the player colour, so a
+     * number that arrives or changes later is painted too. PAINTED_NEVER until
+     * the first paint. */
+    int painted_slot;
 } watched_t;
+
+#define PAINTED_NEVER (-100)
 
 #ifndef HIDIOCGFEATURE
 #define HIDIOCGFEATURE(len) _IOC(_IOC_READ | _IOC_WRITE, 'H', 0x07, len)
@@ -197,6 +203,7 @@ static watched_t *watched_for(SDL_JoystickID id) {
         free_slot->id = id;
         free_slot->since = 0;
         free_slot->fired = false;
+        free_slot->painted_slot = PAINTED_NEVER;
     }
     return free_slot;
 }
@@ -581,6 +588,14 @@ static void paint_player_colour(SDL_GameController *controller) {
                 player_rgb[slot][1], player_rgb[slot][2]);
 }
 
+/* The player colour, remembered against the index it was painted for. */
+static void paint_player_colour_for(watched_t *w, SDL_GameController *controller) {
+    paint_player_colour(controller);
+    if (w) {
+        w->painted_slot = SDL_GameControllerGetPlayerIndex(controller);
+    }
+}
+
 /* A ramp that rises and falls: bright in the middle, dark at both ends, so it
  * reads as a breath rather than a blink. For a signal that ends on a colour of
  * its own, where the last step is not the thing being seen.
@@ -765,22 +780,35 @@ static bool gesture_poll_one(SDL_GameController *controller, SDL_JoystickID id) 
     watched_t *w = watched_for(id);
     if (w && !was_known) {
         log_controller_identity(controller, id);
-        /* ⭐⭐ THE ONLY PLACE THIS SIDE PAINTS THE PLAYER COLOUR NOW.
+        /* ⭐⭐ THE PLAYER COLOUR WHEN A CONTROLLER FIRST APPEARS, whether it is
+         * connected while Aurora runs or was connected before Aurora started
+         * (SDL reports both the same way).
          *
-         * ⛔ It used to be restored after every pattern -- a bridge, an
-         * unbridge, a refusal. rhoquinn8217 ruled that out on 2026-08-19: on a
-         * controller the host has just taken, the colour is overwritten within
-         * a moment anyway, "and it comes off like an error".
-         *
-         * ⭐ Painting it once, when a controller first appears, is what the
-         * colour is actually for: knowing which pad is yours on the dashboard.
-         * ⓘ Two more places are wanted and not built yet -- on stream
-         * disconnect, and on switching away mid-stream. Both need a hook in
-         * app.c rather than here. */
-        paint_player_colour(controller);
+         * ⓘ The other places this side paints it: after a release and after a
+         * refusal (both 2026-09-15, below), when SDL's player number arrives or
+         * changes (just below), and when a stream ends
+         * (ctm_bridge_gesture_restore_player_colours).
+         * ⛔ Never after a BRIDGE. rhoquinn8217, 2026-08-19: on a controller the
+         * host has just taken the colour is overwritten within a moment anyway,
+         * "and it comes off like an error". A bridge ends on the core's green. */
+        paint_player_colour_for(w, controller);
     }
     if (!w) {
         return false;
+    }
+
+    /* ⭐ AND AGAIN WHEN THE PLAYER NUMBER ARRIVES OR CHANGES (rhoquinn8217,
+     * 2026-09-15): "When the controller is connected while aurora is up or if
+     * the controller is already connected and aurora is started, the color
+     * should be set to the player color."
+     * ⚠️ SDL can give a controller its number after the first sight, and its
+     * own PlayStation drivers repaint a dim colour of their own when it does, so
+     * one paint at arrival could be blue for every pad, or overwritten. ⓘ Only
+     * while the light is this side's: not bridged, no hold or pattern running,
+     * and only on a change -- never every pass. */
+    if (!w->ours_plugged && w->since == 0 && w->prep_left == 0 && w->flash_left == 0 &&
+        SDL_GameControllerGetPlayerIndex(controller) != w->painted_slot) {
+        paint_player_colour_for(w, controller);
     }
 
     /* A refusal rumble in progress: alternate on and off, one half-step per
@@ -829,6 +857,14 @@ static bool gesture_poll_one(SDL_GameController *controller, SDL_JoystickID id) 
                 w->plug_miss = 0;
                 w->ours_plugged = false;
                 gesture_moonlight_set_excluded(controller, false);
+                /* ⭐⭐ THE PLAYER COLOUR AFTER A RELEASE (rhoquinn8217,
+                 * 2026-09-15). The core's yellow ends dark, and a pad left dark
+                 * read as "not connected". The plug-out, yellow included, has
+                 * finished by the time the node reads unplugged, so this lands
+                 * after it. ⓘ It also replaces the gesture's magenta as the
+                 * colour SDL remembers, which SDL re-sends to a DS4 with every
+                 * rumble. */
+                paint_player_colour_for(w, controller);
                 /* ⛔⛔ ON BLUETOOTH THE CORE ALWAYS CLAIMS THE SIGNAL, AND
                  * WITH BT_LAYER_CORE_SIGNAL OFF IT THEN DOES NOTHING.
                  *
@@ -1038,9 +1074,12 @@ static bool gesture_poll_one(SDL_GameController *controller, SDL_JoystickID id) 
                             sounded && ctm_bridge_node_is_bluetooth(w->prep_node);
 
                         if (lit) {
-                            /* ⓘ The core lit it and nothing repaints after a
-                             * pattern any more. The refused controller keeps
-                             * the red until something else writes the light. */
+                            /* ⭐ The core lit it, and its Bluetooth signal has
+                             * finished by the time the call returns. Then the
+                             * player colour (rhoquinn8217, 2026-09-15), where a
+                             * refused controller used to keep whatever the last
+                             * flash left. */
+                            paint_player_colour_for(w, controller);
                         } else {
                             w->flash_ok = 0;
                             /* ⭐ The user's switch. ⓘ The refusal is the one
@@ -1086,6 +1125,10 @@ static bool gesture_poll_one(SDL_GameController *controller, SDL_JoystickID id) 
             --w->flash_left;
             if (w->flash_left == 0) {
                 gesture_log("refusal flash finished");
+                /* ⭐ The restore step the count always kept room for: the
+                 * player colour after the red (rhoquinn8217, 2026-09-15). Its
+                 * last flash was lit, so without this the pad stayed red. */
+                paint_player_colour_for(w, controller);
             } else {
                 /* Odd counts are the lit ones, so the LAST flash step is lit
                  * rather than an unlit one nobody sees. */
@@ -1233,12 +1276,16 @@ static app_input_t *s_gesture_input = NULL;
  *
  * ⓘ Called at the two moments a controller comes back to the TV's own world:
  * when a stream disconnects, and when Aurora is switched away from mid-stream.
- * The third moment -- a controller first appearing -- is handled where it is
- * first seen, in gesture_poll_one.
+ * The rest -- a controller first appearing, its player number arriving, a
+ * release and a refusal -- are handled in gesture_poll_one.
  *
- * ⛔ AND NOWHERE ELSE. It used to be restored after every pattern, which rhoquinn8217
- * ruled out on 2026-08-19: on a controller the host has just taken, the colour
- * is overwritten within a moment anyway and "comes off like an error".
+ * ⛔ NEVER AFTER A BRIDGE. It used to be restored after every pattern, which
+ * rhoquinn8217 ruled out on 2026-08-19: on a controller the host has just
+ * taken, the colour is overwritten within a moment anyway and "comes off like
+ * an error". ⓘ A release and a refusal came back on 2026-09-15: that light is
+ * the TV's again, and dark read as "not connected".
+ * ⓘ The notes below about a pad released mid-stream staying dark predate that:
+ * the release paint in gesture_poll_one now covers it.
  *
  * ⭐⭐ A CABLED DUALSHOCK 4 GETS THESE SAME COLOURS, AND NEEDS NOTHING OF ITS OWN.
  * rhoquinn8217, 2026-09-15: "End Dark when in stream. In Aurora, used the colors
@@ -1268,7 +1315,7 @@ void ctm_bridge_gesture_restore_player_colours(void) {
     for (int i = 0; i < MAX_WATCHED; ++i) {
         if (!s_watched[i].in_use) continue;
         SDL_GameController *gc = SDL_GameControllerFromInstanceID(s_watched[i].id);
-        if (gc) paint_player_colour(gc);
+        if (gc) paint_player_colour_for(&s_watched[i], gc);
     }
 }
 
