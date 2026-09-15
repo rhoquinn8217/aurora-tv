@@ -172,11 +172,6 @@ void performPendingSpecialKeyCombo(stream_input_t *input) {
             SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                         "Detected minimize combo");
             break;
-        case KeyComboOpenOverlay:
-            SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
-                        "Detected overlay combo");
-            bus_pushevent(USER_OPEN_OVERLAY, NULL, NULL);
-            break;
         default:
             break;
     }
@@ -226,6 +221,23 @@ void stream_input_handle_key(stream_input_t *input, const SDL_KeyboardEvent *eve
                     break;
                 }
             }
+        }
+
+        /* ⛔⛔ THE OVERLAY'S SHORTCUT ACTS AT ONCE, IT DOES NOT WAIT FOR EVERY KEY
+         * TO BE UP (rhoquinn8217, 2026-09-15, build 346: "I was able to type for
+         * awhile but after attempting the chord, the keyboard stopped working").
+         * A pending combo ignores every key press until SDL's own keyboard state
+         * shows ALL keys released, and on webOS a key release does not always
+         * arrive (see session_events.c), so one key stayed down, the combo never
+         * ran, and the keyboard was dead for the rest of the stream.
+         * ➡️ Release on the host whatever it saw pressed, open the overlay, and
+         * leave nothing pending. The releases still to come land on the overlay,
+         * or on the stream as harmless key-ups. */
+        if (_pending_key_combo == KeyComboOpenOverlay) {
+            SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "Detected overlay combo");
+            stream_input_flush_pressed_keys(input);
+            bus_pushevent(USER_OPEN_OVERLAY, NULL, NULL);
+            return;
         }
     }
 
