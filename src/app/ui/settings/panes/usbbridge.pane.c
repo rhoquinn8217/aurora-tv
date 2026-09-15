@@ -204,13 +204,21 @@ static lv_obj_t *create_obj(lv_fragment_t *self, lv_obj_t *container) {
      * ordinary stream behaved differently and a second controller had no route
      * to the PC at all. This only decides whether a device can be handed over;
      * a stream is unchanged either way. */
+    /* ⭐ THE DUALSHOCK 4 IS NAMED BESIDE THE DUALSENSE (rhoquinn8217, 2026-09-15:
+     * "update the places where it says DS5 and DualSense to say DS5/DS4 and
+     * DualSense/DualShock4"). A cabled DS4 bridges by the chord through SDL, as a
+     * DualSense does, and releases by it through the core's own DS4 type.
+     * ⚠️ On a cable only, so far: the Bluetooth DS4 type reads the release chord
+     * too, and no TV here has bridged a DS4 over Bluetooth.
+     * ⓘ No .po file carries this line, so locstr() hands it back as written and
+     * there is no translation to keep in step. */
     usbb_gap(view);
     lv_obj_t *enable_checkbox =
             pref_checkbox(view, locstr("Enable Device Bridging"),
                           &app_configuration->bridge_enable, false);
     pref_desc_label(view, locstr(
             "Allows device bridging with the USB Bridge Overlay Panel, Auto Bridge, "
-            "or gestures (gestures: DualSense/DualSense Edge only)."), false);
+            "or gestures (gestures: DualSense/DualSense Edge/DualShock4 only)."), false);
     lv_obj_add_event_cb(enable_checkbox, enable_state_update_cb, LV_EVENT_VALUE_CHANGED, pane);
 
 #if defined(TARGET_WEBOS)
@@ -253,7 +261,13 @@ static lv_obj_t *create_obj(lv_fragment_t *self, lv_obj_t *container) {
 
     /* ⭐ A heading, so the four below do not each need to say "DualSense only".
      * ⓘ They are controller features -- a keyboard has no touchpad, no lightbar
-     * and no speaker. */
+     * and no speaker.
+     *
+     * ⚠️ LEFT UNCHANGED ON 2026-09-15, for rhoquinn8217 to word, when the switch
+     * description above gained the DualShock 4. A cabled DS4 now has the gesture
+     * and the lightbar and rumble signals below, but not the microphone or the
+     * tone: adding it to this heading claims those too, and leaving it off says
+     * the DS4 has none of them. */
     pref_title_label(view, locstr("DualSense/DualSense Edge Options"));
 
     /* ⭐⭐ CAPABILITIES FIRST, OPT-OUTS LAST, and the wording follows the same
