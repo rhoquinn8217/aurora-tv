@@ -79,7 +79,10 @@ static void group_identity(const ctm_bridge_dev_t *devs, device_group_t *g)
     for (int p = 0; p < g->part_count; ++p) {
         const ctm_bridge_dev_t *d = &devs[g->part[p]];
         char mac[64];
-        if (strncmp(d->kind, "ds5", 3) == 0 && auto_bridge_identity(d, mac, sizeof mac)) {
+        /* ⓘ A DS4 as well since 2026-09-15: auto_bridge_identity() gives its
+         * MAC the way it gives a DualSense's. */
+        const bool playstation = strncmp(d->kind, "ds5", 3) == 0 || strncmp(d->kind, "ds4", 3) == 0;
+        if (playstation && auto_bridge_identity(d, mac, sizeof mac)) {
             snprintf(g->identity, sizeof g->identity, "%s", mac);
             group_shown(g, "MAC: ", mac);
             return;

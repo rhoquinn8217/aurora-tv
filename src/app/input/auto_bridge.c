@@ -163,9 +163,14 @@ bool auto_bridge_identity(const ctm_bridge_dev_t *d, char *out, size_t out_len)
      * a serial that is not blank or all zeros." Configs are what keep to
      * controllers, and that is the listener's rule, not this one. */
 
-    /* A DualSense or Edge: its own MAC. ⓘ The kind is "ds5", "ds5_usb", "ds5e"
-     * or "ds5e_usb", so its first three letters are enough. */
-    if (strncmp(d->kind, "ds5", 3) == 0) {
+    /* A DualSense, an Edge or a DS4: its own MAC. ⓘ The kind is "ds5",
+     * "ds5_usb", "ds5e", "ds5e_usb", "ds4" or "ds4_usb", so its first three
+     * letters are enough.
+     * ⭐ THE DS4 JOINED 2026-09-15 (rhoquinn8217). On the C1's kernel a cabled
+     * DS4 has no uniq and no USB serial, so it had no identity at all and a mark
+     * matched it by name alone: two DS4s could not be told apart. SDL reads its
+     * MAC the same way as a DualSense's. */
+    if (strncmp(d->kind, "ds5", 3) == 0 || strncmp(d->kind, "ds4", 3) == 0) {
         if (d->node[0] != '\0' && ctm_bridge_gesture_mac_for_node(d->node, out, out_len) &&
             bridge_identity_usable(out)) {
             return true;
