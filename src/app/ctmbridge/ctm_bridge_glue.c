@@ -186,6 +186,15 @@ static void glue_hotplug_cb(void *ud, const ctm_controller_dev_t *dev, int prese
  * enumerates on the host yet feels dead. Idempotent. */
 static bool s_core_up = false;
 
+/* ⭐ Who to tell when a bridged keyboard presses Ctrl+Alt+Shift+O (rhoquinn8217,
+ * 2026-09-13). Its grab keeps the keys from Aurora's own shortcuts, so the core
+ * finds the shortcut and calls this from the keyboard's input thread. ⓘ Set by
+ * the app, which owns the event bus; this library cannot include it. */
+void bridge_set_overlay_request(void (*cb)(void))
+{
+    controller_set_overlay_cb(cb);
+}
+
 static void ctm_glue_ensure_core(void)
 {
     if (s_core_up) {

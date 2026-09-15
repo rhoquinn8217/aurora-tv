@@ -19,6 +19,11 @@ enum KeyCombo {
     KeyComboToggleMouseMode,
     KeyComboToggleCursorHide,
     KeyComboToggleMinimize,
+    /* ⭐ Ctrl+Alt+Shift+O opens the streaming overlay (rhoquinn8217,
+     * 2026-09-13): Moonlight's pattern, with a letter neither Moonlight nor
+     * Aurora uses. This is a keyboard the TV reads; a bridged keyboard's
+     * shortcut is found by the bridge core in its reports. */
+    KeyComboOpenOverlay,
     KeyComboMax
 };
 
@@ -37,6 +42,7 @@ static struct SpecialKeyCombo m_SpecialKeyCombos[KeyComboMax] = {
         {KeyComboToggleMouseMode,    SDLK_m, SDL_SCANCODE_M, true},
         {KeyComboToggleCursorHide,   SDLK_c, SDL_SCANCODE_C, true},
         {KeyComboToggleMinimize,     SDLK_d, SDL_SCANCODE_D, true},
+        {KeyComboOpenOverlay,        SDLK_o, SDL_SCANCODE_O, true},
 };
 
 enum KeyCombo _pending_key_combo = KeyComboMax;
@@ -165,6 +171,11 @@ void performPendingSpecialKeyCombo(stream_input_t *input) {
         case KeyComboToggleMinimize:
             SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                         "Detected minimize combo");
+            break;
+        case KeyComboOpenOverlay:
+            SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                        "Detected overlay combo");
+            bus_pushevent(USER_OPEN_OVERLAY, NULL, NULL);
             break;
         default:
             break;

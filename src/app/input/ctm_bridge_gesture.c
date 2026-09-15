@@ -32,6 +32,8 @@
 #include "app_input.h"
 #include "input_gamepad.h"
 #include "logging.h"
+#include "util/bus.h"
+#include "util/user_event.h"
 
 #include <dirent.h>
 #include <fcntl.h>
@@ -1449,8 +1451,22 @@ bool ctm_bridge_gesture_request_bridge(const char *node) {
     return false;
 }
 
+/* ⭐ A bridged keyboard pressed Ctrl+Alt+Shift+O (rhoquinn8217, 2026-09-13).
+ * When: the keyboard's input thread, so it only posts: the overlay opens on the
+ * main thread, exactly as it does for a keyboard the TV reads. */
+static void gesture_overlay_requested(void) {
+    bus_pushevent(USER_OPEN_OVERLAY, NULL, NULL);
+}
+
 void ctm_bridge_gesture_tick(struct app_input_t *input, struct session_t *session,
                              bool overlay_open) {
+    {
+        static bool s_overlay_request_set = false;
+        if (!s_overlay_request_set) {
+            bridge_set_overlay_request(gesture_overlay_requested);
+            s_overlay_request_set = true;
+        }
+    }
     /* ⭐⭐ RELEASE ANYTHING WHOSE HOST HAS GONE. T-127, 2026-08-23.
      *
      * ⛔ Close the listener's window and the controller used to stay claimed by
