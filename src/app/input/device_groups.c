@@ -63,10 +63,16 @@ static bool has_alnum(const char *s)
  *  3. Off USB, the part's own: over Bluetooth that is its MAC.
  * Otherwise it has none and is remembered by its name alone.
  *
- * ⭐ WHAT IS SHOWN IS THE VALUE ALONE (rhoquinn8217, 2026-09-15): "remove the MAC:
- * and serial: tag's and just put the value". The tags cost the row the room a
- * long serial needs, and a MAC reads as one without being told. "(no serial)"
- * stays: it is not a value. */
+ * ⭐ TWO WAYS TO SHOW IT (rhoquinn8217, 2026-09-15). The Auto Bridge window's
+ * cards keep the tag ("MAC: ", "serial: "); the streaming overlay's USB Bridge
+ * panel shows the value alone, where the tag cost a long serial its room.
+ * "(no serial)" is the same in both: it is not a value. */
+static void group_shown(device_group_t *g, const char *tag, const char *value)
+{
+    snprintf(g->shown, sizeof g->shown, "%s%s", tag, value);
+    snprintf(g->shown_value, sizeof g->shown_value, "%s", value);
+}
+
 static void group_identity(const ctm_bridge_dev_t *devs, device_group_t *g)
 {
     g->identity[0] = '\0';
@@ -75,7 +81,7 @@ static void group_identity(const ctm_bridge_dev_t *devs, device_group_t *g)
         char mac[64];
         if (strncmp(d->kind, "ds5", 3) == 0 && auto_bridge_identity(d, mac, sizeof mac)) {
             snprintf(g->identity, sizeof g->identity, "%s", mac);
-            snprintf(g->shown, sizeof g->shown, "%s", mac);
+            group_shown(g, "MAC: ", mac);
             return;
         }
     }
@@ -85,7 +91,7 @@ static void group_identity(const ctm_bridge_dev_t *devs, device_group_t *g)
             if (bridge_identity_usable(d->usb_serial)) {
                 snprintf(g->identity, sizeof g->identity, "%s", d->usb_serial);
             }
-            snprintf(g->shown, sizeof g->shown, "%s", d->usb_serial);
+            group_shown(g, "serial: ", d->usb_serial);
             return;
         }
     }
@@ -93,11 +99,11 @@ static void group_identity(const ctm_bridge_dev_t *devs, device_group_t *g)
         const ctm_bridge_dev_t *d = &devs[g->part[p]];
         if (bridge_identity_usable(d->serial)) {
             snprintf(g->identity, sizeof g->identity, "%s", d->serial);
-            snprintf(g->shown, sizeof g->shown, "%s", d->serial);
+            group_shown(g, bridge_identity_mac_shaped(d->serial) ? "MAC: " : "serial: ", d->serial);
             return;
         }
     }
-    snprintf(g->shown, sizeof g->shown, "(no serial)");
+    group_shown(g, "", "(no serial)");
 }
 
 /* One device's name: a single part is called what it is, several by the USB

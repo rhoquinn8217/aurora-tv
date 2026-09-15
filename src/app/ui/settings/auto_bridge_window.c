@@ -297,8 +297,9 @@ static void abw_make_box(lv_obj_t *row, int idx) {
 /* ⭐⭐ ONE CARD PER DEVICE, ITS PARTS INSIDE IT (rhoquinn8217, 2026-09-14).
  * - The name, and for a device of one part what that part is: "DualSense
  *   (CONTROLLER)".
- * - What it is remembered by: the MAC, the serial or "(no serial)", the value
- *   alone since 2026-09-15, as the overlay panel's row shows it.
+ * - What it is remembered by: "MAC: ...", "serial: ..." or "(no serial)".
+ *   ⓘ The tag stays here; the overlay panel's row shows the value alone
+ *   (rhoquinn8217, 2026-09-15).
  * - For a device of several parts, each part as the kernel names it, with what
  *   it is. ⓘ Names repeat when a device reports them twice, and are left that
  *   way: the listener shows each part under that same name, and this list is

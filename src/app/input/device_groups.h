@@ -39,10 +39,14 @@ typedef struct {
      * pad's MAC, otherwise the device's serial. "" when it has none, or only
      * zeros. */
     char identity[64];
-    /* The line under the name: exactly one of the MAC, the serial, or "(no
-     * serial)", with no "MAC:" or "serial:" before it (2026-09-15). ⓘ A serial
-     * of zeros is shown as it is, although it identifies nothing. */
+    /* The line under the name on an Auto Bridge card: exactly one of "MAC:
+     * <mac>", "serial: <serial>" or "(no serial)". ⓘ A serial of zeros is shown
+     * as it is, although it identifies nothing. */
     char shown[96];
+    /* The same line without its tag, for the streaming overlay's USB Bridge
+     * panel (rhoquinn8217, 2026-09-15): the MAC or the serial alone, or "(no
+     * serial)". */
+    char shown_value[96];
     /* Positions in the list the device was built from, by interface number. */
     int part[DEVICE_GROUP_PARTS];
     int part_count;
