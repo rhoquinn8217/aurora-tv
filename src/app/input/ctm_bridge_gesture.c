@@ -429,16 +429,11 @@ static bool gesture_held(SDL_GameController *controller) {
  * bridge. Wired is untouched: it works, it passes acceptance, and a change it
  * can reach is a change that can break it.
  *
- * ⚠️ ALL 0: a Bluetooth controller bridges from the PANEL BUTTON and nothing
- * else -- no chord, no light, no pulse, no tone. That build answers one
- * question: is the bridge itself fast.
- *
- * ⓘ Nothing is deleted. The code behind each gate encodes a fortnight of
- * hardware findings, each learnt by breaking something. */
-#define BT_LAYER_GESTURE  1
-#define BT_LAYER_LIGHT    1
-#define BT_LAYER_RUMBLE   1
-#define BT_LAYER_CORE_SIGNAL 1
+ * ⓘ THE REBUILD FINISHED WITH EVERY LAYER BACK ON, and the four switches that
+ * gated them (BT_LAYER_GESTURE, _LIGHT, _RUMBLE, _CORE_SIGNAL, all pinned to 1)
+ * were removed with the branches that only ran at 0 (2026-09-15). The code
+ * that remains is the layers themselves; the hardware findings behind them are
+ * in the comments where each one acts. */
 
 /* The refusal rumble: three short sharp bursts.
  *
@@ -981,9 +976,8 @@ static bool gesture_poll_one(SDL_GameController *controller, SDL_JoystickID id) 
                      * also plays a tone and its own pulse, so this reinforces
                      * rather than replaces -- judged by feel, and easily
                      * gated later if it turns out to be too much. */
-                    /* T-120: on Bluetooth the rumble -- and the signal check
-                     * that costs an enumeration, measured at 5s on the C3 --
-                     * wait for BT_LAYER_RUMBLE. Wired unchanged. */
+                    /* ⓘ T-120 gated this rumble on Bluetooth while its layers
+                     * were rebuilt; the gate is gone and the layer is on. */
                     /* ⛔⛔ THE SAME TRAP AS THE BYE PULSE. On Bluetooth
                      * gesture_signal_here() is always false -- the core claims
                      * the signal there -- so this never fired, gate or no gate.
@@ -997,11 +991,9 @@ static bool gesture_poll_one(SDL_GameController *controller, SDL_JoystickID id) 
                      * 0 on the monitor. The number is logged so a slow one is
                      * seen rather than felt. */
                     uint64_t sig_t0 = gesture_now_ms();
-                    const bool core_signals_ok =
-                        !gesture_signal_here(w->prep_node) &&
-                        (w->xport != 1 || BT_LAYER_CORE_SIGNAL);
+                    const bool core_signals_ok = !gesture_signal_here(w->prep_node);
                     const uint64_t sig_ms = gesture_now_ms() - sig_t0;
-                    if (!core_signals_ok && (w->xport != 1 || BT_LAYER_RUMBLE)) {
+                    if (!core_signals_ok) {
                         SDL_GameControllerRumble(controller, OK_PULSE_STRENGTH,
                                                  OK_PULSE_STRENGTH, OK_PULSE_MS);
                     }
@@ -1189,20 +1181,6 @@ static bool gesture_poll_one(SDL_GameController *controller, SDL_JoystickID id) 
     if (w->fired) {
         return false;   /* wait for the fingers to lift */
     }
-    /* T-120: the chord is off on Bluetooth until BT_LAYER_GESTURE. Asked once
-     * per hold, not per report. Wired never reaches this. */
-    if (!BT_LAYER_GESTURE) {
-        const char *bt_path = SDL_GameControllerPath(controller);
-        char bt_node[64];
-        if (bt_path && bt_path[0] &&
-            hidraw_node_for_event(bt_path, bt_node, sizeof(bt_node)) &&
-            ctm_bridge_node_is_bluetooth(bt_node)) {
-            w->fired = true;
-            gesture_log("T-120: chord on Bluetooth %s ignored (BT_LAYER_GESTURE=0)", bt_node);
-            return false;
-        }
-    }
-
     uint32_t now = SDL_GetTicks();
     if (w->since == 0) {
         w->since = now ? now : 1;
@@ -1262,7 +1240,7 @@ static bool gesture_poll_one(SDL_GameController *controller, SDL_JoystickID id) 
      * than restructure that coupling mid-rebuild, a gated pulse is one step
      * long: the plug still fires, and one step is imperceptible. ⚠️ The
      * coupling itself is worth removing later; it is recorded in T-120. */
-    w->prep_left = (!ctm_bridge_signals_enabled() || (w->xport == 1 && !BT_LAYER_LIGHT))
+    w->prep_left = !ctm_bridge_signals_enabled()
                        ? 1 : PREP_STEPS;
     w->prep_next = SDL_GetTicks();
     gesture_log("fired on %s -> %s : pulsing before handover", dev_path, node);
@@ -1440,7 +1418,7 @@ bool ctm_bridge_gesture_request_bridge(const char *node) {
      * than restructure that coupling mid-rebuild, a gated pulse is one step
      * long: the plug still fires, and one step is imperceptible. ⚠️ The
      * coupling itself is worth removing later; it is recorded in T-120. */
-    w->prep_left = (!ctm_bridge_signals_enabled() || (w->xport == 1 && !BT_LAYER_LIGHT))
+    w->prep_left = !ctm_bridge_signals_enabled()
                        ? 1 : PREP_STEPS;
         w->prep_next = SDL_GetTicks();
         w->fired = true;

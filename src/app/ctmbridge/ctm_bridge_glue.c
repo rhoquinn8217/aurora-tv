@@ -21,17 +21,18 @@ void ctm_bridge_set_host(const char *host, int port)
 {
     ctm_bridge_set_agent_host(host, port);
 }
-/* Auto-plug ALL recognised controllers on stream start.
- *
- * Off. On a TV with one controller, plugging everything is a convenience. On a
- * hub carrying a keyboard, a mouse and a controller it takes all of them --
+/* ⓘ AUTO-PLUG IS GONE, and so is the switch that kept it off. It plugged ALL
+ * recognised controllers on stream start. On a TV with one controller that is a
+ * convenience; on a hub carrying a keyboard, a mouse and a controller it takes
+ * all of them --
  * bridging claims a device exclusively, so the keyboard and mouse stop working
  * on the TV, and every session opens with a cascade of connect chimes and a
  * cleanup. Observed on three TVs.
  *
- * Nothing needs it now: a controller is bridged by holding two fingers on its
- * touchpad and pressing, and the overlay panel still plugs anything by hand. */
-static bool s_autoplug = false;
+ * Nothing needs it now: a controller is bridged by its gesture, the overlay
+ * panel or the user's own Auto Bridge marks. ⛔ The pinned `s_autoplug = false`
+ * and the three branches it guarded were removed 2026-09-15 (a switch nobody
+ * can turn on reads as a choice somebody is making). */
 
 /* Enumerate + build the logical model + Stage-1 puck enumeration capture. The
  * Steam puck only exposes its full composite if g_puck_enum is cached BEFORE the
@@ -170,13 +171,7 @@ static void glue_hotplug_cb(void *ud, const ctm_controller_dev_t *dev, int prese
      * TV without being asked.
      *
      * Noticing a change is still worth doing; acting on it is what the gesture
-     * is for. */
-    if (!s_autoplug) {
-        return;
-    }
-    pthread_mutex_lock(&s_dev_mutex);
-    glue_plug_all_locked();
-    pthread_mutex_unlock(&s_dev_mutex);
+     * is for. ⓘ So nothing is plugged from here any more. */
 }
 
 /* Core bring-up shared by ctm_bridge_start() and the panel entry points:
@@ -298,14 +293,6 @@ bool ctm_bridge_start(void)
      * already running. */
     ctm_bridge_gesture_init();
 
-
-    if (s_autoplug) {
-        int count = ctm_bridge_plug_all();
-        log_append("ctm glue: auto-plugged %d controller(s)", count);
-    } else {
-        log_append("ctm glue: auto-plug off, use the overlay panel to plug a controller");
-    }
-
     /* The TV pointer used to be bridged here unconditionally, whatever the
      * auto-plug setting said -- the third path that claimed a device without
      * being asked, and the one that kept appearing in the host's log as
@@ -318,9 +305,6 @@ bool ctm_bridge_start(void)
      * claiming a device for a job already done.
      *
      * The overlay row still plugs it deliberately for anyone who wants it. */
-    if (s_autoplug && ctm_tv_pointer_plug()) {
-        log_append("ctm glue: TV pointer bridged");
-    }
 
     s_active = true;
 
