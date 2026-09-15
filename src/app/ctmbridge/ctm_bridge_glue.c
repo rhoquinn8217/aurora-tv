@@ -649,15 +649,20 @@ int ctm_bridge_reap_gone_hosts(void)
     int gone_count = 0;
 
     pthread_mutex_lock(&s_dev_mutex);
+    /* ⛔ Under the core's table lock too, and past a stopping entry: the chord's
+     * release worker tears controllers down without s_dev_mutex, so this read a
+     * controller's status while it could be freed. */
+    pthread_mutex_lock(&g_sessions_mutex);
     for (int i = 0; i < g_session_count && gone_count < MAX_SESSIONS; ++i) {
         ctm_controller_t *c = g_sessions[i].controller;
-        if (!c) continue;
+        if (!c || g_sessions[i].stopping) continue;
         ctm_controller_status_t st;
         ctm_controller_get_status(c, &st);
         if (!st.host_gone) continue;
         snprintf(gone[gone_count], sizeof(gone[gone_count]), "%s", g_sessions[i].key);
         ++gone_count;
     }
+    pthread_mutex_unlock(&g_sessions_mutex);
     /* ⚠️ Collected first, stopped second. `stop_session()` removes entries from
      * the very table being walked, so stopping inside the loop would skip the
      * entry that shifts down into the current index. */
@@ -809,11 +814,13 @@ void ctm_bridge_status(char *out, size_t out_len)
     n += (size_t) snprintf(out + n, out_len - n, "Agent: %s\n",
                            (g_agent_online && g_agent_host[0]) ? g_agent_host : "not found");
     if (n >= out_len) return;
+    pthread_mutex_lock(&g_sessions_mutex);
     n += (size_t) snprintf(out + n, out_len - n, "Bridged controllers: %d\n", g_session_count);
     for (int i = 0; i < g_session_count && n < out_len; ++i) {
         n += (size_t) snprintf(out + n, out_len - n, "  - %s [%s]\n",
                                g_sessions[i].key, g_sessions[i].busid);
     }
+    pthread_mutex_unlock(&g_sessions_mutex);
 }
 
 /* Is the USB server answering? ⭐ Separate from its address, which is known
