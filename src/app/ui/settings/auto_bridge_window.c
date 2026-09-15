@@ -448,9 +448,9 @@ void auto_bridge_window_open(void) {
      * ⓘ It says what happens to a device without a usable serial, rather than
      * leaving it to be discovered (rhoquinn8217, 2026-09-14). */
     abw_make_text(card, locstr(
-            "Selected devices bridge automatically when the stream starts. If a device "
-            "doesn't have a serial or if it is all zeros, all devices that share that "
-            "device's name will be auto bridged."),
+            "Selected devices bridge automatically when the stream starts. If you select a "
+            "device that doesn't have a serial or if it is all zeros, all devices that share "
+            "that device's name will also be auto bridged."),
             ABW_COL_SUB, lv_theme_get_font_small(card), true);
     /* ⭐ BOLD, on a line of its own (rhoquinn8217, 2026-09-14): the one condition
      * that makes every selection above do nothing. */
@@ -516,6 +516,32 @@ void auto_bridge_window_open(void) {
          * behind rather than the action taken. */
         abw_make_all_btn(foot, locstr("Select all"), abw_all_auto_cb);
         abw_make_all_btn(foot, locstr("Clear all"), abw_all_manual_cb);
+    }
+
+    /* ⛔ THE BUTTONS AT THE FOOT WERE CUT OFF (rhoquinn8217, 2026-09-14, build
+     * 327, seven devices on the U5s). The list stops at 60% of the window and
+     * the window at 80% of the screen, and at the TV's scale the title, the
+     * two lines of text and the buttons need more than the 40% left: the window
+     * hit its limit and clipped whatever came last.
+     * ➡️ So when the contents run past the window's edge, the window takes its
+     * full 80% and the list takes only what everything else leaves, scrolling
+     * inside it. ⛔ Only then: a list that fits keeps the window as short as its
+     * contents, and a grow inside a window sized to its contents gets no room at
+     * all (the USB Bridge panel's empty-list bug). */
+    lv_obj_update_layout(card);
+    lv_obj_t *last = lv_obj_get_child(card, -1);
+    if (last != NULL) {
+        lv_area_t card_area;
+        lv_area_t last_area;
+        lv_obj_get_coords(card, &card_area);
+        lv_obj_get_coords(last, &last_area);
+        const lv_coord_t inner_bottom = card_area.y2 - lv_obj_get_style_pad_bottom(card, 0) -
+                                        lv_obj_get_style_border_width(card, 0);
+        if (last_area.y2 > inner_bottom) {
+            lv_obj_set_height(card, LV_PCT(80));
+            lv_obj_set_style_max_height(list, LV_COORD_MAX, 0);
+            lv_obj_set_flex_grow(list, 1);
+        }
     }
 
     /* ⛔⛔ PUSH A MODAL GROUP. app_input_set_group() sets the BASE group, and
