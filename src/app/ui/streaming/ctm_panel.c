@@ -143,6 +143,14 @@ static int         s_ctm_flash_left = 0;
  * stale while the panel sat open now does not. */
 static void ctm_online_tick(lv_timer_t *t) {
     LV_UNUSED(t);
+    /* ⓘ Kept in front: stats pinned while the panel is open are added to the
+     * top layer after it, and would cover it again. */
+    if (s_ctm_panel) {
+        const lv_obj_t *layer = lv_obj_get_parent(s_ctm_panel);
+        if (layer && lv_obj_get_index(s_ctm_panel) + 1 != lv_obj_get_child_cnt(layer)) {
+            lv_obj_move_foreground(s_ctm_panel);
+        }
+    }
     if (!s_ctm_state_lbl || s_ctm_flash_left > 0) {
         return;   /* mid-flash: leave the colour alone */
     }
@@ -1174,10 +1182,17 @@ static void open_ctm_panel(lv_event_t *event) {
     s_ctm_nav_group = lv_group_create();
     lv_group_set_wrap(s_ctm_nav_group, false);
 
-    /* Full-screen dim backdrop on the act screen (detached_root) so it does NOT
-     * flip the UI into key/gamepad mode the way a modal does (that hid the webOS
-     * cursor). Clickable so stray clicks don't dismiss the streaming overlay. */
-    lv_obj_t *panel = lv_obj_create(controller->detached_root);
+    /* A full-screen backdrop, clickable so stray clicks don't dismiss the
+     * streaming overlay, and deliberately NOT a modal: a modal flips the UI into
+     * key/gamepad mode, which hid the webOS cursor.
+     *
+     * ⛔ ON THE TOP LAYER, NOT THE STREAM SCREEN (rhoquinn8217, 2026-09-14): the
+     * pinned performance stats move to lv_layer_top(), which is drawn over
+     * everything on the screen, so a panel on detached_root sat BEHIND them and
+     * could not be read. The soft keyboard already lives on the top layer during
+     * a stream. ⚠️ The top layer is not deleted with the stream screen, so
+     * ctm_panel_on_owner_deleted() deletes the panel itself. */
+    lv_obj_t *panel = lv_obj_create(lv_layer_top());
     s_ctm_panel = panel;
     lv_obj_remove_style_all(panel);
     lv_obj_set_size(panel, LV_PCT(100), LV_PCT(100));
@@ -1398,6 +1413,9 @@ void ctm_panel_open(lv_event_t *event) {
  * indev that points at them. */
 void ctm_panel_on_owner_deleted(streaming_controller_t *controller) {
     if (s_ctm_owner == controller) {
+        /* ⚠️ The panel lives on the top layer, which outlives the stream screen:
+         * left alone it would stay drawn over the launcher. */
+        if (s_ctm_panel)        { lv_obj_del(s_ctm_panel); }
         if (s_ctm_nav_group)    { lv_group_del(s_ctm_nav_group);    s_ctm_nav_group = NULL; }
         /* ⛔ The online timer must go with the labels it writes to, or it fires
          * against freed objects. ⓘ The flash timer deletes itself when it runs
@@ -1412,9 +1430,9 @@ void ctm_panel_on_owner_deleted(streaming_controller_t *controller) {
         s_ctm_state_lbl  = NULL;
         s_ctm_owner = NULL;
     }
-    /* Cancel any in-flight panel teardown; the dead panel is freed with the
-     * fragment's detached_root, but its groups must be released here. */
+    /* Cancel any in-flight panel teardown and do it here: a closed panel waiting
+     * to be freed is on the top layer too, so nothing else will free it. */
     lv_async_call_cancel(ctm_teardown_async, NULL);
+    if (s_ctm_dead_panel)  { lv_obj_del(s_ctm_dead_panel);    s_ctm_dead_panel = NULL; }
     if (s_ctm_dead_nav)    { lv_group_del(s_ctm_dead_nav);    s_ctm_dead_nav = NULL; }
-    s_ctm_dead_panel = NULL;
 }
