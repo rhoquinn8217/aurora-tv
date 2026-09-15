@@ -405,6 +405,25 @@ int ctm_bridge_list_quiet(ctm_bridge_dev_t *out, int max)
     return glue_list_locked_body(out, max);
 }
 
+/* The row behind a node in the last enumeration, or NULL. Caller holds
+ * s_dev_mutex. */
+static logical_device_t *item_for_node_locked(const char *node)
+{
+    for (int i = 0; i < g_devices.count; ++i) {
+        logical_device_t *item = &g_devices.items[i];
+        for (int k = 0; k < item->device_count; ++k) {
+            int j = item->device_indices[k];
+            if (j < 0 || j >= g_scan.count) {
+                continue;
+            }
+            if (strcmp(g_scan.devices[j].node, node) == 0) {
+                return item;
+            }
+        }
+    }
+    return NULL;
+}
+
 /* Is the controller behind this hidraw node already bridged?
  *
  * The same lookup a plug does, asked as a question instead. It exists because
@@ -415,7 +434,19 @@ int ctm_bridge_list_quiet(ctm_bridge_dev_t *out, int max)
  * Answered here rather than in the bridge core deliberately -- the behaviour
  * being fixed is this app's, and the core is the part heading upstream.
  *
- * When: the gesture watcher, once, at the moment it would otherwise plug. */
+ * When: the gesture watcher at the moment it would otherwise plug, and every
+ * 500 ms for each controller it bridged (PLUG_CHECK_MS).
+ *
+ * ⛔⛔ THE LAST SCAN FIRST, AND A NEW ONE ONLY FOR A NODE IT DOES NOT HAVE
+ * (U5s, 2026-09-14, build 329). This used to enumerate on every call, and a
+ * scan of fourteen parts took 0.25 to 0.85 s on the interface thread: with a
+ * DualShock 4 and a GameSir's pad bridged through the gesture, the overlay and
+ * the USB Bridge panel barely moved, and releasing those two -- not the Razer,
+ * which is plugged directly and never checked -- is what freed it.
+ * ⭐ Whether a device is bridged is the session table's answer, and that is
+ * live. The scan only maps the node to its row's key, which a connected device
+ * keeps, so a stale scan cannot make a live bridge look gone -- which also
+ * removes the "a scan blinked" misses PLUG_MISSES exists for. */
 bool ctm_bridge_node_is_plugged(const char *node)
 {
     if (!node || !node[0]) {
@@ -423,22 +454,12 @@ bool ctm_bridge_node_is_plugged(const char *node)
     }
     ctm_glue_ensure_core();
     pthread_mutex_lock(&s_dev_mutex);
-    ctm_glue_enumerate();
-    bool plugged = false;
-    for (int i = 0; i < g_devices.count && !plugged; ++i) {
-        logical_device_t *item = &g_devices.items[i];
-        for (int k = 0; k < item->device_count; ++k) {
-            int j = item->device_indices[k];
-            if (j < 0 || j >= g_scan.count) {
-                continue;
-            }
-            if (strcmp(g_scan.devices[j].node, node) != 0) {
-                continue;
-            }
-            plugged = (session_index_for_key(item->key) >= 0);
-            break;
-        }
+    logical_device_t *item = item_for_node_locked(node);
+    if (item == NULL) {
+        ctm_glue_enumerate();
+        item = item_for_node_locked(node);
     }
+    const bool plugged = item != NULL && session_index_for_key(item->key) >= 0;
     pthread_mutex_unlock(&s_dev_mutex);
     return plugged;
 }
@@ -494,19 +515,8 @@ bool ctm_bridge_signals_enabled(void)
  * and has enumerated. */
 static const char *kind_for_node_locked(const char *node)
 {
-    for (int i = 0; i < g_devices.count; ++i) {
-        logical_device_t *item = &g_devices.items[i];
-        for (int k = 0; k < item->device_count; ++k) {
-            int j = item->device_indices[k];
-            if (j < 0 || j >= g_scan.count) {
-                continue;
-            }
-            if (strcmp(g_scan.devices[j].node, node) == 0) {
-                return bridge_kind_for_item(item);
-            }
-        }
-    }
-    return NULL;
+    const logical_device_t *item = item_for_node_locked(node);
+    return item != NULL ? bridge_kind_for_item(item) : NULL;
 }
 
 bool bridge_identity_usable(const char *s)

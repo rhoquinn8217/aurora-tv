@@ -530,11 +530,11 @@ static void cmd_bridge_group(control_job_t *job, const char *sel)
     }
     const device_group_t *g = &s_groups[k];
     if (g->plugged == g->part_count) {
-        reply(job, "OK already bridged: %d (%s)\n", k, g->name);
+        reply(job, "OK already bridged: device %d (%s)\n", k, g->name);
         return;
     }
-    reply(job, "OK bridging %d of %d part(s) of %d (%s)\n", g->part_count - g->plugged, g->part_count, k,
-          g->name);
+    reply(job, "OK bridging %d of %d part(s) of device %d (%s)\n", g->part_count - g->plugged, g->part_count,
+          k, g->name);
     for (int p = 0; p < g->part_count; ++p) {
         const ctm_bridge_dev_t *d = &devs[g->part[p]];
         if (!d->plugged) {
@@ -553,7 +553,7 @@ static void cmd_release_group(control_job_t *job, const char *sel)
     }
     const device_group_t *g = &s_groups[k];
     if (g->plugged == 0) {
-        reply(job, "OK not bridged: %d (%s)\n", k, g->name);
+        reply(job, "OK not bridged: device %d (%s)\n", k, g->name);
         return;
     }
     int released = 0;
@@ -564,7 +564,7 @@ static void cmd_release_group(control_job_t *job, const char *sel)
             ++released;
         }
     }
-    reply(job, "OK released %d part(s) of %d (%s)\n", released, k, g->name);
+    reply(job, "OK released %d part(s) of device %d (%s)\n", released, k, g->name);
 }
 
 #endif /* TARGET_WEBOS */
