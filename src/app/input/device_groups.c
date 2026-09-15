@@ -61,7 +61,12 @@ static bool has_alnum(const char *s)
  *     answers for the device. ⓘ A serial of zeros is SHOWN, so the reader sees
  *     why the device is remembered by its name, and identifies nothing.
  *  3. Off USB, the part's own: over Bluetooth that is its MAC.
- * Otherwise it has none and is remembered by its name alone. */
+ * Otherwise it has none and is remembered by its name alone.
+ *
+ * ⭐ WHAT IS SHOWN IS THE VALUE ALONE (rhoquinn8217, 2026-09-15): "remove the MAC:
+ * and serial: tag's and just put the value". The tags cost the row the room a
+ * long serial needs, and a MAC reads as one without being told. "(no serial)"
+ * stays: it is not a value. */
 static void group_identity(const ctm_bridge_dev_t *devs, device_group_t *g)
 {
     g->identity[0] = '\0';
@@ -70,7 +75,7 @@ static void group_identity(const ctm_bridge_dev_t *devs, device_group_t *g)
         char mac[64];
         if (strncmp(d->kind, "ds5", 3) == 0 && auto_bridge_identity(d, mac, sizeof mac)) {
             snprintf(g->identity, sizeof g->identity, "%s", mac);
-            snprintf(g->shown, sizeof g->shown, "MAC: %s", mac);
+            snprintf(g->shown, sizeof g->shown, "%s", mac);
             return;
         }
     }
@@ -80,7 +85,7 @@ static void group_identity(const ctm_bridge_dev_t *devs, device_group_t *g)
             if (bridge_identity_usable(d->usb_serial)) {
                 snprintf(g->identity, sizeof g->identity, "%s", d->usb_serial);
             }
-            snprintf(g->shown, sizeof g->shown, "serial: %s", d->usb_serial);
+            snprintf(g->shown, sizeof g->shown, "%s", d->usb_serial);
             return;
         }
     }
@@ -88,8 +93,7 @@ static void group_identity(const ctm_bridge_dev_t *devs, device_group_t *g)
         const ctm_bridge_dev_t *d = &devs[g->part[p]];
         if (bridge_identity_usable(d->serial)) {
             snprintf(g->identity, sizeof g->identity, "%s", d->serial);
-            snprintf(g->shown, sizeof g->shown,
-                     bridge_identity_mac_shaped(d->serial) ? "MAC: %s" : "serial: %s", d->serial);
+            snprintf(g->shown, sizeof g->shown, "%s", d->serial);
             return;
         }
     }

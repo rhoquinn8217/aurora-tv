@@ -39,9 +39,9 @@ typedef struct {
      * pad's MAC, otherwise the device's serial. "" when it has none, or only
      * zeros. */
     char identity[64];
-    /* The line under the name: exactly one of "MAC: <mac>", "serial: <serial>"
-     * or "(no serial)". ⓘ A serial of zeros is shown as it is, although it
-     * identifies nothing. */
+    /* The line under the name: exactly one of the MAC, the serial, or "(no
+     * serial)", with no "MAC:" or "serial:" before it (2026-09-15). ⓘ A serial
+     * of zeros is shown as it is, although it identifies nothing. */
     char shown[96];
     /* Positions in the list the device was built from, by interface number. */
     int part[DEVICE_GROUP_PARTS];

@@ -780,8 +780,11 @@ static lv_obj_t *ctm_make_dev_row(const device_group_t *g, int idx) {
      * keeps the same height. Printed exactly as reported, never prettified. */
     lv_obj_t *mac = lv_label_create(namecol);
     /* ⭐⭐ THE SAME LINE AS THE AUTO BRIDGE WINDOW'S CARD (rhoquinn8217,
-     * 2026-09-14): "MAC: ...", "serial: ..." or "(no serial)", decided once in
-     * device_groups.c, so what this row shows is what a mark would match. */
+     * 2026-09-14): the MAC, the serial or "(no serial)", decided once in
+     * device_groups.c, so what this row shows is what a mark would match. ⓘ The
+     * value alone since 2026-09-15, with no "MAC:" or "serial:" before it.
+     * ⭐ And cut short with dots rather than wrapped, as it already was: a long
+     * serial must not grow the row (rhoquinn8217, the same day). */
     lv_label_set_text(mac, g->shown);
     lv_label_set_long_mode(mac, LV_LABEL_LONG_DOT);
     lv_obj_set_width(mac, LV_PCT(100));
