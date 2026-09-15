@@ -201,8 +201,14 @@ bool session_start_input(session_t *session) {
              * now. ⓘ Deliberately AFTER ctm_bridge_start, not inside it: the
              * mark keys on the controller's own MAC, which only SDL knows, and
              * the glue cannot see SDL. ⛔ Not in the reconnect branch above --
-             * that is a stream resuming, and its controllers never left. */
-            {
+             * that is a stream resuming, and its controllers never left.
+             *
+             * ⛔ And never with "Enable Device Bridging" off. The settings screen
+             * greys the Auto Bridge button then, but the marks and "Bridge all"
+             * stay saved for when it is switched back on, and this ran on them
+             * regardless: every device bridged at stream start while bridging
+             * was switched off. */
+            if (app_configuration->bridge_enable) {
                 const int n = auto_bridge_run(app_configuration->bridge_auto_macs,
                                               app_configuration->bridge_auto_all);
                 if (n > 0) {

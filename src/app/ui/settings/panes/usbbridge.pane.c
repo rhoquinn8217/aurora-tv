@@ -195,8 +195,9 @@ static lv_obj_t *create_obj(lv_fragment_t *self, lv_obj_t *container) {
     pref_desc_label(view, locstr(
             "Requires the DS5-USBIP relay running on your host PC."), false);
 
-    /* ⭐⭐ THE ONLY WAYS TO BRIDGE ARE THE PANEL AND THE GESTURE, so switching
-     * this off switches both and nothing can be handed over.
+    /* ⭐⭐ THE ONLY WAYS TO BRIDGE ARE THE PANEL, THE GESTURE AND AUTO BRIDGE,
+     * so switching this off switches all three and nothing can be handed over.
+     * ⓘ Auto Bridge is checked where it runs, at stream start (session.c).
      *
      * ⛔ IT IS NOT THE OLD "use CTM Bridge" SWITCH, removed 2026-08-19. That one
      * stopped Moonlight announcing any gamepad for the whole session, so an
