@@ -209,8 +209,8 @@ static lv_obj_t *create_obj(lv_fragment_t *self, lv_obj_t *container) {
             pref_checkbox(view, locstr("Enable Device Bridging"),
                           &app_configuration->bridge_enable, false);
     pref_desc_label(view, locstr(
-            "Allows device bridging with the USB Bridge Overlay Panel or gestures "
-            "(DualSense/DualSense Edge Only)."), false);
+            "Allows device bridging with the USB Bridge Overlay Panel, Auto Bridge, "
+            "or gestures (gestures: DualSense/DualSense Edge only)."), false);
     lv_obj_add_event_cb(enable_checkbox, enable_state_update_cb, LV_EVENT_VALUE_CHANGED, pane);
 
 #if defined(TARGET_WEBOS)
