@@ -9,7 +9,7 @@ set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
 # merge -- resetting it would make old builds and new ones share numbers, and
 # every log and test note that names one would become ambiguous.
 set(MOONLIGHT_VERSION "1.2.9")
-set(CTM_BUILD_NUMBER 342)
+set(CTM_BUILD_NUMBER 343)
 
 project(moonlight VERSION ${MOONLIGHT_VERSION} LANGUAGES C CXX)
 
