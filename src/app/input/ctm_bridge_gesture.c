@@ -1238,7 +1238,32 @@ static app_input_t *s_gesture_input = NULL;
  *
  * ⛔ AND NOWHERE ELSE. It used to be restored after every pattern, which rhoquinn8217
  * ruled out on 2026-08-19: on a controller the host has just taken, the colour
- * is overwritten within a moment anyway and "comes off like an error". */
+ * is overwritten within a moment anyway and "comes off like an error".
+ *
+ * ⭐⭐ A CABLED DUALSHOCK 4 GETS THESE SAME COLOURS, AND NEEDS NOTHING OF ITS OWN.
+ * rhoquinn8217, 2026-09-15: "End Dark when in stream. In Aurora, used the colors
+ * we decide for DS5". Read through the code that day, not yet watched:
+ * - Nothing here or in gesture_poll_one asks what the controller is, and SDL's
+ *   PS4 driver takes a lightbar colour on a cable just as its PS5 driver does.
+ * - The DS4's release signal ends DARK. At the end of a stream it plays inside
+ *   ctm_bridge_stop(), which session_stop_input calls just before this and
+ *   which returns only once each release has played, so this colour lands
+ *   after the dark -- the same order as a wired DualSense's yellow, which also
+ *   ends at zero.
+ * - In a stream nothing repaints, so a pad released there stays dark until the
+ *   host paints the pad Moonlight hands back to it.
+ * ⚠️ Except a release the chord began just before the stream ended: that runs on
+ * the core's gesture worker, which ctm_bridge_stop() does not wait for, so its
+ * dark can land after this colour.
+ *
+ * ⚠️ ONE WAY A DS4 DIFFERS, read in SDL 2.30.12's source and not measured. Its
+ * PS4 driver sends the lightbar in EVERY effects report, rumble included, so
+ * any rumble SDL sends a DS4 also re-sends the last colour SDL was given -- and
+ * SDL repeats a running rumble every 2 s, for up to 65 s. After a bridge with
+ * the light switch on, that colour is the pre-plug pulse's magenta until the
+ * host sets another. ➡️ So a game's rumble through Moonlight could light a DS4
+ * released mid-stream magenta, and a rumble running when a DS4 was bridged
+ * could keep reaching it. A DualSense's rumble leaves its lightbar alone. */
 void ctm_bridge_gesture_restore_player_colours(void) {
     for (int i = 0; i < MAX_WATCHED; ++i) {
         if (!s_watched[i].in_use) continue;
