@@ -86,6 +86,10 @@ static lv_obj_t   *s_ctm_sidebar    = NULL;   /* the device list */
  * ⭐ They stay in the SAME focus group, so Down from the last device still
  * reaches them; they simply stay visible while the list moves above. */
 static lv_obj_t   *s_ctm_actions    = NULL;
+/* ⓘ Kept between refreshes so they do not blink; see the actions block. */
+static lv_obj_t   *s_ctm_btn_plugall = NULL;
+static lv_obj_t   *s_ctm_btn_unplugall = NULL;
+static uint32_t    s_ctm_actions_sig = 0xffffffffu;
 static lv_obj_t   *s_ctm_close_btn  = NULL;   /* the X in the title row; in the nav group */
 static lv_obj_t   *s_ctm_status_lbl = NULL;   /* "USB Server: <addr> -" */
 static lv_obj_t   *s_ctm_state_lbl  = NULL;   /* ONLINE / OFFLINE, the only coloured part */
@@ -1122,35 +1126,63 @@ static void ctm_panel_refresh(void) {
         lv_obj_set_style_text_color(none, CTM_COL_SUB, 0);
         lv_obj_set_style_pad_all(none, LV_DPX(8), 0);
     }
-    lv_obj_clean(s_ctm_actions);
-    if (s_ctm_ngroup > 0) {
-        /* ⭐⭐ WITH THE SERVER OFFLINE, RELEASE ALL IS THE ONLY THING THAT HELPS.
-         *
-         * ⛔ Bridging cannot work, and trying it gives a refusal -- red flashes
-         * and a buzz, indistinguishable from a real failure. ⭐ Releasing is a
-         * teardown on this side and needs no host at all.
-         *
-         * ⚠️ AND IT IS WHAT THE TV NEEDS ANYWAY. Losing the listener does not
-         * currently tear anything down: the session loops back and retries
-         * forever, so a controller stays claimed and bridged, waiting for a host
-         * that is not coming. ⓘ rhoquinn8217, 2026-08-20: "when the listener is down,
-         * that's what the TV needs to do anyway." ➡️ T-127 makes it automatic;
-         * until then this is the way out. */
-        lv_obj_t *plug_all =
-                ctm_make_action("Bridge All", ctm_act_plugall_cb, CTM_COL_FULL);
-        if (plug_all && s_ctm_server_known && !s_ctm_server_online) {
-            /* ⛔ LV_STATE_DISABLED alone was barely visible -- it only shifts
-             * the theme's own opacity a little. ⭐ Paint it grey and fade it. */
-            lv_obj_add_state(plug_all, LV_STATE_DISABLED);
-            lv_obj_set_style_bg_color(plug_all, lv_color_hex(0x3a4552), 0);
-            lv_obj_set_style_opa(plug_all, LV_OPA_40, 0);
+    /* ⛔⛔ NOT ON EVERY REFRESH -- THEY FLICKERED (rhoquinn8217, 2026-09-15:
+     * "the Bridge all and Release All buttons flicker while a controller is
+     * bridging").
+     *
+     * ⚠️ The rows are rebuilt on every refresh because each one's state can
+     * change, and since a bridge in flight now refreshes every 400 ms until it
+     * lands, rebuilding these two buttons alongside them made them blink. They
+     * do not depend on any row: only on whether there is anything in the list
+     * at all, and on whether the server can be reached.
+     *
+     * ⓘ So they are remembered, and only the NAV GROUP is rebuilt around them
+     * -- the refresh empties that group at the top, so they have to go back in
+     * after the rows to keep the walking order. */
+    const uint32_t actions_sig = (s_ctm_ngroup > 0 ? 1u : 0u) |
+                                 (s_ctm_server_known ? 2u : 0u) |
+                                 (s_ctm_server_online ? 4u : 0u);
+    const bool actions_stale = actions_sig != s_ctm_actions_sig ||
+                               (s_ctm_ngroup > 0 && s_ctm_btn_plugall == NULL);
+    if (actions_stale) {
+        s_ctm_actions_sig = actions_sig;
+        s_ctm_btn_plugall = NULL;
+        s_ctm_btn_unplugall = NULL;
+        lv_obj_clean(s_ctm_actions);
+        if (s_ctm_ngroup > 0) {
+            /* ⭐⭐ WITH THE SERVER OFFLINE, RELEASE ALL IS THE ONLY THING THAT HELPS.
+             *
+             * ⛔ Bridging cannot work, and trying it gives a refusal -- red flashes
+             * and a buzz, indistinguishable from a real failure. ⭐ Releasing is a
+             * teardown on this side and needs no host at all.
+             *
+             * ⚠️ AND IT IS WHAT THE TV NEEDS ANYWAY. Losing the listener does not
+             * currently tear anything down: the session loops back and retries
+             * forever, so a controller stays claimed and bridged, waiting for a host
+             * that is not coming. ⓘ rhoquinn8217, 2026-08-20: "when the listener is down,
+             * that's what the TV needs to do anyway." ➡️ T-127 makes it automatic;
+             * until then this is the way out. */
+            s_ctm_btn_plugall =
+                    ctm_make_action("Bridge All", ctm_act_plugall_cb, CTM_COL_FULL);
+            if (s_ctm_btn_plugall && s_ctm_server_known && !s_ctm_server_online) {
+                /* ⛔ LV_STATE_DISABLED alone was barely visible -- it only shifts
+                 * the theme's own opacity a little. ⭐ Paint it grey and fade it. */
+                lv_obj_add_state(s_ctm_btn_plugall, LV_STATE_DISABLED);
+                lv_obj_set_style_bg_color(s_ctm_btn_plugall, lv_color_hex(0x3a4552), 0);
+                lv_obj_set_style_opa(s_ctm_btn_plugall, LV_OPA_40, 0);
+            }
+            /* ⭐ RED, because it takes every device back at once. ⓘ It was blue-grey, which
+             * read as the neutral of the pair -- but Bridge All affects one thing at a
+             * time in practice and this affects all of them, so it is the one worth
+             * hesitating over. ⚠️ It stays available while the server is offline: that
+             * is exactly when it is needed. */
+            s_ctm_btn_unplugall = ctm_make_action(
+                    "Release All", ctm_act_unplugall_cb, lv_palette_darken(LV_PALETTE_RED, 2));
         }
-        /* ⭐ RED, because it takes every device back at once. ⓘ It was blue-grey, which
-         * read as the neutral of the pair -- but Bridge All affects one thing at a
-         * time in practice and this affects all of them, so it is the one worth
-         * hesitating over. ⚠️ It stays available while the server is offline: that
-         * is exactly when it is needed. */
-        ctm_make_action("Release All", ctm_act_unplugall_cb, lv_palette_darken(LV_PALETTE_RED, 2));
+    } else {
+        /* Kept as they are: back into the walking order behind the rows. */
+        if (s_ctm_btn_plugall) lv_group_add_obj(s_ctm_nav_group, s_ctm_btn_plugall);
+        if (s_ctm_btn_unplugall) lv_group_add_obj(s_ctm_nav_group, s_ctm_btn_unplugall);
     }
 
     if (s_ctm_sel >= s_ctm_ngroup) {
@@ -1194,6 +1226,9 @@ static void ctm_close_panel(void) {
     s_ctm_panel = NULL;
     s_ctm_sidebar = NULL;
     s_ctm_actions = NULL;
+    s_ctm_btn_plugall = NULL;
+    s_ctm_btn_unplugall = NULL;
+    s_ctm_actions_sig = 0xffffffffu;
     s_ctm_status_lbl = NULL;
     s_ctm_state_lbl  = NULL;
     s_ctm_nav_group = NULL;
@@ -1467,6 +1502,9 @@ void ctm_panel_on_owner_deleted(streaming_controller_t *controller) {
         s_ctm_panel = NULL;
         s_ctm_sidebar = NULL;
         s_ctm_actions = NULL;
+        s_ctm_btn_plugall = NULL;
+        s_ctm_btn_unplugall = NULL;
+        s_ctm_actions_sig = 0xffffffffu;
         s_ctm_status_lbl = NULL;
         s_ctm_state_lbl  = NULL;
         s_ctm_owner = NULL;
