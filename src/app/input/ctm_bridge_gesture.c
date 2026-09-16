@@ -505,13 +505,23 @@ static bool gesture_held(SDL_GameController *controller) {
  * no core signal of its own, so it was handed back in complete silence: the
  * only way to know it had worked was to look at the panel.
  *
- * ⭐ SHORT AND FIRM, against the bridge's long soft pulse and the refusal's
- * three bursts. Three signals, told apart by feel without counting: long and
- * gentle means taken, short and firm means given back, three sharp means
- * refused. */
+ * ⓘ One pulse, like every other rumble here: the light says which of the
+ * three happened, and the rumble only says to look at it. */
 #define BYE_PULSE_MS       220
 #define BYE_PULSE_STRENGTH 0xAFFF
-#define BUZZ_BURSTS       3
+/* ⭐⭐ ONE RUMBLE, WHATEVER HAPPENED (rhoquinn8217, 2026-09-15): "we don't need
+ * to have 1 2 or 3 rumbles. 1 rumble for anything should be enough as there
+ * will be no distinction between the number of rumbles."
+ *
+ * ⛔ This was three bursts for a refusal against one pulse for a bridge, on the
+ * theory that a count could be felt and told apart. It cannot, in the hand, in
+ * the moment: what a rumble says is "something happened, look". ⭐ The LIGHT
+ * carries which -- green taken, yellow given back, red refused -- and the
+ * colour is what a person actually reads.
+ *
+ * ⓘ The burst machinery is left in place and simply asked for one: a signal
+ * that wants two again is a constant, not a rewrite. */
+#define BUZZ_BURSTS       1
 /* Doubled for the same reason as the flashes above -- long enough to be
  * noticed and then looked at, rather than felt and missed. */
 #define BUZZ_ON_MS        400
