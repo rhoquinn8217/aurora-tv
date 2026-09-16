@@ -505,23 +505,25 @@ static bool gesture_held(SDL_GameController *controller) {
  * no core signal of its own, so it was handed back in complete silence: the
  * only way to know it had worked was to look at the panel.
  *
- * ⓘ One pulse, like every other rumble here: the light says which of the
- * three happened, and the rumble only says to look at it. */
+ * ⓘ ONE pulse, because this one is good news. Three is the refusal, and the
+ * difference is a signal that stops against one that insists -- see
+ * BUZZ_BURSTS. */
 #define BYE_PULSE_MS       220
 #define BYE_PULSE_STRENGTH 0xAFFF
-/* ⭐⭐ ONE RUMBLE, WHATEVER HAPPENED (rhoquinn8217, 2026-09-15): "we don't need
- * to have 1 2 or 3 rumbles. 1 rumble for anything should be enough as there
- * will be no distinction between the number of rumbles."
+/* ⭐⭐ THREE FOR A REFUSAL, ONE FOR EVERYTHING ELSE (rhoquinn8217, 2026-09-15,
+ * after feeling both): "We should 3 for the refusal as you had before. It odd
+ * enough that it will signal that something is wrong, while a 1 buzz means ok
+ * and we will keep for bridge and release."
  *
- * ⛔ This was three bursts for a refusal against one pulse for a bridge, on the
- * theory that a count could be felt and told apart. It cannot, in the hand, in
- * the moment: what a rumble says is "something happened, look". ⭐ The LIGHT
- * carries which -- green taken, yellow given back, red refused -- and the
- * colour is what a person actually reads.
+ * ⛔ IT WAS BRIEFLY ONE, and that is worth knowing rather than re-deciding: the
+ * theory was that a count cannot be felt and told apart, so every signal should
+ * buzz once. Felt on a pad, the opposite is true of the ODD one -- a single
+ * pulse reads as "done", and a rumble that keeps going reads as "wrong" without
+ * anyone counting it. ➡️ So the count is not a number to read. It is the
+ * difference between a signal that stops and one that insists.
  *
- * ⓘ The burst machinery is left in place and simply asked for one: a signal
- * that wants two again is a constant, not a rewrite. */
-#define BUZZ_BURSTS       1
+ * ⓘ A bridge and a release each stay at one pulse. */
+#define BUZZ_BURSTS       3
 /* Doubled for the same reason as the flashes above -- long enough to be
  * noticed and then looked at, rather than felt and missed. */
 #define BUZZ_ON_MS        400
