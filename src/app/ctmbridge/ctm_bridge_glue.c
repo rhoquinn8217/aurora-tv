@@ -207,8 +207,8 @@ static void ctm_glue_ensure_core(void)
         }
     }
 
-    if (!discover_agent_once()) {
-        log_append("ctm glue: no CTM agent found on the network");
+    if (!agent_is_known()) {
+        log_append("ctm glue: no agent address yet -- a stream sets it");
     }
     ctm_glue_enumerate();
     // Fill g_bt_macs so the stopSniff worker actually keeps the BT controllers
@@ -385,10 +385,12 @@ int ctm_bridge_list(ctm_bridge_dev_t *out, int max)
 /* ⭐⭐ THE SAME LIST WITHOUT WAKING ANYTHING (T-135, 2026-09-08).
  *
  * ⛔ ctm_bridge_list() calls ctm_glue_ensure_core(), which starts the stopSniff
- * worker and runs discover_agent_once() -- a BROADCAST for an agent that
- * cannot exist yet, because the host is not chosen until a stream starts.
+ * worker: work that showing a list is no reason to start. ⓘ Until 2026-09-15
+ * it also ran a broadcast probe for an agent that cannot exist before a host is
+ * chosen; that probe is gone, and the address now only ever comes from a
+ * stream starting.
  * ⚠️ The settings pane lists devices with no stream running, so it must not go
- * through that door: showing a list is not a reason to bring the bridge up.
+ * through that door.
  * ➡️ This enumerates and reports, and nothing else. */
 int ctm_bridge_list_quiet(ctm_bridge_dev_t *out, int max)
 {
