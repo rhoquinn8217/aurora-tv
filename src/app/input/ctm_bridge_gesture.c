@@ -179,6 +179,14 @@ static void request_full_report(const char *dev_path) {
     gesture_log("full-report request on %s: %s", dev_path, ok ? "sent" : "failed");
 }
 
+/* A DualSense or a DualSense Edge, by its USB ids: the same rule the
+ * listener's microphone guard uses, so the two sides agree on what counts. */
+static bool controller_is_dualsense(SDL_GameController *controller) {
+    const Uint16 vendor = SDL_GameControllerGetVendor(controller);
+    const Uint16 product = SDL_GameControllerGetProduct(controller);
+    return vendor == 0x054c && (product == 0x0ce6 || product == 0x0df2);
+}
+
 static watched_t s_watched[MAX_WATCHED];
 
 /* Is this controller already being watched? Asked before watched_for(), which
@@ -1191,11 +1199,26 @@ static bool gesture_poll_one(SDL_GameController *controller, SDL_JoystickID id) 
         return false;
     }
 
-    /* Once per connection, before anything else: make sure the controller is
-     * sending its full report, or there is no touchpad to read. */
+    /* Once per connection, before anything else: make sure a DualSense is
+     * sending its full report, or there is no touchpad to read.
+     *
+     * ⛔ A DUALSENSE OR AN EDGE ONLY. Feature report 0x05 is the DualSense's
+     * request, and this loop polls every controller SDL opened. Sent to all of
+     * them, the C1's log showed a Switch Pro Controller refusing it and a
+     * GameSir in PlayStation mode answering it, on every app start
+     * (2026-09-16). Nothing broke that time; a request meant for one device
+     * reaching others is how the listener's microphone guard did break the
+     * Pro Controller's handshake. */
     if (!w->asked_full) {
         w->asked_full = true;
-        request_full_report(SDL_GameControllerPath(controller));
+        const char *path = SDL_GameControllerPath(controller);
+        if (controller_is_dualsense(controller)) {
+            request_full_report(path);
+        } else {
+            gesture_log("full-report request skipped on %s: not a DualSense (%04x:%04x)",
+                        path ? path : "-", SDL_GameControllerGetVendor(controller),
+                        SDL_GameControllerGetProduct(controller));
+        }
     }
 
     /* ⭐⭐ THE GESTURE SWITCH BELONGS HERE, NOT AT THE TOP OF THE TICK.
