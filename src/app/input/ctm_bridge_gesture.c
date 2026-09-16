@@ -495,6 +495,22 @@ static bool gesture_held(SDL_GameController *controller) {
 #define OK_PULSE_MS       520   /* doubled; see the refusal timings below */
 #define OK_PULSE_STRENGTH 0x7FFF   /* softer than a refusal: this is good news */
 
+
+/* ⭐⭐ THE HANDBACK, FOR A PAD THAT HAS NOTHING ELSE TO SAY IT WITH
+ * (rhoquinn8217, 2026-09-15: "we need a rumble for xbox controller on
+ * release").
+ *
+ * ⛔ A release is announced by the core, in sound and haptics, and by this side
+ * putting the player colour back. An Xbox pad has no lightbar, no speaker and
+ * no core signal of its own, so it was handed back in complete silence: the
+ * only way to know it had worked was to look at the panel.
+ *
+ * ⭐ SHORT AND FIRM, against the bridge's long soft pulse and the refusal's
+ * three bursts. Three signals, told apart by feel without counting: long and
+ * gentle means taken, short and firm means given back, three sharp means
+ * refused. */
+#define BYE_PULSE_MS       220
+#define BYE_PULSE_STRENGTH 0xAFFF
 #define BUZZ_BURSTS       3
 /* Doubled for the same reason as the flashes above -- long enough to be
  * noticed and then looked at, rather than felt and missed. */
@@ -862,6 +878,20 @@ static bool gesture_poll_one(SDL_GameController *controller, SDL_JoystickID id) 
                  * colour SDL remembers, which SDL re-sends to a DS4 with every
                  * rumble. */
                 paint_player_colour_for(w, controller);
+                /* ⭐ AND A RUMBLE FOR A PAD WITH NO LIGHT TO PAINT. The line
+                 * above puts a colour back on a controller that has one; an
+                 * Xbox pad has none, no speaker either, and no core signal of
+                 * its own, so until now it was handed back with no sign at all.
+                 * ⓘ Under the user's rumble switch, like every other signal,
+                 * and shaped to be told apart by feel: see BYE_PULSE_MS. */
+                if (controller && !SDL_GameControllerHasLED(controller) &&
+                    ctm_bridge_signals_enabled() &&
+                    app_configuration && app_configuration->bridge_signal_rumble) {
+                    SDL_GameControllerRumble(controller, BYE_PULSE_STRENGTH,
+                                             BYE_PULSE_STRENGTH, BYE_PULSE_MS);
+                    gesture_log("handback pulse on %s: no lightbar to paint",
+                                w->prep_node[0] ? w->prep_node : "a pad");
+                }
                 /* ⛔⛔ ON BLUETOOTH THE CORE ALWAYS CLAIMS THE SIGNAL, AND
                  * WITH BT_LAYER_CORE_SIGNAL OFF IT THEN DOES NOTHING.
                  *
