@@ -46,7 +46,6 @@ static void ctm_request_close(void);
 static void ctm_teardown_async(void *p);
 static void ctm_panel_refresh(void);
 static void ctm_request_refresh(void);
-static void ctm_late_refresh_cb(lv_timer_t *t);
 static void open_ctm_panel(lv_event_t *event);
 
 #define CTM_COL_CARD     lv_color_hex(0x12181d)
@@ -267,17 +266,62 @@ static lv_group_t *s_ctm_dead_nav    = NULL;
  * ⓘ Given a deadline so a bridge that never completes cannot leave a row grey
  * forever. */
 #define CTM_PENDING_MS 6000
+/* ⓘ How often the watcher below looks while a bridge or a release is in flight. */
+#define CTM_PENDING_POLL_MS 400
 static char     s_ctm_pending_group[96];   /* "" while nothing is pending */
 static bool     s_ctm_pending_want = false;
 static uint32_t s_ctm_pending_until = 0;
+static lv_timer_t *s_ctm_pending_timer = NULL;
 
-/* ⭐ Remember what we asked for, so the row can grey until it happens. */
+/* ⭐ Remember what we asked for, so the row can grey until it happens.
+ *
+ * ⛔⛔ AND KEEP LOOKING UNTIL IT DOES (rhoquinn8217, 2026-09-15: "the Badges
+ * however still don't update when you select them ... if you bridge something
+ * else the previous one you selected get the FULL badge").
+ *
+ * ⚠️ THE OLD SHAPE WAS ONE LATE REFRESH, 1200 ms after the press. A bridge by
+ * the gesture route takes about two seconds -- a second of pre-plug pulse, then
+ * the plug, then the confirmation -- so that single look landed while the row
+ * was still pending, found the old state, and scheduled nothing else. The badge
+ * then sat wrong until the NEXT press forced a refresh, which is why it read as
+ * one action behind. ⓘ A release had no late refresh at all.
+ *
+ * ⭐ So the watcher lives here, where both paths already say what they asked
+ * for, and it stops as soon as the row lands or the deadline passes. */
+static void ctm_pending_watch_cb(lv_timer_t *t);
+
+static void ctm_pending_watch_stop(void) {
+    if (s_ctm_pending_timer != NULL) {
+        lv_timer_del(s_ctm_pending_timer);
+        s_ctm_pending_timer = NULL;
+    }
+}
+
 static void ctm_set_pending(const device_group_t *g, bool want) {
     snprintf(s_ctm_pending_group, sizeof s_ctm_pending_group, "%s", s_ctm_devs[g->part[0]].group);
     s_ctm_pending_want = want;
     s_ctm_pending_until = lv_tick_get() + CTM_PENDING_MS;
+    if (s_ctm_pending_timer == NULL) {
+        s_ctm_pending_timer = lv_timer_create(ctm_pending_watch_cb, CTM_PENDING_POLL_MS, NULL);
+    }
 }
 
+/* ⓘ Cheap on purpose: a refresh re-enumerates, which costs about a quarter of a
+ * second with fourteen parts attached (T-182), so this asks every 400 ms while
+ * something is in flight and never otherwise. */
+static void ctm_pending_watch_cb(lv_timer_t *t) {
+    LV_UNUSED(t);
+    if (s_ctm_panel == NULL) {
+        ctm_pending_watch_stop();
+        return;
+    }
+    const bool done = s_ctm_pending_group[0] == '\0' ||
+                      lv_tick_get() > s_ctm_pending_until;
+    ctm_request_refresh();      /* ⭐ Always one more, so the last state is drawn. */
+    if (done) {
+        ctm_pending_watch_stop();
+    }
+}
 /* Bridge every part of the device on this row that is not bridged already:
  * all of a BASIC device, the rest of a PARTIAL one. */
 static void ctm_bridge_device(int row) {
@@ -331,13 +375,11 @@ static void ctm_bridge_device(int row) {
      * for a second bridge on an already-bridged node -- which is what produced
      * a rumble and a tone on the SECOND press.
      *
-     * ⭐ So: refresh now for anything that finished immediately, and once more
-     * shortly after for the bridge that is still on its way. Two refreshes
-     * rather than a timer, because a timer would enumerate on every tick and
-     * enumeration is the expensive thing here. */
+     * ⭐ So: refresh now for anything that finished immediately, and let the
+     * pending watcher started by ctm_set_pending look again every 400 ms until
+     * the row lands. ⛔ It used to be ONE look 1200 ms later, which is less
+     * than a gesture bridge takes, so the badge stayed a step behind. */
     ctm_request_refresh();
-    lv_timer_t *late = lv_timer_create(ctm_late_refresh_cb, 1200, NULL);
-    lv_timer_set_repeat_count(late, 1);
 }
 
 /* Release every bridged part of the device on this row, FULL or PARTIAL. */
@@ -1137,6 +1179,9 @@ static void ctm_close_panel(void) {
     if (!s_ctm_panel) {
         return;
     }
+    /* ⓘ Nothing to watch for once the rows are gone; the watcher checks the
+     * panel too, but stopping here means it never runs a refresh nobody sees. */
+    ctm_pending_watch_stop();
     /* Hide NOW (same-frame UI change) and move input back to the overlay; the old
      * group stays alive until the async teardown, so the in-flight keypad event
      * that triggered this close keeps a valid group pointer. */
@@ -1161,14 +1206,6 @@ static void ctm_request_close(void) { ctm_close_panel(); }
 
 static void ctm_refresh_async(void *p) { LV_UNUSED(p); ctm_panel_refresh(); }
 static void ctm_request_refresh(void)  { lv_async_call(ctm_refresh_async, NULL); }
-
-/* One-shot, for a bridge that completes after the press. See ctm_toggle_device. */
-static void ctm_late_refresh_cb(lv_timer_t *t) {
-    LV_UNUSED(t);
-    if (s_ctm_panel) {
-        ctm_request_refresh();
-    }
-}
 
 static void open_ctm_panel(lv_event_t *event) {
     /* The CTM button has LV_OBJ_FLAG_EVENT_BUBBLE; stop the CLICKED here so it
