@@ -1,4 +1,5 @@
 #include "app.h"
+#include "app_version.h"
 #include "help.dialog.h"
 
 #include "util/i18n.h"

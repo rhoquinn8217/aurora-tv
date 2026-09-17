@@ -52,11 +52,12 @@ typedef struct app_settings_t {
     bool quitappafter;
     bool autoresume;
     bool viewonly;
-    /* ⭐ CAN A DEVICE BE HANDED TO THE PC AT ALL? Defaults ON.
+    /* ⭐ CAN A DEVICE BE HANDED TO THE PC AT ALL? Defaults OFF (since build 307).
      *
-     * ⓘ The gesture and the USB Bridge panel are the only two ways to ask for a
-     * bridge, so this switches both and nothing else. A stream behaves the same
-     * either way -- keyboards, mice and controllers all reach the PC as usual.
+     * ⓘ The gesture, the USB Bridge panel and Auto Bridge at stream start are
+     * the only ways to ask for a bridge, so this switches all three and nothing
+     * else. A stream behaves the same either way -- keyboards, mice and
+     * controllers all reach the PC as usual.
      *
      * ⛔ NOT the old "use CTM Bridge" switch, removed 2026-08-19: that stopped
      * Moonlight announcing any gamepad for the whole session, so an ordinary
@@ -126,6 +127,11 @@ typedef struct app_settings_t {
      * ⛔ Empty means NONE. Never "whatever is present" -- that is the auto-plug
      * that was removed for taking devices away from the TV unasked. */
     char *bridge_auto_macs;
+    /* ⭐ "Bridge all devices on startup" (rhoquinn8217, 2026-09-13): when a stream
+     * starts, bridge EVERY device, serial or not, and ignore the marks above --
+     * which are kept, so turning this off brings them back. ⛔ Off by default:
+     * it is the user's explicit choice, never the unasked auto-plug. */
+    bool bridge_auto_all;
     bool absmouse;
     bool hardware_mouse;
     bool virtual_mouse;

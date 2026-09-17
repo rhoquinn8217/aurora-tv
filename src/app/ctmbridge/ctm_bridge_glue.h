@@ -45,6 +45,10 @@ void ctm_bridge_set_mic_capture(bool on);
 
 void ctm_bridge_set_input_held(bool held);
 
+/* Who to tell when a bridged keyboard presses the overlay's shortcut,
+ * Ctrl+Alt+Shift+O. ⚠️ Called on the keyboard's input thread. */
+void bridge_set_overlay_request(void (*cb)(void));
+
 void ctm_bridge_stop(void);
 
 /* True while the bridge is active. */
@@ -69,7 +73,29 @@ typedef struct {
      * is not. */
     char node[64];
     bool plugged;
+    /* ⭐ The core's serial for the device: its uniq, or the USB serial number
+     * where no driver filled uniq. What every controller but a DualSense is
+     * known by. */
+    char serial[64];
+    /* A game controller rather than a keyboard, mouse or other device. */
+    bool controller;
+    /* "controller", "keyboard", "mouse" or "other" -- what its HID description
+     * says it is, for a person reading the row. */
+    char type[12];
+    /* ⭐ WHICH PHYSICAL DEVICE THIS PART IS PART OF (2026-09-14). Every part of
+     * one USB device has the same `group`; anything not on USB is its own. */
+    char group[96];
+    char device_name[128];   /* the USB device's maker and product, or "" */
+    char usb_serial[64];     /* the USB device's own serial, zeros and all, or "" */
+    int iface;               /* the USB interface number, -1 when unknown */
 } ctm_bridge_dev_t;
+
+/* ⭐ Identity strings, answered by the core's own rules so the TV and the bridge
+ * cannot disagree. Usable: some letter or digit that is not a zero. Same: equal
+ * once case and punctuation are gone. MAC-shaped: six hex pairs. */
+bool bridge_identity_usable(const char *s);
+bool bridge_identity_same(const char *a, const char *b);
+bool bridge_identity_mac_shaped(const char *s);
 
 /* Write the discovered Windows agent host (or "offline") into out (NUL-terminated).
  * For the overlay header. */

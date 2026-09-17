@@ -27,9 +27,12 @@
 #include "ctm_bridge_glue.h"
 #include "ctm_panel.h"
 #include "input/ctm_bridge_gesture.h"
+#include "input/bridge_request.h"
+#include "input/device_groups.h"
 #include "lvgl/font/material_icons_regular_symbols.h"
 #include "lvgl/theme/lv_theme_moonlight.h"
 
+#include <stdio.h>
 #include <string.h>
 
 /* Which setting a detail row edits. ⚠️ This lived one line above the block that
@@ -43,7 +46,6 @@ static void ctm_request_close(void);
 static void ctm_teardown_async(void *p);
 static void ctm_panel_refresh(void);
 static void ctm_request_refresh(void);
-static void ctm_late_refresh_cb(lv_timer_t *t);
 static void open_ctm_panel(lv_event_t *event);
 
 #define CTM_COL_CARD     lv_color_hex(0x12181d)
@@ -65,6 +67,11 @@ static void open_ctm_panel(lv_event_t *event);
  * it, all one colour. ⛔ A softer hex was tried first and was not punchy
  * enough beside it. */
 #define CTM_COL_FULL     lv_palette_main(LV_PALETTE_PURPLE)
+/* ⭐ Some of a device's parts bridged and some not (rhoquinn8217, 2026-09-14).
+ * It should not happen, since a device is bridged and released whole, so it is
+ * the one badge meant to catch the eye: yellow, in FULL's place. */
+#define CTM_COL_PARTIAL  lv_palette_main(LV_PALETTE_YELLOW)
+#define CTM_COL_ON_PARTIAL lv_color_hex(0x1a1a1a)
 
 
 static lv_obj_t   *s_ctm_panel      = NULL;   /* full-screen backdrop */
@@ -79,6 +86,10 @@ static lv_obj_t   *s_ctm_sidebar    = NULL;   /* the device list */
  * ⭐ They stay in the SAME focus group, so Down from the last device still
  * reaches them; they simply stay visible while the list moves above. */
 static lv_obj_t   *s_ctm_actions    = NULL;
+/* ⓘ Kept between refreshes so they do not blink; see the actions block. */
+static lv_obj_t   *s_ctm_btn_plugall = NULL;
+static lv_obj_t   *s_ctm_btn_unplugall = NULL;
+static uint32_t    s_ctm_actions_sig = 0xffffffffu;
 static lv_obj_t   *s_ctm_close_btn  = NULL;   /* the X in the title row; in the nav group */
 static lv_obj_t   *s_ctm_status_lbl = NULL;   /* "USB Server: <addr> -" */
 static lv_obj_t   *s_ctm_state_lbl  = NULL;   /* ONLINE / OFFLINE, the only coloured part */
@@ -135,6 +146,14 @@ static int         s_ctm_flash_left = 0;
  * stale while the panel sat open now does not. */
 static void ctm_online_tick(lv_timer_t *t) {
     LV_UNUSED(t);
+    /* ⓘ Kept in front: stats pinned while the panel is open are added to the
+     * top layer after it, and would cover it again. */
+    if (s_ctm_panel) {
+        const lv_obj_t *layer = lv_obj_get_parent(s_ctm_panel);
+        if (layer && lv_obj_get_index(s_ctm_panel) + 1 != lv_obj_get_child_cnt(layer)) {
+            lv_obj_move_foreground(s_ctm_panel);
+        }
+    }
     if (!s_ctm_state_lbl || s_ctm_flash_left > 0) {
         return;   /* mid-flash: leave the colour alone */
     }
@@ -187,13 +206,19 @@ static void ctm_flash_offline(void) {
 static lv_group_t *s_ctm_nav_group    = NULL;
 static streaming_controller_t *s_ctm_owner = NULL;
 
-static ctm_bridge_dev_t s_ctm_devs[16];
-static lv_obj_t        *s_ctm_dev_rows[16];
-/* The badge that is NOT lit on each row, and that row's name label. The first
- * is recoloured when the selection moves (LVGL v8 does not give a child the
- * parent's state, so this cannot be a style); the second is measured. */
-static lv_obj_t        *s_ctm_dev_offbadge[16];
-static int  s_ctm_ndev = 0;
+/* ⭐⭐ A ROW IS A DEVICE, NOT A PART (rhoquinn8217, 2026-09-14). The core lists
+ * every HID interface of a USB device as a device of its own; the panel shows
+ * the device once, and bridging or releasing it takes every part. Row indexes
+ * below are into s_ctm_groups. */
+static ctm_bridge_dev_t s_ctm_devs[DEVICE_PARTS_MAX];
+static int              s_ctm_ndev = 0;
+static device_group_t   s_ctm_groups[DEVICE_GROUPS_MAX];
+static int              s_ctm_ngroup = 0;
+static lv_obj_t        *s_ctm_dev_rows[DEVICE_GROUPS_MAX];
+/* The badge that is NOT lit on each row. It is recoloured when the selection
+ * moves: LVGL v8 does not give a child the parent's state, so this cannot be a
+ * style. */
+static lv_obj_t        *s_ctm_dev_offbadge[DEVICE_GROUPS_MAX];
 static int  s_ctm_sel  = 0;
 
 /* ⭐ THE DETAIL PANE IS GONE, AND THE CRASH IT CAUSED WITH IT.
@@ -239,68 +264,78 @@ static lv_group_t *s_ctm_dead_nav    = NULL;
  * actually arrives. Nothing flips twice, and the grey says "working on it",
  * which is true: a bridge takes a second or two.
  *
- * ⚠️ Keyed by the device's INDEX, not its row position, because the list can be
- * rebuilt underneath it -- the same trap ctm_toggle_device documents.
+ * ⚠️ Keyed by the device's GROUP, not its row position, because the list can be
+ * rebuilt underneath it -- the same trap ctm_bridge_device documents.
  *
  * ⓘ Given a deadline so a bridge that never completes cannot leave a row grey
  * forever. */
 #define CTM_PENDING_MS 6000
-static int      s_ctm_pending_index = -1;
+/* ⓘ How often the watcher below looks while a bridge or a release is in flight. */
+#define CTM_PENDING_POLL_MS 400
+static char     s_ctm_pending_group[96];   /* "" while nothing is pending */
 static bool     s_ctm_pending_want = false;
 static uint32_t s_ctm_pending_until = 0;
+static lv_timer_t *s_ctm_pending_timer = NULL;
 
-static void ctm_toggle_device(int row);
+/* ⭐ Remember what we asked for, so the row can grey until it happens.
+ *
+ * ⛔⛔ AND KEEP LOOKING UNTIL IT DOES (rhoquinn8217, 2026-09-15: "the Badges
+ * however still don't update when you select them ... if you bridge something
+ * else the previous one you selected get the FULL badge").
+ *
+ * ⚠️ THE OLD SHAPE WAS ONE LATE REFRESH, 1200 ms after the press. A bridge by
+ * the gesture route takes about two seconds -- a second of pre-plug pulse, then
+ * the plug, then the confirmation -- so that single look landed while the row
+ * was still pending, found the old state, and scheduled nothing else. The badge
+ * then sat wrong until the NEXT press forced a refresh, which is why it read as
+ * one action behind. ⓘ A release had no late refresh at all.
+ *
+ * ⭐ So the watcher lives here, where both paths already say what they asked
+ * for, and it stops as soon as the row lands or the deadline passes. */
+static void ctm_pending_watch_cb(lv_timer_t *t);
 
-static void ctm_bridge_device(int row) {
-    if (row < 0 || row >= s_ctm_ndev || s_ctm_devs[row].plugged) {
-        return;
+static void ctm_pending_watch_stop(void) {
+    if (s_ctm_pending_timer != NULL) {
+        lv_timer_del(s_ctm_pending_timer);
+        s_ctm_pending_timer = NULL;
     }
-    ctm_toggle_device(row);
 }
 
-static void ctm_release_device(int row) {
-    if (row < 0 || row >= s_ctm_ndev || !s_ctm_devs[row].plugged) {
-        return;
-    }
-    ctm_toggle_device(row);
-}
-
-static void ctm_toggle_device(int row) {
-    if (row < 0 || row >= s_ctm_ndev) {
-        return;
-    }
-    /* ⛔⛔ PASS THE DEVICE'S index, NOT THE ROW POSITION.
-     *
-     * ctm_bridge_dev_t.index is an opaque handle into the core's device table;
-     * the row position is where the device happens to sit in OUR copy of the
-     * list. They agree only while nothing has connected or disconnected --
-     * which is exactly when it matters least. Getting this wrong does not
-     * fail quietly: it bridges A DIFFERENT DEVICE. */
-    const int index = s_ctm_devs[row].index;
-    /* ⭐ Remember what we asked for, so the row can grey until it happens. */
-    s_ctm_pending_index = index;
-    s_ctm_pending_want = !s_ctm_devs[row].plugged;
+static void ctm_set_pending(const device_group_t *g, bool want) {
+    snprintf(s_ctm_pending_group, sizeof s_ctm_pending_group, "%s", s_ctm_devs[g->part[0]].group);
+    s_ctm_pending_want = want;
     s_ctm_pending_until = lv_tick_get() + CTM_PENDING_MS;
-    if (s_ctm_devs[row].plugged) {
-        ctm_bridge_unplug_index(index);
-        ctm_request_refresh();
+    if (s_ctm_pending_timer == NULL) {
+        s_ctm_pending_timer = lv_timer_create(ctm_pending_watch_cb, CTM_PENDING_POLL_MS, NULL);
+    }
+}
+
+/* ⓘ Cheap on purpose: a refresh re-enumerates, which costs about a quarter of a
+ * second with fourteen parts attached (T-182), so this asks every 400 ms while
+ * something is in flight and never otherwise. */
+static void ctm_pending_watch_cb(lv_timer_t *t) {
+    LV_UNUSED(t);
+    if (s_ctm_panel == NULL) {
+        ctm_pending_watch_stop();
         return;
     }
-    /* ⭐⭐ ASK THE GESTURE TO DO IT, rather than plugging from here.
-     *
-     * Plugging directly diverged from the chord in ways that were invisible
-     * until they bit: the emulated pad was never retired, so the host saw the
-     * controller twice; the watcher did not know it owned the bridge, so it
-     * never restored anything afterwards; and releasing from the panel then
-     * skipped the sequence that ends a bridge properly, which over Bluetooth
-     * looked like the controller powering itself off.
-     *
-     * ⭐ Asking means there is one implementation and the two cannot drift.
-     *
-     * ⚠️ A keyboard or a mouse is not an SDL controller and has no gesture path
-     * to borrow, so the direct plug stays as the fallback -- it is what those
-     * devices have always used, and they have none of the problems above
-     * because nothing emulates them in the first place. */
+    const bool done = s_ctm_pending_group[0] == '\0' ||
+                      lv_tick_get() > s_ctm_pending_until;
+    ctm_request_refresh();      /* ⭐ Always one more, so the last state is drawn. */
+    if (done) {
+        ctm_pending_watch_stop();
+    }
+}
+/* Bridge every part of the device on this row that is not bridged already:
+ * all of a BASIC device, the rest of a PARTIAL one. */
+static void ctm_bridge_device(int row) {
+    if (row < 0 || row >= s_ctm_ngroup) {
+        return;
+    }
+    const device_group_t *g = &s_ctm_groups[row];
+    if (g->plugged >= g->part_count) {
+        return;
+    }
     /* ⭐ Refuse the press rather than letting it fail. ⛔ With the server
      * offline a bridge cannot work, and attempting it answers with a refusal --
      * red flashes and a buzz, which look exactly like a real failure. ⓘ The row
@@ -309,8 +344,34 @@ static void ctm_toggle_device(int row) {
         ctm_flash_offline();
         return;
     }
-    if (!ctm_bridge_gesture_request_bridge(s_ctm_devs[row].node)) {
-        ctm_bridge_plug_index(index);
+    ctm_set_pending(g, true);
+    int asked = 0;
+    int failed = 0;
+    for (int p = 0; p < g->part_count; ++p) {
+        /* ⛔⛔ THE PART ITSELF GOES DOWN, CARRYING ITS OWN index, NEVER A ROW
+         * POSITION. ctm_bridge_dev_t.index is an opaque handle into the core's
+         * device table; a position is where the device happens to sit in OUR
+         * copy of the list. They agree only while nothing has connected or
+         * disconnected, and getting it wrong does not fail quietly: it bridges
+         * A DIFFERENT DEVICE. */
+        const ctm_bridge_dev_t *d = &s_ctm_devs[g->part[p]];
+        if (d->plugged) {
+            continue;
+        }
+        asked++;
+        /* ⭐⭐ THE ROUTE -- ask the gesture, or plug directly -- is decided in
+         * bridge_request.c, and the reasons are written there. ⓘ It moved out
+         * of this file on 2026-09-12 so Auto Bridge and the terminal control
+         * port take exactly the same one, instead of each keeping a copy that
+         * could drift. */
+        if (bridge_request_device(d) == BRIDGE_REQUEST_FAILED) {
+            failed++;
+        }
+    }
+    if (asked > 0 && failed == asked) {
+        /* ⓘ Every plug refused: nothing is on its way, so the row should not
+         * grey for six seconds waiting for it. */
+        s_ctm_pending_group[0] = '\0';
     }
     /* ⛔ ASKING IS NOT BRIDGING. The gesture takes over and the plug happens on
      * a later tick, so a refresh now reads the OLD state and the row still says
@@ -318,13 +379,44 @@ static void ctm_toggle_device(int row) {
      * for a second bridge on an already-bridged node -- which is what produced
      * a rumble and a tone on the SECOND press.
      *
-     * ⭐ So: refresh now for anything that finished immediately, and once more
-     * shortly after for the bridge that is still on its way. Two refreshes
-     * rather than a timer, because a timer would enumerate on every tick and
-     * enumeration is the expensive thing here. */
+     * ⭐ So: refresh now for anything that finished immediately, and let the
+     * pending watcher started by ctm_set_pending look again every 400 ms until
+     * the row lands. ⛔ It used to be ONE look 1200 ms later, which is less
+     * than a gesture bridge takes, so the badge stayed a step behind. */
     ctm_request_refresh();
-    lv_timer_t *late = lv_timer_create(ctm_late_refresh_cb, 1200, NULL);
-    lv_timer_set_repeat_count(late, 1);
+}
+
+/* Release every bridged part of the device on this row, FULL or PARTIAL. */
+static void ctm_release_device(int row) {
+    if (row < 0 || row >= s_ctm_ngroup) {
+        return;
+    }
+    const device_group_t *g = &s_ctm_groups[row];
+    if (g->plugged == 0) {
+        return;
+    }
+    ctm_set_pending(g, false);
+    for (int p = 0; p < g->part_count; ++p) {
+        const ctm_bridge_dev_t *d = &s_ctm_devs[g->part[p]];
+        if (d->plugged) {
+            bridge_release_device(d);
+        }
+    }
+    ctm_request_refresh();
+}
+
+/* Select on a row (rhoquinn8217, 2026-09-14): a FULL device is released; a
+ * BASIC one is bridged, and a PARTIAL one has the rest of it bridged. */
+static void ctm_toggle_device(int row) {
+    if (row < 0 || row >= s_ctm_ngroup) {
+        return;
+    }
+    const device_group_t *g = &s_ctm_groups[row];
+    if (g->part_count > 0 && g->plugged == g->part_count) {
+        ctm_release_device(row);
+    } else {
+        ctm_bridge_device(row);
+    }
 }
 
 /* Release every bridged device, one at a time, the same way a row does.
@@ -351,17 +443,15 @@ static void ctm_toggle_device(int row) {
  * with several devices this is several bridges in a row. Acceptable while a
  * bridge is ~2 seconds; worth revisiting if that changes. */
 static void ctm_bridge_all(void) {
-    for (int i = 0; i < s_ctm_ndev; ++i) {
-        if (!s_ctm_devs[i].plugged) {
-            ctm_toggle_device(i);
-        }
+    for (int k = 0; k < s_ctm_ngroup; ++k) {
+        ctm_bridge_device(k);   /* skips a device already FULL */
     }
 }
 
 static void ctm_release_all(void) {
     for (int i = 0; i < s_ctm_ndev; ++i) {
         if (s_ctm_devs[i].plugged) {
-            ctm_bridge_unplug_index(s_ctm_devs[i].index);
+            bridge_release_device(&s_ctm_devs[i]);
         }
     }
 }
@@ -391,11 +481,11 @@ static lv_obj_t *ctm_nice_btn(lv_obj_t *parent, const char *text, lv_color_t bg)
  * made the crash possible. */
 static void ctm_dev_focus_cb(lv_event_t *e) {
     int row = (int) (intptr_t) lv_event_get_user_data(e);
-    if (row < 0 || row >= s_ctm_ndev) {
+    if (row < 0 || row >= s_ctm_ngroup) {
         return;
     }
     s_ctm_sel = row;
-    for (int i = 0; i < s_ctm_ndev; ++i) {
+    for (int i = 0; i < s_ctm_ngroup; ++i) {
         if (!s_ctm_dev_rows[i]) continue;
         if (i == row) lv_obj_add_state(s_ctm_dev_rows[i], LV_STATE_CHECKED);
         else          lv_obj_clear_state(s_ctm_dev_rows[i], LV_STATE_CHECKED);
@@ -449,7 +539,8 @@ static void ctm_nav_key_cb(lv_event_t *e) {
              *
              * ⛔ RIGHT IS NOW BRIDGE-ONLY, not a toggle. It used to release a
              * bridged device too, which contradicted the arrow the row shows --
-             * a bridged row offers only the back arrow.
+             * a bridged row offers only the back arrow. ⓘ On a PARTIAL device
+             * it bridges the parts that are not bridged (2026-09-14).
              *
              * ⭐⭐ ON THE ACTION BUTTONS -- row == -1 -- LEFT AND RIGHT MOVE
              * FOCUS INSTEAD. Bridge All and Release All sit SIDE BY SIDE, so
@@ -472,8 +563,8 @@ static void ctm_nav_key_cb(lv_event_t *e) {
                 break;
             }
             /* ⭐ The other half of the same idea: left brings a bridged device
-             * back. ⓘ It was not handled at all before, which is why the back
-             * arrow did nothing. */
+             * back, every part of it, FULL or PARTIAL. ⓘ It was not handled at
+             * all before, which is why the back arrow did nothing. */
             ctm_release_device(row);
             break;
         case LV_KEY_ESC:   ctm_request_close(); break;
@@ -521,9 +612,9 @@ static void ctm_close_key_cb(lv_event_t *e) {
     }
 }
 
-/* BASIC clicked means release, FULL clicked means bridge -- the same absolute
- * directions the Left and Right keys give, so a pointer and a d-pad say the
- * same thing. ⓘ Each refuses a press that would not change anything. */
+/* BASIC clicked means release, FULL or PARTIAL clicked means bridge -- the same
+ * absolute directions the Left and Right keys give, so a pointer and a d-pad say
+ * the same thing. ⓘ Each refuses a press that would not change anything. */
 static void ctm_badge_basic_cb(lv_event_t *e) {
     ctm_release_device((int) (intptr_t) lv_event_get_user_data(e));
 }
@@ -576,32 +667,13 @@ static lv_obj_t *ctm_make_badge(lv_obj_t *parent, const char *text, bool lit,
     return badge;
 }
 
-/* Short sidebar label: kind badge for known controllers, device name for HID. */
-static bool ctm_is(const ctm_bridge_dev_t *d, const char *vid, const char *pid) {
-    return strcmp(d->vid, vid) == 0 && strcmp(d->pid, pid) == 0;
-}
-
-static const char *ctm_dev_label(const ctm_bridge_dev_t *d) {
-    /* ⛔⛔ MATCHED ON VID/PID, NOT ON KIND, AND THAT IS NOT A STYLE CHOICE.
-     *
-     * ctm_bridge_dev_t declares `char kind[8]`. "ds5e_usb" is eight characters
-     * plus a terminator, so it is TRUNCATED to "ds5e_us" on the way in and
-     * matches nothing. A wired DualSense Edge therefore fell through to its raw
-     * system name -- "Sony Interactive Entertainment DualSense Edge Wireless
-     * Controller" -- while a wired DualSense worked, because "ds5_usb" is seven
-     * characters and fits exactly.
-     *
-     * ⭐ vid and pid are what the core matches on anyway, and they cannot be
-     * truncated. */
-    if (ctm_is(d, "054c", "0ce6")) return "DualSense";
-    if (ctm_is(d, "054c", "0df2")) return "DualSense Edge";
-    if (ctm_is(d, "054c", "09cc") || ctm_is(d, "054c", "05c4")) return "DualShock 4";
-    if (strcmp(d->kind, "puck") == 0) return "Steam Controller";
-    if (strcmp(d->kind, "xbox") == 0) return "Xbox Controller";
-    return d->name;
-}
-
-static lv_obj_t *ctm_make_dev_row(const ctm_bridge_dev_t *d, int idx) {
+/* ⓘ A device's name -- "DualSense" for a pad known by a shorter one, the USB
+ * maker and product for a device of several parts -- is decided in
+ * device_groups.c, so this row and the Auto Bridge window agree. The shorter
+ * names moved there from here on 2026-09-14. */
+static lv_obj_t *ctm_make_dev_row(const device_group_t *g, int idx) {
+    const bool state_full = g->part_count > 0 && g->plugged == g->part_count;
+    const bool state_partial = g->plugged > 0 && !state_full;
     lv_obj_t *row = lv_obj_create(s_ctm_sidebar);
     lv_obj_remove_style_all(row);
     lv_obj_set_size(row, LV_PCT(100), LV_SIZE_CONTENT);
@@ -697,11 +769,16 @@ static lv_obj_t *ctm_make_dev_row(const ctm_bridge_dev_t *d, int idx) {
         /* ⭐ "(1) DualSense" -- the number prepended rather than given a column
          * of its own. ⛔ A separate column was tried and wasted width the name
          * needed. ⓘ Anything without a player number just shows its name. */
-        const int player = ctm_bridge_gesture_player_for_node(d->node);
+        /* ⓘ A device's number is its first part's that has one: the pad half
+         * of a pad with a keyboard part. */
+        int player = -1;
+        for (int p = 0; p < g->part_count && player < 0; ++p) {
+            player = ctm_bridge_gesture_player_for_node(s_ctm_devs[g->part[p]].node);
+        }
         if (player >= 0 && player < 4) {
-            lv_label_set_text_fmt(name, "(%d) %s", player + 1, ctm_dev_label(d));
+            lv_label_set_text_fmt(name, "(%d) %s", player + 1, g->name);
         } else {
-            lv_label_set_text(name, ctm_dev_label(d));
+            lv_label_set_text(name, g->name);
         }
     }
     lv_label_set_long_mode(name, LV_LABEL_LONG_DOT);
@@ -748,14 +825,14 @@ static lv_obj_t *ctm_make_dev_row(const ctm_bridge_dev_t *d, int idx) {
      * with nothing at all gets a dash rather than an empty line, so every row
      * keeps the same height. Printed exactly as reported, never prettified. */
     lv_obj_t *mac = lv_label_create(namecol);
-    {
-        char addr[64];
-        if (ctm_bridge_gesture_mac_for_node(d->node, addr, sizeof addr)) {
-            lv_label_set_text(mac, addr);
-        } else {
-            lv_label_set_text(mac, d->mac[0] ? d->mac : "--");
-        }
-    }
+    /* ⭐⭐ THE SAME VALUE AS THE AUTO BRIDGE WINDOW'S CARD (rhoquinn8217,
+     * 2026-09-14): the MAC, the serial or "(no serial)", decided once in
+     * device_groups.c, so what this row shows is what a mark would match.
+     * ⭐ WITHOUT THE CARD'S TAG (rhoquinn8217, 2026-09-15): here the value
+     * alone, where "MAC: " and "serial: " cost a long serial its room; the
+     * card keeps them. ⭐ And cut short with dots rather than wrapped, as it
+     * already was: a long value must not grow the row. */
+    lv_label_set_text(mac, g->shown_value);
     lv_label_set_long_mode(mac, LV_LABEL_LONG_DOT);
     lv_obj_set_width(mac, LV_PCT(100));
     lv_obj_set_style_text_color(mac, CTM_COL_SUB, 0);
@@ -814,14 +891,23 @@ static lv_obj_t *ctm_make_dev_row(const ctm_bridge_dev_t *d, int idx) {
     lv_obj_set_style_pad_gap(badgerow, LV_DPX(8), 0);
     lv_obj_clear_flag(badgerow, LV_OBJ_FLAG_SCROLLABLE);
 
-    lv_obj_t *b_basic = ctm_make_badge(badgerow, "BASIC", !d->plugged,
+    /* ⭐ PARTIAL TAKES FULL'S PLACE, IN YELLOW (rhoquinn8217, 2026-09-14), when
+     * only some of a device's parts are bridged -- one released on its own
+     * somehow. BASIC is then unlit: the device is not on the stream's path
+     * either. */
+    const bool basic_lit = g->plugged == 0;
+    lv_obj_t *b_basic = ctm_make_badge(badgerow, "BASIC", basic_lit,
                                        lv_color_hex(0x4a5866), CTM_COL_SUB,
                                        ctm_badge_basic_cb, idx);
-    lv_obj_t *b_full  = ctm_make_badge(badgerow, "FULL", d->plugged,
-                                       CTM_COL_FULL, CTM_COL_TXT,
-                                       ctm_badge_full_cb, idx);
-    if (idx >= 0 && idx < 16) {
-        s_ctm_dev_offbadge[idx] = d->plugged ? b_basic : b_full;
+    lv_obj_t *b_full  = state_partial
+                        ? ctm_make_badge(badgerow, "PARTIAL", true,
+                                         CTM_COL_PARTIAL, CTM_COL_ON_PARTIAL,
+                                         ctm_badge_full_cb, idx)
+                        : ctm_make_badge(badgerow, "FULL", state_full,
+                                         CTM_COL_FULL, CTM_COL_TXT,
+                                         ctm_badge_full_cb, idx);
+    if (idx >= 0 && idx < DEVICE_GROUPS_MAX) {
+        s_ctm_dev_offbadge[idx] = basic_lit ? b_full : b_basic;
     }
 
     /* ⭐ CENTRED UNDER THE BADGES (rhoquinn8217, 2026-09-08), by living inside
@@ -868,7 +954,9 @@ static lv_obj_t *ctm_make_dev_row(const ctm_bridge_dev_t *d, int idx) {
      * box -- the small theme font on these rows has no symbol range. */
     /* ⭐ Shorter (rhoquinn8217, 2026-09-08): the badges now say the state and the
      * arrow says the direction, so "Click to" was carrying nothing. */
-    lv_label_set_text(actlbl, d->plugged ? "< Release" : "Bridge >");
+    /* ⓘ A PARTIAL device offers both: the rest can be bridged, or all of it
+     * released. */
+    lv_label_set_text(actlbl, state_full ? "< Release" : state_partial ? "< Release  Bridge >" : "Bridge >");
     lv_obj_set_style_text_color(actlbl, CTM_COL_TXT, 0);
     lv_obj_set_style_text_font(actlbl, lv_theme_get_font_small(act), 0);
     lv_obj_set_style_text_color(actlbl, CTM_COL_SUB, 0);
@@ -880,13 +968,15 @@ static lv_obj_t *ctm_make_dev_row(const ctm_bridge_dev_t *d, int idx) {
      * bridged, and a light touch of grey was invisible on a television. ⓘ A
      * BRIDGED row is left alone: releasing it is a teardown on this side and
      * needs no host, so it is still worth pressing. */
-    if (s_ctm_server_known && !s_ctm_server_online && !d->plugged) {
+    if (s_ctm_server_known && !s_ctm_server_online && g->plugged == 0) {
         lv_obj_set_style_opa(row, LV_OPA_30, 0);
     }
 
-    if (s_ctm_pending_index == d->index) {
-        if (d->plugged == s_ctm_pending_want || lv_tick_get() > s_ctm_pending_until) {
-            s_ctm_pending_index = -1;
+    if (s_ctm_pending_group[0] != '\0' &&
+        strcmp(s_ctm_pending_group, s_ctm_devs[g->part[0]].group) == 0) {
+        const bool landed = s_ctm_pending_want ? state_full : (g->plugged == 0);
+        if (landed || lv_tick_get() > s_ctm_pending_until) {
+            s_ctm_pending_group[0] = '\0';
         } else {
             lv_obj_set_style_opa(row, LV_OPA_50, 0);
         }
@@ -929,14 +1019,15 @@ static void ctm_panel_refresh(void) {
     if (!s_ctm_panel) {
         return;
     }
-    s_ctm_ndev = ctm_bridge_list(s_ctm_devs, 16);
+    s_ctm_ndev = ctm_bridge_list(s_ctm_devs, DEVICE_PARTS_MAX);
+    s_ctm_ngroup = device_groups_build(s_ctm_devs, s_ctm_ndev, s_ctm_groups, DEVICE_GROUPS_MAX);
 
     lv_group_remove_all_objs(s_ctm_nav_group);
     /* The close corner lives in the header, which is not rebuilt, so it goes
      * back into the group first: Up from the first row reaches it. */
     if (s_ctm_close_btn) lv_group_add_obj(s_ctm_nav_group, s_ctm_close_btn);
     lv_obj_clean(s_ctm_sidebar);
-    for (int i = 0; i < 16; ++i) {
+    for (int i = 0; i < DEVICE_GROUPS_MAX; ++i) {
         s_ctm_dev_rows[i] = NULL;
         s_ctm_dev_offbadge[i] = NULL;
     }
@@ -1014,69 +1105,88 @@ static void ctm_panel_refresh(void) {
         }
     }
 
-    if (s_ctm_ndev == 0) {
-        lv_obj_t *l = lv_label_create(s_ctm_sidebar);
-        lv_label_set_text(l, "No controllers detected.");
-        lv_obj_set_style_text_color(l, CTM_COL_SUB, 0);
-        lv_label_set_long_mode(l, LV_LABEL_LONG_WRAP);
-        lv_obj_set_width(l, LV_PCT(100));
-    }
-    /* ⏸ NO COLLAPSING OF DUPLICATE HID INTERFACES -- tried 2026-08-17 and
-     * REVERTED the same evening because it emptied the list entirely.
+    /* ⭐⭐ ONE ROW PER DEVICE (rhoquinn8217, 2026-09-14), every part inside it.
      *
-     * ⚠️ The observation behind it is real: one Razer Orochi appears three
-     * times and a wireless receiver adds more, because a modern mouse presents
-     * several HID interfaces and each is its own node. ⛔ But we do not yet know
-     * what those interfaces ARE, or which one a user would want bridged, and
-     * collapsing them was a guess dressed as a fix.
-     *
-     * ➡️ Understand the interfaces first. Then decide whether to merge, to
-     * label, or to leave them alone. */
-    for (int i = 0; i < s_ctm_ndev; ++i) {
-        s_ctm_dev_rows[i] = ctm_make_dev_row(&s_ctm_devs[i], i);
+     * ⓘ NOT the collapse tried 2026-08-17 and reverted the same evening, which
+     * merged rows that merely looked alike and emptied the list. What those
+     * interfaces are was then worked out: the parts of one USB device share its
+     * physical path, which no other device has, even an identical one in the
+     * next port. So the core groups parts by that path, and a row bridges them
+     * together. */
+    for (int i = 0; i < s_ctm_ngroup; ++i) {
+        s_ctm_dev_rows[i] = ctm_make_dev_row(&s_ctm_groups[i], i);
     }
 
     /* ⭐ Say so when there is nothing, rather than offering to bridge it.
-     * "Bridge all" and "Release all" over an empty list imply devices exist. */
-    if (s_ctm_ndev == 0) {
+     * "Bridge all" and "Release all" over an empty list imply devices exist.
+     * ⓘ Said once: a second "No controllers detected." used to sit above this. */
+    if (s_ctm_ngroup == 0) {
         lv_obj_t *none = lv_label_create(s_ctm_sidebar);
         lv_label_set_text(none, "No devices connected");
         lv_obj_set_style_text_color(none, CTM_COL_SUB, 0);
         lv_obj_set_style_pad_all(none, LV_DPX(8), 0);
     }
-    lv_obj_clean(s_ctm_actions);
-    if (s_ctm_ndev > 0) {
-        /* ⭐⭐ WITH THE SERVER OFFLINE, RELEASE ALL IS THE ONLY THING THAT HELPS.
-         *
-         * ⛔ Bridging cannot work, and trying it gives a refusal -- red flashes
-         * and a buzz, indistinguishable from a real failure. ⭐ Releasing is a
-         * teardown on this side and needs no host at all.
-         *
-         * ⚠️ AND IT IS WHAT THE TV NEEDS ANYWAY. Losing the listener does not
-         * currently tear anything down: the session loops back and retries
-         * forever, so a controller stays claimed and bridged, waiting for a host
-         * that is not coming. ⓘ rhoquinn8217, 2026-08-20: "when the listener is down,
-         * that's what the TV needs to do anyway." ➡️ T-127 makes it automatic;
-         * until then this is the way out. */
-        lv_obj_t *plug_all =
-                ctm_make_action("Bridge All", ctm_act_plugall_cb, CTM_COL_FULL);
-        if (plug_all && s_ctm_server_known && !s_ctm_server_online) {
-            /* ⛔ LV_STATE_DISABLED alone was barely visible -- it only shifts
-             * the theme's own opacity a little. ⭐ Paint it grey and fade it. */
-            lv_obj_add_state(plug_all, LV_STATE_DISABLED);
-            lv_obj_set_style_bg_color(plug_all, lv_color_hex(0x3a4552), 0);
-            lv_obj_set_style_opa(plug_all, LV_OPA_40, 0);
+    /* ⛔⛔ NOT ON EVERY REFRESH -- THEY FLICKERED (rhoquinn8217, 2026-09-15:
+     * "the Bridge all and Release All buttons flicker while a controller is
+     * bridging").
+     *
+     * ⚠️ The rows are rebuilt on every refresh because each one's state can
+     * change, and since a bridge in flight now refreshes every 400 ms until it
+     * lands, rebuilding these two buttons alongside them made them blink. They
+     * do not depend on any row: only on whether there is anything in the list
+     * at all, and on whether the server can be reached.
+     *
+     * ⓘ So they are remembered, and only the NAV GROUP is rebuilt around them
+     * -- the refresh empties that group at the top, so they have to go back in
+     * after the rows to keep the walking order. */
+    const uint32_t actions_sig = (s_ctm_ngroup > 0 ? 1u : 0u) |
+                                 (s_ctm_server_known ? 2u : 0u) |
+                                 (s_ctm_server_online ? 4u : 0u);
+    const bool actions_stale = actions_sig != s_ctm_actions_sig ||
+                               (s_ctm_ngroup > 0 && s_ctm_btn_plugall == NULL);
+    if (actions_stale) {
+        s_ctm_actions_sig = actions_sig;
+        s_ctm_btn_plugall = NULL;
+        s_ctm_btn_unplugall = NULL;
+        lv_obj_clean(s_ctm_actions);
+        if (s_ctm_ngroup > 0) {
+            /* ⭐⭐ WITH THE SERVER OFFLINE, RELEASE ALL IS THE ONLY THING THAT HELPS.
+             *
+             * ⛔ Bridging cannot work, and trying it gives a refusal -- red flashes
+             * and a buzz, indistinguishable from a real failure. ⭐ Releasing is a
+             * teardown on this side and needs no host at all.
+             *
+             * ⚠️ AND IT IS WHAT THE TV NEEDS ANYWAY. Losing the listener does not
+             * currently tear anything down: the session loops back and retries
+             * forever, so a controller stays claimed and bridged, waiting for a host
+             * that is not coming. ⓘ rhoquinn8217, 2026-08-20: "when the listener is down,
+             * that's what the TV needs to do anyway." ➡️ T-127 makes it automatic;
+             * until then this is the way out. */
+            s_ctm_btn_plugall =
+                    ctm_make_action("Bridge All", ctm_act_plugall_cb, CTM_COL_FULL);
+            if (s_ctm_btn_plugall && s_ctm_server_known && !s_ctm_server_online) {
+                /* ⛔ LV_STATE_DISABLED alone was barely visible -- it only shifts
+                 * the theme's own opacity a little. ⭐ Paint it grey and fade it. */
+                lv_obj_add_state(s_ctm_btn_plugall, LV_STATE_DISABLED);
+                lv_obj_set_style_bg_color(s_ctm_btn_plugall, lv_color_hex(0x3a4552), 0);
+                lv_obj_set_style_opa(s_ctm_btn_plugall, LV_OPA_40, 0);
+            }
+            /* ⭐ RED, because it takes every device back at once. ⓘ It was blue-grey, which
+             * read as the neutral of the pair -- but Bridge All affects one thing at a
+             * time in practice and this affects all of them, so it is the one worth
+             * hesitating over. ⚠️ It stays available while the server is offline: that
+             * is exactly when it is needed. */
+            s_ctm_btn_unplugall = ctm_make_action(
+                    "Release All", ctm_act_unplugall_cb, lv_palette_darken(LV_PALETTE_RED, 2));
         }
-        /* ⭐ RED, because it takes every device back at once. ⓘ It was blue-grey, which
-         * read as the neutral of the pair -- but Bridge All affects one thing at a
-         * time in practice and this affects all of them, so it is the one worth
-         * hesitating over. ⚠️ It stays available while the server is offline: that
-         * is exactly when it is needed. */
-        ctm_make_action("Release All", ctm_act_unplugall_cb, lv_palette_darken(LV_PALETTE_RED, 2));
+    } else {
+        /* Kept as they are: back into the walking order behind the rows. */
+        if (s_ctm_btn_plugall) lv_group_add_obj(s_ctm_nav_group, s_ctm_btn_plugall);
+        if (s_ctm_btn_unplugall) lv_group_add_obj(s_ctm_nav_group, s_ctm_btn_unplugall);
     }
 
-    if (s_ctm_sel >= s_ctm_ndev) {
-        s_ctm_sel = s_ctm_ndev > 0 ? s_ctm_ndev - 1 : 0;
+    if (s_ctm_sel >= s_ctm_ngroup) {
+        s_ctm_sel = s_ctm_ngroup > 0 ? s_ctm_ngroup - 1 : 0;
     }
 
     /* ⭐ ONE GROUP NOW. There is no second pane to hand focus to, so a refresh
@@ -1084,7 +1194,7 @@ static void ctm_panel_refresh(void) {
      * branch here used to guard against. */
     {
         app_input_set_group(&s_ctm_owner->global->ui.input, s_ctm_nav_group);
-        if (s_ctm_ndev > 0 && s_ctm_dev_rows[s_ctm_sel]) {
+        if (s_ctm_ngroup > 0 && s_ctm_dev_rows[s_ctm_sel]) {
             lv_group_focus_obj(s_ctm_dev_rows[s_ctm_sel]);
             lv_obj_add_state(s_ctm_dev_rows[s_ctm_sel], LV_STATE_FOCUS_KEY);
         }
@@ -1101,6 +1211,9 @@ static void ctm_close_panel(void) {
     if (!s_ctm_panel) {
         return;
     }
+    /* ⓘ Nothing to watch for once the rows are gone; the watcher checks the
+     * panel too, but stopping here means it never runs a refresh nobody sees. */
+    ctm_pending_watch_stop();
     /* Hide NOW (same-frame UI change) and move input back to the overlay; the old
      * group stays alive until the async teardown, so the in-flight keypad event
      * that triggered this close keeps a valid group pointer. */
@@ -1113,6 +1226,9 @@ static void ctm_close_panel(void) {
     s_ctm_panel = NULL;
     s_ctm_sidebar = NULL;
     s_ctm_actions = NULL;
+    s_ctm_btn_plugall = NULL;
+    s_ctm_btn_unplugall = NULL;
+    s_ctm_actions_sig = 0xffffffffu;
     s_ctm_status_lbl = NULL;
     s_ctm_state_lbl  = NULL;
     s_ctm_nav_group = NULL;
@@ -1125,14 +1241,6 @@ static void ctm_request_close(void) { ctm_close_panel(); }
 
 static void ctm_refresh_async(void *p) { LV_UNUSED(p); ctm_panel_refresh(); }
 static void ctm_request_refresh(void)  { lv_async_call(ctm_refresh_async, NULL); }
-
-/* One-shot, for a bridge that completes after the press. See ctm_toggle_device. */
-static void ctm_late_refresh_cb(lv_timer_t *t) {
-    LV_UNUSED(t);
-    if (s_ctm_panel) {
-        ctm_request_refresh();
-    }
-}
 
 static void open_ctm_panel(lv_event_t *event) {
     /* The CTM button has LV_OBJ_FLAG_EVENT_BUBBLE; stop the CLICKED here so it
@@ -1150,10 +1258,17 @@ static void open_ctm_panel(lv_event_t *event) {
     s_ctm_nav_group = lv_group_create();
     lv_group_set_wrap(s_ctm_nav_group, false);
 
-    /* Full-screen dim backdrop on the act screen (detached_root) so it does NOT
-     * flip the UI into key/gamepad mode the way a modal does (that hid the webOS
-     * cursor). Clickable so stray clicks don't dismiss the streaming overlay. */
-    lv_obj_t *panel = lv_obj_create(controller->detached_root);
+    /* A full-screen backdrop, clickable so stray clicks don't dismiss the
+     * streaming overlay, and deliberately NOT a modal: a modal flips the UI into
+     * key/gamepad mode, which hid the webOS cursor.
+     *
+     * ⛔ ON THE TOP LAYER, NOT THE STREAM SCREEN (rhoquinn8217, 2026-09-14): the
+     * pinned performance stats move to lv_layer_top(), which is drawn over
+     * everything on the screen, so a panel on detached_root sat BEHIND them and
+     * could not be read. The soft keyboard already lives on the top layer during
+     * a stream. ⚠️ The top layer is not deleted with the stream screen, so
+     * ctm_panel_on_owner_deleted() deletes the panel itself. */
+    lv_obj_t *panel = lv_obj_create(lv_layer_top());
     s_ctm_panel = panel;
     lv_obj_remove_style_all(panel);
     lv_obj_set_size(panel, LV_PCT(100), LV_PCT(100));
@@ -1374,6 +1489,9 @@ void ctm_panel_open(lv_event_t *event) {
  * indev that points at them. */
 void ctm_panel_on_owner_deleted(streaming_controller_t *controller) {
     if (s_ctm_owner == controller) {
+        /* ⚠️ The panel lives on the top layer, which outlives the stream screen:
+         * left alone it would stay drawn over the launcher. */
+        if (s_ctm_panel)        { lv_obj_del(s_ctm_panel); }
         if (s_ctm_nav_group)    { lv_group_del(s_ctm_nav_group);    s_ctm_nav_group = NULL; }
         /* ⛔ The online timer must go with the labels it writes to, or it fires
          * against freed objects. ⓘ The flash timer deletes itself when it runs
@@ -1384,13 +1502,16 @@ void ctm_panel_on_owner_deleted(streaming_controller_t *controller) {
         s_ctm_panel = NULL;
         s_ctm_sidebar = NULL;
         s_ctm_actions = NULL;
+        s_ctm_btn_plugall = NULL;
+        s_ctm_btn_unplugall = NULL;
+        s_ctm_actions_sig = 0xffffffffu;
         s_ctm_status_lbl = NULL;
         s_ctm_state_lbl  = NULL;
         s_ctm_owner = NULL;
     }
-    /* Cancel any in-flight panel teardown; the dead panel is freed with the
-     * fragment's detached_root, but its groups must be released here. */
+    /* Cancel any in-flight panel teardown and do it here: a closed panel waiting
+     * to be freed is on the top layer too, so nothing else will free it. */
     lv_async_call_cancel(ctm_teardown_async, NULL);
+    if (s_ctm_dead_panel)  { lv_obj_del(s_ctm_dead_panel);    s_ctm_dead_panel = NULL; }
     if (s_ctm_dead_nav)    { lv_group_del(s_ctm_dead_nav);    s_ctm_dead_nav = NULL; }
-    s_ctm_dead_panel = NULL;
 }

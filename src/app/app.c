@@ -11,6 +11,7 @@
 #include "input/ctm_bridge_gesture.h"
 #endif
 #include "config.h"
+#include "app_version.h"
 
 #include "logging.h"
 #include "logging_ext_sdl.h"
@@ -31,6 +32,7 @@
 #include "stream/embed_wrapper.h"
 #include "profile/profile_manager.h"
 #include "util/log_overlay.h"
+#include "control_server.h"
 
 PCONFIGURATION app_configuration = NULL;
 
@@ -124,11 +126,16 @@ int app_init(app_t *app, app_settings_loader *settings_loader, int argc, char *a
 
     global = app;
 
+    /* ⓘ Once the UI and the bus are up, because every command runs through
+     * them. A no-op unless built with AURORA_TERMINAL_CONTROL. */
+    control_server_start(app);
+
     SS4S_PostInit(argc, argv);
     return 0;
 }
 
 void app_deinit(app_t *app) {
+    control_server_stop();
     app_bus_drain();
     app_session_destroy(app);
     app_ui_close(&app->ui);

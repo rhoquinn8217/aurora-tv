@@ -32,6 +32,8 @@
 #include "app_input.h"
 #include "input_gamepad.h"
 #include "logging.h"
+#include "util/bus.h"
+#include "util/user_event.h"
 
 #include <dirent.h>
 #include <fcntl.h>
@@ -51,11 +53,17 @@
  * bridge is the thing to watch for. */
 #define GESTURE_PLUG_HOLD_MS 1000
 
-/* The app's own log is not readable on webOS -- there is no journal and no
- * /var/log -- so gesture activity goes to a file of its own, beside the ones
- * the bridge core writes. Without it a failure here is completely silent,
- * which cost a build cycle to learn. */
-#define GESTURE_LOG "/tmp/ctm-gesture.log"
+/* Gesture activity goes to a file of its own, beside the ones the bridge core
+ * writes, so a gesture reads end to end in one place. Without it a failure here
+ * is completely silent, which cost a build cycle to learn.
+ *
+ * ⛔ NOT /tmp. webOS 26 made /tmp traverse-only, so on the U5s this file was
+ * never written at all. The core resolves its own logs to the app's logs
+ * directory, with /tmp kept only where that directory is not available, and
+ * this now asks it for the same file. Declared here rather than by including
+ * the core's state header, the way controller_common.c does. */
+#define GESTURE_LOG "ctm-gesture.log"
+FILE *ctm_log_open(const char *name, const char *mode);
 
 /* Every line carries the time it was written.
  *
@@ -66,7 +74,7 @@
  *
  * Same clock the bridge core uses, so lines from both interleave correctly. */
 static void gesture_log(const char *fmt, ...) {
-    FILE *f = fopen(GESTURE_LOG, "a");
+    FILE *f = ctm_log_open(GESTURE_LOG, "a");
     if (!f) {
         return;
     }
@@ -124,7 +132,13 @@ typedef struct {
     uint8_t buzz_left;   /* half-steps of the refusal rumble still to run */
     uint32_t buzz_next;  /* SDL ticks when the next buzz half-step is due */
     uint32_t flash_next; /* SDL ticks when the next half-step is due */
+    /* SDL's player index when this side last painted the player colour, so a
+     * number that arrives or changes later is painted too. PAINTED_NEVER until
+     * the first paint. */
+    int painted_slot;
 } watched_t;
+
+#define PAINTED_NEVER (-100)
 
 #ifndef HIDIOCGFEATURE
 #define HIDIOCGFEATURE(len) _IOC(_IOC_READ | _IOC_WRITE, 'H', 0x07, len)
@@ -165,6 +179,14 @@ static void request_full_report(const char *dev_path) {
     gesture_log("full-report request on %s: %s", dev_path, ok ? "sent" : "failed");
 }
 
+/* A DualSense or a DualSense Edge, by its USB ids: the same rule the
+ * listener's microphone guard uses, so the two sides agree on what counts. */
+static bool controller_is_dualsense(SDL_GameController *controller) {
+    const Uint16 vendor = SDL_GameControllerGetVendor(controller);
+    const Uint16 product = SDL_GameControllerGetProduct(controller);
+    return vendor == 0x054c && (product == 0x0ce6 || product == 0x0df2);
+}
+
 static watched_t s_watched[MAX_WATCHED];
 
 /* Is this controller already being watched? Asked before watched_for(), which
@@ -191,6 +213,7 @@ static watched_t *watched_for(SDL_JoystickID id) {
         free_slot->id = id;
         free_slot->since = 0;
         free_slot->fired = false;
+        free_slot->painted_slot = PAINTED_NEVER;
     }
     return free_slot;
 }
@@ -414,16 +437,11 @@ static bool gesture_held(SDL_GameController *controller) {
  * bridge. Wired is untouched: it works, it passes acceptance, and a change it
  * can reach is a change that can break it.
  *
- * ⚠️ ALL 0: a Bluetooth controller bridges from the PANEL BUTTON and nothing
- * else -- no chord, no light, no pulse, no tone. That build answers one
- * question: is the bridge itself fast.
- *
- * ⓘ Nothing is deleted. The code behind each gate encodes a fortnight of
- * hardware findings, each learnt by breaking something. */
-#define BT_LAYER_GESTURE  1
-#define BT_LAYER_LIGHT    1
-#define BT_LAYER_RUMBLE   1
-#define BT_LAYER_CORE_SIGNAL 1
+ * ⓘ THE REBUILD FINISHED WITH EVERY LAYER BACK ON, and the four switches that
+ * gated them (BT_LAYER_GESTURE, _LIGHT, _RUMBLE, _CORE_SIGNAL, all pinned to 1)
+ * were removed with the branches that only ran at 0 (2026-09-15). The code
+ * that remains is the layers themselves; the hardware findings behind them are
+ * in the comments where each one acts. */
 
 /* The refusal rumble: three short sharp bursts.
  *
@@ -485,6 +503,34 @@ static bool gesture_held(SDL_GameController *controller) {
 #define OK_PULSE_MS       520   /* doubled; see the refusal timings below */
 #define OK_PULSE_STRENGTH 0x7FFF   /* softer than a refusal: this is good news */
 
+
+/* ⭐⭐ THE HANDBACK, FOR A PAD THAT HAS NOTHING ELSE TO SAY IT WITH
+ * (rhoquinn8217, 2026-09-15: "we need a rumble for xbox controller on
+ * release").
+ *
+ * ⛔ A release is announced by the core, in sound and haptics, and by this side
+ * putting the player colour back. An Xbox pad has no lightbar, no speaker and
+ * no core signal of its own, so it was handed back in complete silence: the
+ * only way to know it had worked was to look at the panel.
+ *
+ * ⓘ ONE pulse, because this one is good news. Three is the refusal, and the
+ * difference is a signal that stops against one that insists -- see
+ * BUZZ_BURSTS. */
+#define BYE_PULSE_MS       220
+#define BYE_PULSE_STRENGTH 0xAFFF
+/* ⭐⭐ THREE FOR A REFUSAL, ONE FOR EVERYTHING ELSE (rhoquinn8217, 2026-09-15,
+ * after feeling both): "We should 3 for the refusal as you had before. It odd
+ * enough that it will signal that something is wrong, while a 1 buzz means ok
+ * and we will keep for bridge and release."
+ *
+ * ⛔ IT WAS BRIEFLY ONE, and that is worth knowing rather than re-deciding: the
+ * theory was that a count cannot be felt and told apart, so every signal should
+ * buzz once. Felt on a pad, the opposite is true of the ODD one -- a single
+ * pulse reads as "done", and a rumble that keeps going reads as "wrong" without
+ * anyone counting it. ➡️ So the count is not a number to read. It is the
+ * difference between a signal that stops and one that insists.
+ *
+ * ⓘ A bridge and a release each stay at one pulse. */
 #define BUZZ_BURSTS       3
 /* Doubled for the same reason as the flashes above -- long enough to be
  * noticed and then looked at, rather than felt and missed. */
@@ -575,6 +621,14 @@ static void paint_player_colour(SDL_GameController *controller) {
                 player_rgb[slot][1], player_rgb[slot][2]);
 }
 
+/* The player colour, remembered against the index it was painted for. */
+static void paint_player_colour_for(watched_t *w, SDL_GameController *controller) {
+    paint_player_colour(controller);
+    if (w) {
+        w->painted_slot = SDL_GameControllerGetPlayerIndex(controller);
+    }
+}
+
 /* A ramp that rises and falls: bright in the middle, dark at both ends, so it
  * reads as a breath rather than a blink. For a signal that ends on a colour of
  * its own, where the last step is not the thing being seen.
@@ -622,9 +676,16 @@ static bool sys_input_dir_for_event(const char *dev_path, char *out, size_t out_
     return access(out, F_OK) == 0;
 }
 
-/* Walk up from the input device to the USB interface, then find the hidraw node
- * underneath it. The interface is the input device's parent's parent, matching
- * the layout confirmed on hardware. */
+/* From an evdev node to the hidraw node of the same HID device.
+ *
+ * ⛔ THIS USED TO WALK ONE LEVEL SHORT. /sys/class/input/eventN/device is the
+ * INPUT device (inputM); its parent is only the "input" folder, which holds no
+ * hidraw at any depth. So no controller SDL read through evdev was ever joined
+ * to its row, and each fell back to a plain plug that retired nothing.
+ * ➡️ The input device's own `device` is the HID device, whose hidraw directory
+ * names the node: the same walk the core makes from inputM. Read off the U5s
+ * 2026-09-13: event9/device/device/hidraw holds hidraw0 (the DS4) and event13's
+ * holds hidraw1 (the KMA2 keyboard). */
 static bool hidraw_node_for_event(const char *dev_path, char *out, size_t out_len) {
     /* On webOS, SDL opens the controller through hidraw and hands that node
      * straight back -- which is the thing we are looking for. Measured on C3,
@@ -641,45 +702,59 @@ static bool hidraw_node_for_event(const char *dev_path, char *out, size_t out_le
         return false;
     }
 
-    char iface[PATH_MAX];
-    snprintf(iface, sizeof(iface), "%s/..", sys_input);
-
-    char resolved[PATH_MAX];
-    if (!realpath(iface, resolved)) {
-        return false;
-    }
-
-    /* The interface directory holds one 0003:VVVV:PPPP.NNNN entry per HID
-     * device; the hidraw node lives inside it. The trailing number changes on
-     * every re-enumeration, so it is searched for rather than remembered. */
-    DIR *d = opendir(resolved);
-    if (!d) {
-        return false;
+    /* ⓘ Followed through the links rather than resolved with realpath, which is
+     * flaky inside the dev-mode jail. The hidraw number changes on every
+     * re-enumeration, so it is read rather than remembered. */
+    char hidraw_dir[PATH_MAX];
+    snprintf(hidraw_dir, sizeof(hidraw_dir), "%s/device/hidraw", sys_input);
+    DIR *hd = opendir(hidraw_dir);
+    if (!hd) {
+        return false;   /* no hidraw: an xpad pad, for one -- see below */
     }
     bool found = false;
-    struct dirent *ent;
-    while (!found && (ent = readdir(d)) != NULL) {
-        if (ent->d_name[0] == '.') {
-            continue;
+    struct dirent *hent;
+    while ((hent = readdir(hd)) != NULL) {
+        if (strncmp(hent->d_name, "hidraw", 6) == 0) {
+            snprintf(out, out_len, "/dev/%s", hent->d_name);
+            found = true;
+            break;
         }
-        char hidraw_dir[PATH_MAX];
-        snprintf(hidraw_dir, sizeof(hidraw_dir), "%s/%s/hidraw", resolved, ent->d_name);
-        DIR *hd = opendir(hidraw_dir);
-        if (!hd) {
-            continue;
-        }
-        struct dirent *hent;
-        while ((hent = readdir(hd)) != NULL) {
-            if (strncmp(hent->d_name, "hidraw", 6) == 0) {
-                snprintf(out, out_len, "/dev/%s", hent->d_name);
-                found = true;
-                break;
-            }
-        }
-        closedir(hd);
     }
-    closedir(d);
+    closedir(hd);
     return found;
+}
+
+/* ⭐⭐ IS THE SDL CONTROLLER AT dev_path THE DEVICE BEHIND THE ROW node?
+ *
+ * The one join, used by the bridge request, the player lookup and the MAC
+ * lookup, so the three cannot disagree about which controller a row is.
+ *
+ * 1. The same string: a DualSense, which SDL opens through hidraw.
+ * 2. The hidraw node of the evdev node SDL reports.
+ * 3. ⭐ A row that is itself an input node. A wired Xbox pad has no hidraw at
+ *    all: its row is /dev/input/jsN and SDL reports its sibling eventN. Both
+ *    are children of one input device, and eventN's `device` link IS that
+ *    device, so the pair is the same pad exactly when
+ *    /sys/class/input/eventN/device/jsN exists. Read off the U5s 2026-09-13:
+ *    event12/device/js7 exists (the Series pad), event12/device/js8 does not
+ *    (that is the One S pad's), and event17/device/js8 does. */
+static bool controller_path_is_node(const char *dev_path, const char *node) {
+    if (!dev_path || !dev_path[0] || !node || !node[0]) {
+        return false;
+    }
+    if (strcmp(dev_path, node) == 0) {
+        return true;
+    }
+    char found[64];
+    if (hidraw_node_for_event(dev_path, found, sizeof(found))) {
+        return strcmp(found, node) == 0;
+    }
+    if (strncmp(node, "/dev/input/", 11) != 0 || strncmp(dev_path, "/dev/input/event", 16) != 0) {
+        return false;
+    }
+    char sibling[PATH_MAX];
+    snprintf(sibling, sizeof(sibling), "/sys/class/input/%s/device/%s", dev_path + 11, node + 11);
+    return access(sibling, F_OK) == 0;
 }
 
 void ctm_bridge_gesture_reset(SDL_JoystickID id) {
@@ -738,22 +813,35 @@ static bool gesture_poll_one(SDL_GameController *controller, SDL_JoystickID id) 
     watched_t *w = watched_for(id);
     if (w && !was_known) {
         log_controller_identity(controller, id);
-        /* ⭐⭐ THE ONLY PLACE THIS SIDE PAINTS THE PLAYER COLOUR NOW.
+        /* ⭐⭐ THE PLAYER COLOUR WHEN A CONTROLLER FIRST APPEARS, whether it is
+         * connected while Aurora runs or was connected before Aurora started
+         * (SDL reports both the same way).
          *
-         * ⛔ It used to be restored after every pattern -- a bridge, an
-         * unbridge, a refusal. rhoquinn8217 ruled that out on 2026-08-19: on a
-         * controller the host has just taken, the colour is overwritten within
-         * a moment anyway, "and it comes off like an error".
-         *
-         * ⭐ Painting it once, when a controller first appears, is what the
-         * colour is actually for: knowing which pad is yours on the dashboard.
-         * ⓘ Two more places are wanted and not built yet -- on stream
-         * disconnect, and on switching away mid-stream. Both need a hook in
-         * app.c rather than here. */
-        paint_player_colour(controller);
+         * ⓘ The other places this side paints it: after a release and after a
+         * refusal (both 2026-09-15, below), when SDL's player number arrives or
+         * changes (just below), and when a stream ends
+         * (ctm_bridge_gesture_restore_player_colours).
+         * ⛔ Never after a BRIDGE. rhoquinn8217, 2026-08-19: on a controller the
+         * host has just taken the colour is overwritten within a moment anyway,
+         * "and it comes off like an error". A bridge ends on the core's green. */
+        paint_player_colour_for(w, controller);
     }
     if (!w) {
         return false;
+    }
+
+    /* ⭐ AND AGAIN WHEN THE PLAYER NUMBER ARRIVES OR CHANGES (rhoquinn8217,
+     * 2026-09-15): "When the controller is connected while aurora is up or if
+     * the controller is already connected and aurora is started, the color
+     * should be set to the player color."
+     * ⚠️ SDL can give a controller its number after the first sight, and its
+     * own PlayStation drivers repaint a dim colour of their own when it does, so
+     * one paint at arrival could be blue for every pad, or overwritten. ⓘ Only
+     * while the light is this side's: not bridged, no hold or pattern running,
+     * and only on a change -- never every pass. */
+    if (!w->ours_plugged && w->since == 0 && w->prep_left == 0 && w->flash_left == 0 &&
+        SDL_GameControllerGetPlayerIndex(controller) != w->painted_slot) {
+        paint_player_colour_for(w, controller);
     }
 
     /* A refusal rumble in progress: alternate on and off, one half-step per
@@ -802,6 +890,28 @@ static bool gesture_poll_one(SDL_GameController *controller, SDL_JoystickID id) 
                 w->plug_miss = 0;
                 w->ours_plugged = false;
                 gesture_moonlight_set_excluded(controller, false);
+                /* ⭐⭐ THE PLAYER COLOUR AFTER A RELEASE (rhoquinn8217,
+                 * 2026-09-15). The core's yellow ends dark, and a pad left dark
+                 * read as "not connected". The plug-out, yellow included, has
+                 * finished by the time the node reads unplugged, so this lands
+                 * after it. ⓘ It also replaces the gesture's magenta as the
+                 * colour SDL remembers, which SDL re-sends to a DS4 with every
+                 * rumble. */
+                paint_player_colour_for(w, controller);
+                /* ⭐ AND A RUMBLE FOR A PAD WITH NO LIGHT TO PAINT. The line
+                 * above puts a colour back on a controller that has one; an
+                 * Xbox pad has none, no speaker either, and no core signal of
+                 * its own, so until now it was handed back with no sign at all.
+                 * ⓘ Under the user's rumble switch, like every other signal,
+                 * and shaped to be told apart by feel: see BYE_PULSE_MS. */
+                if (controller && !SDL_GameControllerHasLED(controller) &&
+                    ctm_bridge_signals_enabled() &&
+                    app_configuration && app_configuration->bridge_signal_rumble) {
+                    SDL_GameControllerRumble(controller, BYE_PULSE_STRENGTH,
+                                             BYE_PULSE_STRENGTH, BYE_PULSE_MS);
+                    gesture_log("handback pulse on %s: no lightbar to paint",
+                                w->prep_node[0] ? w->prep_node : "a pad");
+                }
                 /* ⛔⛔ ON BLUETOOTH THE CORE ALWAYS CLAIMS THE SIGNAL, AND
                  * WITH BT_LAYER_CORE_SIGNAL OFF IT THEN DOES NOTHING.
                  *
@@ -916,9 +1026,8 @@ static bool gesture_poll_one(SDL_GameController *controller, SDL_JoystickID id) 
                      * also plays a tone and its own pulse, so this reinforces
                      * rather than replaces -- judged by feel, and easily
                      * gated later if it turns out to be too much. */
-                    /* T-120: on Bluetooth the rumble -- and the signal check
-                     * that costs an enumeration, measured at 5s on the C3 --
-                     * wait for BT_LAYER_RUMBLE. Wired unchanged. */
+                    /* ⓘ T-120 gated this rumble on Bluetooth while its layers
+                     * were rebuilt; the gate is gone and the layer is on. */
                     /* ⛔⛔ THE SAME TRAP AS THE BYE PULSE. On Bluetooth
                      * gesture_signal_here() is always false -- the core claims
                      * the signal there -- so this never fired, gate or no gate.
@@ -932,11 +1041,9 @@ static bool gesture_poll_one(SDL_GameController *controller, SDL_JoystickID id) 
                      * 0 on the monitor. The number is logged so a slow one is
                      * seen rather than felt. */
                     uint64_t sig_t0 = gesture_now_ms();
-                    const bool core_signals_ok =
-                        !gesture_signal_here(w->prep_node) &&
-                        (w->xport != 1 || BT_LAYER_CORE_SIGNAL);
+                    const bool core_signals_ok = !gesture_signal_here(w->prep_node);
                     const uint64_t sig_ms = gesture_now_ms() - sig_t0;
-                    if (!core_signals_ok && (w->xport != 1 || BT_LAYER_RUMBLE)) {
+                    if (!core_signals_ok) {
                         SDL_GameControllerRumble(controller, OK_PULSE_STRENGTH,
                                                  OK_PULSE_STRENGTH, OK_PULSE_MS);
                     }
@@ -1011,9 +1118,12 @@ static bool gesture_poll_one(SDL_GameController *controller, SDL_JoystickID id) 
                             sounded && ctm_bridge_node_is_bluetooth(w->prep_node);
 
                         if (lit) {
-                            /* ⓘ The core lit it and nothing repaints after a
-                             * pattern any more. The refused controller keeps
-                             * the red until something else writes the light. */
+                            /* ⭐ The core lit it, and its Bluetooth signal has
+                             * finished by the time the call returns. Then the
+                             * player colour (rhoquinn8217, 2026-09-15), where a
+                             * refused controller used to keep whatever the last
+                             * flash left. */
+                            paint_player_colour_for(w, controller);
                         } else {
                             w->flash_ok = 0;
                             /* ⭐ The user's switch. ⓘ The refusal is the one
@@ -1059,6 +1169,10 @@ static bool gesture_poll_one(SDL_GameController *controller, SDL_JoystickID id) 
             --w->flash_left;
             if (w->flash_left == 0) {
                 gesture_log("refusal flash finished");
+                /* ⭐ The restore step the count always kept room for: the
+                 * player colour after the red (rhoquinn8217, 2026-09-15). Its
+                 * last flash was lit, so without this the pad stayed red. */
+                paint_player_colour_for(w, controller);
             } else {
                 /* Odd counts are the lit ones, so the LAST flash step is lit
                  * rather than an unlit one nobody sees. */
@@ -1085,11 +1199,26 @@ static bool gesture_poll_one(SDL_GameController *controller, SDL_JoystickID id) 
         return false;
     }
 
-    /* Once per connection, before anything else: make sure the controller is
-     * sending its full report, or there is no touchpad to read. */
+    /* Once per connection, before anything else: make sure a DualSense is
+     * sending its full report, or there is no touchpad to read.
+     *
+     * ⛔ A DUALSENSE OR AN EDGE ONLY. Feature report 0x05 is the DualSense's
+     * request, and this loop polls every controller SDL opened. Sent to all of
+     * them, the C1's log showed a Switch Pro Controller refusing it and a
+     * GameSir in PlayStation mode answering it, on every app start
+     * (2026-09-16). Nothing broke that time; a request meant for one device
+     * reaching others is how the listener's microphone guard did break the
+     * Pro Controller's handshake. */
     if (!w->asked_full) {
         w->asked_full = true;
-        request_full_report(SDL_GameControllerPath(controller));
+        const char *path = SDL_GameControllerPath(controller);
+        if (controller_is_dualsense(controller)) {
+            request_full_report(path);
+        } else {
+            gesture_log("full-report request skipped on %s: not a DualSense (%04x:%04x)",
+                        path ? path : "-", SDL_GameControllerGetVendor(controller),
+                        SDL_GameControllerGetProduct(controller));
+        }
     }
 
     /* ⭐⭐ THE GESTURE SWITCH BELONGS HERE, NOT AT THE TOP OF THE TICK.
@@ -1117,20 +1246,6 @@ static bool gesture_poll_one(SDL_GameController *controller, SDL_JoystickID id) 
     if (w->fired) {
         return false;   /* wait for the fingers to lift */
     }
-    /* T-120: the chord is off on Bluetooth until BT_LAYER_GESTURE. Asked once
-     * per hold, not per report. Wired never reaches this. */
-    if (!BT_LAYER_GESTURE) {
-        const char *bt_path = SDL_GameControllerPath(controller);
-        char bt_node[64];
-        if (bt_path && bt_path[0] &&
-            hidraw_node_for_event(bt_path, bt_node, sizeof(bt_node)) &&
-            ctm_bridge_node_is_bluetooth(bt_node)) {
-            w->fired = true;
-            gesture_log("T-120: chord on Bluetooth %s ignored (BT_LAYER_GESTURE=0)", bt_node);
-            return false;
-        }
-    }
-
     uint32_t now = SDL_GetTicks();
     if (w->since == 0) {
         w->since = now ? now : 1;
@@ -1190,7 +1305,7 @@ static bool gesture_poll_one(SDL_GameController *controller, SDL_JoystickID id) 
      * than restructure that coupling mid-rebuild, a gated pulse is one step
      * long: the plug still fires, and one step is imperceptible. ⚠️ The
      * coupling itself is worth removing later; it is recorded in T-120. */
-    w->prep_left = (!ctm_bridge_signals_enabled() || (w->xport == 1 && !BT_LAYER_LIGHT))
+    w->prep_left = !ctm_bridge_signals_enabled()
                        ? 1 : PREP_STEPS;
     w->prep_next = SDL_GetTicks();
     gesture_log("fired on %s -> %s : pulsing before handover", dev_path, node);
@@ -1206,17 +1321,46 @@ static app_input_t *s_gesture_input = NULL;
  *
  * ⓘ Called at the two moments a controller comes back to the TV's own world:
  * when a stream disconnects, and when Aurora is switched away from mid-stream.
- * The third moment -- a controller first appearing -- is handled where it is
- * first seen, in gesture_poll_one.
+ * The rest -- a controller first appearing, its player number arriving, a
+ * release and a refusal -- are handled in gesture_poll_one.
  *
- * ⛔ AND NOWHERE ELSE. It used to be restored after every pattern, which rhoquinn8217
- * ruled out on 2026-08-19: on a controller the host has just taken, the colour
- * is overwritten within a moment anyway and "comes off like an error". */
+ * ⛔ NEVER AFTER A BRIDGE. It used to be restored after every pattern, which
+ * rhoquinn8217 ruled out on 2026-08-19: on a controller the host has just
+ * taken, the colour is overwritten within a moment anyway and "comes off like
+ * an error". ⓘ A release and a refusal came back on 2026-09-15: that light is
+ * the TV's again, and dark read as "not connected".
+ * ⓘ The notes below about a pad released mid-stream staying dark predate that:
+ * the release paint in gesture_poll_one now covers it.
+ *
+ * ⭐⭐ A CABLED DUALSHOCK 4 GETS THESE SAME COLOURS, AND NEEDS NOTHING OF ITS OWN.
+ * rhoquinn8217, 2026-09-15: "End Dark when in stream. In Aurora, used the colors
+ * we decide for DS5". Read through the code that day, not yet watched:
+ * - Nothing here or in gesture_poll_one asks what the controller is, and SDL's
+ *   PS4 driver takes a lightbar colour on a cable just as its PS5 driver does.
+ * - The DS4's release signal ends DARK. At the end of a stream it plays inside
+ *   ctm_bridge_stop(), which session_stop_input calls just before this and
+ *   which returns only once each release has played, so this colour lands
+ *   after the dark -- the same order as a wired DualSense's yellow, which also
+ *   ends at zero.
+ * - In a stream nothing repaints, so a pad released there stays dark until the
+ *   host paints the pad Moonlight hands back to it.
+ * ⚠️ Except a release the chord began just before the stream ended: that runs on
+ * the core's gesture worker, which ctm_bridge_stop() does not wait for, so its
+ * dark can land after this colour.
+ *
+ * ⚠️ ONE WAY A DS4 DIFFERS, read in SDL 2.30.12's source and not measured. Its
+ * PS4 driver sends the lightbar in EVERY effects report, rumble included, so
+ * any rumble SDL sends a DS4 also re-sends the last colour SDL was given -- and
+ * SDL repeats a running rumble every 2 s, for up to 65 s. After a bridge with
+ * the light switch on, that colour is the pre-plug pulse's magenta until the
+ * host sets another. ➡️ So a game's rumble through Moonlight could light a DS4
+ * released mid-stream magenta, and a rumble running when a DS4 was bridged
+ * could keep reaching it. A DualSense's rumble leaves its lightbar alone. */
 void ctm_bridge_gesture_restore_player_colours(void) {
     for (int i = 0; i < MAX_WATCHED; ++i) {
         if (!s_watched[i].in_use) continue;
         SDL_GameController *gc = SDL_GameControllerFromInstanceID(s_watched[i].id);
-        if (gc) paint_player_colour(gc);
+        if (gc) paint_player_colour_for(&s_watched[i], gc);
     }
 }
 
@@ -1241,9 +1385,8 @@ bool ctm_bridge_gesture_light_busy(SDL_GameController *controller) {
      * not route: most likely the kernel's own PlayStation driver, which no
      * gate of ours can reach.
      *
-     * ⓘ Once per app run. Reported here rather than at the call site because
-     * the app's own log cannot be read on webOS; this one lands in
-     * /tmp/ctm-gesture.log. */
+     * ⓘ Once per app run, and it lands in logs/ctm-gesture.log beside the
+     * core's own lines. */
     if (busy) {
         static int s_dropped;
         if (!s_dropped) {
@@ -1262,11 +1405,7 @@ int ctm_bridge_gesture_player_for_node(const char *node) {
     for (int i = 0; i < n; ++i) {
         SDL_GameController *gc = s_gesture_input->gamepads[i].controller;
         if (!gc) continue;
-        const char *dev_path = SDL_GameControllerPath(gc);
-        if (!dev_path || !dev_path[0]) continue;
-        char found[64];
-        if (!hidraw_node_for_event(dev_path, found, sizeof(found))) continue;
-        if (strcmp(found, node) != 0) continue;
+        if (!controller_path_is_node(SDL_GameControllerPath(gc), node)) continue;
         return SDL_GameControllerGetPlayerIndex(gc);
     }
     return -1;
@@ -1281,11 +1420,7 @@ bool ctm_bridge_gesture_mac_for_node(const char *node, char *out, size_t out_len
     for (int i = 0; i < n; ++i) {
         SDL_GameController *gc = s_gesture_input->gamepads[i].controller;
         if (!gc) continue;
-        const char *dev_path = SDL_GameControllerPath(gc);
-        if (!dev_path || !dev_path[0]) continue;
-        char found[64];
-        if (!hidraw_node_for_event(dev_path, found, sizeof(found))) continue;
-        if (strcmp(found, node) != 0) continue;
+        if (!controller_path_is_node(SDL_GameControllerPath(gc), node)) continue;
         const char *serial = SDL_JoystickGetSerial(SDL_GameControllerGetJoystick(gc));
         if (!serial || !serial[0]) return false;
         snprintf(out, out_len, "%s", serial);
@@ -1307,15 +1442,7 @@ bool ctm_bridge_gesture_request_bridge(const char *node) {
         if (!gc) {
             continue;
         }
-        const char *dev_path = SDL_GameControllerPath(gc);
-        if (!dev_path || !dev_path[0]) {
-            continue;
-        }
-        char found[64];
-        if (!hidraw_node_for_event(dev_path, found, sizeof(found))) {
-            continue;
-        }
-        if (strcmp(found, node) != 0) {
+        if (!controller_path_is_node(SDL_GameControllerPath(gc), node)) {
             continue;
         }
 
@@ -1356,7 +1483,7 @@ bool ctm_bridge_gesture_request_bridge(const char *node) {
      * than restructure that coupling mid-rebuild, a gated pulse is one step
      * long: the plug still fires, and one step is imperceptible. ⚠️ The
      * coupling itself is worth removing later; it is recorded in T-120. */
-    w->prep_left = (!ctm_bridge_signals_enabled() || (w->xport == 1 && !BT_LAYER_LIGHT))
+    w->prep_left = !ctm_bridge_signals_enabled()
                        ? 1 : PREP_STEPS;
         w->prep_next = SDL_GetTicks();
         w->fired = true;
@@ -1367,8 +1494,22 @@ bool ctm_bridge_gesture_request_bridge(const char *node) {
     return false;
 }
 
+/* ⭐ A bridged keyboard pressed Ctrl+Alt+Shift+O (rhoquinn8217, 2026-09-13).
+ * When: the keyboard's input thread, so it only posts: the overlay opens on the
+ * main thread, exactly as it does for a keyboard the TV reads. */
+static void gesture_overlay_requested(void) {
+    bus_pushevent(USER_OPEN_OVERLAY, NULL, NULL);
+}
+
 void ctm_bridge_gesture_tick(struct app_input_t *input, struct session_t *session,
                              bool overlay_open) {
+    {
+        static bool s_overlay_request_set = false;
+        if (!s_overlay_request_set) {
+            bridge_set_overlay_request(gesture_overlay_requested);
+            s_overlay_request_set = true;
+        }
+    }
     /* ⭐⭐ RELEASE ANYTHING WHOSE HOST HAS GONE. T-127, 2026-08-23.
      *
      * ⛔ Close the listener's window and the controller used to stay claimed by

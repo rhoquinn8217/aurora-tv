@@ -1,7 +1,8 @@
 /* The Auto Bridge window: which devices bridge themselves when a stream starts.
  *
  * ⭐ A CUT-DOWN USB Bridge panel, opened from the USB Bridge settings pane
- * (rhoquinn8217, 2026-09-08). Device, address, a box each, and one button.
+ * (rhoquinn8217, 2026-09-08). Since 2026-09-14 a card per device, its parts
+ * listed inside, and one box that selects them all.
  *
  * ⛔ NO BRIDGE OR RELEASE HERE, and that is not a limitation being worked
  * around. Bridging is HOST-BOUND: session.c hands the bridge the streaming

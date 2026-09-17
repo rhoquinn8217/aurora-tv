@@ -193,23 +193,32 @@ static lv_obj_t *create_obj(lv_fragment_t *self, lv_obj_t *container) {
             "connected to your TV. Bridged devices appear as if they are directly connected "
             "to the host PC."), false);
     pref_desc_label(view, locstr(
-            "Requires the CTM-USBIP relay running on your host PC."), false);
+            "Requires the DS5-USBIP relay running on your host PC."), false);
 
-    /* ⭐⭐ THE ONLY WAYS TO BRIDGE ARE THE PANEL AND THE GESTURE, so switching
-     * this off switches both and nothing can be handed over.
+    /* ⭐⭐ THE ONLY WAYS TO BRIDGE ARE THE PANEL, THE GESTURE AND AUTO BRIDGE,
+     * so switching this off switches all three and nothing can be handed over.
+     * ⓘ Auto Bridge is checked where it runs, at stream start (session.c).
      *
      * ⛔ IT IS NOT THE OLD "use CTM Bridge" SWITCH, removed 2026-08-19. That one
      * stopped Moonlight announcing any gamepad for the whole session, so an
      * ordinary stream behaved differently and a second controller had no route
      * to the PC at all. This only decides whether a device can be handed over;
      * a stream is unchanged either way. */
+    /* ⭐ THE DUALSHOCK 4 IS NAMED BESIDE THE DUALSENSE (rhoquinn8217, 2026-09-15:
+     * "update the places where it says DS5 and DualSense to say DS5/DS4 and
+     * DualSense/DualShock4"). A cabled DS4 bridges by the chord through SDL, as a
+     * DualSense does, and releases by it through the core's own DS4 type.
+     * ⚠️ On a cable only, so far: the Bluetooth DS4 type reads the release chord
+     * too, and no TV here has bridged a DS4 over Bluetooth.
+     * ⓘ No .po file carries this line, so locstr() hands it back as written and
+     * there is no translation to keep in step. */
     usbb_gap(view);
     lv_obj_t *enable_checkbox =
             pref_checkbox(view, locstr("Enable Device Bridging"),
                           &app_configuration->bridge_enable, false);
     pref_desc_label(view, locstr(
-            "Allows device bridging with the USB Bridge Overlay Panel or gestures "
-            "(DualSense/DualSense Edge Only)."), false);
+            "Allows device bridging with the USB Bridge Overlay Panel, Auto Bridge, "
+            "or gestures (gestures: DualSense/DualSense Edge/DualShock4 only)."), false);
     lv_obj_add_event_cb(enable_checkbox, enable_state_update_cb, LV_EVENT_VALUE_CHANGED, pane);
 
 #if defined(TARGET_WEBOS)
@@ -252,8 +261,13 @@ static lv_obj_t *create_obj(lv_fragment_t *self, lv_obj_t *container) {
 
     /* ⭐ A heading, so the four below do not each need to say "DualSense only".
      * ⓘ They are controller features -- a keyboard has no touchpad, no lightbar
-     * and no speaker. */
-    pref_title_label(view, locstr("DualSense/DualSense Edge Options"));
+     * and no speaker.
+     *
+     * ⭐ WORDED BY rhoquinn8217, 2026-09-15: *"Change it to 'DS5/DS5E and DS4
+     * Options'"*, once a cabled DS4 had the gesture and the lightbar and rumble
+     * signals below. ⓘ It still has no microphone or tone, and the heading was
+     * chosen knowing that. */
+    pref_title_label(view, locstr("DS5/DS5E and DS4 Options"));
 
     /* ⭐⭐ CAPABILITIES FIRST, OPT-OUTS LAST, and the wording follows the same
      * split.

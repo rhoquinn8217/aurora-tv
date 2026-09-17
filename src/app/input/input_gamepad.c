@@ -298,8 +298,11 @@ void app_input_gamepad_set_controller_led(app_input_t *input, unsigned short con
      * ⭐ Once a controller is BRIDGED its emulated pad is retired, so nothing
      * comes through here for it at all and the host owns the light properly,
      * over its own connection. */
+    /* ⓘ Always dropped while a pattern draws. The escape hatch that forwarded
+     * them anyway (CTM_HOST_OWNS_LIGHTBAR) served the flicker hunt, which is
+     * over, and was removed 2026-09-15. */
     SDL_GameController *gc = input->gamepads[controllerNumber].controller;
-    if (CTM_HOST_OWNS_LIGHTBAR == 0 && ctm_bridge_gesture_light_busy(gc)) {
+    if (ctm_bridge_gesture_light_busy(gc)) {
         return;
     }
     SDL_GameControllerSetLED(gc, r, g, b);
