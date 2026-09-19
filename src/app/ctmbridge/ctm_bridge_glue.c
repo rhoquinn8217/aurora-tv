@@ -556,9 +556,51 @@ bool ctm_bridge_signal_refused(const char *node)
     return false;
 }
 
+/* Does the CORE have a connected signal for the pad on this node? (T-212)
+ *
+ * ⓘ The core answers, from the same two ops fields its own branch uses. The
+ * device it is asked about carries this NODE's path, because a type's matches()
+ * can depend on it -- the Bluetooth Xbox type takes hidraw nodes and the xpad
+ * type takes js/event ones. */
+static bool core_signals_node_locked(const char *node)
+{
+    const logical_device_t *item = item_for_node_locked(node);
+    if (item == NULL) return false;
+
+    ctm_controller_dev_t dev;
+    memset(&dev, 0, sizeof dev);
+    snprintf(dev.vid, sizeof dev.vid, "%s", item->vid);
+    snprintf(dev.pid, sizeof dev.pid, "%s", item->pid);
+    snprintf(dev.bus, sizeof dev.bus, "%s", item->bus);
+    snprintf(dev.name, sizeof dev.name, "%s", item->name);
+    snprintf(dev.mac, sizeof dev.mac, "%s", item->mac);
+    snprintf(dev.serial, sizeof dev.serial, "%s", item->serial);
+    snprintf(dev.driver, sizeof dev.driver, "%s", item->driver);
+    snprintf(dev.path, sizeof dev.path, "%s", node);
+    return ctm_controller_will_signal_connect(&dev) != 0;
+}
+
 bool ctm_bridge_node_signals_itself(const char *node)
 {
     if (!ctm_bridge_signals_enabled()) return false;
+
+    /* ⛔⛔ T-212: ASK WHETHER THE CORE WILL, NOT WHETHER THE PAD IS PLUGGED.
+     *
+     * This said "plugged, so the core has it" -- and for a Bluetooth Xbox pad
+     * or a Bluetooth DS4 the core has NO connected signal at all, so the TV
+     * stood aside for nobody and the bridge was silent. Measured 2026-09-18:
+     * both pads logged "NOT SENT BY US -- the core claims the signal here",
+     * and neither pad's core log held a signal line.
+     *
+     * ⭐ A pad the core cannot signal now falls through to the TV's own pulse,
+     * which is what the caller does when this is false. */
+    ctm_glue_ensure_core();
+    pthread_mutex_lock(&s_dev_mutex);
+    ctm_glue_enumerate();
+    const bool core_has_one = core_signals_node_locked(node);
+    pthread_mutex_unlock(&s_dev_mutex);
+    if (!core_has_one) return false;
+
     if (ctm_bridge_node_is_bluetooth(node)) return true;
     return ctm_bridge_node_is_plugged(node);
 }
