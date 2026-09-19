@@ -624,8 +624,19 @@ bool ctm_bridge_node_is_bluetooth(const char *node)
     ctm_glue_ensure_core();
     pthread_mutex_lock(&s_dev_mutex);
     ctm_glue_enumerate();
-    const char *kind = kind_for_node_locked(node);
-    const bool bt = kind && (strcmp(kind, "ds5") == 0 || strcmp(kind, "ds5e") == 0);
+    /* ⛔⛔ THE BUS SAYS THIS, NOT A LIST OF TWO KINDS.
+     *
+     * It tested for "ds5" and "ds5e" and nothing else, from when a
+     * DualSense was the only pad that could be bridged over Bluetooth. Every
+     * other Bluetooth pad has answered WIRED ever since -- the T-212 run
+     * logged a Bluetooth Xbox pad as `transport=wired` on 2026-09-18.
+     *
+     * ⭐ item->bus is sysfs's bustype and bus_label() turns "0005" into
+     * "BT", which is the same conversion the bridge path uses to decide a
+     * pad's type. So this now answers for any pad, including ones no type
+     * exists for yet. */
+    const logical_device_t *item = item_for_node_locked(node);
+    const bool bt = item != NULL && strcmp(bus_label(item->bus), "BT") == 0;
     pthread_mutex_unlock(&s_dev_mutex);
     return bt;
 }

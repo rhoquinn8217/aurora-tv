@@ -115,10 +115,12 @@ typedef struct {
     bool fired;          /* already acted on this hold */
     bool asked_full;     /* full-report request already sent for this connection */
     uint8_t flash_left;  /* half-steps of the outcome flash still to show */
-    /* ⭐ WHICH OUTCOME THE FLASH IS SAYING. 0 = refused (red), 1 = bridged
-     * (green). The mechanism is identical; only the colour and the count
-     * differ, so one is not worth duplicating for the other. */
-    uint8_t flash_ok;
+    /* ⭐ THE COLOUR THE FLASH IS SAYING IT IN (T-223). This was a yes/no
+     * flag whose only caller set it to "refused", while the tick that read
+     * it wrote red unconditionally -- so a third pattern could not be asked
+     * for at all. The mechanism was always identical bar the colour, which
+     * is now simply carried here: red refuses, yellow hands back. */
+    uint8_t flash_r, flash_g, flash_b;
     uint8_t prep_left;   /* steps of the pre-plug pulse still to show */
     uint32_t prep_next;  /* SDL ticks when the next pulse step is due */
     char prep_node[64];  /* the node to plug once the pulse finishes */
@@ -328,6 +330,20 @@ static void gesture_paint_logged(SDL_GameController *controller, const char *wha
         gesture_log("%s on %s: REFUSED by SDL (player %d, HasLED=%d) -- %s",
                     what, where, slot, has, SDL_GetError());
     }
+}
+
+/* Arm the outcome flash: `flashes` lit steps in one colour, then the player
+ * colour again. ⓘ The count is doubled for the dark halves and carries one
+ * extra step, which is the restore -- the last flash is lit, so without it
+ * the pad keeps the colour. */
+static void flash_arm(watched_t *w, uint8_t r, uint8_t g, uint8_t b, int flashes)
+{
+    if (w == NULL) return;
+    w->flash_r = r;
+    w->flash_g = g;
+    w->flash_b = b;
+    w->flash_left = (uint8_t)(flashes * 2 + 1);
+    w->flash_next = SDL_GetTicks();
 }
 
 static bool gesture_signal_here(const char *node)
@@ -599,6 +615,10 @@ static bool gesture_held(SDL_GameController *controller) {
  * useful if it outlasts the reaction it provokes. Three flashes at 120 ms was
  * over in under a second. */
 #define REFUSED_FLASHES   3
+/* ⭐ THREE, MATCHING THE CORE (T-223). BTSIG_HANDED_BACK is "yellow, three
+ * flashes", so a pad the TV paints for says exactly what a DualSense says.
+ * Three is also clearly deliberate rather than a glitch. */
+#define HANDBACK_FLASHES  3
 /* ⭐ Two green flashes on a successful bridge, against three red on a refusal.
  * Green for done, red for refused -- the light says which without anyone
  * learning a vocabulary. Fewer than the refusal because success is the ordinary
@@ -956,9 +976,26 @@ static bool gesture_poll_one(SDL_GameController *controller, SDL_JoystickID id) 
                  * after it. ⓘ It also replaces the gesture's magenta as the
                  * colour SDL remembers, which SDL re-sends to a DS4 with every
                  * rumble. */
-                const int paint_rc = paint_player_colour_for(w, controller);
-                gesture_paint_logged(controller, "handback colour", w->prep_node,
-                                     paint_rc);
+                /* ⭐⭐ YELLOW ON THE WAY BACK, FOR A PAD THE CORE WILL NOT
+                 * PAINT (T-223). The core flashes yellow three times with its
+                 * tone -- BTSIG_HANDED_BACK -- and it has no signal at all for
+                 * a Bluetooth DS4, so that pad came back with nothing but the
+                 * player colour. Same question as the pulse below: ask whether
+                 * the core owns this signal, and paint it here when it does
+                 * not. ⓘ The flash restores the player colour itself on its
+                 * last step, so the two paths end in the same place. */
+                const bool paint_here =
+                    app_configuration && app_configuration->bridge_signal_light &&
+                    gesture_signal_here(w->prep_node);
+                if (paint_here) {
+                    flash_arm(w, 0xff, 0xff, 0x00, HANDBACK_FLASHES);
+                    gesture_log("handback colour on %s: three yellow flashes from here",
+                                w->prep_node);
+                } else {
+                    const int paint_rc = paint_player_colour_for(w, controller);
+                    gesture_paint_logged(controller, "handback colour", w->prep_node,
+                                         paint_rc);
+                }
                 /* ⭐ AND A RUMBLE FOR A PAD WITH NO LIGHT TO PAINT. The line
                  * above puts a colour back on a controller that has one; an
                  * Xbox pad has none, no speaker either, and no core signal of
@@ -1026,8 +1063,6 @@ static bool gesture_poll_one(SDL_GameController *controller, SDL_JoystickID id) 
                  * ⛔ The symptom when this was still asking: `pulsing yellow`
                  * in the log, and no `unplug pulse finished` ever after it.
                  * Armed, then given zero steps. */
-                w->flash_ok = 0;   /* yellow, not green: this is a handback */
-
                 /* ⭐⭐ ON BLUETOOTH THE CORE PAINTS THIS ONE, AND IT IS ON TIME.
                  *
                  * The unbridge chord is detected in the CORE -- a bridged
@@ -1067,7 +1102,10 @@ static bool gesture_poll_one(SDL_GameController *controller, SDL_JoystickID id) 
                  * clean unplug -- the listener going away -- where the core
                  * never signalled. That path leaves the host's pad unrestored
                  * anyway, so it is not worth keeping a buzz for. */
-                gesture_log("%s came back to us -- pulsing yellow", w->prep_node);
+                /* ⚠️ This said "pulsing yellow" and drew nothing: the paragraphs
+                 * above had already moved the colour to the core, and the line
+                 * was left behind describing a pulse that no longer existed. */
+                gesture_log("%s came back to us", w->prep_node);
             } else {
                 w->plug_miss = 0;
                 w->plug_check_next = now_ticks + PLUG_CHECK_MS;
@@ -1142,6 +1180,22 @@ static bool gesture_poll_one(SDL_GameController *controller, SDL_JoystickID id) 
                     w->ours_plugged = true;
                     w->plug_miss = 0;
                     w->plug_check_next = SDL_GetTicks() + PLUG_CHECK_MS;
+                    /* ⭐⭐ GREEN ON SUCCESS, FOR A PAD THE CORE WILL NOT PAINT
+                     * (T-223). The paragraph below is still true for a
+                     * DualSense -- the core draws its green with its tone, so
+                     * the two arrive together -- but the core has no signal for
+                     * a Bluetooth DS4, which left the only lit pad in the set
+                     * going magenta straight back to its player colour, saying
+                     * nothing about whether the bridge worked.
+                     * ⓘ Steady, not a pattern: the host claims the light within
+                     * a moment of this and would cut a flash sequence in half. */
+                    if (core_signals_ok == false && app_configuration &&
+                        app_configuration->bridge_signal_light) {
+                        const int green_rc = flash_write(controller, 0x00, 0xff, 0x00);
+                        gesture_paint_logged(controller, "bridged green",
+                                             w->prep_node, green_rc);
+                        w->painted_slot = PAINTED_NEVER;   /* not the player colour now */
+                    }
                     /* ⛔ PUT THE LIGHT BACK. The pre-plug pulse leaves magenta
                      * and walks away: nothing after it repaints, so the light
                      * stayed magenta until Steam claimed it -- long after the
@@ -1215,13 +1269,11 @@ static bool gesture_poll_one(SDL_GameController *controller, SDL_JoystickID id) 
                              * flash left. */
                             paint_player_colour_for(w, controller);
                         } else {
-                            w->flash_ok = 0;
                             /* ⭐ The user's switch. ⓘ The refusal is the one
                              * worth being loudest about, so it is gated last
                              * and independently of the others. */
                             if (app_configuration->bridge_signal_light)
-                                w->flash_left = REFUSED_FLASHES * 2 + 1;   /* +1 for the restore */
-                            w->flash_next = SDL_GetTicks();
+                                flash_arm(w, 0xff, 0x00, 0x00, REFUSED_FLASHES);
                         }
                         if (!sounded) {
                             if (app_configuration->bridge_signal_rumble)
@@ -1258,7 +1310,7 @@ static bool gesture_poll_one(SDL_GameController *controller, SDL_JoystickID id) 
         if (now_ticks >= w->flash_next) {
             --w->flash_left;
             if (w->flash_left == 0) {
-                gesture_log("refusal flash finished");
+                gesture_log("outcome flash finished on %s", w->prep_node);
                 /* ⭐ The restore step the count always kept room for: the
                  * player colour after the red (rhoquinn8217, 2026-09-15). Its
                  * last flash was lit, so without this the pad stayed red. */
@@ -1267,22 +1319,19 @@ static bool gesture_poll_one(SDL_GameController *controller, SDL_JoystickID id) 
                 /* Odd counts are the lit ones, so the LAST flash step is lit
                  * rather than an unlit one nobody sees. */
                 bool lit = (w->flash_left % 2) == 1;
-                /* RED, not yellow.
+                /* ⭐ RED REFUSES, YELLOW HANDS BACK, and they are never the
+                 * same pad at the same moment: yellow says "the controller is
+                 * yours again because you asked", red says "it is still yours
+                 * because the bridge failed". ⓘ Which one this is was decided
+                 * by whoever armed it; this tick only draws.
                  *
-                 * Yellow already means "the controller is yours again" -- it
-                 * is the colour of a deliberate unbridge. Using it for a
-                 * refusal made one colour carry two opposite meanings: you
-                 * have it back because you asked, and you still have it
-                 * because the bridge failed. */
-                /* RED, not yellow.
-                 *
-                 * Yellow already means "the controller is yours again" -- the
-                 * colour of a deliberate unbridge. Using it for a refusal made
-                 * one colour carry two opposite meanings.
-                 *
-                 * ⓘ This tick only ever draws a refusal now: success breathes
-                 * green through the pulse tick instead. */
-                flash_write(controller, lit ? 0xff : 0x00, 0x00, 0x00);
+                 * ⚠️ Success is NOT a flash. It is a steady green, painted
+                 * where the plug completes, because the host claims the light
+                 * moments later and a pattern would be cut in half. */
+                flash_write(controller,
+                            lit ? w->flash_r : 0x00,
+                            lit ? w->flash_g : 0x00,
+                            lit ? w->flash_b : 0x00);
                 w->flash_next = now_ticks + (lit ? REFUSED_ON_MS : REFUSED_OFF_MS);
             }
         }
