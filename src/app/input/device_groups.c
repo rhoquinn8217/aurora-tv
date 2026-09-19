@@ -9,6 +9,10 @@
 #include <strings.h>
 
 #include "auto_bridge.h"
+/* ⭐ bus_label(): sysfs's bustype -> "USB" / "BT". The core owns it and the
+ * bridge path already uses it, so the mapping is not spelled a second time
+ * here -- two copies of it is how one of them goes stale. */
+#include "ctm_state.h"
 
 static bool dev_is(const ctm_bridge_dev_t *d, const char *vid, const char *pid)
 {
@@ -42,6 +46,39 @@ void device_part_type(const ctm_bridge_dev_t *d, char *out, size_t out_len)
         out[i] = (char) toupper((unsigned char) type[i]);
     }
     out[i] = '\0';
+
+    /* ⭐⭐ AND HOW IT IS ATTACHED: "CONTROLLER (BT)" (T-226, rhoquinn8217
+     * 2026-09-19, who chose the shape).
+     *
+     * ⛔ THE GAP THIS CLOSES. Transport used to be readable only off a
+     * PlayStation pad's KIND -- "ds5" against "ds5_usb", "ds4" against
+     * "ds4_usb". Nothing else has a split kind, so an Xbox pad, a keyboard and
+     * a dongle showed no transport at all, and one pad on two transports read
+     * identically both times.
+     *
+     * ⓘ d->bus holds sysfs's BUSTYPE, not the label its header once claimed:
+     * ctm_bridge_glue.c copies item->bus verbatim. bus_label() is the
+     * conversion, and it is the core's own, so this cannot drift from what the
+     * bridge path decides a pad's type by.
+     *
+     * ⚠️ NOTHING IS APPENDED unless the answer is one of the two words. A bus
+     * with no name returns the raw number or "-", and "CONTROLLER (-)" says
+     * less than "CONTROLLER" alone. */
+    if (d == NULL || d->bus[0] == '\0') {
+        return;
+    }
+    const char *how = bus_label(d->bus);
+    if (how == NULL || (strcmp(how, "USB") != 0 && strcmp(how, "BT") != 0)) {
+        return;
+    }
+    /* ⓘ Left off rather than truncated when the buffer is too small: a
+     * "CONTROLLER (B" is worse than a bare "CONTROLLER". The longest real
+     * answer is "CONTROLLER (USB)", 17 bytes with its NUL, so both callers
+     * were widened with this change. */
+    if (i + strlen(how) + 4 > out_len) {
+        return;
+    }
+    snprintf(out + i, out_len - i, " (%s)", how);
 }
 
 static bool has_alnum(const char *s)

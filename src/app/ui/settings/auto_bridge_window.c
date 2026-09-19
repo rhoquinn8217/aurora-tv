@@ -312,7 +312,7 @@ static lv_obj_t *abw_make_card(lv_obj_t *parent, int idx) {
 
     char header[200];
     if (g->part_count == 1) {
-        char type[16];
+        char type[24];   /* "CONTROLLER (USB)" needs 17 (T-226) */
         device_part_type(&s_parts[g->part[0]], type, sizeof type);
         snprintf(header, sizeof header, "%s (%s)", g->name, type);
     } else {
@@ -334,7 +334,7 @@ static lv_obj_t *abw_make_card(lv_obj_t *parent, int idx) {
         lv_obj_set_style_pad_gap(parts, LV_DPX(1), 0);
         for (int p = 0; p < g->part_count; ++p) {
             const ctm_bridge_dev_t *d = &s_parts[g->part[p]];
-            char type[16];
+            char type[24];   /* "CONTROLLER (USB)" needs 17 (T-226) */
             device_part_type(d, type, sizeof type);
             char line[200];
             snprintf(line, sizeof line, "%s (%s)", d->name, type);
