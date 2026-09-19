@@ -341,6 +341,23 @@ static void cmd_groups(control_job_t *job)
         for (int p = 0; p < g->part_count; ++p) {
             reply(job, "%s%d", p > 0 ? "," : "", devs[g->part[p]].index);
         }
+        /* ⭐⭐ THE LABEL THE PANEL DRAWS, verbatim (T-226, 2026-09-19).
+         *
+         * ⛔ THE GAP: this command's own help says it shows a device "as the
+         * panel's rows show them", and it showed the name without the type --
+         * so the one part of a row that is COMPUTED could not be read from here
+         * at all. A change to it could only be checked by looking at a
+         * television, which is what this port exists to avoid.
+         * ⓘ The same call auto_bridge_window.c makes, so the two cannot
+         * disagree: if this prints CONTROLLER (BT), that is what is on screen.
+         * ⓘ Per PART, because a device of several parts draws one label each
+         * and they differ -- a dongle's keyboard half against its mouse half. */
+        reply(job, " labels=");
+        for (int p = 0; p < g->part_count; ++p) {
+            char label[24];
+            device_part_type(&devs[g->part[p]], label, sizeof label);
+            reply(job, "%s" "\"" "%s" "\"", p > 0 ? "," : "", label);
+        }
         reply(job, "\n");
     }
 }
