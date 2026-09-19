@@ -11,8 +11,14 @@
 #include "auto_bridge.h"
 /* ⭐ bus_label(): sysfs's bustype -> "USB" / "BT". The core owns it and the
  * bridge path already uses it, so the mapping is not spelled a second time
- * here -- two copies of it is how one of them goes stale. */
-#include "ctm_state.h"
+ * here -- two copies of it is how one of them goes stale.
+ *
+ * ⛔ DECLARED, NOT INCLUDED. It lives in the core's ctm_state.h, and only
+ * the ctmbridge target carries that include path -- moonlight-lib does not,
+ * so `#include "ctm_state.h"` here fails to compile (build 374). The symbol
+ * itself links fine: libctmbridge.a is already linked in. ⓘ One line here
+ * is a smaller coupling than widening an include path for one function. */
+const char *bus_label(const char *bus);
 
 static bool dev_is(const ctm_bridge_dev_t *d, const char *vid, const char *pid)
 {
