@@ -15,6 +15,24 @@
 #include <SDL.h>
 
 #define QUIT_BUTTONS (PLAY_FLAG | BACK_FLAG | LB_FLAG | RB_FLAG)
+
+/* T-216. The two chord buttons the HOST acts on by itself: Select and Start,
+ * which are View and Menu on an Xbox pad. Steam opens its on-screen keyboard
+ * and an app switcher from them.
+ *
+ * ⛔ THE LEAK. Every press goes to the host the moment it arrives, and the chord
+ * is only recognised once all four are down -- so rolling through it left
+ * Steam's keyboard and the app switcher sitting behind the overlay, every time.
+ *
+ * ⭐ THE RULE (rhoquinn8217, 2026-09-18): while BOTH BUMPERS are held, these two
+ * belong to the chord and are not sent at all. Nobody holds LB and RB together
+ * and then reaches for Start in a game, so nothing real is taken away -- and it
+ * costs no latency anywhere, which a delay on the bumpers would have.
+ * ⚠️ It does mean the chord is pressed BUMPERS FIRST. Press View before the
+ * bumpers are down and the host still sees it, because at that moment it is an
+ * ordinary press and there is no way to know otherwise. */
+#define CHORD_GATED_BUTTONS (BACK_FLAG | PLAY_FLAG)
+#define CHORD_GATE_HELD (LB_FLAG | RB_FLAG)
 /** Hold Select (Back) this long to toggle pinned performance stats (Artemis-style). */
 #define GAMEPAD_HOLD_STATS_MS 4000
 
@@ -318,6 +336,14 @@ void stream_input_handle_cbutton(stream_input_t *input, const SDL_ControllerButt
     } else if (button != BACK_FLAG) {
         /* Mixing other buttons with a pending hold cancels the shortcut. */
         cancel_stats_hold();
+    }
+
+    /* T-216: with both bumpers held, Select and Start are the chord's, not the
+     * host's. The state above is still updated, so the chord check that follows
+     * a later press still sees them -- only the SEND is withheld. */
+    if ((button & CHORD_GATED_BUTTONS) != 0 &&
+        (gamepad->buttons & CHORD_GATE_HELD) == CHORD_GATE_HELD) {
+        return;
     }
 
     stream_input_send_buttons(input, gamepad);

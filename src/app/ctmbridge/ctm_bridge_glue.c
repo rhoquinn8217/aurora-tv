@@ -556,11 +556,64 @@ bool ctm_bridge_signal_refused(const char *node)
     return false;
 }
 
+/* Does the CORE have a connected signal for the pad on this node? (T-212)
+ *
+ * ⓘ The core answers, from the same two ops fields its own branch uses. The
+ * device it is asked about carries this NODE's path, because a type's matches()
+ * can depend on it -- the Bluetooth Xbox type takes hidraw nodes and the xpad
+ * type takes js/event ones. */
+static bool core_signals_node_locked(const char *node)
+{
+    const logical_device_t *item = item_for_node_locked(node);
+    if (item == NULL) return false;
+
+    ctm_controller_dev_t dev;
+    memset(&dev, 0, sizeof dev);
+    snprintf(dev.vid, sizeof dev.vid, "%s", item->vid);
+    snprintf(dev.pid, sizeof dev.pid, "%s", item->pid);
+    /* ⛔⛔ THE LABEL, NOT THE KERNEL NUMBER. A type's matches() compares
+     * dev.bus against "USB" and "BT", while item->bus holds sysfs's "0003" or
+     * "0005". ⚠️ Passed raw, EVERY DualSense matcher failed, the registry fell
+     * through to generic, and the TV pulsed a pad the core was about to sing to
+     * -- felt on the monitor 2026-09-18 as a rumble with no sound, then the
+     * core's own tone and rumble seconds later. ⭐ bus_label() is the conversion
+     * the real bridge path has always used (ui_bridge.c, plug_in_item). */
+    snprintf(dev.bus, sizeof dev.bus, "%s", bus_label(item->bus));
+    snprintf(dev.name, sizeof dev.name, "%s", item->name);
+    snprintf(dev.mac, sizeof dev.mac, "%s", item->mac);
+    snprintf(dev.serial, sizeof dev.serial, "%s", item->serial);
+    snprintf(dev.driver, sizeof dev.driver, "%s", item->driver);
+    snprintf(dev.path, sizeof dev.path, "%s", node);
+    return ctm_controller_will_signal_connect(&dev) != 0;
+}
+
 bool ctm_bridge_node_signals_itself(const char *node)
 {
     if (!ctm_bridge_signals_enabled()) return false;
-    if (ctm_bridge_node_is_bluetooth(node)) return true;
-    return ctm_bridge_node_is_plugged(node);
+
+    /* ⛔⛔ T-212: ASK WHETHER THE CORE WILL, NOT WHETHER THE PAD IS PLUGGED.
+     *
+     * This said "plugged, so the core has it" -- and for a Bluetooth Xbox pad
+     * or a Bluetooth DS4 the core has NO connected signal at all, so the TV
+     * stood aside for nobody and the bridge was silent. Measured 2026-09-18:
+     * both pads logged "NOT SENT BY US -- the core claims the signal here",
+     * and neither pad's core log held a signal line.
+     *
+     * ⭐ A pad the core cannot signal now falls through to the TV's own pulse,
+     * which is what the caller does when this is false. */
+    ctm_glue_ensure_core();
+    pthread_mutex_lock(&s_dev_mutex);
+    ctm_glue_enumerate();
+    const bool core_has_one = core_signals_node_locked(node);
+    pthread_mutex_unlock(&s_dev_mutex);
+    /* ⏱️ ONE ENUMERATION, NOT THREE. This ended in
+     * `ctm_bridge_node_is_bluetooth(node) || ctm_bridge_node_is_plugged(node)`,
+     * and each of those takes the lock and enumerates every device again.
+     * Both were only ever asking "is this pad really here", which the core's
+     * answer above already settles -- it returns false for a node it cannot
+     * find. ⚠️ The extra passes were measured at 5079ms on the monitor
+     * 2026-09-18: five seconds between the bridge and the pulse confirming it. */
+    return core_has_one;
 }
 
 bool ctm_bridge_node_is_bluetooth(const char *node)
@@ -571,8 +624,19 @@ bool ctm_bridge_node_is_bluetooth(const char *node)
     ctm_glue_ensure_core();
     pthread_mutex_lock(&s_dev_mutex);
     ctm_glue_enumerate();
-    const char *kind = kind_for_node_locked(node);
-    const bool bt = kind && (strcmp(kind, "ds5") == 0 || strcmp(kind, "ds5e") == 0);
+    /* ⛔⛔ THE BUS SAYS THIS, NOT A LIST OF TWO KINDS.
+     *
+     * It tested for "ds5" and "ds5e" and nothing else, from when a
+     * DualSense was the only pad that could be bridged over Bluetooth. Every
+     * other Bluetooth pad has answered WIRED ever since -- the T-212 run
+     * logged a Bluetooth Xbox pad as `transport=wired` on 2026-09-18.
+     *
+     * ⭐ item->bus is sysfs's bustype and bus_label() turns "0005" into
+     * "BT", which is the same conversion the bridge path uses to decide a
+     * pad's type. So this now answers for any pad, including ones no type
+     * exists for yet. */
+    const logical_device_t *item = item_for_node_locked(node);
+    const bool bt = item != NULL && strcmp(bus_label(item->bus), "BT") == 0;
     pthread_mutex_unlock(&s_dev_mutex);
     return bt;
 }
