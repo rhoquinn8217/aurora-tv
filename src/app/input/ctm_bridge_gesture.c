@@ -276,6 +276,36 @@ static void log_controller_identity(SDL_GameController *controller, SDL_Joystick
  * can fail take SDL down with it -- a controller that has stopped accepting
  * reports ignores SDL's just as readily as ours -- so a second signal that
  * fails in the same conditions is noise, not insurance. */
+/* T-212 -- SAY WHETHER A PULSE ACTUALLY HAPPENED.
+ *
+ * ⛔ Every "pulse" line in this file used to print whether or not a rumble was
+ * sent: the SDL call sits inside an `if`, and its return value was discarded.
+ * So a log full of "confirmation pulse: bridged" said nothing about whether the
+ * pad was ever asked to rumble -- and T-212 spent days reading it as if it did.
+ *
+ * ⭐ This wraps the call so the log carries the three things that matter: that
+ * we tried, what SDL said, and, when we did not try, WHY not.
+ *
+ * ⓘ SDL_GameControllerRumble returns 0 when it accepted the request and -1 when
+ * the controller cannot rumble or has gone; SDL_GetError() then says which. */
+static void gesture_rumble_logged(SDL_GameController *controller, const char *what,
+                                  const char *node, Uint16 strength, Uint32 ms)
+{
+    const char *where = (node && node[0]) ? node : "a pad";
+    if (controller == NULL) {
+        gesture_log("%s on %s: NOT SENT -- SDL has no controller handle for it",
+                    what, where);
+        return;
+    }
+    const int rc = SDL_GameControllerRumble(controller, strength, strength, ms);
+    if (rc == 0) {
+        gesture_log("%s on %s: sent to SDL (%u for %ums)", what, where,
+                    (unsigned) strength, (unsigned) ms);
+    } else {
+        gesture_log("%s on %s: REFUSED by SDL -- %s", what, where, SDL_GetError());
+    }
+}
+
 static bool gesture_signal_here(const char *node)
 {
     if (!ctm_bridge_signals_enabled()) return false;
@@ -907,10 +937,8 @@ static bool gesture_poll_one(SDL_GameController *controller, SDL_JoystickID id) 
                 if (controller && !SDL_GameControllerHasLED(controller) &&
                     ctm_bridge_signals_enabled() &&
                     app_configuration && app_configuration->bridge_signal_rumble) {
-                    SDL_GameControllerRumble(controller, BYE_PULSE_STRENGTH,
-                                             BYE_PULSE_STRENGTH, BYE_PULSE_MS);
-                    gesture_log("handback pulse on %s: no lightbar to paint",
-                                w->prep_node[0] ? w->prep_node : "a pad");
+                    gesture_rumble_logged(controller, "handback pulse", w->prep_node,
+                                          BYE_PULSE_STRENGTH, BYE_PULSE_MS);
                 }
                 /* ⛔⛔ ON BLUETOOTH THE CORE ALWAYS CLAIMS THE SIGNAL, AND
                  * WITH BT_LAYER_CORE_SIGNAL OFF IT THEN DOES NOTHING.
@@ -1043,12 +1071,20 @@ static bool gesture_poll_one(SDL_GameController *controller, SDL_JoystickID id) 
                     uint64_t sig_t0 = gesture_now_ms();
                     const bool core_signals_ok = !gesture_signal_here(w->prep_node);
                     const uint64_t sig_ms = gesture_now_ms() - sig_t0;
-                    if (!core_signals_ok) {
-                        SDL_GameControllerRumble(controller, OK_PULSE_STRENGTH,
-                                                 OK_PULSE_STRENGTH, OK_PULSE_MS);
-                    }
                     gesture_log("confirmation pulse on %s: bridged (signal check %llums)",
                                 w->prep_node, (unsigned long long) sig_ms);
+                    if (!core_signals_ok) {
+                        gesture_rumble_logged(controller, "confirmation pulse",
+                                              w->prep_node, OK_PULSE_STRENGTH,
+                                              OK_PULSE_MS);
+                    } else {
+                        /* ⛔ NOT a pulse. The core is expected to signal this pad
+                         * instead -- and whether it does for a Bluetooth XBOX pad
+                         * is exactly what T-212 has never established. */
+                        gesture_log("confirmation pulse on %s: NOT SENT BY US -- the core "
+                                    "claims the signal here (transport=%s)",
+                                    w->prep_node, w->xport == 1 ? "bluetooth" : "wired");
+                    }
                     w->ours_plugged = true;
                     w->plug_miss = 0;
                     w->plug_check_next = SDL_GetTicks() + PLUG_CHECK_MS;
