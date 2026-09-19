@@ -306,6 +306,30 @@ static void gesture_rumble_logged(SDL_GameController *controller, const char *wh
     }
 }
 
+/* The same idea as gesture_rumble_logged, for the light. ⭐ Only the handback
+ * paint uses it: flash_write() runs inside animations at frame rate and a log
+ * line there would drown the file. ⚠️ SDL_GameControllerSetLED returns -1
+ * when the pad has no light OR when its driver refused the write, and those
+ * two look identical from here -- so the line says which pad it was. */
+static void gesture_paint_logged(SDL_GameController *controller, const char *what,
+                                 const char *node, int rc)
+{
+    const char *where = (node && node[0]) ? node : "a pad";
+    if (controller == NULL) {
+        gesture_log("%s on %s: NOT SENT -- SDL has no controller handle for it",
+                    what, where);
+        return;
+    }
+    const int slot = SDL_GameControllerGetPlayerIndex(controller);
+    const int has = SDL_GameControllerHasLED(controller) ? 1 : 0;
+    if (rc == 0) {
+        gesture_log("%s on %s: player %d colour accepted by SDL", what, where, slot);
+    } else {
+        gesture_log("%s on %s: REFUSED by SDL (player %d, HasLED=%d) -- %s",
+                    what, where, slot, has, SDL_GetError());
+    }
+}
+
 static bool gesture_signal_here(const char *node)
 {
     if (!ctm_bridge_signals_enabled()) return false;
@@ -603,10 +627,14 @@ static bool gesture_held(SDL_GameController *controller) {
  * Deliberately NOT a loop with sleeps in it: this runs on the app's main loop,
  * and sleeping here would freeze the interface for the length of the signal.
  * The loop's own passes are the clock, exactly as the gesture hold is timed. */
-static void flash_write(SDL_GameController *controller, uint8_t r, uint8_t g, uint8_t b) {
+/* ⓘ Returns what SDL said: 0 accepted, -1 refused or no light. Almost every
+ * caller is an animation step and ignores it; the handback paint reads it, so a
+ * colour that never lands is a line in the log. */
+static int flash_write(SDL_GameController *controller, uint8_t r, uint8_t g, uint8_t b) {
     if (controller) {
-        SDL_GameControllerSetLED(controller, r, g, b);
+        return SDL_GameControllerSetLED(controller, r, g, b);
     }
+    return -1;
 }
 
 /* Leave the light on the controller's player colour.
@@ -636,7 +664,7 @@ static void flash_write(SDL_GameController *controller, uint8_t r, uint8_t g, ui
  * triple. If it ever visibly steps when Steam takes over, this is the number to
  * tune -- it is one line. */
 
-static void paint_player_colour(SDL_GameController *controller) {
+static int paint_player_colour(SDL_GameController *controller) {
     static const uint8_t player_rgb[4][3] = {
         { 0x00, 0x00, 0xff },   /* 1: blue   */
         { 0xff, 0x00, 0x00 },   /* 2: red    */
@@ -647,16 +675,17 @@ static void paint_player_colour(SDL_GameController *controller) {
     if (slot < 0 || slot > 3) {
         slot = 0;
     }
-    flash_write(controller, player_rgb[slot][0],
-                player_rgb[slot][1], player_rgb[slot][2]);
+    return flash_write(controller, player_rgb[slot][0],
+                       player_rgb[slot][1], player_rgb[slot][2]);
 }
 
 /* The player colour, remembered against the index it was painted for. */
-static void paint_player_colour_for(watched_t *w, SDL_GameController *controller) {
-    paint_player_colour(controller);
+static int paint_player_colour_for(watched_t *w, SDL_GameController *controller) {
+    const int rc = paint_player_colour(controller);
     if (w) {
         w->painted_slot = SDL_GameControllerGetPlayerIndex(controller);
     }
+    return rc;
 }
 
 /* A ramp that rises and falls: bright in the middle, dark at both ends, so it
@@ -927,18 +956,43 @@ static bool gesture_poll_one(SDL_GameController *controller, SDL_JoystickID id) 
                  * after it. ⓘ It also replaces the gesture's magenta as the
                  * colour SDL remembers, which SDL re-sends to a DS4 with every
                  * rumble. */
-                paint_player_colour_for(w, controller);
+                const int paint_rc = paint_player_colour_for(w, controller);
+                gesture_paint_logged(controller, "handback colour", w->prep_node,
+                                     paint_rc);
                 /* ⭐ AND A RUMBLE FOR A PAD WITH NO LIGHT TO PAINT. The line
                  * above puts a colour back on a controller that has one; an
                  * Xbox pad has none, no speaker either, and no core signal of
                  * its own, so until now it was handed back with no sign at all.
                  * ⓘ Under the user's rumble switch, like every other signal,
                  * and shaped to be told apart by feel: see BYE_PULSE_MS. */
-                if (controller && !SDL_GameControllerHasLED(controller) &&
-                    ctm_bridge_signals_enabled() &&
-                    app_configuration && app_configuration->bridge_signal_rumble) {
+                /* ⛔⛔ ASK THE QUESTION THE CONFIRMATION PULSE ASKS (T-212).
+                 *
+                 * `!SDL_GameControllerHasLED` was a stand-in for "this pad has
+                 * no other sign to give", and it is wrong for a Bluetooth DS4:
+                 * it HAS a light, the core has no signal for it, and the colour
+                 * put back above is not something a hand feels.
+                 *
+                 * ⚠️ Measured on the monitor 2026-09-18 -- it rumbled on the
+                 * bridge and was handed back in silence, while the Xbox pad beside
+                 * it did both. ⭐ A DualSense still says nothing here, because
+                 * gesture_signal_here() is false for it: the core does sing.
+                 *
+                 * ⓘ gesture_signal_here() folds in ctm_bridge_signals_enabled(),
+                 * so the switch that used to be tested on this line still is. */
+                if (controller && app_configuration &&
+                    app_configuration->bridge_signal_rumble &&
+                    gesture_signal_here(w->prep_node)) {
                     gesture_rumble_logged(controller, "handback pulse", w->prep_node,
                                           BYE_PULSE_STRENGTH, BYE_PULSE_MS);
+                } else if (controller) {
+                    /* ⭐ Say why, so a silent handback is a line in the log
+                     * rather than a question for the next hardware run. */
+                    gesture_log("handback pulse on %s: NOT SENT BY US -- %s",
+                                w->prep_node,
+                                (app_configuration &&
+                                 app_configuration->bridge_signal_rumble)
+                                    ? "the core claims the signal here"
+                                    : "the bridge rumble switch is off");
                 }
                 /* ⛔⛔ ON BLUETOOTH THE CORE ALWAYS CLAIMS THE SIGNAL, AND
                  * WITH BT_LAYER_CORE_SIGNAL OFF IT THEN DOES NOTHING.

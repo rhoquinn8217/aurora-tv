@@ -571,7 +571,14 @@ static bool core_signals_node_locked(const char *node)
     memset(&dev, 0, sizeof dev);
     snprintf(dev.vid, sizeof dev.vid, "%s", item->vid);
     snprintf(dev.pid, sizeof dev.pid, "%s", item->pid);
-    snprintf(dev.bus, sizeof dev.bus, "%s", item->bus);
+    /* ⛔⛔ THE LABEL, NOT THE KERNEL NUMBER. A type's matches() compares
+     * dev.bus against "USB" and "BT", while item->bus holds sysfs's "0003" or
+     * "0005". ⚠️ Passed raw, EVERY DualSense matcher failed, the registry fell
+     * through to generic, and the TV pulsed a pad the core was about to sing to
+     * -- felt on the monitor 2026-09-18 as a rumble with no sound, then the
+     * core's own tone and rumble seconds later. ⭐ bus_label() is the conversion
+     * the real bridge path has always used (ui_bridge.c, plug_in_item). */
+    snprintf(dev.bus, sizeof dev.bus, "%s", bus_label(item->bus));
     snprintf(dev.name, sizeof dev.name, "%s", item->name);
     snprintf(dev.mac, sizeof dev.mac, "%s", item->mac);
     snprintf(dev.serial, sizeof dev.serial, "%s", item->serial);
@@ -599,10 +606,14 @@ bool ctm_bridge_node_signals_itself(const char *node)
     ctm_glue_enumerate();
     const bool core_has_one = core_signals_node_locked(node);
     pthread_mutex_unlock(&s_dev_mutex);
-    if (!core_has_one) return false;
-
-    if (ctm_bridge_node_is_bluetooth(node)) return true;
-    return ctm_bridge_node_is_plugged(node);
+    /* ⏱️ ONE ENUMERATION, NOT THREE. This ended in
+     * `ctm_bridge_node_is_bluetooth(node) || ctm_bridge_node_is_plugged(node)`,
+     * and each of those takes the lock and enumerates every device again.
+     * Both were only ever asking "is this pad really here", which the core's
+     * answer above already settles -- it returns false for a node it cannot
+     * find. ⚠️ The extra passes were measured at 5079ms on the monitor
+     * 2026-09-18: five seconds between the bridge and the pulse confirming it. */
+    return core_has_one;
 }
 
 bool ctm_bridge_node_is_bluetooth(const char *node)
