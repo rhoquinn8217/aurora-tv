@@ -25,6 +25,7 @@
 #include "util/bus.h"
 #include "backend/pcmanager.h"
 #include "stream/session.h"
+#include "stream/video/session_video.h"
 #include "ui/streaming/streaming.controller.h"
 
 #if defined(TARGET_WEBOS)
@@ -112,6 +113,7 @@ static void cmd_help(control_job_t *job)
                "stream <host> <app id>  start a stream; host is a uuid or part of its name\n"
                "stop                    end the stream and leave the game running\n"
                "quit                    end the stream and quit the game on the host\n"
+               "stats                   the stream's own numbers, one line, as the overlay draws them\n"
                "devices                 every part the core lists, with its SDL match and its group\n"
                "groups                  the devices those parts make up, as the panel's rows show them\n"
                "bridge <device>         bridge one part\n"
@@ -243,6 +245,108 @@ static void cmd_stop(control_job_t *job, bool quit_game)
     session_interrupt(s_app->session, quit_game, STREAMING_INTERRUPT_USER);
     reply(job, quit_game ? "OK ending the stream and quitting the game\n"
                          : "OK ending the stream\n");
+}
+
+/* ⭐ WHY THIS EXISTS: the overlay's numbers can be read only by someone sitting
+ * in front of the set, and the fault they are wanted for -- decode latency that
+ * climbs, stays up for hours and then clears on its own -- turns up while nobody
+ * is watching. One line a second into a file can be lined up afterwards against
+ * the host's encoder trace and the set's own lag trace, which share its clock.
+ *
+ * ⓘ Every figure is derived exactly as `streaming_refresh_stats` derives it for
+ * the overlay, so the two cannot disagree. Units are ms, except `fps`/`recvfps`,
+ * `loss` (percent of frames), `bitrate` (Mbps) and the plain counts.
+ *
+ * ⚠️ `window` says how often the numbers underneath are recomputed: 2000 ms
+ * normally, 1000 ms while the overlay is shown. Sampling faster than that
+ * repeats a reading rather than refining it. */
+static void cmd_stats(control_job_t *job)
+{
+    /* ⛔ session_is_streaming, not merely a session: LiGetEstimatedRttInfo below
+     * may only be called between LiStartConnection and LiStopConnection, and a
+     * session exists while it is still connecting and while it is tearing down. */
+    if (s_app->session == NULL || !session_is_streaming(s_app->session)) {
+        reply(job, "ERR no stream is running\n");
+        return;
+    }
+
+    struct VIDEO_STATS st;
+    vdec_stats_snapshot(&st);
+    const struct VIDEO_INFO *info = &vdec_stream_info;
+
+    /* ⛔ THE SNAPSHOT'S RTT IS STALE WHILE THE OVERLAY IS OFF -- vdec_stat_submit
+     * asks ENet for it only when the overlay is shown. Ask for it here instead.
+     * It is a deliberately lock-free read of the peer's own metrics, and it
+     * leaves both values untouched when it fails. */
+    uint32_t rtt = st.rtt, rtt_var = st.rttVariance;
+    LiGetEstimatedRttInfo(&rtt, &rtt_var);
+
+    float host_ms = 0.0f, render_ms = 0.0f, decode_ms = 0.0f, reasm_ms = 0.0f;
+    bool have_host = false, have_render = false, have_decode = false;
+    if (st.submittedFrames > 0) {
+        render_ms = (float) st.totalSubmitTime / (float) st.submittedFrames;
+        have_render = true;
+        if (info->has_host_latency) {
+            /* ⓘ The host reports capture-to-encode in TENTHS of a millisecond. */
+            host_ms = (float) st.totalCaptureLatency / (float) st.submittedFrames / 10.0f;
+            have_host = true;
+        }
+        if (info->has_decoder_latency) {
+            decode_ms = st.avgDecoderLatency;
+            have_decode = true;
+        }
+    }
+    if (st.receivedFrames > 0) {
+        /* Not on the overlay: how long a frame spent being put back together from
+         * its packets, which tells a late network from a slow decoder. */
+        reasm_ms = (float) st.totalReassemblyTime / (float) st.receivedFrames;
+    }
+    const float total_ms = (float) rtt + host_ms + render_ms + decode_ms;
+    const float loss_pct = st.totalFrames > 0
+                           ? (float) st.networkDroppedFrames / (float) st.totalFrames * 100.0f
+                           : 0.0f;
+    /* ⚠️ currentBitrateKbps is bits per second, whatever its name says. */
+    const float bitrate_mbps = (float) st.currentBitrateKbps / 1000000.0f;
+
+    char host_s[16], decode_s[16], render_s[16], queue_s[16];
+    if (have_host) {
+        snprintf(host_s, sizeof host_s, "%.2f", host_ms);
+    } else {
+        snprintf(host_s, sizeof host_s, "-");
+    }
+    if (have_decode) {
+        snprintf(decode_s, sizeof decode_s, "%.2f", decode_ms);
+    } else {
+        snprintf(decode_s, sizeof decode_s, "-");
+    }
+    if (have_render) {
+        snprintf(render_s, sizeof render_s, "%.2f", render_ms);
+    } else {
+        snprintf(render_s, sizeof render_s, "-");
+    }
+    if (info->has_render_queue && st.videoRenderQueue >= 0) {
+        snprintf(queue_s, sizeof queue_s, "%d", st.videoRenderQueue);
+    } else {
+        snprintf(queue_s, sizeof queue_s, "-");
+    }
+    const char *audio_ch = audio_stream_info.channels;
+
+    /* ⭐ ONE LINE, key=value, because what reads it is usually a log. */
+    reply(job, "OK res=%dx%d codec=\"%s\" hdr=%d window=%u"
+               " fps=%.1f recvfps=%.1f frames=%u netdrop=%u loss=%.2f bitrate=%.1f"
+               " rtt=%u rttvar=%u host=%s decode=%s render=%s reasm=%.2f queue=%s"
+               " total=%.2f audio=\"%s\" af=%u\n",
+          info->width, info->height,
+          info->format != NULL && info->format[0] != '\0' ? info->format : "-",
+          app_configuration->hdr ? 1 : 0,
+          streaming_stats_shown() ? 1000u : 2000u,
+          st.decodedFps, st.receivedFps,
+          (unsigned) st.totalFrames, (unsigned) st.networkDroppedFrames,
+          loss_pct, bitrate_mbps,
+          (unsigned) rtt, (unsigned) rtt_var,
+          host_s, decode_s, render_s, reasm_ms, queue_s, total_ms,
+          audio_ch != NULL && audio_ch[0] != '\0' ? audio_ch : "-",
+          (unsigned) audio_stream_info.feedFailures);
 }
 
 #if defined(TARGET_WEBOS)
@@ -615,6 +719,8 @@ static void run_command(control_job_t *job)
         cmd_stop(job, false);
     } else if (strcasecmp(verb, "quit") == 0) {
         cmd_stop(job, true);
+    } else if (strcasecmp(verb, "stats") == 0) {
+        cmd_stats(job);
 #if defined(TARGET_WEBOS)
     } else if (strcasecmp(verb, "devices") == 0) {
         cmd_devices(job);
