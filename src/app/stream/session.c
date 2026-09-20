@@ -241,6 +241,10 @@ void session_toggle_vmouse(session_t *session) {
     session_input_set_vmouse_active(&session->input.vmouse, value);
 }
 
+bool session_vmouse_active(session_t *session) {
+    return session != NULL && session_input_is_vmouse_active(&session->input.vmouse);
+}
+
 void session_screen_keyboard_opened(session_t *session) {
     session_input_screen_keyboard_opened(&session->input);
 }
