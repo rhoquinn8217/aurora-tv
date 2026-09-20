@@ -1180,6 +1180,24 @@ static bool gesture_poll_one(SDL_GameController *controller, SDL_JoystickID id) 
                     w->ours_plugged = true;
                     w->plug_miss = 0;
                     w->plug_check_next = SDL_GetTicks() + PLUG_CHECK_MS;
+                    /* A CONTROLLER IS NOW BRIDGED, so warn if the TV's own
+                     * mouse mode is on (T-170). It will go on driving the host
+                     * cursor, which is DELIBERATE -- without it a bridged pad
+                     * cannot reach the settings page to choose a listener
+                     * preset, and you would need a second device -- but it
+                     * surprises anyone who then sets one.
+                     *
+                     * Only controllers reach this function at all: a keyboard
+                     * or mouse has no SDL controller behind its node and takes
+                     * the direct plug instead. So every path that bridges a
+                     * CONTROLLER passes here -- the chord, a panel row, Auto
+                     * Bridge and the control port -- and nothing else does.
+                     *
+                     * Posted rather than called: this file includes no UI
+                     * headers, and whether mouse mode is on is the streaming
+                     * controller's to answer. Same mechanism as the overlay
+                     * request below. */
+                    bus_pushevent(USER_CTM_MOUSE_MODE_WARN, NULL, NULL);
                     /* ⭐⭐ GREEN ON SUCCESS, FOR A PAD THE CORE WILL NOT PAINT
                      * (T-223). The paragraph below is still true for a
                      * DualSense -- the core draws its green with its tone, so

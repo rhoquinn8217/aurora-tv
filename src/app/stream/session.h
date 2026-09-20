@@ -119,6 +119,10 @@ bool session_has_input(session_t *session);
 
 void session_toggle_vmouse(session_t *session);
 
+/* Is the TV's own mouse mode driving the cursor right now? The query beside
+ * the toggle above, so a caller does not have to reach into session->input. */
+bool session_vmouse_active(session_t *session);
+
 void session_screen_keyboard_opened(session_t *session);
 
 void session_screen_keyboard_closed(session_t *session);

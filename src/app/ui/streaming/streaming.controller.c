@@ -382,6 +382,52 @@ bool streaming_refresh_stats() {
     return true;
 }
 
+/* T-170. The warning goes away on its own after this long. If a second
+ * controller is bridged while it is still up, the timer is RESET rather than a
+ * second notice raised -- bridging three pads at once should read as one
+ * warning, not three. */
+#define MOUSE_NOTICE_MS 5000
+
+static void mouse_notice_expired(lv_timer_t *timer) {
+    streaming_controller_t *controller = timer->user_data;
+    if (controller != NULL) {
+        if (controller->mouse_notice != NULL) {
+            lv_obj_add_flag(controller->mouse_notice, LV_OBJ_FLAG_HIDDEN);
+        }
+        controller->mouse_notice_timer = NULL;
+    }
+    /* Deleted here rather than by a repeat count, so the pointer above is
+     * always cleared in the same breath as the timer goes. */
+    lv_timer_del(timer);
+}
+
+/* Raised when a controller is bridged and the TV's own mouse mode is on.
+ *
+ * Deliberately NOT a question. It was a two-button dialog first; rhoquinn8217
+ * replaced it because a modal cannot appear on an AUTO bridge without waiting
+ * for an answer nobody is there to give, and auto bridge takes several devices
+ * at stream start. A notice that fades needs no one present. */
+void streaming_mouse_mode_warn(void) {
+    streaming_controller_t *controller = current_controller;
+    if (controller == NULL || controller->mouse_notice == NULL) {
+        return;
+    }
+    /* No session means no virtual mouse to be on, so nothing to warn about. */
+    if (controller->global == NULL || controller->global->session == NULL) {
+        return;
+    }
+    if (!session_vmouse_active(controller->global->session)) {
+        return;
+    }
+    lv_obj_clear_flag(controller->mouse_notice, LV_OBJ_FLAG_HIDDEN);
+    if (controller->mouse_notice_timer != NULL) {
+        lv_timer_reset(controller->mouse_notice_timer);
+    } else {
+        controller->mouse_notice_timer =
+                lv_timer_create(mouse_notice_expired, MOUSE_NOTICE_MS, controller);
+    }
+}
+
 void streaming_notice_show(const char *message) {
     streaming_controller_t *controller = current_controller;
     if (!controller) { return; }
@@ -415,6 +461,14 @@ static void controller_dtor(lv_fragment_t *self) {
     if (current_controller == fragment) {
         current_controller = NULL;
     }
+    /* The notice is deleted with lv_layer_sys, but the TIMER is not owned by
+     * any object -- left running it would fire into a freed fragment. */
+    if (fragment->mouse_notice_timer != NULL) {
+        lv_timer_del(fragment->mouse_notice_timer);
+        fragment->mouse_notice_timer = NULL;
+    }
+    fragment->mouse_notice = NULL;
+    fragment->mouse_notice_label = NULL;
     fragment->soft_kbd = NULL; /* Will be deleted with parent */
 }
 
@@ -490,6 +544,10 @@ static bool on_event(lv_fragment_t *self, int code, void *userdata) {
             }
             return true;
         }
+        case USER_CTM_MOUSE_MODE_WARN: {
+            streaming_mouse_mode_warn();
+            return true;
+        }
         case USER_OPEN_SOFT_KEYBOARD: {
             if (controller->soft_kbd) {
                 return true;
@@ -548,6 +606,30 @@ static void on_view_created(lv_fragment_t *self, lv_obj_t *view) {
 
     controller->notice = notice;
     controller->notice_label = notice_label;
+
+    /* T-170: the mouse-mode warning, TOP LEFT so it cannot sit on top of the
+     * connection notice above, which is top right and can be up at the same
+     * time. Same styling on purpose -- it is the same kind of message. */
+    lv_obj_t *mouse_notice = lv_obj_create(lv_layer_sys());
+    lv_obj_set_size(mouse_notice, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+    lv_obj_align(mouse_notice, LV_ALIGN_TOP_LEFT, LV_DPX(20), LV_DPX(20));
+    lv_obj_set_style_radius(mouse_notice, LV_DPX(5), 0);
+    lv_obj_set_style_pad_hor(mouse_notice, LV_DPX(5), 0);
+    lv_obj_set_style_pad_ver(mouse_notice, LV_DPX(3), 0);
+    lv_obj_set_style_border_opa(mouse_notice, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_bg_opa(mouse_notice, LV_OPA_40, 0);
+    lv_obj_set_style_bg_color(mouse_notice, lv_color_black(), 0);
+    lv_obj_t *mouse_notice_label = lv_label_create(mouse_notice);
+    lv_obj_set_size(mouse_notice_label, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+    lv_obj_set_style_text_font(mouse_notice_label, lv_theme_get_font_small(view), 0);
+    lv_label_set_text(mouse_notice_label,
+                      locstr("Mouse mode is on and may affect bridged controllers. "
+                             "Turn off in the streaming overlay"));
+    lv_obj_add_flag(mouse_notice, LV_OBJ_FLAG_HIDDEN);
+
+    controller->mouse_notice = mouse_notice;
+    controller->mouse_notice_label = mouse_notice_label;
+    controller->mouse_notice_timer = NULL;
 
     lv_obj_add_event_cb(controller->stats_pin, pin_toggle, LV_EVENT_VALUE_CHANGED, controller->stats);
 
