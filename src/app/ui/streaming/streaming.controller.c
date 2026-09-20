@@ -630,9 +630,12 @@ static void on_view_created(lv_fragment_t *self, lv_obj_t *view) {
     lv_obj_t *mouse_notice_label = lv_label_create(mouse_notice);
     lv_obj_set_size(mouse_notice_label, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
     lv_obj_set_style_text_font(mouse_notice_label, lv_theme_get_font_small(view), 0);
+    /* Names the overlay button EXACTLY as it is labelled -- "Virtual Mouse",
+     * streaming.view.c:110 -- so the instruction points at something findable.
+     * The settings pane already phrases it the same way. */
     lv_label_set_text(mouse_notice_label,
-                      locstr("Mouse mode is on and may affect bridged controllers. "
-                             "Turn off in the streaming overlay"));
+                      locstr("Virtual mouse is on and will affect bridged controllers. "
+                             "Toggle Virtual Mouse off in the streaming overlay."));
     lv_obj_add_flag(mouse_notice, LV_OBJ_FLAG_HIDDEN);
 
     controller->mouse_notice = mouse_notice;
