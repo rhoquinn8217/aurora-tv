@@ -385,8 +385,12 @@ bool streaming_refresh_stats() {
 /* T-170. The warning goes away on its own after this long. If a second
  * controller is bridged while it is still up, the timer is RESET rather than a
  * second notice raised -- bridging three pads at once should read as one
- * warning, not three. */
-#define MOUSE_NOTICE_MS 5000
+ * warning, not three.
+ *
+ * 7s, up from 5 (rhoquinn8217, 2026-09-19, on the first run): it is two
+ * sentences and one of them names where to go, so it wants reading, not
+ * glancing at. */
+#define MOUSE_NOTICE_MS 7000
 
 static void mouse_notice_expired(lv_timer_t *timer) {
     streaming_controller_t *controller = timer->user_data;
@@ -617,7 +621,11 @@ static void on_view_created(lv_fragment_t *self, lv_obj_t *view) {
     lv_obj_set_style_pad_hor(mouse_notice, LV_DPX(5), 0);
     lv_obj_set_style_pad_ver(mouse_notice, LV_DPX(3), 0);
     lv_obj_set_style_border_opa(mouse_notice, LV_OPA_TRANSP, 0);
-    lv_obj_set_style_bg_opa(mouse_notice, LV_OPA_40, 0);
+    /* Denser than the connection notice's LV_OPA_40, which rhoquinn8217 found
+     * too transparent to read here (2026-09-19). That one shows two words over
+     * whatever is on screen; this one is a sentence with an instruction in it,
+     * and it has to survive being laid over bright video. */
+    lv_obj_set_style_bg_opa(mouse_notice, LV_OPA_80, 0);
     lv_obj_set_style_bg_color(mouse_notice, lv_color_black(), 0);
     lv_obj_t *mouse_notice_label = lv_label_create(mouse_notice);
     lv_obj_set_size(mouse_notice_label, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
