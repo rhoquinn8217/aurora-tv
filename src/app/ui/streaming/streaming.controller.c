@@ -412,17 +412,24 @@ static void mouse_notice_expired(lv_timer_t *timer) {
  * for an answer nobody is there to give, and auto bridge takes several devices
  * at stream start. A notice that fades needs no one present. */
 void streaming_mouse_mode_warn(void) {
+    /* Every branch says which one it took. The first run warned on a manual
+     * bridge and stayed silent on an auto bridge, and four readings of the
+     * code could not say why -- so it says so itself now. */
     streaming_controller_t *controller = current_controller;
     if (controller == NULL || controller->mouse_notice == NULL) {
+        commons_log_info("Streaming", "mouse-mode warning: no streaming view yet");
         return;
     }
     /* No session means no virtual mouse to be on, so nothing to warn about. */
     if (controller->global == NULL || controller->global->session == NULL) {
+        commons_log_info("Streaming", "mouse-mode warning: no session");
         return;
     }
     if (!session_vmouse_active(controller->global->session)) {
+        commons_log_info("Streaming", "mouse-mode warning: virtual mouse is OFF, nothing to say");
         return;
     }
+    commons_log_info("Streaming", "mouse-mode warning: showing for %d ms", MOUSE_NOTICE_MS);
     lv_obj_clear_flag(controller->mouse_notice, LV_OBJ_FLAG_HIDDEN);
     if (controller->mouse_notice_timer != NULL) {
         lv_timer_reset(controller->mouse_notice_timer);

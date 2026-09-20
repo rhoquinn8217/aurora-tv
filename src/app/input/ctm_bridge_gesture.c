@@ -1197,6 +1197,7 @@ static bool gesture_poll_one(SDL_GameController *controller, SDL_JoystickID id) 
                      * headers, and whether mouse mode is on is the streaming
                      * controller's to answer. Same mechanism as the overlay
                      * request below. */
+                    gesture_log("mouse-mode warning: posting the event");
                     bus_pushevent(USER_CTM_MOUSE_MODE_WARN, NULL, NULL);
                     /* ⭐⭐ GREEN ON SUCCESS, FOR A PAD THE CORE WILL NOT PAINT
                      * (T-223). The paragraph below is still true for a
