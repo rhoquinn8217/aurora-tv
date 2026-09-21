@@ -2,6 +2,7 @@
 #include "logging.h"
 #include "app.h"
 #include "input_gamepad_mapping.h"
+#include "input_gamepad.h"
 
 #include "lvgl/lv_sdl_drv_input.h"
 
@@ -30,6 +31,9 @@ void app_input_init(app_input_t *input, app_t *app) {
     SDL_GameControllerAddMappingsFromFile(app->settings.condb_path);
 #endif
     app_input_init_gamepad_mapping(input, app->backend.executor, &app->settings);
+    /* Devices already connected at init may not deliver JOYDEVICEADDED until
+     * later (or at all on webOS BT). Enumerate once up front. */
+    app_input_scan_gamepads(input);
 }
 
 void app_input_deinit(app_input_t *input) {

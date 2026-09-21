@@ -24,7 +24,7 @@
 
 #if TARGET_WEBOS
 /* Installer greps this string out of the ELF. */
-static const char aurora_build_tag[] __attribute__((used)) = "aurora-v124-nopacing";
+static const char aurora_build_tag[] __attribute__((used)) = "aurora-v1.2.10-ndlprime-gp2";
 #endif
 
 int session_worker(session_t *session) {
@@ -78,7 +78,13 @@ int session_worker(session_t *session) {
         commons_log_info("Session", "webOS 5.1 surroundParams=642014523 (FL FR SL SR FC LFE)");
     }
 #endif
-    short gamepad_mask = app_input_gamepads_mask(&app->input);
+    short gamepad_mask;
+    /* Refresh before launch so Sunshine/Apollo allocate a slot for every pad
+     * already attached (remoteControllersBitmap / gcmap). */
+    app_input_scan_gamepads(&app->input);
+    gamepad_mask = app_input_gamepads_mask(&app->input);
+    commons_log_info("Session", "Launch gamepad mask=0x%x (%d pad(s))", gamepad_mask,
+                     app_input_get_gamepads_count(&app->input));
     int ret = gs_start_app(client, server, &session->config.stream, appId, server->isGfe, session->config.sops,
                            session->config.local_audio, gamepad_mask, surround_params);
     if (ret != GS_OK) {

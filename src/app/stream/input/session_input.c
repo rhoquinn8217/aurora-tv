@@ -22,6 +22,7 @@
 #include "stream/session_priv.h"
 #include "session_evmouse.h"
 #include "input/app_input.h"
+#include "input/input_gamepad.h"
 
 /* Pointer travel, in host pixels, for a finger swept across the full width of the
  * touchpad at 100% sensitivity. Vertical travel is derived from each pad's own
@@ -89,6 +90,8 @@ void session_input_started(stream_input_t *input) {
     if (!input->view_only) {
         stream_input_touchpad_mouse_init(input);
     }
+    /* Pick up pads whose JOYDEVICEADDED never reached us (2nd DualSense on webOS). */
+    app_input_scan_gamepads(input->input);
     for (int i = 0, j = app_input_get_max_gamepads(input->input); i < j; ++i) {
         app_gamepad_state_t *gamepad = app_input_gamepad_state_by_index(input->input, i);
         if (gamepad == NULL) {
