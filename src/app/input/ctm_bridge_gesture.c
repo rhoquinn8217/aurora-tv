@@ -1680,11 +1680,15 @@ static void arrival_reenumerate(struct app_input_t *input) {
 
 /* The look itself. Runs on the main thread, from the tick. */
 static void arrival_check(struct app_input_t *input) {
-    /* ⛔ The quiet list unless the core is already awake: the full one wakes the
-     * bridge core and broadcasts for a listener, which a check should never
-     * cause. */
+    /* ⛔⛔ THE QUIET LIST, ALWAYS. The full one wakes the bridge core and
+     * broadcasts for a listener -- the settings pane uses the quiet one for
+     * exactly that reason -- and this runs a few seconds after ANY device
+     * node appears, which includes replugging a dongle while a pad is
+     * bridged. ⚠️ It was the awake-core variant for one build (384), and
+     * rhoquinn8217 was right to ask what the new code touched during a
+     * session: a watchdog reads what is already known, and nothing else. */
     ctm_bridge_dev_t devs[16];
-    const int n = ctm_bridge_active() ? ctm_bridge_list(devs, 16) : ctm_bridge_list_quiet(devs, 16);
+    const int n = ctm_bridge_list_quiet(devs, 16);
     if (n <= 0) return;
 
     bool bridged = false;
