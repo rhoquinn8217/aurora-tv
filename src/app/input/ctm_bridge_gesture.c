@@ -1607,6 +1607,9 @@ bool ctm_bridge_gesture_light_busy(SDL_GameController *controller) {
 static int s_arrival_inotify = -1;
 static uint32_t s_arrival_due;      /* SDL ticks at which to look; 0 = nothing pending */
 static bool s_arrival_started;
+/* ⭐ After a cure, the node it was for -- so the NEXT look can say whether it
+ * worked. A fix nobody can confirm is a claim. */
+static char s_arrival_verify[64];
 
 static void arrival_watch_init(void) {
     s_arrival_started = true;
@@ -1616,6 +1619,12 @@ static void arrival_watch_init(void) {
         gesture_log("arrival watch: no inotify (%s) -- the check runs at start only", strerror(errno));
         return;
     }
+    /* ⭐⭐ SAID ON EVERY START, because this watch is otherwise SILENT when
+     * all is well -- and silence cannot be told from a watch that never ran.
+     * One line at the top of each session is what makes the quiet afterwards
+     * mean something. */
+    gesture_log("arrival watch: armed -- watching /dev and /dev/input, first look in %u ms",
+                (unsigned) ARRIVAL_START_MS);
     /* ⓘ Both directories: a pad arrives as a hidraw node and as js/event nodes,
      * and which one appears first is not ours to predict. IN_CREATE only --
      * a node going away is the ordinary path and needs nothing from us. */
@@ -1692,10 +1701,36 @@ static void arrival_check(struct app_input_t *input) {
     if (n <= 0) return;
 
     bool bridged = false;
+    int controllers = 0, matched = 0;
     for (int i = 0; i < n; ++i) {
         if (devs[i].plugged) bridged = true;
+        if (!devs[i].controller || devs[i].node[0] == '\0') continue;
+        ++controllers;
+        if (ctm_bridge_gesture_player_for_node(devs[i].node) >= 0) ++matched;
     }
     const int open_pads = app_input_get_gamepads_count(input);
+
+    /* ⭐ DID THE CURE WORK? Asked on the look after it ran, and answered
+     * either way. ⓘ This is the line that turns "it should recover" into
+     * something readable off a set nobody was watching. */
+    if (s_arrival_verify[0] != '\0') {
+        const int player = ctm_bridge_gesture_player_for_node(s_arrival_verify);
+        if (player >= 0) {
+            gesture_log("arrival watch: %s is player %d now -- the re-enumeration worked",
+                        s_arrival_verify, player);
+        } else {
+            gesture_log("arrival watch: %s STILL has no player after the re-enumeration -- "
+                        "reconnect it, and say so, because that is a second fault",
+                        s_arrival_verify);
+        }
+        s_arrival_verify[0] = '\0';
+    }
+
+    /* ⓘ One line per look, healthy or not. A look happens only after a device
+     * node appears or at start, so it is rare -- and it is the proof the watch
+     * is running at all. */
+    gesture_log("arrival watch: looked -- %d device(s), %d controller(s), %d matched%s",
+                n, controllers, matched, bridged ? ", something bridged" : "");
 
     for (int i = 0; i < n; ++i) {
         const ctm_bridge_dev_t *d = &devs[i];
@@ -1714,7 +1749,10 @@ static void arrival_check(struct app_input_t *input) {
                         open_pads, bridged ? "something" : "nothing");
             return;
         }
+        snprintf(s_arrival_verify, sizeof s_arrival_verify, "%s", d->node);
         arrival_reenumerate(input);
+        /* ⭐ Look again shortly, to say whether it worked. */
+        s_arrival_due = SDL_GetTicks() + 3000;
         return;
     }
 }
