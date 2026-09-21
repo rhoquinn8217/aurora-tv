@@ -28,6 +28,11 @@
 
 #if defined(TARGET_WEBOS)
 
+#include <errno.h>
+#include <fcntl.h>
+#include <sys/inotify.h>
+#include <unistd.h>
+
 #include "ctm_bridge_glue.h"
 #include "app_input.h"
 #include "input_gamepad.h"
@@ -1555,6 +1560,178 @@ bool ctm_bridge_gesture_light_busy(SDL_GameController *controller) {
     return busy;
 }
 
+/* --- T-179: a controller the core can see that SDL never heard about --------
+ *
+ * ⭐⭐ THE FAULT, MEASURED ON THE C3 2026-09-21. A pad is connected, the kernel
+ * enumerates it, the core's scan lists it and it bridges -- and Aurora has no
+ * input from it, no overlay chord, nothing, until it is unplugged and plugged
+ * in again.
+ *
+ * ⛔ THE CAUSE IS AN ARRIVAL THAT NEVER LANDED. SDL takes the udev monitor path
+ * on webOS (libudev is present and systemd-udevd runs), and that path has no
+ * poll behind it: one dropped event is permanent. The core does not care,
+ * because everything it does is a scan -- which is exactly why the panel can
+ * list a pad the app cannot feel.
+ *
+ * ➡️ So this watches for the DISAGREEMENT rather than for a cause: a controller
+ * the core can see, with no SDL player, is the fault by definition, however it
+ * got there. That covers the two cases no log could tell apart -- a pad that
+ * was never registered, and one that registered and quietly fell out.
+ *
+ * ⭐ WHEN IT LOOKS (rhoquinn8217, 2026-09-21: *"you should just check whenever
+ * a device is connected or when the app starts"*). Not a poll:
+ *   - once, shortly after the app starts, and
+ *   - whenever a device node APPEARS, which is watched with inotify on /dev and
+ *     /dev/input.
+ * ⓘ inotify rather than udev on purpose: udev is the thing that dropped the
+ * event, and the kernel creates the node either way. It is also what SDL's own
+ * fallback uses on this platform, so it is proven here. One fd, no timer, and
+ * nothing at all while the TV sits idle.
+ *
+ * ⛔⛔ AND IT DOES NOT DISTURB WHAT IS WORKING (rhoquinn8217, 2026-09-21:
+ * *"don't disrupt any currently connected devices"*). The only way to make SDL
+ * find a device it missed is to restart its joystick subsystem, which closes
+ * and reopens EVERY pad's handle -- so that is done only when the broken pad is
+ * the only one there is: no other controller open, nothing bridged. Otherwise
+ * the state is logged and left alone, and the pad is reconnected by hand as
+ * before. ⓘ A bridged pad's emulated twin on the host is retired by SDL player
+ * index; shuffling those to rescue a pad nobody is holding would trade a known
+ * fault for a worse one.
+ *
+ * ⓘ Logged into the core's own file rather than Aurora's, because the C3 and
+ * the C1 have no /var/log/dbg-log at all and this has to be readable on every
+ * set. */
+#define ARRIVAL_SETTLE_MS   4000    /* after a node appears: SDL is allowed its own chance first */
+#define ARRIVAL_START_MS    8000    /* after the app starts */
+
+static int s_arrival_inotify = -1;
+static uint32_t s_arrival_due;      /* SDL ticks at which to look; 0 = nothing pending */
+static bool s_arrival_started;
+
+static void arrival_watch_init(void) {
+    s_arrival_started = true;
+    s_arrival_due = SDL_GetTicks() + ARRIVAL_START_MS;
+    s_arrival_inotify = inotify_init1(IN_NONBLOCK | IN_CLOEXEC);
+    if (s_arrival_inotify < 0) {
+        gesture_log("arrival watch: no inotify (%s) -- the check runs at start only", strerror(errno));
+        return;
+    }
+    /* ⓘ Both directories: a pad arrives as a hidraw node and as js/event nodes,
+     * and which one appears first is not ours to predict. IN_CREATE only --
+     * a node going away is the ordinary path and needs nothing from us. */
+    if (inotify_add_watch(s_arrival_inotify, "/dev", IN_CREATE) < 0) {
+        gesture_log("arrival watch: cannot watch /dev (%s)", strerror(errno));
+    }
+    if (inotify_add_watch(s_arrival_inotify, "/dev/input", IN_CREATE) < 0) {
+        gesture_log("arrival watch: cannot watch /dev/input (%s)", strerror(errno));
+    }
+}
+
+/* True when a node that could be a controller has just appeared. Drains the
+ * queue either way, so a burst of nodes from one dongle is one wake-up. */
+static bool arrival_node_appeared(void) {
+    if (s_arrival_inotify < 0) return false;
+    char buf[4096] __attribute__((aligned(__alignof__(struct inotify_event))));
+    bool interesting = false;
+    for (;;) {
+        const ssize_t len = read(s_arrival_inotify, buf, sizeof buf);
+        if (len <= 0) break;
+        for (char *p = buf; p < buf + len;) {
+            const struct inotify_event *ev = (const struct inotify_event *) p;
+            if (ev->len > 0) {
+                if (strncmp(ev->name, "hidraw", 6) == 0 || strncmp(ev->name, "js", 2) == 0 ||
+                    strncmp(ev->name, "event", 5) == 0) {
+                    interesting = true;
+                }
+            }
+            p += sizeof(struct inotify_event) + ev->len;
+        }
+    }
+    return interesting;
+}
+
+/* ⚠️ Closes each pad through the app's OWN path first. SDL_QuitSubSystem would
+ * free the controllers behind the app's back, leaving the pointers in
+ * app_gamepad_state_t and this file's own table pointing at freed memory -- so
+ * the pair that runs on SDL_JOYDEVICEREMOVED is run here by hand, per pad, in
+ * the same order. ⓘ In practice there is nothing to close: this only runs when
+ * no other controller is open. */
+static void arrival_reenumerate(struct app_input_t *input) {
+    int closed = 0;
+    const int slots = (int) app_input_get_max_gamepads(input);
+    for (int i = 0; i < slots; ++i) {
+        SDL_GameController *gc = input->gamepads[i].controller;
+        if (gc == NULL) continue;
+        SDL_Joystick *js = SDL_GameControllerGetJoystick(gc);
+        if (js == NULL) continue;
+        const SDL_JoystickID id = SDL_JoystickInstanceID(js);
+        ctm_bridge_gesture_reset(id);
+        app_input_close_gamepad(input, id);
+        ++closed;
+    }
+    SDL_QuitSubSystem(SDL_INIT_GAMECONTROLLER | SDL_INIT_JOYSTICK);
+    SDL_InitSubSystem(SDL_INIT_JOYSTICK | SDL_INIT_GAMECONTROLLER);
+    /* ⓘ Nothing is opened here. SDL announces every device it finds and the
+     * ordinary SDL_JOYDEVICEADDED path opens them, filters included -- the same
+     * route a pad takes when the app starts, which is why pads plugged in
+     * before launch never miss. */
+    gesture_log("arrival watch: re-enumerated (%d pad(s) closed first)", closed);
+}
+
+/* The look itself. Runs on the main thread, from the tick. */
+static void arrival_check(struct app_input_t *input) {
+    /* ⛔ The quiet list unless the core is already awake: the full one wakes the
+     * bridge core and broadcasts for a listener, which a check should never
+     * cause. */
+    ctm_bridge_dev_t devs[16];
+    const int n = ctm_bridge_active() ? ctm_bridge_list(devs, 16) : ctm_bridge_list_quiet(devs, 16);
+    if (n <= 0) return;
+
+    bool bridged = false;
+    for (int i = 0; i < n; ++i) {
+        if (devs[i].plugged) bridged = true;
+    }
+    const int open_pads = app_input_get_gamepads_count(input);
+
+    for (int i = 0; i < n; ++i) {
+        const ctm_bridge_dev_t *d = &devs[i];
+        if (!d->controller || d->node[0] == '\0') continue;
+        if (ctm_bridge_gesture_player_for_node(d->node) >= 0) continue;
+
+        gesture_log("arrival watch: %s (%s) on %s has no SDL player -- its arrival never reached SDL",
+                    d->name, d->kind, d->node);
+        if (bridged || open_pads > 0) {
+            /* ⭐ THE REFUSAL IS THE INTERESTING HALF and is said out loud: it
+             * means the fault happened with something else in use, which no log
+             * has ever shown, and it is the case a person still has to fix by
+             * unplugging. */
+            gesture_log("arrival watch: leaving it alone -- %d pad(s) open, %s bridged. "
+                        "Reconnect the controller to recover it",
+                        open_pads, bridged ? "something" : "nothing");
+            return;
+        }
+        arrival_reenumerate(input);
+        return;
+    }
+}
+
+/* Called from the tick. Cheap: a read on one fd, and a look only when something
+ * has just appeared or the app has just started. */
+static void arrival_watch_tick(struct app_input_t *input) {
+    if (input == NULL) return;
+    if (!s_arrival_started) {
+        arrival_watch_init();
+        return;
+    }
+    const uint32_t now = SDL_GetTicks();
+    if (arrival_node_appeared()) {
+        s_arrival_due = now + ARRIVAL_SETTLE_MS;
+    }
+    if (s_arrival_due == 0 || (int32_t) (now - s_arrival_due) < 0) return;
+    s_arrival_due = 0;
+    arrival_check(input);
+}
+
 int ctm_bridge_gesture_player_for_node(const char *node) {
     if (!node || !node[0] || !s_gesture_input) {
         return -1;
@@ -1661,6 +1838,10 @@ static void gesture_overlay_requested(void) {
 
 void ctm_bridge_gesture_tick(struct app_input_t *input, struct session_t *session,
                              bool overlay_open) {
+    /* ⭐ T-179: has a controller arrived that SDL never heard about? See the
+     * long note beside arrival_watch_tick. Cheap, and silent until a device
+     * node appears. */
+    arrival_watch_tick(input);
     {
         static bool s_overlay_request_set = false;
         if (!s_overlay_request_set) {
