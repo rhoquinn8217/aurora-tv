@@ -67,6 +67,30 @@ bool app_input_init_gamepad(app_input_t *input, int device_index) {
     return false;
 }
 
+int app_input_scan_gamepads(app_input_t *input) {
+    int opened = 0;
+    int num = SDL_NumJoysticks();
+    for (int device_index = 0; device_index < num; device_index++) {
+        if (app_input_get_gamepads_count(input) >= app_input_get_max_gamepads(input)) {
+            break;
+        }
+#if SDL_VERSION_ATLEAST(2, 0, 6)
+        SDL_JoystickID instance_id = SDL_JoystickGetDeviceInstanceID(device_index);
+        if (instance_id >= 0 && app_input_gamepad_state_by_instance_id(input, instance_id) != NULL) {
+            continue;
+        }
+#endif
+        if (app_input_init_gamepad(input, device_index)) {
+            opened++;
+        }
+    }
+    if (opened > 0) {
+        commons_log_info("Input", "Gamepad scan opened %d additional controller(s); mask=0x%x count=%d",
+                         opened, input->activeGamepadMask, app_input_get_gamepads_count(input));
+    }
+    return opened;
+}
+
 void app_input_close_gamepad(app_input_t *input, SDL_JoystickID sdl_id) {
     app_gamepad_state_t *state = app_input_gamepad_state_by_instance_id(input, sdl_id);
     if (!state) {
@@ -167,6 +191,16 @@ app_gamepad_state_t *app_input_gamepad_state_by_instance_id(app_input_t *input, 
     return NULL;
 }
 
+app_gamepad_state_t *app_input_gamepad_state_by_gs_id(app_input_t *input, unsigned short gs_id) {
+    for (short i = 0; i < (short) input->max_num_gamepads; i++) {
+        app_gamepad_state_t *gamepad = &input->gamepads[i];
+        if (gamepad->instance_id != -1 && gamepad->gs_id == (short) gs_id) {
+            return gamepad;
+        }
+    }
+    return NULL;
+}
+
 int app_input_get_gamepads_count(app_input_t *input) {
     return (int) input->gamepads_count;
 }
@@ -181,11 +215,10 @@ short app_input_gamepads_mask(app_input_t *input) {
 
 void app_input_gamepad_rumble(app_input_t *input, unsigned short controller_id,
                               unsigned short low_freq_motor, unsigned short high_freq_motor) {
-    if (controller_id >= app_input_get_max_gamepads(input)) {
+    app_gamepad_state_t *state = app_input_gamepad_state_by_gs_id(input, controller_id);
+    if (state == NULL || state->controller == NULL) {
         return;
     }
-
-    app_gamepad_state_t *state = &input->gamepads[controller_id];
 
 #if SDL_VERSION_ATLEAST(2, 0, 9)
     SDL_GameControllerRumble(state->controller, low_freq_motor, high_freq_motor, SDL_HAPTIC_INFINITY);
@@ -223,15 +256,26 @@ void app_input_gamepad_rumble(app_input_t *input, unsigned short controller_id,
 void app_input_gamepad_rumble_triggers(app_input_t *input, unsigned short controllerNumber, unsigned short leftTrigger,
                                        unsigned short rightTrigger) {
 #if SDL_VERSION_ATLEAST(2, 0, 14)
-    SDL_GameControllerRumbleTriggers(input->gamepads[controllerNumber].controller, leftTrigger, rightTrigger,
-                                     SDL_HAPTIC_INFINITY);
+    app_gamepad_state_t *state = app_input_gamepad_state_by_gs_id(input, controllerNumber);
+    if (state == NULL || state->controller == NULL) {
+        return;
+    }
+    SDL_GameControllerRumbleTriggers(state->controller, leftTrigger, rightTrigger, SDL_HAPTIC_INFINITY);
+#else
+    (void) input;
+    (void) controllerNumber;
+    (void) leftTrigger;
+    (void) rightTrigger;
 #endif
 }
 
 void app_input_gamepad_set_motion_event_state(app_input_t *input, unsigned short controllerNumber, uint8_t motionType,
                                               uint16_t reportRateHz) {
 #if SDL_VERSION_ATLEAST(2, 0, 14)
-    app_gamepad_state_t *gamepad = &input->gamepads[controllerNumber];
+    app_gamepad_state_t *gamepad = app_input_gamepad_state_by_gs_id(input, controllerNumber);
+    if (gamepad == NULL || gamepad->controller == NULL) {
+        return;
+    }
     SDL_SensorType sensor_type = SDL_SENSOR_INVALID;
     switch (motionType) {
         case LI_MOTION_TYPE_ACCEL:
@@ -251,6 +295,11 @@ void app_input_gamepad_set_motion_event_state(app_input_t *input, unsigned short
     SDL_GameControllerSetSensorEnabled(gamepad->controller, sensor_type, reportRateHz > 0 ? SDL_TRUE : SDL_FALSE);
     commons_log_info("Input", "Setting motion event state for controller %d, motionType: %d, reportRateHz: %d",
                      controllerNumber, motionType, reportRateHz);
+#else
+    (void) input;
+    (void) controllerNumber;
+    (void) motionType;
+    (void) reportRateHz;
 #endif
 }
 
@@ -258,7 +307,17 @@ void app_input_gamepad_set_motion_event_state(app_input_t *input, unsigned short
 void app_input_gamepad_set_controller_led(app_input_t *input, unsigned short controllerNumber, uint8_t r, uint8_t g,
                                           uint8_t b) {
 #if SDL_VERSION_ATLEAST(2, 0, 14)
-    SDL_GameControllerSetLED(input->gamepads[controllerNumber].controller, r, g, b);
+    app_gamepad_state_t *state = app_input_gamepad_state_by_gs_id(input, controllerNumber);
+    if (state == NULL || state->controller == NULL) {
+        return;
+    }
+    SDL_GameControllerSetLED(state->controller, r, g, b);
+#else
+    (void) input;
+    (void) controllerNumber;
+    (void) r;
+    (void) g;
+    (void) b;
 #endif
 }
 
@@ -274,14 +333,11 @@ static bool app_input_gamepad_is_ps5(SDL_GameController *controller) {
 static int app_input_gamepad_send_ps5_effect(app_input_t *input, unsigned short controllerNumber,
                                              const void *data, int size) {
 #if SDL_VERSION_ATLEAST(2, 0, 18)
-    if (controllerNumber >= (unsigned short) app_input_get_max_gamepads(input)) {
+    app_gamepad_state_t *state = app_input_gamepad_state_by_gs_id(input, controllerNumber);
+    if (state == NULL || state->controller == NULL || !app_input_gamepad_is_ps5(state->controller)) {
         return -1;
     }
-    SDL_GameController *controller = input->gamepads[controllerNumber].controller;
-    if (!controller || !app_input_gamepad_is_ps5(controller)) {
-        return -1;
-    }
-    return SDL_GameControllerSendEffect(controller, data, size);
+    return SDL_GameControllerSendEffect(state->controller, data, size);
 #else
     (void) input;
     (void) controllerNumber;
@@ -353,8 +409,11 @@ static bool is_same_gamepad(const app_gamepad_state_t *state, SDL_GameController
     }
 #if SDL_VERSION_ATLEAST(2, 0, 14)
     const char *serial = SDL_JoystickGetSerial(joystick);
-    if (serial == NULL) {
-        return state->serial_crc == 0;
+    /* DualSense on webOS often has a NULL serial. Matching by GUID alone would
+     * make two identical pads share reconnect identity and steal each other's
+     * gs_id. Only reuse a slot when we have a real serial to key on. */
+    if (serial == NULL || serial[0] == '\0') {
+        return false;
     }
     return state->serial_crc == SDL_crc32(0, (const void *) serial, strlen(serial));
 #else

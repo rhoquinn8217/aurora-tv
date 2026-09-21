@@ -11,6 +11,13 @@ bool app_input_init_gamepad(app_input_t *input, int device_index);
 
 void app_input_close_gamepad(app_input_t *input, SDL_JoystickID sdl_id);
 
+/**
+ * Open any SDL joysticks that are present but not tracked yet.
+ * Needed when JOYDEVICEADDED was missed (common with a second BT DualSense on webOS).
+ * @return number of newly opened gamepads
+ */
+int app_input_scan_gamepads(app_input_t *input);
+
 int app_input_get_gamepads_count(app_input_t *input);
 
 short app_input_get_max_gamepads(app_input_t *input);
@@ -42,3 +49,6 @@ void app_input_gamepad_state_deinit(app_gamepad_state_t *state);
 app_gamepad_state_t *app_input_gamepad_state_by_index(app_input_t *input, int index);
 
 app_gamepad_state_t *app_input_gamepad_state_by_instance_id(app_input_t *input, SDL_JoystickID instance_id);
+
+/** Host controllerNumber is gs_id, not the sparse gamepads[] slot index. */
+app_gamepad_state_t *app_input_gamepad_state_by_gs_id(app_input_t *input, unsigned short gs_id);
