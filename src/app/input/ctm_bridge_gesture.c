@@ -1784,7 +1784,11 @@ static void arrival_check(struct app_input_t *input) {
             bool same_driver_bridged = false;
             for (int k = 0; k < n; ++k) {
                 if (!devs[k].plugged || !devs[k].controller) continue;
-                if (arrival_hidapi_hint(devs[k].kind) == hint) same_driver_bridged = true;
+                const char *other = arrival_hidapi_hint(devs[k].kind);
+                /* ⓘ strcmp, not a pointer test: two uses of the same macro need not
+                 * be the same literal, and guessing "different driver" would let the
+                 * cure run on a pad that IS in play. */
+                if (other != NULL && strcmp(other, hint) == 0) same_driver_bridged = true;
             }
             if (same_driver_bridged) {
                 gesture_log("arrival watch: leaving it alone -- another pad on that driver is "
@@ -1806,12 +1810,6 @@ static void arrival_check(struct app_input_t *input) {
                         "%d pad(s) open, %s bridged. Reconnect the controller to recover it",
                         d->kind, open_pads, bridged ? "something" : "nothing");
             return;
-        }
-        snprintf(s_arrival_verify, sizeof s_arrival_verify, "%s", d->node);
-        arrival_reenumerate(input);
-        /* ⭐ Look again shortly, to say whether it worked. */
-        s_arrival_due = SDL_GetTicks() + 3000;
-        return;
         }
         snprintf(s_arrival_verify, sizeof s_arrival_verify, "%s", d->node);
         arrival_reenumerate(input);
