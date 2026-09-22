@@ -22,6 +22,19 @@ void app_input_handle_event(app_input_t *input, const SDL_Event *event) {
         app_input_close_gamepad(input, event->jdevice.which);
     } else if (event->type == SDL_CONTROLLERDEVICEADDED) {
         commons_log_debug("Input", "SDL_CONTROLLERDEVICEADDED");
+        /* Some webOS DualSense paths surface CONTROLLERDEVICEADDED without a
+         * matching JOYDEVICEADDED (or after it was dropped). Open if missing. */
+        if (app_input_get_gamepads_count(input) >= app_input_get_max_gamepads(input)) {
+            commons_log_warn("Input", "Too many controllers, ignoring.");
+            return;
+        }
+#if SDL_VERSION_ATLEAST(2, 0, 6)
+        SDL_JoystickID instance_id = SDL_JoystickGetDeviceInstanceID(event->cdevice.which);
+        if (instance_id >= 0 && app_input_gamepad_state_by_instance_id(input, instance_id) != NULL) {
+            return;
+        }
+#endif
+        app_input_init_gamepad(input, event->cdevice.which);
     } else if (event->type == SDL_CONTROLLERDEVICEREMOVED) {
         commons_log_debug("Input", "SDL_CONTROLLERDEVICEREMOVED");
         app_input_close_gamepad(input, event->cdevice.which);

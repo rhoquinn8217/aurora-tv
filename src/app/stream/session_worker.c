@@ -24,7 +24,7 @@
 
 #if TARGET_WEBOS
 /* Installer greps this string out of the ELF. */
-static const char aurora_build_tag[] __attribute__((used)) = "aurora-v124-nopacing";
+static const char aurora_build_tag[] __attribute__((used)) = "aurora-v1.2.10-ndlprime-gp2";
 #endif
 
 /* Auto-reconnect policy: a stream that dies with a network error is resumed in
@@ -107,7 +107,15 @@ int session_worker(session_t *session) {
 #endif
 
     connect:
+    /* ⭐ UPSTREAM 1.2.10: refresh before launch so Apollo allocates a slot for
+     * every pad already attached (remoteControllersBitmap / gcmap) -- and, with
+     * the scan, for a pad whose arrival the app never heard. ⓘ Our retry label
+     * and our already-declared ret / gamepad_mask are kept; only the refresh and
+     * its line of log are his. */
+    app_input_scan_gamepads(&app->input);
     gamepad_mask = app_input_gamepads_mask(&app->input);
+    commons_log_info("Session", "Launch gamepad mask=0x%x (%d pad(s))", gamepad_mask,
+                     app_input_get_gamepads_count(&app->input));
     ret = gs_start_app(client, server, &session->config.stream, appId, server->isGfe, session->config.sops,
                        session->config.local_audio, gamepad_mask, surround_params);
     if (ret != GS_OK) {
