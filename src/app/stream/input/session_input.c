@@ -23,6 +23,7 @@
 #include "session_evmouse.h"
 #include "input/app_input.h"
 #include "input/input_gamepad.h"
+#include "input/ctm_bridge_gesture.h"
 
 /* Pointer travel, in host pixels, for a finger swept across the full width of the
  * touchpad at 100% sensitivity. Vertical travel is derived from each pad's own
