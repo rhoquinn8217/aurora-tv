@@ -1659,6 +1659,32 @@ static bool arrival_node_appeared(void) {
     return interesting;
 }
 
+/* ⭐⭐ THE GENTLE CURE, and the one that will run almost every time
+ * (rhoquinn8217, 2026-09-21, after the strict gate refused on the rooted
+ * monitor because two Xbox pads sit connected there permanently).
+ *
+ * SDL claims a DualSense, an Edge and a DS4 through its HIDAPI drivers rather
+ * than evdev -- `app.c` sets SDL_HINT_JOYSTICK_HIDAPI_PS5 -- and a driver
+ * switched off and on again re-examines the devices it could claim.
+ * ➡️ So a PlayStation pad can be made to announce itself WITHOUT touching
+ * anything else: an Xbox pad on evdev never notices, bridged or not.
+ *
+ * ⓘ Which hint depends on the pad, so a missing DualSense does not disturb a
+ * DS4 that is perfectly happy. ⚠️ The core's kind strings are cut to 8 bytes
+ * ("ds5e_us"), hence the prefix test. */
+static const char *arrival_hidapi_hint(const char *kind) {
+    if (kind == NULL) return NULL;
+    if (strncmp(kind, "ds5", 3) == 0) return SDL_HINT_JOYSTICK_HIDAPI_PS5;
+    if (strncmp(kind, "ds4", 3) == 0) return SDL_HINT_JOYSTICK_HIDAPI_PS4;
+    return NULL;   /* an Xbox or generic pad is on evdev; only the full pass reaches it */
+}
+
+static void arrival_rescan_driver(const char *hint) {
+    SDL_SetHint(hint, "0");
+    SDL_SetHint(hint, "1");
+    gesture_log("arrival watch: asked %s to look again -- nothing else is touched", hint);
+}
+
 /* ⚠️ Closes each pad through the app's OWN path first. SDL_QuitSubSystem would
  * free the controllers behind the app's back, leaving the pointers in
  * app_gamepad_state_t and this file's own table pointing at freed memory -- so
@@ -1739,15 +1765,53 @@ static void arrival_check(struct app_input_t *input) {
 
         gesture_log("arrival watch: %s (%s) on %s has no SDL player -- its arrival never reached SDL",
                     d->name, d->kind, d->node);
-        if (bridged || open_pads > 0) {
-            /* ⭐ THE REFUSAL IS THE INTERESTING HALF and is said out loud: it
-             * means the fault happened with something else in use, which no log
-             * has ever shown, and it is the case a person still has to fix by
-             * unplugging. */
-            gesture_log("arrival watch: leaving it alone -- %d pad(s) open, %s bridged. "
-                        "Reconnect the controller to recover it",
-                        open_pads, bridged ? "something" : "nothing");
+        /* ⛔⛔ A PAD THAT IS BRIDGED IS NOT THE ONE TO RESCUE. It already works
+         * for the game -- the PC has the real controller -- and what it lacks
+         * is only this side's chord and menus. Meanwhile re-announcing it
+         * mid-handover would shuffle the slot that the "retire its fake twin"
+         * bookkeeping is keyed on. ➡️ Say so, and look at the next one. */
+        if (d->plugged) {
+            gesture_log("arrival watch: %s is bridged, so the PC has it -- leaving it alone",
+                        d->node);
+            continue;
+        }
+
+        const char *hint = arrival_hidapi_hint(d->kind);
+        if (hint != NULL) {
+            /* ⭐ Only a pad on the SAME driver can be disturbed by this, so only
+             * that blocks it: a bridged Xbox pad, or a bridged DS4 while a
+             * DualSense is missing, has nothing to do with it. */
+            bool same_driver_bridged = false;
+            for (int k = 0; k < n; ++k) {
+                if (!devs[k].plugged || !devs[k].controller) continue;
+                if (arrival_hidapi_hint(devs[k].kind) == hint) same_driver_bridged = true;
+            }
+            if (same_driver_bridged) {
+                gesture_log("arrival watch: leaving it alone -- another pad on that driver is "
+                            "bridged and in play. Reconnect the controller to recover it");
+                return;
+            }
+            snprintf(s_arrival_verify, sizeof s_arrival_verify, "%s", d->node);
+            arrival_rescan_driver(hint);
+            s_arrival_due = SDL_GetTicks() + 3000;
             return;
+        }
+
+        /* ⚠️ NOT A PLAYSTATION PAD, so the gentle cure cannot reach it: an Xbox
+         * or generic pad arrives through evdev, and only restarting the whole
+         * joystick subsystem re-examines that. ⛔ That closes and reopens EVERY
+         * pad, so it keeps the strict gate it was born with. */
+        if (bridged || open_pads > 0) {
+            gesture_log("arrival watch: leaving it alone -- %s needs the full pass, and "
+                        "%d pad(s) open, %s bridged. Reconnect the controller to recover it",
+                        d->kind, open_pads, bridged ? "something" : "nothing");
+            return;
+        }
+        snprintf(s_arrival_verify, sizeof s_arrival_verify, "%s", d->node);
+        arrival_reenumerate(input);
+        /* ⭐ Look again shortly, to say whether it worked. */
+        s_arrival_due = SDL_GetTicks() + 3000;
+        return;
         }
         snprintf(s_arrival_verify, sizeof s_arrival_verify, "%s", d->node);
         arrival_reenumerate(input);
