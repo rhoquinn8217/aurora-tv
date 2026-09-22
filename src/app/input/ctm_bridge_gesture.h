@@ -72,6 +72,11 @@ bool ctm_bridge_gesture_light_busy(SDL_GameController *controller);
  * SDL. The hidraw node is what both sides speak, so it is the join. */
 int ctm_bridge_gesture_player_for_node(const char *node);
 
+/* Re-apply the moonlight exclusion for every controller the core reports as
+ * bridged. Call at session start: the mask is cleared when a stream stops, but
+ * a bridge outlives the stream. */
+void ctm_bridge_gesture_reexclude_bridged(void);
+
 /* The controller's own ADDRESS -- its Bluetooth MAC -- for the controller
  * behind this hidraw node, written NUL-terminated into out. True if there was
  * one. False leaves out untouched.

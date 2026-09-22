@@ -94,6 +94,13 @@ void session_input_started(stream_input_t *input) {
     }
     /* Pick up pads whose JOYDEVICEADDED never reached us (2nd DualSense on webOS). */
     app_input_scan_gamepads(input->input);
+    /* ⛔ THEN take back out the ones the bridge already owns. The scan opens
+     * whatever SDL has, including a pad that is bridged right now, and the mask
+     * that used to exclude it was cleared when the last stream stopped. Without
+     * this the announce loop below would hand the host a pad the bridge is
+     * already sending -- two of the same controller, and two of every touchpad
+     * movement. */
+    ctm_bridge_gesture_reexclude_bridged();
     /* ⓘ Upstream v1.2.9 guarded its touchpad-mouse init with `if (!view_only)`.
      * Our early return above says the same thing for the whole function, so the
      * call simply sits after it. ⚠️ Neither guard existed at the fork: we each
