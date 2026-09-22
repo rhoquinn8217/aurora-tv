@@ -1610,6 +1610,8 @@ static bool s_arrival_started;
 /* ⭐ After a cure, the node it was for -- so the NEXT look can say whether it
  * worked. A fix nobody can confirm is a claim. */
 static char s_arrival_verify[64];
+/* 1 after upstream's scan, 2 after the driver re-announce. */
+static int s_arrival_stage;
 
 static void arrival_watch_init(void) {
     s_arrival_started = true;
@@ -1685,43 +1687,35 @@ static void arrival_rescan_driver(const char *hint) {
     gesture_log("arrival watch: asked %s to look again -- nothing else is touched", hint);
 }
 
-/* ⚠️ Closes each pad through the app's OWN path first. SDL_QuitSubSystem would
- * free the controllers behind the app's back, leaving the pointers in
- * app_gamepad_state_t and this file's own table pointing at freed memory -- so
- * the pair that runs on SDL_JOYDEVICEREMOVED is run here by hand, per pad, in
- * the same order. ⓘ In practice there is nothing to close: this only runs when
- * no other controller is open. */
-static void arrival_reenumerate(struct app_input_t *input) {
-    int closed = 0;
-    const int slots = (int) app_input_get_max_gamepads(input);
-    for (int i = 0; i < slots; ++i) {
-        SDL_GameController *gc = input->gamepads[i].controller;
-        if (gc == NULL) continue;
-        SDL_Joystick *js = SDL_GameControllerGetJoystick(gc);
-        if (js == NULL) continue;
-        const SDL_JoystickID id = SDL_JoystickInstanceID(js);
-        ctm_bridge_gesture_reset(id);
-        app_input_close_gamepad(input, id);
-        ++closed;
-    }
-    SDL_QuitSubSystem(SDL_INIT_GAMECONTROLLER | SDL_INIT_JOYSTICK);
-    SDL_InitSubSystem(SDL_INIT_JOYSTICK | SDL_INIT_GAMECONTROLLER);
-    /* ⓘ Nothing is opened here. SDL announces every device it finds and the
-     * ordinary SDL_JOYDEVICEADDED path opens them, filters included -- the same
-     * route a pad takes when the app starts, which is why pads plugged in
-     * before launch never miss. */
-    gesture_log("arrival watch: re-enumerated (%d pad(s) closed first)", closed);
-}
 
 /* The look itself. Runs on the main thread, from the tick. */
+/* The look itself, and the cure, in the order that disturbs least.
+ *
+ * ⭐⭐ UPSTREAM v1.2.10 ARRIVED WITH ITS OWN FIX FOR THIS FAULT, and it is a
+ * better first move than anything here was: `app_input_scan_gamepads()` walks
+ * SDL's joystick list and opens whatever the app is not already tracking.
+ * Nothing that is working is touched, no subsystem is restarted, and there is
+ * no state to get wrong -- so it needs no gate at all.
+ *
+ * ⓘ His reading of the cause differs from ours and is at least as likely:
+ * SDL DOES see the pad and surfaces only SDL_CONTROLLERDEVICEADDED, which this
+ * app ignored while acting on SDL_JOYDEVICEADDED alone. He opens from that
+ * event too. Where that is what happened, his scan finds the pad; where the
+ * arrival never reached SDL at all, it does not, and the mark below is what
+ * says which of the two we are looking at.
+ *
+ * ➡️ So: scan first, look again, and only if the pad is STILL unknown ask its
+ * HIDAPI driver to re-examine what it can claim. That second step is ours, and
+ * it is the one with a gate, because it re-announces every pad on that driver.
+ * ⛔ The subsystem restart that used to sit at the end is gone (2026-09-21,
+ * merging v1.2.10): it was the only thing here that could disturb a pad in
+ * play, and the two steps above cover what it covered. */
 static void arrival_check(struct app_input_t *input) {
     /* ⛔⛔ THE QUIET LIST, ALWAYS. The full one wakes the bridge core and
      * broadcasts for a listener -- the settings pane uses the quiet one for
      * exactly that reason -- and this runs a few seconds after ANY device
      * node appears, which includes replugging a dongle while a pad is
-     * bridged. ⚠️ It was the awake-core variant for one build (384), and
-     * rhoquinn8217 was right to ask what the new code touched during a
-     * session: a watchdog reads what is already known, and nothing else. */
+     * bridged. A watchdog reads what is already known, and nothing else. */
     ctm_bridge_dev_t devs[16];
     const int n = ctm_bridge_list_quiet(devs, 16);
     if (n <= 0) return;
@@ -1734,60 +1728,40 @@ static void arrival_check(struct app_input_t *input) {
         ++controllers;
         if (ctm_bridge_gesture_player_for_node(devs[i].node) >= 0) ++matched;
     }
-    const int open_pads = app_input_get_gamepads_count(input);
 
-    /* ⭐ DID THE CURE WORK? Asked on the look after it ran, and answered
-     * either way. ⓘ This is the line that turns "it should recover" into
-     * something readable off a set nobody was watching. */
+    /* ⭐ DID THE LAST CURE WORK? Asked on the look after it ran, and answered
+     * either way -- the line that turns "it should recover" into something
+     * readable off a set nobody was watching. */
     if (s_arrival_verify[0] != '\0') {
-        const int player = ctm_bridge_gesture_player_for_node(s_arrival_verify);
-        if (player >= 0) {
-            gesture_log("arrival watch: %s is player %d now -- the re-enumeration worked",
-                        s_arrival_verify, player);
-        } else {
-            gesture_log("arrival watch: %s STILL has no player after the re-enumeration -- "
-                        "reconnect it, and say so, because that is a second fault",
-                        s_arrival_verify);
-        }
+        char node[64];
+        snprintf(node, sizeof node, "%s", s_arrival_verify);
+        const int player = ctm_bridge_gesture_player_for_node(node);
+        const int stage = s_arrival_stage;
         s_arrival_verify[0] = '\0';
-    }
-
-    /* ⓘ One line per look, healthy or not. A look happens only after a device
-     * node appears or at start, so it is rare -- and it is the proof the watch
-     * is running at all. */
-    gesture_log("arrival watch: looked -- %d device(s), %d controller(s), %d matched%s",
-                n, controllers, matched, bridged ? ", something bridged" : "");
-
-    for (int i = 0; i < n; ++i) {
-        const ctm_bridge_dev_t *d = &devs[i];
-        if (!d->controller || d->node[0] == '\0') continue;
-        if (ctm_bridge_gesture_player_for_node(d->node) >= 0) continue;
-
-        gesture_log("arrival watch: %s (%s) on %s has no SDL player -- its arrival never reached SDL",
-                    d->name, d->kind, d->node);
-        /* ⛔⛔ A PAD THAT IS BRIDGED IS NOT THE ONE TO RESCUE. It already works
-         * for the game -- the PC has the real controller -- and what it lacks
-         * is only this side's chord and menus. Meanwhile re-announcing it
-         * mid-handover would shuffle the slot that the "retire its fake twin"
-         * bookkeeping is keyed on. ➡️ Say so, and look at the next one. */
-        if (d->plugged) {
-            gesture_log("arrival watch: %s is bridged, so the PC has it -- leaving it alone",
-                        d->node);
-            continue;
+        s_arrival_stage = 0;
+        if (player >= 0) {
+            gesture_log("arrival watch: %s is player %d now -- %s worked", node, player,
+                        stage == 1 ? "the scan" : "the driver re-announce");
+            return;
         }
-
-        const char *hint = arrival_hidapi_hint(d->kind);
-        if (hint != NULL) {
-            /* ⭐ Only a pad on the SAME driver can be disturbed by this, so only
-             * that blocks it: a bridged Xbox pad, or a bridged DS4 while a
-             * DualSense is missing, has nothing to do with it. */
+        gesture_log("arrival watch: %s still has no player after %s", node,
+                    stage == 1 ? "the scan" : "the driver re-announce");
+        /* ⭐ A scan that found nothing means SDL never had the pad either, which
+         * is the harder half of the fault. Escalate once, to the driver. */
+        if (stage == 1) {
+            const ctm_bridge_dev_t *d = NULL;
+            for (int i = 0; i < n; ++i) {
+                if (strcmp(devs[i].node, node) == 0) d = &devs[i];
+            }
+            const char *hint = d != NULL ? arrival_hidapi_hint(d->kind) : NULL;
+            if (hint == NULL) {
+                gesture_log("arrival watch: nothing left to try for %s -- reconnect it", node);
+                return;
+            }
             bool same_driver_bridged = false;
             for (int k = 0; k < n; ++k) {
                 if (!devs[k].plugged || !devs[k].controller) continue;
                 const char *other = arrival_hidapi_hint(devs[k].kind);
-                /* ⓘ strcmp, not a pointer test: two uses of the same macro need not
-                 * be the same literal, and guessing "different driver" would let the
-                 * cure run on a pad that IS in play. */
                 if (other != NULL && strcmp(other, hint) == 0) same_driver_bridged = true;
             }
             if (same_driver_bridged) {
@@ -1795,25 +1769,45 @@ static void arrival_check(struct app_input_t *input) {
                             "bridged and in play. Reconnect the controller to recover it");
                 return;
             }
-            snprintf(s_arrival_verify, sizeof s_arrival_verify, "%s", d->node);
+            snprintf(s_arrival_verify, sizeof s_arrival_verify, "%s", node);
+            s_arrival_stage = 2;
             arrival_rescan_driver(hint);
             s_arrival_due = SDL_GetTicks() + 3000;
             return;
         }
+        gesture_log("arrival watch: %s needs a reconnect by hand", node);
+        return;
+    }
 
-        /* ⚠️ NOT A PLAYSTATION PAD, so the gentle cure cannot reach it: an Xbox
-         * or generic pad arrives through evdev, and only restarting the whole
-         * joystick subsystem re-examines that. ⛔ That closes and reopens EVERY
-         * pad, so it keeps the strict gate it was born with. */
-        if (bridged || open_pads > 0) {
-            gesture_log("arrival watch: leaving it alone -- %s needs the full pass, and "
-                        "%d pad(s) open, %s bridged. Reconnect the controller to recover it",
-                        d->kind, open_pads, bridged ? "something" : "nothing");
-            return;
+    /* ⓘ One line per look, healthy or not. A look happens only after a device
+     * node appears or at start, so it is rare -- and it is the proof the watch
+     * is running at all. */
+    gesture_log("arrival watch: looked -- %d device(s), %d controller(s), %d matched%s",
+                n, controllers, matched, bridged ? ", something bridged" : "");
+    if (controllers == matched) return;
+
+    for (int i = 0; i < n; ++i) {
+        const ctm_bridge_dev_t *d = &devs[i];
+        if (!d->controller || d->node[0] == '\0') continue;
+        if (ctm_bridge_gesture_player_for_node(d->node) >= 0) continue;
+
+        gesture_log("arrival watch: %s (%s) on %s has no SDL player", d->name, d->kind, d->node);
+
+        /* ⛔ A PAD THAT IS BRIDGED IS NOT THE ONE TO RESCUE. It already works
+         * for the game -- the PC has the real controller -- and what it lacks is
+         * only this side's chord and menus. */
+        if (d->plugged) {
+            gesture_log("arrival watch: %s is bridged, so the PC has it -- leaving it alone",
+                        d->node);
+            continue;
         }
+
+        /* ⭐ Upstream's scan: it opens what SDL has and the app has not, and
+         * disturbs nothing at all, so nothing gates it. */
+        const int opened = app_input_scan_gamepads(input);
+        gesture_log("arrival watch: scanned SDL's joysticks, %d opened", opened);
         snprintf(s_arrival_verify, sizeof s_arrival_verify, "%s", d->node);
-        arrival_reenumerate(input);
-        /* ⭐ Look again shortly, to say whether it worked. */
+        s_arrival_stage = 1;
         s_arrival_due = SDL_GetTicks() + 3000;
         return;
     }
