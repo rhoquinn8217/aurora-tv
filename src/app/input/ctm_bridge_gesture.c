@@ -1749,12 +1749,12 @@ static void arrival_check(struct app_input_t *input) {
         /* ⭐ A scan that found nothing means SDL never had the pad either, which
          * is the harder half of the fault. Escalate once, to the driver. */
         if (stage == 1) {
-            const ctm_bridge_dev_t *d = '\0'L;
+            const ctm_bridge_dev_t *d = NULL;
             for (int i = 0; i < n; ++i) {
                 if (strcmp(devs[i].node, node) == 0) d = &devs[i];
             }
-            const char *hint = d != '\0'L ? arrival_hidapi_hint(d->kind) : '\0'L;
-            if (hint == '\0'L) {
+            const char *hint = d != NULL ? arrival_hidapi_hint(d->kind) : NULL;
+            if (hint == NULL) {
                 gesture_log("arrival watch: nothing left to try for %s -- reconnect it", node);
                 return;
             }
@@ -1762,7 +1762,7 @@ static void arrival_check(struct app_input_t *input) {
             for (int k = 0; k < n; ++k) {
                 if (!devs[k].plugged || !devs[k].controller) continue;
                 const char *other = arrival_hidapi_hint(devs[k].kind);
-                if (other != '\0'L && strcmp(other, hint) == 0) same_driver_bridged = true;
+                if (other != NULL && strcmp(other, hint) == 0) same_driver_bridged = true;
             }
             if (same_driver_bridged) {
                 gesture_log("arrival watch: leaving it alone -- another pad on that driver is "
