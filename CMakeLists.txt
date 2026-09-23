@@ -11,6 +11,18 @@ set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
 set(MOONLIGHT_VERSION "1.2.10")
 set(CTM_BUILD_NUMBER 421)
 
+# A tag after the build number, so a build you can SEE says what it is.
+#   R    the rooted LG monitor's build -- trunk with T-210's stream-boost
+#        switch cherry-picked on, which must never go on any other set
+#   EXP  an experimental branch, such as the DualSense BT mic capture
+# Set by build-aurora-docker.ps1: -Rooted implies R, -Suffix EXP for the rest.
+#
+# !! IT IS A SEPARATE VARIABLE ON PURPOSE. build-aurora-docker.ps1 scans for
+# !! `set(CTM_BUILD_NUMBER (\d+))` in two places -- to pick the next number and
+# !! to name the package -- so a letter inside that value would break both and
+# !! the next plain build would silently reuse a number.
+set(CTM_BUILD_SUFFIX "")
+
 project(moonlight VERSION ${MOONLIGHT_VERSION} LANGUAGES C CXX)
 
 # To suppress warnings for MbedTLS

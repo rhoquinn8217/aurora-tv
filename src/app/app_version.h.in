@@ -6,4 +6,4 @@
  * version changes, and only the few files that print it include it. */
 #pragma once
 
-#define APP_VERSION "@PROJECT_VERSION@ (@CTM_BUILD_NUMBER@)"
+#define APP_VERSION "@PROJECT_VERSION@ (@CTM_BUILD_NUMBER@@CTM_BUILD_SUFFIX@)"
