@@ -1677,8 +1677,29 @@ static bool arrival_node_appeared(void) {
 static const char *arrival_hidapi_hint(const char *kind) {
     if (kind == NULL) return NULL;
     if (strncmp(kind, "ds5", 3) == 0) return SDL_HINT_JOYSTICK_HIDAPI_PS5;
-    if (strncmp(kind, "ds4", 3) == 0) return SDL_HINT_JOYSTICK_HIDAPI_PS4;
-    return NULL;   /* an Xbox or generic pad is on evdev; only the full pass reaches it */
+    /* ⛔⛔ NEVER A DRIVER THIS APP DID NOT ENABLE ITSELF, and the DS4 line
+     * that used to sit here is why.
+     *
+     * `app.c` sets SDL_HINT_JOYSTICK_HIDAPI_PS5 and its rumble hint, and
+     * NOTHING ELSE. So a DS4 is meant to reach SDL through evdev. Handing back
+     * the PS4 hint made the cure set it to "0" and then to "1" -- switching
+     * SDL's PS4 HIDAPI driver ON and leaving it on.
+     *
+     * ⚠️ What that did, measured on the rooted monitor 2026-09-22 18:08: SDL
+     * then CLAIMS 054c:05c4 for HIDAPI and stops using the pad's evdev node,
+     * and HIDAPI never opens it. Claimed by one path, refused by it, excluded
+     * from the other -- no player for the rest of the app run. The pad's
+     * hidraw node was held by webOS's own bthidmanager and NOTHING held its
+     * js node, so the kernel had it by both routes and SDL by neither.
+     *
+     * ⓘ A DS5 is unharmed because its hint is already on: toggling restores
+     * the intended state rather than changing it, which is why the same cure
+     * worked twice that afternoon and failed here.
+     *
+     * ➡️ Restoring the previous value instead was considered and is worse:
+     * an unset hint cannot be restored to unset, and guessing between "0" and
+     * SDL's default risks switching off a driver the app does rely on. */
+    return NULL;   /* a DS4, Xbox or generic pad is on evdev; the cure cannot help it */
 }
 
 static void arrival_rescan_driver(const char *hint) {
