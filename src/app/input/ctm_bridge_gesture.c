@@ -1851,60 +1851,18 @@ static void arrival_watch_tick(struct app_input_t *input) {
     arrival_check(input);
 }
 
-/* The open SDL controller sitting on this core node, or NULL. */
-static SDL_GameController *gesture_controller_for_node(const char *node) {
+int ctm_bridge_gesture_player_for_node(const char *node) {
     if (!node || !node[0] || !s_gesture_input) {
-        return NULL;
+        return -1;
     }
     int n = (int) app_input_get_max_gamepads(s_gesture_input);
     for (int i = 0; i < n; ++i) {
         SDL_GameController *gc = s_gesture_input->gamepads[i].controller;
         if (!gc) continue;
         if (!controller_path_is_node(SDL_GameControllerPath(gc), node)) continue;
-        return gc;
+        return SDL_GameControllerGetPlayerIndex(gc);
     }
-    return NULL;
-}
-
-int ctm_bridge_gesture_player_for_node(const char *node) {
-    SDL_GameController *gc = gesture_controller_for_node(node);
-    return gc != NULL ? SDL_GameControllerGetPlayerIndex(gc) : -1;
-}
-
-/* ⛔⛔ THE EXCLUSION DOES NOT SURVIVE A STREAM STOP, AND A BRIDGE DOES.
- *
- * `moonlightExcludedMask` is what stops the app sending a bridged controller's
- * input to the host as well as the bridge sending the pad itself. It is set
- * when the bridge takes a controller and CLEARED WHOLESALE by
- * session_input_stopped(). ⚠️ So: stream up, pad bridged, stream stopped,
- * stream started again -- and that pad is no longer excluded, while the bridge
- * still owns it. Both halves then move the mouse, and the host sees the pad
- * twice.
- *
- * ➡️ The mask cannot be trusted across a session, so at session start it is
- * rebuilt from the thing that IS still true: which controllers the core says
- * are bridged. ⓘ Cheap, and it runs once per stream.
- *
- * ⓘ Found 2026-09-21 while answering "can Aurora's touchpad and a bridged
- * touchpad both run at once" -- they cannot, EXCEPT through this hole. */
-void ctm_bridge_gesture_reexclude_bridged(void) {
-    if (!s_stream_input || !s_gesture_input) {
-        return;
-    }
-    ctm_bridge_dev_t devs[16];
-    const int n = ctm_bridge_list_quiet(devs, 16);
-    int done = 0;
-    for (int i = 0; i < n; ++i) {
-        if (!devs[i].plugged || !devs[i].controller || !devs[i].node[0]) continue;
-        SDL_GameController *gc = gesture_controller_for_node(devs[i].node);
-        if (gc == NULL) continue;
-        gesture_moonlight_set_excluded(gc, true);
-        ++done;
-    }
-    if (done > 0) {
-        gesture_log("session start: re-excluded %d bridged controller(s) -- "
-                    "the mask does not survive a stop", done);
-    }
+    return -1;
 }
 
 bool ctm_bridge_gesture_mac_for_node(const char *node, char *out, size_t out_len) {
