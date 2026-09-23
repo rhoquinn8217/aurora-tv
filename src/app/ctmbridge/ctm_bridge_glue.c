@@ -545,6 +545,16 @@ bool ctm_bridge_signal_refused(const char *node)
     if (strcmp(kind, "ds5") == 0 || strcmp(kind, "ds5e") == 0) {
         return ctm_signal_refused_bt(node) == 0;
     }
+    /* ⭐⭐ A BLUETOOTH DS4 GETS ITS OWN TONE NOW (T-238). Its audio is SBC in a
+     * 0x14 report rather than Opus in a 0x36, so it is a separate player --
+     * but the same idea, and the same two notes, so one pad does not mean
+     * something different from the other.
+     * ⛔ "ds4" ONLY, never "ds4_usb": a cabled DS4 reaches its speaker through
+     * a USB sound card and the pads here have none, so it falls through to the
+     * SDL buzz below, which is correct rather than a gap. 🔗 T-229 item C. */
+    if (strcmp(kind, "ds4") == 0) {
+        return ds4_signal_refused_bt(node) == 0;
+    }
     /* ⛔ The wired signal plays through a DualSense's sound card, taken by
      * elimination when the node's own cannot be told apart. For any other
      * controller that meant the refusal played on whichever DualSense was
