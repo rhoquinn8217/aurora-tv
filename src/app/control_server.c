@@ -121,7 +121,57 @@ static void cmd_help(control_job_t *job)
                "bridge-group <n>        bridge every part of a device, exactly as its panel row does\n"
                "release-group <n>       release every part of a device, exactly as its panel row does\n"
                "bridge-all, release-all every part, as the panel's buttons do\n"
+               "set <name> <on|off>     a switch, without the remote: boost, light, rumble, tone\n"
                "<device> is its number, its node, its vid:pid, or part of its name; <n> is from groups\n");
+}
+
+/* A switch, from here, without the remote.
+ *
+ * What this costs when it is missing, 2026-09-23: answering "do the light and
+ * the pulse break the DS4 tone?" needed those switches toggled on a TV with no
+ * keyboard. luna-send and kill are both denied to `prisoner` on the C3, and the
+ * app rewrites moonlight.ini from memory on shutdown, so a file edit never
+ * survived a restart. It took two throwaway builds to flip two booleans, and
+ * the first silently did nothing because the stored value won.
+ *
+ * In memory only: it does NOT write moonlight.ini, so a restart puts the
+ * settings back and no test can leave a set permanently altered. */
+static void cmd_set(control_job_t *job, const char *args)
+{
+    char name[32] = "";
+    char value[16] = "";
+    if (args == NULL || sscanf(args, "%31s %15s", name, value) != 2) {
+        reply(job, "ERR usage: set <boost|light|rumble|tone> <on|off>\n");
+        return;
+    }
+    const bool on  = (strcasecmp(value, "on") == 0 || strcmp(value, "1") == 0);
+    const bool off = (strcasecmp(value, "off") == 0 || strcmp(value, "0") == 0);
+    if (!on && !off) { reply(job, "ERR <on|off>\n"); return; }
+    if (app_configuration == NULL) { reply(job, "ERR no settings loaded\n"); return; }
+
+    if (strcasecmp(name, "boost") == 0) {
+        app_configuration->stream_priority = on;
+        reply(job, "OK boost=%s -- applied at STREAM START, so restart the stream\n",
+              on ? "on" : "off");
+        return;
+    }
+#if defined(TARGET_WEBOS)
+    if (strcasecmp(name, "light") == 0 || strcasecmp(name, "rumble") == 0 ||
+        strcasecmp(name, "tone") == 0) {
+        if (strcasecmp(name, "light") == 0)  app_configuration->bridge_signal_light = on;
+        if (strcasecmp(name, "rumble") == 0) app_configuration->bridge_signal_rumble = on;
+        if (strcasecmp(name, "tone") == 0)   app_configuration->bridge_signal_tone = on;
+        ctm_bridge_set_signals(app_configuration->bridge_signal_light,
+                               app_configuration->bridge_signal_rumble,
+                               app_configuration->bridge_signal_tone);
+        reply(job, "OK light=%s rumble=%s tone=%s\n",
+              app_configuration->bridge_signal_light ? "on" : "off",
+              app_configuration->bridge_signal_rumble ? "on" : "off",
+              app_configuration->bridge_signal_tone ? "on" : "off");
+        return;
+    }
+#endif
+    reply(job, "ERR try boost, light, rumble or tone\n");
 }
 
 static void cmd_status(control_job_t *job)
@@ -721,6 +771,8 @@ static void run_command(control_job_t *job)
         cmd_stop(job, true);
     } else if (strcasecmp(verb, "stats") == 0) {
         cmd_stats(job);
+    } else if (strcasecmp(verb, "set") == 0) {
+        cmd_set(job, args);
 #if defined(TARGET_WEBOS)
     } else if (strcasecmp(verb, "devices") == 0) {
         cmd_devices(job);
