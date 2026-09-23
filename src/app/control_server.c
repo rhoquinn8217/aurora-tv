@@ -122,6 +122,7 @@ static void cmd_help(control_job_t *job)
                "release-group <n>       release every part of a device, exactly as its panel row does\n"
                "bridge-all, release-all every part, as the panel's buttons do\n"
                "set <name> <on|off>     a switch, without the remote: boost, light, rumble, tone\n"
+               "signal refuse <n>       play a device's refusal signal; no plug has to fail\n"
                "<device> is its number, its node, its vid:pid, or part of its name; <n> is from groups\n");
 }
 
@@ -714,6 +715,49 @@ static void cmd_bridge_group(control_job_t *job, const char *sel)
     }
 }
 
+/* ⭐ THE REFUSAL SIGNAL, WITHOUT A FAILING PLUG (2026-09-23).
+ *
+ * ⛔ A refusal cannot be reached from `bridge-group`: bridge_possible() replies
+ * "the listener is offline" and returns BEFORE any plug is attempted, so the
+ * one path that plays it -- the gesture worker, when its plug comes back false
+ * -- never runs. Forcing a real failure means breaking the stream, which is the
+ * thing under test.
+ *
+ * ⓘ This calls exactly what the gesture worker calls, on the same node, so
+ * what it plays is the refusal itself rather than an imitation of it. On
+ * Bluetooth that is the whole signal: the core carries the light, the pulse and
+ * the tone on one report. On a cable the flashes come from the gesture worker
+ * instead, so what is heard here is the sound alone -- say so rather than
+ * reading a missing light as a fault. */
+static void cmd_signal(control_job_t *job, const char *args)
+{
+    char what[16] = "";
+    char sel[16] = "";
+    if (args == NULL || sscanf(args, "%15s %15s", what, sel) != 2) {
+        reply(job, "ERR usage: signal refuse <n>\n");
+        return;
+    }
+    if (strcasecmp(what, "refuse") != 0 && strcasecmp(what, "refused") != 0) {
+        reply(job, "ERR only refuse: bridge and release are reached by bridging\n");
+        return;
+    }
+    ctm_bridge_dev_t devs[CONTROL_MAX_DEVICES];
+    const int n = list_devices(devs);
+    const int k = select_group(job, list_groups(devs, n), sel);
+    if (k < 0) {
+        return;
+    }
+    const device_group_t *g = &s_groups[k];
+    if (g->part_count <= 0) {
+        reply(job, "ERR device %d (%s) has no parts\n", k, g->name);
+        return;
+    }
+    const ctm_bridge_dev_t *d = &devs[g->part[0]];
+    const bool played = ctm_bridge_signal_refused(d->node);
+    reply(job, "OK refusal signal on %s (%s): %s\n", d->node, g->name,
+          played ? "played" : "declined -- signals off, or no signal for this kind");
+}
+
 static void cmd_release_group(control_job_t *job, const char *sel)
 {
     ctm_bridge_dev_t devs[CONTROL_MAX_DEVICES];
@@ -782,6 +826,8 @@ static void run_command(control_job_t *job)
         cmd_bridge_group(job, args);
     } else if (strcasecmp(verb, "release-group") == 0) {
         cmd_release_group(job, args);
+    } else if (strcasecmp(verb, "signal") == 0) {
+        cmd_signal(job, args);
     } else if (strcasecmp(verb, "bridge") == 0) {
         cmd_bridge(job, args);
     } else if (strcasecmp(verb, "release") == 0) {
