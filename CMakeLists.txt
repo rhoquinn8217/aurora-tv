@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.19)
+﻿cmake_minimum_required(VERSION 3.19)
 set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
 
 # Keep the fork's upstream version; CTM changes bump only the build number,
@@ -9,7 +9,7 @@ set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
 # merge -- resetting it would make old builds and new ones share numbers, and
 # every log and test note that names one would become ambiguous.
 set(MOONLIGHT_VERSION "1.2.10")
-set(CTM_BUILD_NUMBER 423)
+set(CTM_BUILD_NUMBER 424)
 
 # A tag after the build number, so a build you can SEE says what it is.
 #   R    the rooted LG monitor's build -- trunk with T-210's stream-boost
