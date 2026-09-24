@@ -257,9 +257,9 @@ void ctm_bridge_set_signals(bool light, bool rumble, bool tone)
 }
 
 /* The settle before a Bluetooth DS4's handback tone, in ms. Memory only. */
-void ctm_bridge_set_handback_settle(int ms)
+void ctm_bridge_set_tone_gap(int ms)
 {
-    ctm_handback_settle_set_ms(ms);
+    ctm_tone_gap_set_ms(ms);
 }
 
 void ctm_bridge_set_mic_capture(bool on)

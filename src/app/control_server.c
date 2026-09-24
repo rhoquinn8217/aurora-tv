@@ -164,7 +164,7 @@ static void cmd_set(control_job_t *job, const char *args)
             reply(job, "ERR settle takes 0 to 3000 ms\n");
             return;
         }
-        ctm_bridge_set_handback_settle((int) ms);
+        ctm_bridge_set_tone_gap((int) ms);
         reply(job, "OK settle=%ldms before a Bluetooth DS4 handback tone\n", ms);
         return;
     }
