@@ -179,6 +179,14 @@ typedef struct app_settings_t {
      * Default on; UI row only shown when Homebrew Channel elevated service is present.
      */
     bool game_mode;
+    /**
+     * webOS rooted only: the session boost in stream_priority.c (nice -10, mlockall of
+     * current and future pages, deep C-states held off, other apps closed and caches
+     * dropped, performance governor, network and USB Ethernet tuning). Default on, as
+     * upstream. Off skips all of it: with it on, a stream start restarted a rooted LG
+     * 34SR65QC (webOS 8.3) with a crash in its video driver, at every mode tried.
+     */
+    bool stream_priority;
     char *conf_dir;
     char *ini_path;
     char *condb_path;

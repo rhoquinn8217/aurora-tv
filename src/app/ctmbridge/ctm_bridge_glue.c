@@ -256,6 +256,12 @@ void ctm_bridge_set_signals(bool light, bool rumble, bool tone)
     ctm_signals_set_enabled(light ? 1 : 0, rumble ? 1 : 0, tone ? 1 : 0);
 }
 
+/* The settle before a Bluetooth DS4's handback tone, in ms. Memory only. */
+void ctm_bridge_set_tone_gap(int ms)
+{
+    ctm_tone_gap_set_ms(ms);
+}
+
 void ctm_bridge_set_mic_capture(bool on)
 {
     ctm_mic_capture_set_enabled(on ? 1 : 0);
@@ -544,6 +550,16 @@ bool ctm_bridge_signal_refused(const char *node)
 
     if (strcmp(kind, "ds5") == 0 || strcmp(kind, "ds5e") == 0) {
         return ctm_signal_refused_bt(node) == 0;
+    }
+    /* ⭐⭐ A BLUETOOTH DS4 GETS ITS OWN TONE NOW (T-238). Its audio is SBC in a
+     * 0x14 report rather than Opus in a 0x36, so it is a separate player --
+     * but the same idea, and the same two notes, so one pad does not mean
+     * something different from the other.
+     * ⛔ "ds4" ONLY, never "ds4_usb": a cabled DS4 reaches its speaker through
+     * a USB sound card and the pads here have none, so it falls through to the
+     * SDL buzz below, which is correct rather than a gap. 🔗 T-229 item C. */
+    if (strcmp(kind, "ds4") == 0) {
+        return ds4_signal_refused_bt(node) == 0;
     }
     /* ⛔ The wired signal plays through a DualSense's sound card, taken by
      * elimination when the node's own cannot be told apart. For any other

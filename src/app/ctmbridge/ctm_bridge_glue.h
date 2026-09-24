@@ -40,6 +40,7 @@ void ctm_bridge_set_gesture_enabled(bool enabled);
 /* Which confirmation signals the bridge may make, and whether it captures the
  * controller's microphone. ⭐ Set when a stream starts. */
 void ctm_bridge_set_signals(bool light, bool rumble, bool tone);
+void ctm_bridge_set_tone_gap(int ms);
 
 void ctm_bridge_set_mic_capture(bool on);
 

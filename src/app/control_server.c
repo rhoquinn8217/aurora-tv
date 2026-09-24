@@ -121,7 +121,85 @@ static void cmd_help(control_job_t *job)
                "bridge-group <n>        bridge every part of a device, exactly as its panel row does\n"
                "release-group <n>       release every part of a device, exactly as its panel row does\n"
                "bridge-all, release-all every part, as the panel's buttons do\n"
+               "set <name> <on|off>     a switch, without the remote: boost, light, rumble, tone\n"
+               "set settle <ms>         how long to let the link settle before a DS4 handback tone\n"
+               "signal refuse <n>       play a device's refusal signal; no plug has to fail\n"
                "<device> is its number, its node, its vid:pid, or part of its name; <n> is from groups\n");
+}
+
+/* A switch, from here, without the remote.
+ *
+ * What this costs when it is missing, 2026-09-23: answering "do the light and
+ * the pulse break the DS4 tone?" needed those switches toggled on a TV with no
+ * keyboard. luna-send and kill are both denied to `prisoner` on the C3, and the
+ * app rewrites moonlight.ini from memory on shutdown, so a file edit never
+ * survived a restart. It took two throwaway builds to flip two booleans, and
+ * the first silently did nothing because the stored value won.
+ *
+ * In memory only: it does NOT write moonlight.ini, so a restart puts the
+ * settings back and no test can leave a set permanently altered. */
+static void cmd_set(control_job_t *job, const char *args)
+{
+    char name[32] = "";
+    char value[16] = "";
+    if (args == NULL || sscanf(args, "%31s %15s", name, value) != 2) {
+        reply(job, "ERR usage: set <boost|light|rumble|tone> <on|off>, or set settle <ms>\n");
+        return;
+    }
+    /* ⛔⛔ BEFORE THE on/off CHECK, AND THAT IS THE WHOLE POINT.
+     * ⚠️ It was added after it on 2026-09-23, so every numeric value was
+     * answered "ERR <on|off>" and silently never applied -- `0` was the one
+     * that got through, because it matches "off". A four-point sweep of the
+     * tone gap was run and reported before the replies were read, and every
+     * point of it was really the same setting. ➡️ A knob that rejects its own
+     * values is worse than no knob: it reads as a result.
+     * 🔗 control-a-probe-before-trusting-it. */
+#if defined(TARGET_WEBOS)
+    /* ⭐ A NUMBER RATHER THAN A SWITCH, and the only setting here that is not a
+     * bool: how long to let a pad's link settle after a session ends, before the
+     * handback tone goes out. ⓘ Sweeping it from here is what keeps a pad's
+     * battery and a room's noise pinned across a comparison; a build per value
+     * does not. Memory only, like everything else in this command. */
+    if (strcasecmp(name, "settle") == 0) {
+        char *end = NULL;
+        const long ms = strtol(value, &end, 10);
+        if (end == value || ms < 0 || ms > 3000) {
+            reply(job, "ERR settle takes 0 to 3000 ms\n");
+            return;
+        }
+        ctm_bridge_set_tone_gap((int) ms);
+        reply(job, "OK settle=%ldms before a Bluetooth DS4 handback tone\n", ms);
+        return;
+    }
+#endif
+    const bool on  = (strcasecmp(value, "on") == 0 || strcmp(value, "1") == 0);
+    const bool off = (strcasecmp(value, "off") == 0 || strcmp(value, "0") == 0);
+    if (!on && !off) { reply(job, "ERR <on|off>\n"); return; }
+    if (app_configuration == NULL) { reply(job, "ERR no settings loaded\n"); return; }
+
+    if (strcasecmp(name, "boost") == 0) {
+        app_configuration->stream_priority = on;
+        reply(job, "OK boost=%s -- applied at STREAM START, so restart the stream\n",
+              on ? "on" : "off");
+        return;
+    }
+#if defined(TARGET_WEBOS)
+    if (strcasecmp(name, "light") == 0 || strcasecmp(name, "rumble") == 0 ||
+        strcasecmp(name, "tone") == 0) {
+        if (strcasecmp(name, "light") == 0)  app_configuration->bridge_signal_light = on;
+        if (strcasecmp(name, "rumble") == 0) app_configuration->bridge_signal_rumble = on;
+        if (strcasecmp(name, "tone") == 0)   app_configuration->bridge_signal_tone = on;
+        ctm_bridge_set_signals(app_configuration->bridge_signal_light,
+                               app_configuration->bridge_signal_rumble,
+                               app_configuration->bridge_signal_tone);
+        reply(job, "OK light=%s rumble=%s tone=%s\n",
+              app_configuration->bridge_signal_light ? "on" : "off",
+              app_configuration->bridge_signal_rumble ? "on" : "off",
+              app_configuration->bridge_signal_tone ? "on" : "off");
+        return;
+    }
+#endif
+    reply(job, "ERR try boost, light, rumble, tone or settle\n");
 }
 
 static void cmd_status(control_job_t *job)
@@ -664,6 +742,49 @@ static void cmd_bridge_group(control_job_t *job, const char *sel)
     }
 }
 
+/* ⭐ THE REFUSAL SIGNAL, WITHOUT A FAILING PLUG (2026-09-23).
+ *
+ * ⛔ A refusal cannot be reached from `bridge-group`: bridge_possible() replies
+ * "the listener is offline" and returns BEFORE any plug is attempted, so the
+ * one path that plays it -- the gesture worker, when its plug comes back false
+ * -- never runs. Forcing a real failure means breaking the stream, which is the
+ * thing under test.
+ *
+ * ⓘ This calls exactly what the gesture worker calls, on the same node, so
+ * what it plays is the refusal itself rather than an imitation of it. On
+ * Bluetooth that is the whole signal: the core carries the light, the pulse and
+ * the tone on one report. On a cable the flashes come from the gesture worker
+ * instead, so what is heard here is the sound alone -- say so rather than
+ * reading a missing light as a fault. */
+static void cmd_signal(control_job_t *job, const char *args)
+{
+    char what[16] = "";
+    char sel[16] = "";
+    if (args == NULL || sscanf(args, "%15s %15s", what, sel) != 2) {
+        reply(job, "ERR usage: signal refuse <n>\n");
+        return;
+    }
+    if (strcasecmp(what, "refuse") != 0 && strcasecmp(what, "refused") != 0) {
+        reply(job, "ERR only refuse: bridge and release are reached by bridging\n");
+        return;
+    }
+    ctm_bridge_dev_t devs[CONTROL_MAX_DEVICES];
+    const int n = list_devices(devs);
+    const int k = select_group(job, list_groups(devs, n), sel);
+    if (k < 0) {
+        return;
+    }
+    const device_group_t *g = &s_groups[k];
+    if (g->part_count <= 0) {
+        reply(job, "ERR device %d (%s) has no parts\n", k, g->name);
+        return;
+    }
+    const ctm_bridge_dev_t *d = &devs[g->part[0]];
+    const bool played = ctm_bridge_signal_refused(d->node);
+    reply(job, "OK refusal signal on %s (%s): %s\n", d->node, g->name,
+          played ? "played" : "declined -- signals off, or no signal for this kind");
+}
+
 static void cmd_release_group(control_job_t *job, const char *sel)
 {
     ctm_bridge_dev_t devs[CONTROL_MAX_DEVICES];
@@ -721,6 +842,8 @@ static void run_command(control_job_t *job)
         cmd_stop(job, true);
     } else if (strcasecmp(verb, "stats") == 0) {
         cmd_stats(job);
+    } else if (strcasecmp(verb, "set") == 0) {
+        cmd_set(job, args);
 #if defined(TARGET_WEBOS)
     } else if (strcasecmp(verb, "devices") == 0) {
         cmd_devices(job);
@@ -730,6 +853,8 @@ static void run_command(control_job_t *job)
         cmd_bridge_group(job, args);
     } else if (strcasecmp(verb, "release-group") == 0) {
         cmd_release_group(job, args);
+    } else if (strcasecmp(verb, "signal") == 0) {
+        cmd_signal(job, args);
     } else if (strcasecmp(verb, "bridge") == 0) {
         cmd_bridge(job, args);
     } else if (strcasecmp(verb, "release") == 0) {

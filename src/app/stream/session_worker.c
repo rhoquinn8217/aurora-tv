@@ -69,8 +69,14 @@ int session_worker(session_t *session) {
 #endif
 
 #if TARGET_WEBOS
-    /* USB/net buffers must land before UDP sockets (LiStartConnection). */
-    stream_prio = webos_stream_priority_enter();
+    /* USB/net buffers must land before UDP sockets (LiStartConnection).
+     * ⚠️ Only while stream_priority is on (see app_settings.h): on a rooted LG 34SR65QC
+     * the boost came before every stream start that restarted the set. */
+    if (session->app->settings.stream_priority) {
+        stream_prio = webos_stream_priority_enter();
+    } else {
+        commons_log_info("StreamPrio", "session boost skipped (stream_priority = false)");
+    }
 #endif
 
     commons_log_info("Session", "Launch app %d (host currentGame=%d)...", appId, server->currentGame);

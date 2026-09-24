@@ -217,6 +217,7 @@ void settings_initialize(app_settings_t *config, char *conf_dir) {
     config->auto_adjust_bitrate = false;
     config->abr_mode = 0;
     config->game_mode = true;
+    config->stream_priority = true;
 
 #if defined(TARGET_WEBOS)
     /* Auto pairs audio with the video module (SMP/NDL). */
@@ -342,6 +343,7 @@ bool settings_save(app_settings_t *config) {
     ini_write_int(fp, "client_refresh_rate_x100", config->client_refresh_rate_x100);
     ini_write_bool(fp, "use_ntsc_refresh", config->use_ntsc_refresh);
     ini_write_bool(fp, "game_mode", config->game_mode);
+    ini_write_bool(fp, "stream_priority", config->stream_priority);
 
     ini_write_section(fp, "audio");
     ini_write_string(fp, "backend", config->audio_backend);
@@ -513,6 +515,8 @@ static int settings_parse(app_settings_t *config, const char *section, const cha
         config->use_ntsc_refresh = INI_IS_TRUE(value);
     } else if (INI_NAME_MATCH("game_mode")) {
         config->game_mode = INI_IS_TRUE(value);
+    } else if (INI_NAME_MATCH("stream_priority")) {
+        config->stream_priority = INI_IS_TRUE(value);
     } else if (INI_FULL_MATCH("video", "stream_pacing") ||
                INI_FULL_MATCH("video", "pause_at_decode_time") ||
                INI_FULL_MATCH("video", "smooth_presentation") ||
