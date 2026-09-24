@@ -256,6 +256,12 @@ void ctm_bridge_set_signals(bool light, bool rumble, bool tone)
     ctm_signals_set_enabled(light ? 1 : 0, rumble ? 1 : 0, tone ? 1 : 0);
 }
 
+/* The settle before a Bluetooth DS4's handback tone, in ms. Memory only. */
+void ctm_bridge_set_handback_settle(int ms)
+{
+    ctm_handback_settle_set_ms(ms);
+}
+
 void ctm_bridge_set_mic_capture(bool on)
 {
     ctm_mic_capture_set_enabled(on ? 1 : 0);

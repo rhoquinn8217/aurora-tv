@@ -122,6 +122,7 @@ static void cmd_help(control_job_t *job)
                "release-group <n>       release every part of a device, exactly as its panel row does\n"
                "bridge-all, release-all every part, as the panel's buttons do\n"
                "set <name> <on|off>     a switch, without the remote: boost, light, rumble, tone\n"
+               "set settle <ms>         how long to let the link settle before a DS4 handback tone\n"
                "signal refuse <n>       play a device's refusal signal; no plug has to fail\n"
                "<device> is its number, its node, its vid:pid, or part of its name; <n> is from groups\n");
 }
@@ -142,7 +143,7 @@ static void cmd_set(control_job_t *job, const char *args)
     char name[32] = "";
     char value[16] = "";
     if (args == NULL || sscanf(args, "%31s %15s", name, value) != 2) {
-        reply(job, "ERR usage: set <boost|light|rumble|tone> <on|off>\n");
+        reply(job, "ERR usage: set <boost|light|rumble|tone> <on|off>, or set settle <ms>\n");
         return;
     }
     const bool on  = (strcasecmp(value, "on") == 0 || strcmp(value, "1") == 0);
@@ -150,6 +151,24 @@ static void cmd_set(control_job_t *job, const char *args)
     if (!on && !off) { reply(job, "ERR <on|off>\n"); return; }
     if (app_configuration == NULL) { reply(job, "ERR no settings loaded\n"); return; }
 
+#if defined(TARGET_WEBOS)
+    /* ⭐ A NUMBER RATHER THAN A SWITCH, and the only setting here that is not a
+     * bool: how long to let a pad's link settle after a session ends, before the
+     * handback tone goes out. ⓘ Sweeping it from here is what keeps a pad's
+     * battery and a room's noise pinned across a comparison; a build per value
+     * does not. Memory only, like everything else in this command. */
+    if (strcasecmp(name, "settle") == 0) {
+        char *end = NULL;
+        const long ms = strtol(value, &end, 10);
+        if (end == value || ms < 0 || ms > 3000) {
+            reply(job, "ERR settle takes 0 to 3000 ms\n");
+            return;
+        }
+        ctm_bridge_set_handback_settle((int) ms);
+        reply(job, "OK settle=%ldms before a Bluetooth DS4 handback tone\n", ms);
+        return;
+    }
+#endif
     if (strcasecmp(name, "boost") == 0) {
         app_configuration->stream_priority = on;
         reply(job, "OK boost=%s -- applied at STREAM START, so restart the stream\n",
@@ -172,7 +191,7 @@ static void cmd_set(control_job_t *job, const char *args)
         return;
     }
 #endif
-    reply(job, "ERR try boost, light, rumble or tone\n");
+    reply(job, "ERR try boost, light, rumble, tone or settle\n");
 }
 
 static void cmd_status(control_job_t *job)
