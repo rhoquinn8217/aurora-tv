@@ -146,11 +146,14 @@ static void cmd_set(control_job_t *job, const char *args)
         reply(job, "ERR usage: set <boost|light|rumble|tone> <on|off>, or set settle <ms>\n");
         return;
     }
-    const bool on  = (strcasecmp(value, "on") == 0 || strcmp(value, "1") == 0);
-    const bool off = (strcasecmp(value, "off") == 0 || strcmp(value, "0") == 0);
-    if (!on && !off) { reply(job, "ERR <on|off>\n"); return; }
-    if (app_configuration == NULL) { reply(job, "ERR no settings loaded\n"); return; }
-
+    /* ⛔⛔ BEFORE THE on/off CHECK, AND THAT IS THE WHOLE POINT.
+     * ⚠️ It was added after it on 2026-09-23, so every numeric value was
+     * answered "ERR <on|off>" and silently never applied -- `0` was the one
+     * that got through, because it matches "off". A four-point sweep of the
+     * tone gap was run and reported before the replies were read, and every
+     * point of it was really the same setting. ➡️ A knob that rejects its own
+     * values is worse than no knob: it reads as a result.
+     * 🔗 control-a-probe-before-trusting-it. */
 #if defined(TARGET_WEBOS)
     /* ⭐ A NUMBER RATHER THAN A SWITCH, and the only setting here that is not a
      * bool: how long to let a pad's link settle after a session ends, before the
@@ -169,6 +172,11 @@ static void cmd_set(control_job_t *job, const char *args)
         return;
     }
 #endif
+    const bool on  = (strcasecmp(value, "on") == 0 || strcmp(value, "1") == 0);
+    const bool off = (strcasecmp(value, "off") == 0 || strcmp(value, "0") == 0);
+    if (!on && !off) { reply(job, "ERR <on|off>\n"); return; }
+    if (app_configuration == NULL) { reply(job, "ERR no settings loaded\n"); return; }
+
     if (strcasecmp(name, "boost") == 0) {
         app_configuration->stream_priority = on;
         reply(job, "OK boost=%s -- applied at STREAM START, so restart the stream\n",
