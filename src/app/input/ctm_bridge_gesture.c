@@ -205,6 +205,16 @@ static bool watched_slot_exists(SDL_JoystickID id) {
     return false;
 }
 
+/* The watched slot for this controller, or NULL. Never claims one: unlike
+ * watched_for(), asking here cannot make a controller look known. For callers
+ * outside the gesture's own tick, which only ever want to read. */
+static const watched_t *watched_find(SDL_JoystickID id) {
+    for (int i = 0; i < MAX_WATCHED; ++i) {
+        if (s_watched[i].in_use && s_watched[i].id == id) return &s_watched[i];
+    }
+    return NULL;
+}
+
 static watched_t *watched_for(SDL_JoystickID id) {
     watched_t *free_slot = NULL;
     for (int i = 0; i < MAX_WATCHED; ++i) {
@@ -1531,6 +1541,26 @@ void ctm_bridge_gesture_restore_player_colours(void) {
  *
  * ⭐ Used to drop the HOST's lightbar writes while we draw -- see the note in
  * app_input_gamepad_set_controller_led. */
+/* True while this controller belongs to the bridge rather than to the host:
+ * a confirmation pattern is drawing on it, or it is bridged.
+ *
+ * Asked on every lightbar, trigger and LED packet the host sends, so it must
+ * be cheap. It reads the gesture's own state and nothing else: ours_plugged is
+ * kept current by the debounced poll in the tick, precisely because
+ * ctm_bridge_node_is_plugged() re-enumerates devices and cannot sit on a
+ * per-packet path.
+ *
+ * Deliberately not light_busy(): that one counts every true as a dropped host
+ * COLOUR, which is only right on the lightbar path. */
+bool ctm_bridge_gesture_pad_is_ours(SDL_GameController *controller) {
+    if (!controller) return false;
+    SDL_Joystick *js = SDL_GameControllerGetJoystick(controller);
+    if (!js) return false;
+    const watched_t *w = watched_find(SDL_JoystickInstanceID(js));
+    if (!w) return false;
+    return w->prep_left > 0 || w->flash_left > 0 || w->ours_plugged;
+}
+
 bool ctm_bridge_gesture_light_busy(SDL_GameController *controller) {
     if (!controller) return false;
     SDL_Joystick *js = SDL_GameControllerGetJoystick(controller);

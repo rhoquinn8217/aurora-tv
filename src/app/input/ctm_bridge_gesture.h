@@ -65,6 +65,10 @@ void ctm_bridge_gesture_restore_player_colours(void);
 /* True while this side is drawing a pattern on that controller's lightbar. */
 bool ctm_bridge_gesture_light_busy(SDL_GameController *controller);
 
+/* True while a confirmation pattern is drawing on this controller or it is
+ * bridged. Cheap enough for every host packet; see the definition. */
+bool ctm_bridge_gesture_pad_is_ours(SDL_GameController *controller);
+
 /* The player number SDL gave the controller behind this hidraw node, or -1 if
  * nothing there is a controller. Zero-based, as SDL reports it.
  *
