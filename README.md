@@ -5,24 +5,23 @@
 ![transport](https://img.shields.io/badge/transport-USB%2FIP-2ea44f)
 ![fork of GuiDev1994/aurora-tv](https://img.shields.io/badge/fork%20of-GuiDev1994%2Faurora--tv-lightgrey)
 
-aurora-tv streams a Windows PC to an LG webOS TV. This fork adds a USB bridge, so
-a DualSense connected to the television reaches the PC as a native USB device
-with all of its features working: gyro, touchpad, audio-based rumble, speaker
-audio and microphone.
+This fork of aurora-tv carries a modified version of [ciprianmisaila's
+ctm-bridge-webos](https://github.com/CTM-Bridge/ctm-bridge-webos) controller
+bridge. It offers a DualSense a native connection to a host PC with all of its
+features working: gyro, touchpad, **audio-based rumble**, **speaker audio** and
+**microphone**.
 
-This is a fork of [GuiDev1994's
-aurora-tv](https://github.com/GuiDev1994/aurora-tv) carrying
-[ciprianmisaila's ctm-bridge-webos](https://github.com/CTM-Bridge/ctm-bridge-webos)
-controller bridge. What aurora-tv is, how to install it and how to stream with it
-are documented in [GuiDev1994's
-README](https://github.com/GuiDev1994/aurora-tv#readme), which is kept current.
-This page covers the bridge only.
+This fork expands ctm-bridge-webos to bring audio features to a DualSense
+connected to a webOS TV's USB port. It also adds DualSense Edge and
+[DS5Dongle](https://github.com/awalol/DS5Dongle) support along with bridging
+controls: a simplified USB Bridge panel, auto bridging, a touchpad gesture, and
+confirmation signals.
 
-The bridge needs this app and
-[DS5-USBIP](https://github.com/rhoquinn8217/CTM-USBIP) on the PC, and does
-nothing without both. aurora-tv reads the controller on the television and
-forwards it. DS5-USBIP rebuilds the controller on the PC and is documented on
-its own page.
+[GuiDev1994/aurora-tv](https://github.com/GuiDev1994/aurora-tv)'s original
+functions and features work the same way. Refer to the original for support on
+those. This modified version of ctm-bridge-webos in aurora-tv requires
+[DS5-USBIP](https://github.com/rhoquinn8217/CTM-USBIP) running on your host PC
+to bridge controllers.
 
 ---
 
@@ -35,7 +34,7 @@ its own page.
 | **DualSense** | Your controller |
 | **Windows machine** | usbip-win2 and DS5-USBIP run only on Windows |
 | **[vadimgrn/usbip-win2](https://github.com/vadimgrn/usbip-win2)** | Install vadimgrn's usbip-win2 fork on your Windows machine, **restart required** |
-| **Streaming host** | [Sunshine](https://github.com/LizardByte/Sunshine), [Apollo](https://github.com/ClassicOldSong/Apollo), [Vibepollo](https://github.com/Nonary/Vibepollo), [Vibeshine](https://github.com/Nonary/vibeshine), etc.<br>Any Moonlight-compatible host that works with aurora-tv |
+| **Streaming host** | [Sunshine](https://github.com/LizardByte/Sunshine), [Apollo](https://github.com/ClassicOldSong/Apollo), [Vibepollo](https://github.com/Nonary/Vibepollo), [Vibeshine](https://github.com/Nonary/vibeshine), etc.<br>Any Moonlight-compatible host that works with rhoquinn8217/aurora-tv |
 | **[rhoquinn8217/aurora-tv](https://github.com/rhoquinn8217/aurora-tv)** | Install rhoquinn8217's aurora-tv fork on your webOS TV |
 
 **Set up the listener**
@@ -51,7 +50,7 @@ its own page.
 **Bridge and play**
 
 1. Connect a DualSense to the television: via Bluetooth or USB port.
-2. Start the aurora-tv fork on the television.
+2. Start rhoquinn8217/aurora-tv on the television.
 3. Turn on **Enable Device Bridging** in **Settings → USB Bridge**.
 4. Start the stream to the host.
 5. Press and hold the touchpad with two fingers for a second.
@@ -76,8 +75,8 @@ The difference between Bluetooth and the USB port is where the audio lives. Over
 Bluetooth the controller's audio travels inside the same report stream as its
 buttons and sticks, so forwarding the reports carries everything at once. Over
 the USB port the controller is a composite device whose speaker, haptics and
-microphone arrive as a sound card owned by webOS rather than by the aurora-tv
-app reading the DualSense. Audio through the USB port needed a different
+microphone arrive as a sound card owned by webOS rather than by the
+rhoquinn8217/aurora-tv app reading the DualSense. Audio through the USB port needed a different
 mechanism.
 
 ---
