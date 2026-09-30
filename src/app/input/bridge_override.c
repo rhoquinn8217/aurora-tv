@@ -3,7 +3,6 @@
 
 #include "bridge_override.h"
 
-#include <math.h>
 #include <stdio.h>
 
 #include "app.h"            /* app_configuration */
@@ -43,7 +42,8 @@ void bridge_override_apply(stream_input_t *input) {
     }
     input->touchpad_multitouch = on ? false : config->touchpad_multitouch;
     /* The scroll direction is the sign of the scale; its size is not ours. */
-    const float scroll = fabsf(input->touchpad_scroll_scale);
+    const float scroll = input->touchpad_scroll_scale < 0 ? -input->touchpad_scroll_scale
+                                                          : input->touchpad_scroll_scale;
     input->touchpad_scroll_scale = (!on && config->touchpad_natural_scroll) ? scroll : -scroll;
     input->report_gamepad_battery = on ? false : config->report_gamepad_battery;
 

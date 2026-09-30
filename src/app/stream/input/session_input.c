@@ -24,6 +24,7 @@
 #include "input/app_input.h"
 #include "input/input_gamepad.h"
 #include "input/bridge_override.h"
+#include "logging.h"
 
 #if TARGET_WEBOS
 #include "platform/webos/keyboard_evdev.h"
