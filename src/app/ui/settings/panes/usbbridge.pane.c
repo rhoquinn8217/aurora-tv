@@ -360,6 +360,13 @@ static lv_obj_t *create_obj(lv_fragment_t *self, lv_obj_t *container) {
     (void) bt_mic;
 #else
     lv_obj_add_state(bt_mic, LV_STATE_DISABLED);
+    /* ⛔ AND UNCHECKED. pref_checkbox draws the box from the stored value, so a
+     * config carrying bridge_mic_bt = true from an armed build showed a ticked
+     * box on a build that cannot offer the microphone -- a control claiming a
+     * feature is on while being greyed out against switching it off. The value
+     * is LEFT ALONE rather than forced false: it is the person's preference and
+     * it should come back with them if they move to a build that arms it. */
+    lv_obj_clear_state(bt_mic, LV_STATE_CHECKED);
 #endif
     pref_desc_label(view, locstr(
             "A bug in webOS's input driver causes Bluetooth microphone audio to be read as "
@@ -387,11 +394,11 @@ static lv_obj_t *create_obj(lv_fragment_t *self, lv_obj_t *container) {
      * 2026-08-20: gestures and the microphone are user actions; signals are
      * acknowledgements, and less important. */
     usbb_gap(view);
-    dependent_checkbox_inverted(pane, view, locstr("Disable Lightbar Bridge/Release Signals"),
+    dependent_checkbox_inverted(pane, view, locstr("Disable Lightbar Bridge/Release/Refusal Signals"),
                                 &app_configuration->bridge_signal_light);
-    dependent_checkbox_inverted(pane, view, locstr("Disable Rumble Bridge/Release Signals"),
+    dependent_checkbox_inverted(pane, view, locstr("Disable Rumble Bridge/Release/Refusal Signals"),
                                 &app_configuration->bridge_signal_rumble);
-    dependent_checkbox_inverted(pane, view, locstr("Disable Audio Tone Bridge/Release Signals"),
+    dependent_checkbox_inverted(pane, view, locstr("Disable Audio Tone Bridge/Release/Refusal Signals"),
                                 &app_configuration->bridge_signal_tone);
     pref_desc_label(view, locstr(
             "Warning: With all three signals disabled, check the USB Bridge Overlay Panel or "

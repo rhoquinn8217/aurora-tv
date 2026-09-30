@@ -101,9 +101,9 @@ Settings located at **Settings → USB Bridge**.
 | **Enable Gesture Bridging** | Enable DualSense bridging gestures. A two finger hold on the touchpad: one second bridges, four seconds releases |
 | **Enable Wired Microphone** | Enables the microphone on a DualSense connected to a USB port. The controller draws on its battery while the microphone is on, whether or not anything is listening |
 | **Enable BT Microphone (Unavailable)** | Disabled. A bug in webOS makes a Bluetooth DualSense's microphone unusable |
-| **Disable Lightbar Bridge/Release Signals** | Turns off the lightbar confirmation signals |
-| **Disable Rumble Bridge/Release Signals** | Turns off the rumble confirmation signals |
-| **Disable Audio Tone Bridge/Release Signals** | Turns off the audio confirmation signals |
+| **Disable Lightbar Bridge/Release/Refusal Signals** | Turns off the lightbar confirmation signals |
+| **Disable Rumble Bridge/Release/Refusal Signals** | Turns off the rumble confirmation signals |
+| **Disable Audio Tone Bridge/Release/Refusal Signals** | Turns off the audio confirmation signals |
 
 ---
 
@@ -136,8 +136,7 @@ repo.
   [ctm-bridge-webos](https://github.com/CTM-Bridge/ctm-bridge-webos) and
   [CTM-USBIP](https://github.com/CTM-Bridge/CTM-USBIP). The controller bridge,
   the map-driven translation pipeline, the USB/IP hosting and the DualSense audio
-  work over Bluetooth are all ciprianmisaila's. This fork extends one transport,
-  it did not build the thing.
+  work over Bluetooth are all ciprianmisaila's.
 - **[mariotaku](https://github.com/mariotaku/moonlight-tv)**: moonlight-tv, the
   base both of the above are built on.
 
