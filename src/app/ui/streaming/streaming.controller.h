@@ -20,6 +20,10 @@ typedef struct {
     lv_obj_t *kbd_btn, *vmouse_btn;
     lv_obj_t *suspend_btn, *quit_btn;
     lv_obj_t *ctm_btn;
+    /* The labels that say a state, set each time the overlay opens:
+     * "Virtual Mouse: On/Off" and "Bridge Override: On/Off". */
+    lv_obj_t *vmouse_label;
+    lv_obj_t *override_btn, *override_label;
     lv_obj_t *stats;
     struct {
         lv_obj_t *header;
@@ -86,3 +90,8 @@ void streaming_notice_show(const char *message);
  * controller has just been bridged. Does nothing when mouse mode is off, or
  * outside a stream. Safe to call repeatedly -- it resets its own timer. */
 void streaming_mouse_mode_warn(void);
+
+/* Bridge Override was switched, from the overlay or the control port: say what
+ * that did, in the same top-left notice, and bring the button labels up to
+ * date. Does nothing outside a stream. */
+void streaming_bridge_override_changed(void);

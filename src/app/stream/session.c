@@ -2,6 +2,7 @@
 #include "input/ctm_bridge_gesture.h"
 #include "input/auto_bridge.h"
 #endif
+#include "input/bridge_override.h"
 #include "app.h"
 #include "app_settings.h"
 #include "session_priv.h"
@@ -163,7 +164,8 @@ bool session_start_input(session_t *session) {
     }
 #endif
     session_input_started(&session->input);
-    if (session->config.vmouse) {
+    /* ⓘ Bridge Override keeps the virtual mouse off; see input/bridge_override.h. */
+    if (session->config.vmouse && !bridge_override_active()) {
         session_input_set_vmouse_active(&session->input.vmouse, true);
     }
     {
@@ -237,6 +239,13 @@ bool session_has_input(session_t *session) {
 }
 
 void session_toggle_vmouse(session_t *session) {
+    /* ⭐ Every way of switching the virtual mouse comes through here: the
+     * overlay button and the USER_TOGGLE_VMOUSE event both do. So this is the
+     * one place Bridge Override has to hold it off. The caller says why. */
+    if (bridge_override_active()) {
+        session_input_set_vmouse_active(&session->input.vmouse, false);
+        return;
+    }
     bool value = !session_input_is_vmouse_active(&session->input.vmouse);
     session_input_set_vmouse_active(&session->input.vmouse, value);
 }

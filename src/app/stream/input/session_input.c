@@ -23,6 +23,7 @@
 #include "session_evmouse.h"
 #include "input/app_input.h"
 #include "input/input_gamepad.h"
+#include "input/bridge_override.h"
 
 #if TARGET_WEBOS
 #include "platform/webos/keyboard_evdev.h"
@@ -82,12 +83,45 @@ void session_input_init(stream_input_t *input, session_t *session, app_input_t *
     }
 #endif
 #if TARGET_WEBOS
-    if (!config->view_only) {
+    /* ⓘ Not while Bridge Override is on: the grab holds the keyboard's node,
+     * which a bridge wants for itself. */
+    if (!config->view_only && !bridge_override_active()) {
         input->keyboard_evdev = keyboard_evdev_start(session_keyboard_evdev_cb, input);
         if (input->keyboard_evdev != NULL) {
             commons_log_info("Input", "USB keyboard EVIOCGRAB active for stream");
         }
     }
+#endif
+    /* ⭐ Bridge Override acts on the LIVE copy made above, never on the saved
+     * settings. With it off, nothing here differs from upstream. */
+    if (bridge_override_active()) {
+        bridge_override_apply(input);
+        char state[256];
+        bridge_override_describe(input, state, sizeof state);
+        commons_log_info("Input", "Bridge override on for this stream: %s", state);
+    }
+}
+
+void session_input_set_keyboard_grab(stream_input_t *input, bool on) {
+#if TARGET_WEBOS
+    if (on) {
+        if (input->keyboard_evdev != NULL || input->view_only) {
+            return;
+        }
+        input->keyboard_evdev = keyboard_evdev_start(session_keyboard_evdev_cb, input);
+        if (input->keyboard_evdev != NULL) {
+            commons_log_info("Input", "USB keyboard EVIOCGRAB active for stream");
+        }
+    } else if (input->keyboard_evdev != NULL) {
+        /* ⓘ Joins the reader thread, which wakes at least every 200 ms, and
+         * releases the grab. SDL's own keyboard path takes the keys back. */
+        keyboard_evdev_stop(input->keyboard_evdev);
+        input->keyboard_evdev = NULL;
+        commons_log_info("Input", "USB keyboard EVIOCGRAB released");
+    }
+#else
+    (void) input;
+    (void) on;
 #endif
 }
 
