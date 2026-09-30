@@ -1,4 +1,4 @@
-# DualSense Bridge for LG webOS
+# Aurora - Remote DualSense Bridge Support for webOS
 
 ![platform](https://img.shields.io/badge/platform-LG%20webOS-A50034?logo=lg&logoColor=white)
 ![language](https://img.shields.io/badge/C-11-00599C?logo=c&logoColor=white)
@@ -7,9 +7,9 @@
 
 This fork of aurora-tv carries a modified version of [ciprianmisaila's
 ctm-bridge-webos](https://github.com/CTM-Bridge/ctm-bridge-webos) controller
-bridge. It offers a TV connected DualSense a native connection to a host PC with
-all of its features working: gyro, touchpad, **audio-based rumble** and
-**speaker audio**. It also brings a range of DualSense specific features,
+bridge. It offers a DualSense connected to a webOS TV a native connection to a
+host PC with all of its features working: gyro, touchpad, **audio-based rumble**
+and **speaker audio**. It also brings a range of DualSense specific features,
 including **microphone support on USB**, **auto bridging** and
 **[DS5Dongle](https://github.com/awalol/DS5Dongle)** support.
 
