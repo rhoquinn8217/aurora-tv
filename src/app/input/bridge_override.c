@@ -73,6 +73,21 @@ void bridge_override_set(session_t *session, bool on) {
     commons_log_info("Input", "Bridge override switched %s: %s", on ? "on" : "off", state);
 }
 
+void bridge_override_release_for_vmouse(session_t *session) {
+    bridge_override_set(session, false);
+    if (session == NULL) {
+        return;
+    }
+    stream_input_t *input = session_get_input(session);
+    /* ⓘ Switching the override off brings the virtual mouse back only if the
+     * Input setting has it on. The press asked for it either way. */
+    if (input->started) {
+        session_input_set_vmouse_active(&input->vmouse, true);
+    }
+    commons_log_info("Input", "Virtual Mouse pressed with Bridge Override on: override off, virtual mouse %s",
+                     session_input_is_vmouse_active(&input->vmouse) ? "on" : "off");
+}
+
 void bridge_override_describe(stream_input_t *input, char *buf, size_t len) {
     if (buf == NULL || len == 0) {
         return;

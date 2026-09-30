@@ -240,8 +240,9 @@ bool session_has_input(session_t *session) {
 
 void session_toggle_vmouse(session_t *session) {
     /* ⭐ Every way of switching the virtual mouse comes through here: the
-     * overlay button and the USER_TOGGLE_VMOUSE event both do. So this is the
-     * one place Bridge Override has to hold it off. The caller says why. */
+     * overlay button and the USER_TOGGLE_VMOUSE event both do. The overlay's
+     * own callers switch Bridge Override off first, since the press wins
+     * there; this holds the mouse off for anything that does not. */
     if (bridge_override_active()) {
         session_input_set_vmouse_active(&session->input.vmouse, false);
         return;

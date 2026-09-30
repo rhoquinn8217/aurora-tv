@@ -36,6 +36,8 @@ static void toggle_bridge_override(lv_event_t *event);
 
 static void refresh_input_buttons(streaming_controller_t *controller);
 
+static void vmouse_ends_override(streaming_controller_t *controller);
+
 static void stream_fragment_del_timer_cb(lv_timer_t *timer);
 
 static void hide_overlay(lv_event_t *event);
@@ -591,10 +593,10 @@ static bool on_event(lv_fragment_t *self, int code, void *userdata) {
         }
         case USER_TOGGLE_VMOUSE: {
             if (controller->global->session) {
-                session_toggle_vmouse(controller->global->session);
                 if (bridge_override_active()) {
-                    show_timed_notice(controller,
-                                      locstr("Virtual Mouse stays off while Bridge Override is on."));
+                    vmouse_ends_override(controller);
+                } else {
+                    session_toggle_vmouse(controller->global->session);
                 }
             }
             return true;
@@ -814,12 +816,23 @@ static void toggle_vmouse(lv_event_t *event) {
     streaming_controller_t *controller = lv_event_get_user_data(event);
     hide_overlay(event);
     app_t *app = controller->global;
-    session_toggle_vmouse(app->session);
     if (bridge_override_active()) {
-        /* The toggle refused; a button that does nothing has to say why. */
-        show_timed_notice(controller,
-                          locstr("Virtual Mouse stays off while Bridge Override is on."));
+        vmouse_ends_override(controller);
+        return;
     }
+    session_toggle_vmouse(app->session);
+}
+
+/* Virtual Mouse pressed while Bridge Override is on: the press wins
+ * (rhoquinn8217, 2026-09-30, in place of a notice refusing it). The override
+ * goes off and the virtual mouse comes on. The notice says both, because the
+ * override's other switches came back with it. */
+static void vmouse_ends_override(streaming_controller_t *controller) {
+    bridge_override_release_for_vmouse(controller->global->session);
+    refresh_input_buttons(controller);
+    show_timed_notice(controller,
+                      locstr("Virtual Mouse is on, and Bridge Override is off. "
+                             "The Input settings apply again."));
 }
 
 static void toggle_bridge_override(lv_event_t *event) {

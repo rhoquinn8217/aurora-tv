@@ -46,6 +46,11 @@ void bridge_override_apply(stream_input_t *input);
  * moonlight.ini when the app next saves its settings. */
 void bridge_override_set(session_t *session, bool on);
 
+/** The Virtual Mouse button, pressed while the override is on: the press wins.
+ * The override is switched off exactly as its own button would, and the virtual
+ * mouse comes on, which is what the press asked for. */
+void bridge_override_release_for_vmouse(session_t *session);
+
 /** The live input state as one line, for the log and the control port. */
 void bridge_override_describe(stream_input_t *input, char *buf, size_t len);
 
