@@ -7,25 +7,23 @@
 
 This fork of aurora-tv carries a modified version of [ciprianmisaila's
 ctm-bridge-webos](https://github.com/CTM-Bridge/ctm-bridge-webos) controller
-bridge. It offers a DualSense a native connection to a host PC with all of its
-features working: gyro, touchpad, **audio-based rumble**, **speaker audio** and
-**microphone**.
-
-This fork expands ctm-bridge-webos to bring audio features to a DualSense
-connected to a webOS TV's USB port. It also adds DualSense Edge and
-[DS5Dongle](https://github.com/awalol/DS5Dongle) support along with bridging
-controls: a simplified USB Bridge panel, auto bridging, a touchpad gesture, and
-confirmation signals.
+bridge. It offers a TV connected DualSense a native connection to a host PC with
+all of its features working: gyro, touchpad, **audio-based rumble** and
+**speaker audio**. It also brings a range of DualSense specific features,
+including **microphone support on USB**, **auto bridging** and
+**[DS5Dongle](https://github.com/awalol/DS5Dongle)** support.
 
 [GuiDev1994/aurora-tv](https://github.com/GuiDev1994/aurora-tv)'s original
 functions and features work the same way. Refer to the original for support on
-those. This modified version of ctm-bridge-webos in aurora-tv requires
+those.
+
+The modified version of ctm-bridge-webos requires
 [DS5-USBIP](https://github.com/rhoquinn8217/CTM-USBIP) running on your host PC
 to bridge controllers.
 
 ---
 
-## Quick start
+## Start up guide
 
 **Prerequisites**
 
@@ -33,15 +31,15 @@ to bridge controllers.
 |---|---|
 | **DualSense** | Your controller |
 | **Windows machine** | usbip-win2 and DS5-USBIP run only on Windows |
-| **[vadimgrn/usbip-win2](https://github.com/vadimgrn/usbip-win2)** | Install vadimgrn's usbip-win2 fork on your Windows machine, **restart required** |
-| **Streaming host** | [Sunshine](https://github.com/LizardByte/Sunshine), [Apollo](https://github.com/ClassicOldSong/Apollo), [Vibepollo](https://github.com/Nonary/Vibepollo), [Vibeshine](https://github.com/Nonary/vibeshine), etc.<br>Any Moonlight-compatible host that works with rhoquinn8217/aurora-tv |
-| **[rhoquinn8217/aurora-tv](https://github.com/rhoquinn8217/aurora-tv)** | Install rhoquinn8217's aurora-tv fork on your webOS TV |
+| **[vadimgrn/usbip-win2](https://github.com/vadimgrn/usbip-win2/releases)** | Install vadimgrn's usbip-win2 fork on your Windows machine, requires restart. Tested with 0.9.7.7 |
+| **Streaming host** | [Sunshine](https://github.com/LizardByte/Sunshine), [Apollo](https://github.com/ClassicOldSong/Apollo), [Vibepollo](https://github.com/Nonary/Vibepollo), [Vibeshine](https://github.com/Nonary/vibeshine), etc.<br>Any Moonlight-compatible host that works with Moonlight or aurora-tv |
+| **[rhoquinn8217/aurora-tv](https://github.com/rhoquinn8217/aurora-tv)** | Install the ipk on your webOS TV |
 
-**Set up the listener**
+**Set up DS5-USBIP**
 
-1. Download the listener from the [releases page](https://github.com/rhoquinn8217/CTM-USBIP/releases).
+1. Download DS5-USBIP from the [releases page](https://github.com/rhoquinn8217/CTM-USBIP/releases).
 2. Put the folder somewhere you have write access.
-3. Run the listener from that folder:
+3. Run DS5-USBIP from that folder:
 
    ```powershell
    ctm-usbip.exe agent 48054 --ui
@@ -54,13 +52,10 @@ to bridge controllers.
 3. Turn on **Enable Device Bridging** in **Settings → USB Bridge**.
 4. Start the stream to the host.
 5. Press and hold the touchpad with two fingers for a second.
-6. Play, with the controller's full feature set.
 
-**Notes**
+**DualSense is ready to use with its full feature set (microphone over USB only).**
 
-- The listener can be set up, stopped and started through the same stream.
-- A Bluetooth-connected DualSense's microphone does not work, because of a bug in
-  webOS.
+*Note: DS5-USBIP can be set up, stopped and started through the same stream.*
 
 ---
 
