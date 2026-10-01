@@ -1,32 +1,29 @@
-# DualSense Bridge for LG webOS
+# Aurora - Remote DualSense Bridge Support for webOS
 
 ![platform](https://img.shields.io/badge/platform-LG%20webOS-A50034?logo=lg&logoColor=white)
 ![language](https://img.shields.io/badge/C-11-00599C?logo=c&logoColor=white)
 ![transport](https://img.shields.io/badge/transport-USB%2FIP-2ea44f)
 ![fork of GuiDev1994/aurora-tv](https://img.shields.io/badge/fork%20of-GuiDev1994%2Faurora--tv-lightgrey)
 
-aurora-tv streams a Windows PC to an LG webOS TV. This fork adds a USB bridge, so
-a DualSense connected to the television reaches the PC as a native USB device
-with all of its features working: gyro, touchpad, audio-based rumble, speaker
-audio and microphone.
+This fork of aurora-tv carries a modified version of [ciprianmisaila's
+ctm-bridge-webos](https://github.com/CTM-Bridge/ctm-bridge-webos) controller
+bridge. It offers a DualSense connected to a webOS TV a native connection to a
+host PC with all of its features working: gyro, touchpad, **audio-based rumble**
+and **speaker audio**. It also brings a range of DualSense specific features,
+including **microphone support on USB**, **auto bridging** and
+**[DS5Dongle](https://github.com/awalol/DS5Dongle)** support.
 
-This is a fork of [GuiDev1994's
-aurora-tv](https://github.com/GuiDev1994/aurora-tv) carrying
-[ciprianmisaila's ctm-bridge-webos](https://github.com/CTM-Bridge/ctm-bridge-webos)
-controller bridge. What aurora-tv is, how to install it and how to stream with it
-are documented in [GuiDev1994's
-README](https://github.com/GuiDev1994/aurora-tv#readme), which is kept current.
-This page covers the bridge only.
+[GuiDev1994/aurora-tv](https://github.com/GuiDev1994/aurora-tv)'s original
+functions and features work the same way. Refer to the original for support on
+those.
 
-The bridge needs this app and
-[DS5-USBIP](https://github.com/rhoquinn8217/CTM-USBIP) on the PC, and does
-nothing without both. aurora-tv reads the controller on the television and
-forwards it. DS5-USBIP rebuilds the controller on the PC and is documented on
-its own page.
+The modified version of ctm-bridge-webos requires
+[DS5-USBIP](https://github.com/rhoquinn8217/CTM-USBIP) running on your host PC
+to bridge controllers.
 
 ---
 
-## Quick start
+## Start up guide
 
 **Prerequisites**
 
@@ -34,15 +31,15 @@ its own page.
 |---|---|
 | **DualSense** | Your controller |
 | **Windows machine** | usbip-win2 and DS5-USBIP run only on Windows |
-| **[vadimgrn/usbip-win2](https://github.com/vadimgrn/usbip-win2)** | Install vadimgrn's usbip-win2 fork on your Windows machine, **restart required** |
-| **Streaming host** | [Sunshine](https://github.com/LizardByte/Sunshine), [Apollo](https://github.com/ClassicOldSong/Apollo), [Vibepollo](https://github.com/Nonary/Vibepollo), [Vibeshine](https://github.com/Nonary/vibeshine), etc.<br>Any Moonlight-compatible host that works with aurora-tv |
-| **[rhoquinn8217/aurora-tv](https://github.com/rhoquinn8217/aurora-tv)** | Install rhoquinn8217's aurora-tv fork on your webOS TV |
+| **[vadimgrn/usbip-win2](https://github.com/vadimgrn/usbip-win2/releases)** | Install vadimgrn's usbip-win2 fork on your Windows machine, requires restart. Tested with 0.9.7.7 |
+| **Streaming host** | [Sunshine](https://github.com/LizardByte/Sunshine), [Apollo](https://github.com/ClassicOldSong/Apollo), [Vibepollo](https://github.com/Nonary/Vibepollo), [Vibeshine](https://github.com/Nonary/vibeshine), etc.<br>Any Moonlight-compatible host that works with Moonlight or aurora-tv |
+| **[rhoquinn8217/aurora-tv](https://github.com/rhoquinn8217/aurora-tv)** | Install the ipk on your webOS TV |
 
-**Set up the listener**
+**Set up DS5-USBIP**
 
-1. Download the listener from the [releases page](https://github.com/rhoquinn8217/CTM-USBIP/releases).
+1. Download DS5-USBIP from the [releases page](https://github.com/rhoquinn8217/CTM-USBIP/releases).
 2. Put the folder somewhere you have write access.
-3. Run the listener from that folder:
+3. Run DS5-USBIP from that folder:
 
    ```powershell
    ctm-usbip.exe agent 48054 --ui
@@ -51,17 +48,14 @@ its own page.
 **Bridge and play**
 
 1. Connect a DualSense to the television: via Bluetooth or USB port.
-2. Start the aurora-tv fork on the television.
+2. Start rhoquinn8217/aurora-tv on the television.
 3. Turn on **Enable Device Bridging** in **Settings → USB Bridge**.
 4. Start the stream to the host.
 5. Press and hold the touchpad with two fingers for a second.
-6. Play, with the controller's full feature set.
 
-**Notes**
+**DualSense is ready to use with its full feature set (microphone over USB only).**
 
-- The listener can be set up, stopped and started through the same stream.
-- A Bluetooth-connected DualSense's microphone does not work, because of a bug in
-  webOS.
+*Note: DS5-USBIP can be set up, stopped and started through the same stream.*
 
 ---
 
@@ -76,8 +70,8 @@ The difference between Bluetooth and the USB port is where the audio lives. Over
 Bluetooth the controller's audio travels inside the same report stream as its
 buttons and sticks, so forwarding the reports carries everything at once. Over
 the USB port the controller is a composite device whose speaker, haptics and
-microphone arrive as a sound card owned by webOS rather than by the aurora-tv
-app reading the DualSense. Audio through the USB port needed a different
+microphone arrive as a sound card owned by webOS rather than by the
+rhoquinn8217/aurora-tv app reading the DualSense. Audio through the USB port needed a different
 mechanism.
 
 ---
@@ -107,9 +101,9 @@ Settings located at **Settings → USB Bridge**.
 | **Enable Gesture Bridging** | Enable DualSense bridging gestures. A two finger hold on the touchpad: one second bridges, four seconds releases |
 | **Enable Wired Microphone** | Enables the microphone on a DualSense connected to a USB port. The controller draws on its battery while the microphone is on, whether or not anything is listening |
 | **Enable BT Microphone (Unavailable)** | Disabled. A bug in webOS makes a Bluetooth DualSense's microphone unusable |
-| **Disable Lightbar Bridge/Release Signals** | Turns off the lightbar confirmation signals |
-| **Disable Rumble Bridge/Release Signals** | Turns off the rumble confirmation signals |
-| **Disable Audio Tone Bridge/Release Signals** | Turns off the audio confirmation signals |
+| **Disable Lightbar Bridge/Release/Refusal Signals** | Turns off the lightbar confirmation signals |
+| **Disable Rumble Bridge/Release/Refusal Signals** | Turns off the rumble confirmation signals |
+| **Disable Audio Tone Bridge/Release/Refusal Signals** | Turns off the audio confirmation signals |
 
 ---
 
@@ -142,8 +136,7 @@ repo.
   [ctm-bridge-webos](https://github.com/CTM-Bridge/ctm-bridge-webos) and
   [CTM-USBIP](https://github.com/CTM-Bridge/CTM-USBIP). The controller bridge,
   the map-driven translation pipeline, the USB/IP hosting and the DualSense audio
-  work over Bluetooth are all ciprianmisaila's. This fork extends one transport,
-  it did not build the thing.
+  work over Bluetooth are all ciprianmisaila's.
 - **[mariotaku](https://github.com/mariotaku/moonlight-tv)**: moonlight-tv, the
   base both of the above are built on.
 
