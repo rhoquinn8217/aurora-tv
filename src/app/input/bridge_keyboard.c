@@ -10,7 +10,9 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <stdarg.h>
+#include <stdlib.h>
 #include <string.h>
+#include <sys/ioctl.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -89,8 +91,11 @@ static const nav_key_t k_nav[] = {
 #define TWIN_MS 2000u
 #define TWINS_MAX 4
 
-/* Reader thread only: the keys whose press was fed, so their release is too. */
+/* The keys whose press was fed, so their release is too, and whether the
+ * overlay was open at the last key the reader saw. ⓘ The reader thread's, and
+ * the app's loop's only while there is no reader (let_go, and between streams). */
 static bool s_fed_down[NAV_KEYS];
+static bool s_reader_in_overlay = false;
 
 /* A bridged keyboard's own input nodes, opened by the app's loop while the
  * overlay is up and read there without being taken, and the keys of theirs
@@ -113,6 +118,16 @@ struct evdev_event {
 };
 #define EVDEV_TYPE_KEY 1
 #define EVDEV_VALUE_REPEAT 2
+/* Two questions for a node, asked of the kernel: its name, and which keys it
+ * can send. ⓘ Written out for the same reason: they are linux/input.h's
+ * EVIOCGNAME and EVIOCGBIT(EV_KEY). */
+#define EVDEV_GET_NAME(len) _IOC(_IOC_READ, 'E', 0x06, len)
+#define EVDEV_GET_KEYS(len) _IOC(_IOC_READ, 'E', 0x20 + EVDEV_TYPE_KEY, len)
+#define NAV_CODE_MAX 111    /* the highest of the numbers in k_nav */
+/* Left Ctrl (29) and A (30) in the lowest word of a device's key list: what the
+ * grab's own test asks of a keyboard first (is_usb_keyboard in
+ * platform/webos/keyboard_evdev.c). */
+#define KEYBOARD_LOW_KEYS 0x60000000ull
 
 /* Keys taken from one source and not yet matched by their twin from the other:
  * how many, and when the last was taken. By source (fed, webOS), by press or
@@ -133,6 +148,7 @@ static int s_open_fed = 0, s_open_nav = 0, s_open_echoes = 0;
 #define NODES_POLL_MS 500u
 static Uint32 s_nodes_poll_at = 0;
 static Uint32 s_nodes_hash = 0;
+static Uint32 s_keyboards_hash = 0;
 static bool s_nodes_known = false;
 
 /* The record a person can read on any set: logs/tv-keyboard.log, beside the
@@ -220,15 +236,39 @@ void bridge_keyboard_changed(void) {
     }
 }
 
+static void feed_overlay(int slot, bool down, char modifiers);
+
+/* The grab lets go of every keyboard, and the host lets go of every key.
+ *
+ * ⛔ THE TWO GO TOGETHER. Until the grab has looked again nobody reads the
+ * keyboards it held, so a key released in that time would never come up on the
+ * host, and the host repeats a held key by itself. Whatever the host holds
+ * comes up here instead; a key still down afterwards is simply pressed again.
+ * ⓘ Joins the TV's reader thread, which wakes at least every 200 ms, so the
+ * list of keys the host holds is this thread's to touch. With nothing grabbed
+ * it returns at once, so several parts of one device cost this once. */
+static void let_go(stream_input_t *input) {
+    if (input->keyboard_evdev == NULL) {
+        return;
+    }
+    session_input_set_keyboard_grab(input, false);
+    stream_input_flush_pressed_keys(input);
+    /* The interface as well: a key the reader had given it would never come
+     * up there either, and it repeats a held arrow by itself. */
+    for (int slot = 0; slot < NAV_KEYS; slot++) {
+        if (s_fed_down[slot]) {
+            s_fed_down[slot] = false;
+            feed_overlay(slot, false, 0);
+        }
+    }
+}
+
 void bridge_keyboard_before_plug(void) {
     stream_input_t *input = live_input();
     if (input == NULL) {
         return;
     }
-    /* ⓘ Joins the TV's reader thread, which wakes at least every 200 ms. With
-     * nothing grabbed it returns at once, so several parts of one device cost
-     * this once. */
-    session_input_set_keyboard_grab(input, false);
+    let_go(input);
     bridge_keyboard_changed();
 }
 
@@ -283,6 +323,26 @@ static void close_bridged_nodes(void) {
     s_bridged_n = 0;
 }
 
+/* Can this node send any key the interface reads? ⓘ A bridged controller has
+ * input nodes too (a DualSense has three) and none of them can. Read here
+ * they would only take the places a keyboard needs: build 456 on the C3 opened
+ * a DualSense's three beside the keyboard's four, and there are eight. */
+static bool node_has_nav_key(int fd) {
+    const unsigned word_bits = 8u * (unsigned) sizeof(unsigned long);
+    unsigned long keys[NAV_CODE_MAX / (8 * sizeof(unsigned long)) + 1];
+    memset(keys, 0, sizeof(keys));
+    if (ioctl(fd, EVDEV_GET_KEYS(sizeof(keys)), keys) < 0) {
+        return true;   /* it cannot be asked: read it, as before */
+    }
+    for (int i = 0; i <= NAV_KEYS; i++) {
+        const unsigned code = i < NAV_KEYS ? k_nav[i].code : NAV_CODE_KP_ENTER;
+        if ((keys[code / word_bits] & (1ul << (code % word_bits))) != 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
 static void open_bridged_nodes(void) {
     close_bridged_nodes();
     if (!ctm_bridge_active()) {
@@ -298,15 +358,21 @@ static void open_bridged_nodes(void) {
         if (fd < 0) {
             continue;
         }
+        if (!node_has_nav_key(fd)) {
+            close(fd);
+            continue;
+        }
+        char name[96] = "";
+        (void) ioctl(fd, EVDEV_GET_NAME(sizeof(name) - 1), name);
         s_bridged_fds[s_bridged_n++] = fd;
-        keyboard_log("the overlay reads %s itself: it is bridged", path);
+        keyboard_log("the overlay reads %s (%s) itself: it is bridged", path, name[0] != '\0' ? name : "no name");
     }
 }
 
 static void read_bridged_nodes(void) {
     for (int i = 0; i < s_bridged_n; i++) {
-        /* ⓘ A bounded burst: a pad's node, read here if the core is not
-         * holding it, can say a great deal. */
+        /* ⓘ A bounded burst, so a node with a great deal to say cannot hold
+         * the app's loop. */
         for (int burst = 0; burst < 64; burst++) {
             struct evdev_event ev;
             const ssize_t got = read(s_bridged_fds[i], &ev, sizeof(ev));
@@ -335,9 +401,20 @@ static void read_bridged_nodes(void) {
 
 bool bridge_keyboard_evdev_key(stream_input_t *input, short vk, bool down, char modifiers) {
     SDL_AtomicAdd(&s_evdev_keys, 1);
+    const bool overlay = s_overlay_open;
+    if (overlay && !s_reader_in_overlay) {
+        /* ⛔ The first key since the overlay opened: whatever the host still
+         * holds comes up now. From here the overlay swallows every key, the
+         * releases too, so a key that was down as the overlay opened (from a
+         * controller or the remote, with a key held) would stay down on the
+         * host, which repeats a held key by itself. ⓘ A shortcut does this
+         * itself, below; here on this thread for the same reason. */
+        stream_input_flush_pressed_keys(input);
+    }
+    s_reader_in_overlay = overlay;
     const int slot = nav_slot_for_vk(vk);
     if (slot >= 0) {
-        if (down && s_overlay_open) {
+        if (down && overlay) {
             s_fed_down[slot] = true;
             feed_overlay(slot, true, modifiers);
             return true;
@@ -351,7 +428,7 @@ bool bridge_keyboard_evdev_key(stream_input_t *input, short vk, bool down, char 
             return true;
         }
     }
-    if (s_overlay_open) {
+    if (overlay) {
         return true;   /* the overlay has the keyboard */
     }
     const char chord = MODIFIER_CTRL | MODIFIER_ALT | MODIFIER_SHIFT;
@@ -501,12 +578,60 @@ static Uint32 input_devices_hash(const char **source) {
     return 0;
 }
 
+/* The keyboards among them, as one number: every input device with letter keys
+ * and a left Ctrl. ⓘ Wider than the grab's own test, which also goes by name;
+ * looking again once too often costs little, and missing a keyboard costs the
+ * keyboard. 0 when they cannot be listed. */
+static Uint32 keyboards_hash(void) {
+    DIR *dir = opendir("/sys/class/input");
+    if (dir == NULL) {
+        return 0;
+    }
+    static char keys[4096];   /* app's loop only; the kernel gives a page at most */
+    Uint32 sum = 0;
+    struct dirent *ent;
+    while ((ent = readdir(dir)) != NULL) {
+        if (strncmp(ent->d_name, "input", 5) != 0) {
+            continue;
+        }
+        char path[320];
+        snprintf(path, sizeof(path), "/sys/class/input/%s/capabilities/key", ent->d_name);
+        FILE *f = fopen(path, "r");
+        if (f == NULL) {
+            continue;
+        }
+        size_t len = fread(keys, 1, sizeof(keys) - 1, f);
+        fclose(f);
+        while (len > 0 && (keys[len - 1] == '\n' || keys[len - 1] == ' ')) {
+            len--;
+        }
+        keys[len] = '\0';
+        /* Words in hexadecimal, the lowest keys in the LAST one. */
+        const char *last = strrchr(keys, ' ');
+        last = last != NULL ? last + 1 : keys;
+        if ((strtoull(last, NULL, 16) & KEYBOARD_LOW_KEYS) != KEYBOARD_LOW_KEYS) {
+            continue;
+        }
+        Uint32 h = 2166136261u;
+        for (const char *p = ent->d_name; *p != '\0'; ++p) {
+            h = (h ^ (unsigned char) *p) * 16777619u;
+        }
+        sum += h;
+    }
+    closedir(dir);
+    return sum | 1u;
+}
+
 /* ⭐ A KEYBOARD THAT CONNECTS MID-STREAM IS TAKEN TOO (rhoquinn8217, 2026-10-01:
  * "connecting a keyboard while the stream has already started doesn't
  * register"). Upstream's grab looks for keyboards once, as the stream starts,
  * so one that arrives later, or a wireless one that slept and came back as a
  * new device, was nobody's. A keyboard that goes leaves the reader a dead
- * handle, and its loop then spins on it; looking again drops that as well. */
+ * handle, and its loop then spins on it; looking again drops that as well.
+ *
+ * ⛔ ONLY FOR A KEYBOARD. Looking again leaves every keyboard unread for about
+ * half a second, and a key pressed in that time is lost. A controller that
+ * switches itself off while someone is typing must not cost them that. */
 static void watch_input_devices(void) {
     const Uint32 now = SDL_GetTicks();
     if (s_nodes_known && !SDL_TICKS_PASSED(now, s_nodes_poll_at)) {
@@ -526,9 +651,17 @@ static void watch_input_devices(void) {
     }
     if (!s_nodes_known) {
         keyboard_log("watching %s for a keyboard arriving or going", source);
+        s_keyboards_hash = keyboards_hash();
     } else if (hash != s_nodes_hash) {
-        keyboard_log("an input device connected or went away: the grab looks again");
-        bridge_keyboard_changed();
+        const Uint32 keyboards = keyboards_hash();
+        if (keyboards == 0 || keyboards != s_keyboards_hash) {
+            keyboard_log("a keyboard connected or went away: the grab looks again");
+            bridge_keyboard_changed();
+        } else {
+            keyboard_log("an input device that is not a keyboard connected or went away:"
+                         " the grab stays as it is");
+        }
+        s_keyboards_hash = keyboards;
     }
     s_nodes_hash = hash;
     s_nodes_known = true;
@@ -571,9 +704,12 @@ void bridge_keyboard_tick(bool overlay_shown) {
         read_bridged_nodes();
     }
     if (input == NULL) {
-        /* No stream: nothing is held, so nothing is watched or owed. */
+        /* No stream: nothing is held, so nothing is watched or owed, and no
+         * reader is left to remember a key from the stream before. */
         s_nodes_known = false;
         s_look_again_at = 0;
+        memset(s_fed_down, 0, sizeof(s_fed_down));
+        s_reader_in_overlay = false;
         return;
     }
     watch_input_devices();
@@ -585,7 +721,7 @@ void bridge_keyboard_tick(bool overlay_shown) {
      * (bridge_keyboard_node_is_bridged) and takes what has been released or
      * has just connected. ⓘ Whatever Bridge Override says: it leaves the
      * keyboard alone. */
-    session_input_set_keyboard_grab(input, false);
+    let_go(input);
     session_input_set_keyboard_grab(input, true);
     const bool holding = input->keyboard_evdev != NULL;
     commons_log_info("Input", "Keyboard grab looked again: %s",

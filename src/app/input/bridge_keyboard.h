@@ -42,9 +42,9 @@
  * the C3, 2026-10-01: "escape or any key doesn't work in the overlay screen",
  * and of a bridged keyboard: "results in no control and I have to rely on a
  * different input"). webOS cannot be relied on to hand a keyboard's keys to the
- * app: on the C3 it handed over a keyboard that was connected when the app
- * started, and nothing from the same keyboard once it had been switched off
- * and on. So, while the overlay is open:
+ * app: on the C3 it handed them over in one overlay all morning and never
+ * again, the keyboard connected from before the app started included. What
+ * decides it is not known. So, while the overlay is open:
  *
  * - a keyboard the grab holds STAYS held, and the reader turns the keys the
  *   interface understands (the arrows, Enter, Escape, Tab, Backspace, Delete,
@@ -54,6 +54,8 @@
  *   as the overlay opens and closes them as it closes. The bridge core lets
  *   the keyboard go for exactly that long and sends the host nothing, so
  *   the keys can be heard, and nothing read this way can reach the host.
+ *   Only the nodes that can send one of those keys are opened: a bridged
+ *   controller's are left alone.
  *
  * Where webOS delivers the same key as well (a bridged keyboard the core has let
  * go, on a set that hands it over), whichever copy is taken second is dropped:
@@ -63,7 +65,22 @@
  *
  * ⭐ A KEYBOARD THAT CONNECTS MID-STREAM IS TAKEN (rhoquinn8217, the same
  * morning: "connecting a keyboard while the stream has already started doesn't
- * register"). The grab looks again whenever an input device arrives or goes.
+ * register"). The grab looks again whenever a keyboard arrives or goes. Any
+ * other device coming or going leaves it as it is: looking again leaves every
+ * keyboard unread for about half a second.
+ *
+ * ⛔ NO KEY STAYS DOWN ON THE HOST BEHIND THE KEYBOARD'S BACK. The host repeats
+ * a held key by itself, so a release it never hears is a key typing on its
+ * own. Two places could lose one, and in both the host's keys come up first:
+ * the grab letting go to look again, and the overlay opening with a key held
+ * (it swallows every key from then on, the releases too).
+ *
+ * ⛔ A HANDLE ON A DEVICE THAT HAS GONE IS CLOSED AT ONCE. A set that keeps its
+ * input nodes as permanent files (the C3 does) lets nobody open the device
+ * that takes the same number next while one is still open: a keyboard that
+ * dropped off bridged came back dead that way (2026-10-01). The bridge core
+ * ends such a session itself, and the nodes the overlay reads are closed as
+ * soon as a read says the device has gone.
  *
  * ⓘ What the grab holds and reads, each shortcut, each look-again and who gave
  * the overlay its keys are written to logs/tv-keyboard.log, where they can be
@@ -91,8 +108,8 @@ void bridge_keyboard_took(const char *event_path, const char *name);
  * itself afterwards (bridge_keyboard_changed). */
 void bridge_keyboard_before_plug(void);
 
-/* Something was bridged or released, or an input device arrived or went: the
- * TV's keyboard grab looks again shortly, once the last change has settled. */
+/* Something was bridged or released, or a keyboard arrived or went: the TV's
+ * keyboard grab looks again shortly, once the last change has settled. */
 void bridge_keyboard_changed(void);
 
 /* Once per pass of the app's loop: watches for input devices arriving or going,
