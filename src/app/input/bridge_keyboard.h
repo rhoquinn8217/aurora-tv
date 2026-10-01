@@ -12,9 +12,9 @@
  *   twice;
  * - the core's grab came first, and then the overlay opened: the core lets the
  *   keyboard go while the overlay is up, so the TV can read it there. If the
- *   TV's grab is started in that moment (Bridge Override going off does it) it
- *   takes the keyboard, the core cannot take it back, and every key arrives
- *   twice again.
+ *   TV's grab is started in that moment (Bridge Override going off did it,
+ *   while the override still switched the grab) it takes the keyboard, the core
+ *   cannot take it back, and every key arrives twice again.
  *
  * Both were seen on the C1 on 2026-09-30 (rhoquinn8217: "13. still double
  * types", typed double), and both are in the core's log as `grab refused ...
@@ -23,17 +23,28 @@
  * ➡️ So: the TV's grab SKIPS a keyboard that is bridged, by asking rather than
  * by losing a race; it LETS GO of every keyboard just before anything is
  * bridged; and it LOOKS AGAIN a moment after anything is bridged or released,
- * taking back the keyboards that are not bridged. Bridge Override no longer has
- * to be on for a bridged keyboard to type once.
+ * taking back the keyboards that are not bridged. Bridge Override does not have
+ * to be on for a bridged keyboard to type once, and it no longer touches the
+ * keyboard at all (bridge_override.h).
  *
- * ⭐ AND THE OVERLAY'S SHORTCUT WORKS ON A KEYBOARD THE TV HAS (rhoquinn8217,
+ * ⭐ AND AURORA'S SHORTCUTS WORK ON A KEYBOARD THE TV HAS (rhoquinn8217,
  * 2026-09-30: "it doesn't work unless the keyboard is bridged. It should work
  * all the time"). Upstream's grab sends a keyboard's keys straight to the host,
- * around stream_input_handle_key(), which is where Ctrl+Alt+Shift+O was
- * found; and it went on sending them with the overlay open. So that path asks
- * here first: the shortcut opens the overlay, and while the overlay is open
- * the grab lets its keyboards go for the TV to read and sends the host
- * nothing, the way the bridge core does for a bridged keyboard. */
+ * around stream_input_handle_key(), which is where the Ctrl+Alt+Shift
+ * shortcuts were found; and it went on sending them with the overlay open. So
+ * that path asks here first:
+ *
+ * - Ctrl+Alt+Shift+O opens the overlay (ours), and so does Ctrl+Alt+Shift+S
+ *   (Moonlight's stats shortcut, which is what it does in this app);
+ * - Ctrl+Alt+Shift+Q ends the stream (Moonlight's quit), as the overlay's
+ *   Disconnect does;
+ * - Moonlight's other five (Z, X, M, C, D) do nothing in this app beyond a log
+ *   line, so they are left for the host.
+ *
+ * While the overlay is open the grab lets its keyboards go for the TV to read
+ * and sends the host nothing, the way the bridge core does for a bridged
+ * keyboard. ⓘ Each shortcut and each look-again is written to
+ * logs/tv-keyboard.log, where it can be read on every set. */
 
 #ifndef BRIDGE_KEYBOARD_H
 #define BRIDGE_KEYBOARD_H
@@ -55,13 +66,14 @@ void bridge_keyboard_before_plug(void);
  * shortly, once the last change has settled. */
 void bridge_keyboard_changed(void);
 
-/* Once per pass of the app's loop: does the look-again when it is due, and
- * hands the TV's keyboards to the overlay while it is open. */
+/* Once per pass of the app's loop: does the look-again when it is due, hands
+ * the TV's keyboards to the overlay while it is open, and acts on a shortcut
+ * the reader thread found. */
 void bridge_keyboard_tick(bool overlay_shown);
 
 /* A key from the TV's own keyboard grab, on its reader thread, before it is
- * sent to the host. True when it is not to be sent: it completed the overlay's
- * shortcut, or the overlay is open and the keyboard is the TV's. */
+ * sent to the host. True when it is not to be sent: it completed one of
+ * Aurora's shortcuts, or the overlay is open and the keyboard is the TV's. */
 bool bridge_keyboard_evdev_key(stream_input_t *input, short vk, bool down, char modifiers);
 
 #endif /* BRIDGE_KEYBOARD_H */

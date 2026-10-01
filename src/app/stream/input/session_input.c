@@ -36,7 +36,7 @@ static void session_keyboard_evdev_cb(short vk, bool down, char modifiers, void 
     if (input == NULL || !input->started || input->view_only) {
         return;
     }
-    /* ⭐ The overlay's shortcut, and the overlay's turn with the keyboard: this
+    /* ⭐ Aurora's own shortcuts, and the overlay's turn with the keyboard: this
      * path goes around stream_input_handle_key(), where both used to live. */
     if (bridge_keyboard_evdev_key(input, vk, down, modifiers)) {
         return;
@@ -90,9 +90,7 @@ void session_input_init(stream_input_t *input, session_t *session, app_input_t *
     }
 #endif
 #if TARGET_WEBOS
-    /* ⓘ Not while Bridge Override is on: the grab holds the keyboard's node,
-     * which a bridge wants for itself. */
-    if (!config->view_only && !bridge_override_active()) {
+    if (!config->view_only) {
         input->keyboard_evdev = keyboard_evdev_start(session_keyboard_evdev_cb, input);
         if (input->keyboard_evdev != NULL) {
             commons_log_info("Input", "USB keyboard EVIOCGRAB active for stream");

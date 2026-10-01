@@ -1,19 +1,23 @@
 /* Bridge Override: one switch, beside the USB Bridge button in the streaming
- * overlay, that turns the TV's own mouse, touchpad and keyboard handling off.
+ * overlay, that turns the TV's own mouse and touchpad handling off.
  *
  * ⭐ WHY IT EXISTS. A bridged controller reaches the host as itself, over
  * USB/IP, and the TV goes on READING it. The virtual mouse turns its sticks and
- * triggers into a host mouse, the touchpad's mouse mode sends its click as a
- * host mouse click, and the USB keyboard grab (upstream v1.3.0) holds the
- * keyboard's node, which a bridge wants for itself. Each of those is an Input
- * setting of the upstream app, and none of them asks whether a pad is bridged.
+ * triggers into a host mouse, and the touchpad's mouse mode sends its click as
+ * a host mouse click. Each of those is an Input setting of the upstream app,
+ * and neither asks whether a pad is bridged.
  *
  * What it switches off for the stream: the virtual mouse, the touchpad's mouse
  * mode (the touchpad is sent as a touchpad), multi-touch gestures, natural
- * scrolling, battery reports to the host, and the USB keyboard grab. ⓘ The
- * middle three never reach a bridged pad anyway; they are included so that
- * everything the override leaves off is off for every pad, and the notice that
- * lists them is true.
+ * scrolling and battery reports to the host. ⓘ The last three never reach a
+ * bridged pad anyway; they are included so that everything the override leaves
+ * off is off for every pad, and the notice that lists them is true.
+ *
+ * ⛔ NOT THE KEYBOARD (rhoquinn8217, 2026-09-30). It used to switch upstream
+ * v1.3.0's USB keyboard grab off as well, because that grab held a keyboard's
+ * node against the bridge and every key arrived twice. The grab now leaves a
+ * bridged keyboard alone by itself (bridge_keyboard.h), so the override taking
+ * it away only cost the keyboards that are NOT bridged upstream's handling.
  *
  * ⛔⛔ THE SAVED SETTINGS ARE NEVER WRITTEN. They are saved on leaving Settings
  * and on exit, so changing them would overwrite the person's own choices. The

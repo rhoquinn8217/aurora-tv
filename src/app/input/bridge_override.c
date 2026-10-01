@@ -54,7 +54,10 @@ void bridge_override_apply(stream_input_t *input) {
          * start turns it on from the same config. */
         session_input_set_vmouse_active(&input->vmouse, true);
     }
-    session_input_set_keyboard_grab(input, !on);
+    /* ⓘ The USB keyboard grab is NOT one of them any more (rhoquinn8217,
+     * 2026-09-30). The grab itself leaves a bridged keyboard to the bridge
+     * (bridge_keyboard.h), so switching it off here only took upstream's
+     * handling away from the keyboards that are not bridged. */
 }
 
 void bridge_override_set(session_t *session, bool on) {
