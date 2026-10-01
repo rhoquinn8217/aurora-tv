@@ -2,6 +2,7 @@
 
 #include "logging.h"
 #include "stream/input/vk.h"
+#include "input/bridge_keyboard.h"
 
 #include <Limelight.h>
 
@@ -316,6 +317,12 @@ static int open_keyboards(keyboard_evdev_t *kbd) {
             continue;
         }
         if (!is_usb_keyboard(fd)) {
+            close(fd);
+            continue;
+        }
+        /* A bridged keyboard is the bridge's: see input/bridge_keyboard.h. */
+        if (bridge_keyboard_node_is_bridged(path)) {
+            commons_log_info("Input", "Keyboard evdev: %s is bridged, left to the bridge", path);
             close(fd);
             continue;
         }

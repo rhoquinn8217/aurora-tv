@@ -22,6 +22,7 @@
 #include <time.h>
 
 #include "ctm_bridge_gesture.h"
+#include "bridge_keyboard.h"
 #include "app.h"   /* app_configuration, for the bridge_enable switch */
 #include "stream/session.h"
 #include "stream/input/session_input.h"
@@ -816,6 +817,17 @@ static bool hidraw_node_for_event(const char *dev_path, char *out, size_t out_le
     }
     closedir(hd);
     return found;
+}
+
+/* Is the input node dev_path part of a device that is bridged right now?
+ * The same walk as above, from the input node to the HID node the bridge
+ * plugs by. A node with no HID device behind it is nobody's. */
+bool ctm_bridge_gesture_event_is_bridged(const char *dev_path) {
+    char node[64];
+    if (dev_path == NULL || !hidraw_node_for_event(dev_path, node, sizeof(node))) {
+        return false;
+    }
+    return ctm_bridge_node_is_plugged(node);
 }
 
 /* ⭐⭐ IS THE SDL CONTROLLER AT dev_path THE DEVICE BEHIND THE ROW node?
@@ -2017,6 +2029,8 @@ void ctm_bridge_gesture_tick(struct app_input_t *input, struct session_t *sessio
         const int reaped = ctm_bridge_reap_gone_hosts();
         if (reaped > 0) {
             gesture_log("host gone: released %d controller(s) -- the USB server stopped answering", reaped);
+            /* A keyboard among them is the TV's again. */
+            bridge_keyboard_changed();
         }
     }
 

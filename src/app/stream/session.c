@@ -3,6 +3,7 @@
 #include "input/auto_bridge.h"
 #endif
 #include "input/bridge_override.h"
+#include "input/bridge_keyboard.h"
 #include "app.h"
 #include "app_settings.h"
 #include "session_priv.h"
@@ -187,6 +188,8 @@ bool session_start_input(session_t *session) {
             // Stream came back after an auto-reconnect: the bridge was left
             // running so the controllers stayed plugged through the outage.
             // Re-plug anything a longer outage dropped (no-op when still plugged).
+            // The TV's keyboard grab lets go first, as for any bridge.
+            bridge_keyboard_before_plug();
             ctm_bridge_plug_all();
         } else {
             // Keep Moonlight's controllers open (UI nav still works); host sends are

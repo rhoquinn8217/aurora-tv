@@ -7,4 +7,5 @@ target_sources(moonlight-lib PRIVATE
         bridge_request.c
         device_groups.c
         auto_bridge.c
-        bridge_override.c)
+        bridge_override.c
+        bridge_keyboard.c)
