@@ -1,5 +1,5 @@
-/* A bridged keyboard is the bridge's, and the TV's own keyboard grab leaves it
- * alone.
+/* A bridged keyboard is the bridge's, and the TV's own keyboard grab never takes
+ * it.
  *
  * ⭐ WHY IT EXISTS. Upstream v1.3.0 takes every USB keyboard for the stream
  * (keyboard_evdev.c: an EVIOCGRAB on its input node, read by its own thread and
@@ -11,28 +11,25 @@
  *   and never retried, the TV goes on sending the keys, and every key arrives
  *   twice;
  * - the core's grab came first, and then the overlay opened: the core lets the
- *   keyboard go while the overlay is up, so the TV can read it there. If the
- *   TV's grab is started in that moment (Bridge Override going off did it,
- *   while the override still switched the grab) it takes the keyboard, the core
- *   cannot take it back, and every key arrives twice again.
+ *   keyboard go while the overlay is up. If the TV's grab takes it in that
+ *   moment, the core cannot take it back, and every key arrives twice again.
  *
  * Both were seen on the C1 on 2026-09-30 (rhoquinn8217: "13. still double
  * types", typed double), and both are in the core's log as `grab refused ...
  * errno=16` and `taken back from the TV (0 grab(s) taken again)`.
  *
- * ➡️ So: the TV's grab SKIPS a keyboard that is bridged, by asking rather than
- * by losing a race; it LETS GO of every keyboard just before anything is
+ * ➡️ So: the TV's grab NEVER TAKES a keyboard that is bridged, by asking rather
+ * than by losing a race; it LETS GO of every keyboard just before anything is
  * bridged; and it LOOKS AGAIN a moment after anything is bridged or released,
- * taking back the keyboards that are not bridged. Bridge Override does not have
- * to be on for a bridged keyboard to type once, and it no longer touches the
- * keyboard at all (bridge_override.h).
+ * taking the keyboards that are not bridged. Bridge Override does not have to be
+ * on for a bridged keyboard to type once, and it no longer touches the keyboard
+ * at all (bridge_override.h).
  *
- * ⭐ AND AURORA'S SHORTCUTS WORK ON A KEYBOARD THE TV HAS (rhoquinn8217,
- * 2026-09-30: "it doesn't work unless the keyboard is bridged. It should work
- * all the time"). Upstream's grab sends a keyboard's keys straight to the host,
- * around stream_input_handle_key(), which is where the Ctrl+Alt+Shift
- * shortcuts were found; and it went on sending them with the overlay open. So
- * that path asks here first:
+ * ⭐ AURORA'S SHORTCUTS WORK ON A KEYBOARD THE TV HAS (rhoquinn8217, 2026-09-30:
+ * "it doesn't work unless the keyboard is bridged. It should work all the
+ * time"). Upstream's grab sends a keyboard's keys straight to the host, around
+ * stream_input_handle_key(), which is where the Ctrl+Alt+Shift shortcuts were
+ * found. So that path asks here first:
  *
  * - Ctrl+Alt+Shift+O opens the overlay (ours), and so does Ctrl+Alt+Shift+S
  *   (Moonlight's stats shortcut, which is what it does in this app);
@@ -41,27 +38,36 @@
  * - Moonlight's other five (Z, X, M, C, D) do nothing in this app beyond a log
  *   line, so they are left for the host.
  *
- * While the overlay is open the grab lets its keyboards go for the TV to read
- * and sends the host nothing, the way the bridge core does for a bridged
- * keyboard.
+ * ⭐ THE READER GIVES THE OVERLAY ITS KEYS, FROM EVERY KEYBOARD (rhoquinn8217 on
+ * the C3, 2026-10-01: "escape or any key doesn't work in the overlay screen",
+ * and of a bridged keyboard: "results in no control and I have to rely on a
+ * different input"). webOS cannot be relied on to hand a keyboard's keys to the
+ * app: on the C3 it handed over a keyboard that was connected when the app
+ * started, and nothing from the same keyboard once it had been switched off
+ * and on. So, while the overlay is open:
  *
- * ⭐ AND THE GRAB FEEDS THE OVERLAY ITSELF (rhoquinn8217 on the C3, 2026-10-01:
- * "escape or any key doesn't work in the overlay screen"). Letting the
- * keyboards go only helps where webOS then hands their keys to the app. It did
- * on the C1 with a USB keyboard; on the C3 with a Bluetooth one nothing
- * arrived, in the overlay or from a keyboard the grab did not hold. So the
- * reader, which goes on reading while the overlay is open, turns the keys the
- * interface understands (the arrows, Enter, Escape, Tab, Backspace, Delete,
- * Home, End) into SDL key events of its own. Where webOS delivers the same key
- * as well, whichever copy comes second is dropped.
+ * - a keyboard the grab holds STAYS held, and the reader turns the keys the
+ *   interface understands (the arrows, Enter, Escape, Tab, Backspace, Delete,
+ *   Home, End) into SDL key events of its own. Nothing goes to the host;
+ * - a BRIDGED keyboard is read as well, without being taken, and not by
+ *   upstream's reader: the app's loop opens the keyboard's own input nodes
+ *   as the overlay opens and closes them as it closes. The bridge core lets
+ *   the keyboard go for exactly that long and sends the host nothing, so
+ *   the keys can be heard, and nothing read this way can reach the host.
  *
- * ⭐ AND A KEYBOARD THAT CONNECTS MID-STREAM IS TAKEN (rhoquinn8217, the same
+ * Where webOS delivers the same key as well (a bridged keyboard the core has let
+ * go, on a set that hands it over), whichever copy is taken second is dropped:
+ * each key taken from one source is owed one twin from the other. ⓘ Counted,
+ * not timed to a short window: build 454 used 250 ms, and a copy held up by the
+ * app's loop was taken as a second press.
+ *
+ * ⭐ A KEYBOARD THAT CONNECTS MID-STREAM IS TAKEN (rhoquinn8217, the same
  * morning: "connecting a keyboard while the stream has already started doesn't
  * register"). The grab looks again whenever an input device arrives or goes.
  *
- * ⓘ What the grab holds, each shortcut, each look-again and who gave the
- * overlay its keys are written to logs/tv-keyboard.log, where they can be read
- * on every set. */
+ * ⓘ What the grab holds and reads, each shortcut, each look-again and who gave
+ * the overlay its keys are written to logs/tv-keyboard.log, where they can be
+ * read on every set. */
 
 #ifndef BRIDGE_KEYBOARD_H
 #define BRIDGE_KEYBOARD_H
@@ -73,7 +79,8 @@ typedef struct stream_input_t stream_input_t;
 struct SDL_KeyboardEvent;
 
 /* Is this input node (/dev/input/eventN) part of a device that is bridged right
- * now? Asked by the TV's keyboard grab for each keyboard it is about to take. */
+ * now? Asked by the TV's keyboard grab for each keyboard it finds: a bridged
+ * one is read without being taken. */
 bool bridge_keyboard_node_is_bridged(const char *event_path);
 
 /* The TV's keyboard grab has taken this node. For the record only. */
@@ -89,13 +96,14 @@ void bridge_keyboard_before_plug(void);
 void bridge_keyboard_changed(void);
 
 /* Once per pass of the app's loop: watches for input devices arriving or going,
- * does the look-again when it is due, hands the TV's keyboards to the overlay
- * while it is open, and acts on a shortcut the reader thread found. */
+ * does the look-again when it is due, tells the reader whether the overlay is
+ * open, and acts on a shortcut the reader thread found. */
 void bridge_keyboard_tick(bool overlay_shown);
 
-/* A key from the TV's own keyboard grab, on its reader thread, before it is
- * sent to the host. True when it is not to be sent: it completed one of
- * Aurora's shortcuts, or the overlay is open and the key is the overlay's. */
+/* A key from the TV's own keyboard reader, on its thread, before it is sent to
+ * the host. True when it is not to be sent: it completed one of Aurora's
+ * shortcuts, the overlay is open and the key is the overlay's, or it came from
+ * a bridged keyboard. */
 bool bridge_keyboard_evdev_key(stream_input_t *input, short vk, bool down, char modifiers);
 
 /* A key event taken off SDL's queue by the interface, on the app's loop, before
@@ -107,8 +115,8 @@ enum {
 };
 int bridge_keyboard_sdl_key(const struct SDL_KeyboardEvent *event);
 
-/* The counts as one line, for the control port: key events the grab's reader
- * saw and fed, and key events that came through SDL. */
+/* The counts as one line, for the control port: key events the reader saw and
+ * fed, and key events that came through SDL. */
 void bridge_keyboard_counts(char *buf, size_t len);
 
 #endif /* BRIDGE_KEYBOARD_H */

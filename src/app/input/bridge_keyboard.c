@@ -7,9 +7,12 @@
 #if defined(TARGET_WEBOS)
 
 #include <dirent.h>
+#include <errno.h>
+#include <fcntl.h>
 #include <stdarg.h>
 #include <string.h>
 #include <time.h>
+#include <unistd.h>
 
 #include <SDL.h>
 
@@ -32,9 +35,9 @@
 /* When the look-again is due, in SDL ticks. 0: nothing is due. */
 static Uint32 s_look_again_at = 0;
 
-/* The overlay is open: the TV's keyboards are let go for it, and the reader
- * sends the host nothing. ⓘ Written by the app's loop, read by the reader
- * thread; a key that crosses the change either way is harmless. */
+/* The overlay is open: the reader gives it the keys it understands and sends
+ * the host nothing. ⓘ Written by the app's loop, read by the reader thread; a
+ * key that crosses the change either way is harmless. */
 static volatile bool s_overlay_open = false;
 
 /* A shortcut the reader thread found, waiting for the app's loop to act on it:
@@ -55,37 +58,67 @@ typedef struct {
     short vk;
     SDL_Keycode sym;
     SDL_Scancode scancode;
+    unsigned short code;    /* the kernel's number for the key: linux/input-event-codes.h */
 } nav_key_t;
 
 static const nav_key_t k_nav[] = {
-        {VK_UP,     SDLK_UP,        SDL_SCANCODE_UP},
-        {VK_DOWN,   SDLK_DOWN,      SDL_SCANCODE_DOWN},
-        {VK_LEFT,   SDLK_LEFT,      SDL_SCANCODE_LEFT},
-        {VK_RIGHT,  SDLK_RIGHT,     SDL_SCANCODE_RIGHT},
-        {VK_RETURN, SDLK_RETURN,    SDL_SCANCODE_RETURN},
-        {VK_ESCAPE, SDLK_ESCAPE,    SDL_SCANCODE_ESCAPE},
-        {VK_TAB,    SDLK_TAB,       SDL_SCANCODE_TAB},
-        {VK_BACK,   SDLK_BACKSPACE, SDL_SCANCODE_BACKSPACE},
-        {VK_DELETE, SDLK_DELETE,    SDL_SCANCODE_DELETE},
-        {VK_HOME,   SDLK_HOME,      SDL_SCANCODE_HOME},
-        {VK_END,    SDLK_END,       SDL_SCANCODE_END},
+        {VK_UP,     SDLK_UP,        SDL_SCANCODE_UP,        103},
+        {VK_DOWN,   SDLK_DOWN,      SDL_SCANCODE_DOWN,      108},
+        {VK_LEFT,   SDLK_LEFT,      SDL_SCANCODE_LEFT,      105},
+        {VK_RIGHT,  SDLK_RIGHT,     SDL_SCANCODE_RIGHT,     106},
+        {VK_RETURN, SDLK_RETURN,    SDL_SCANCODE_RETURN,    28},
+        {VK_ESCAPE, SDLK_ESCAPE,    SDL_SCANCODE_ESCAPE,    1},
+        {VK_TAB,    SDLK_TAB,       SDL_SCANCODE_TAB,       15},
+        {VK_BACK,   SDLK_BACKSPACE, SDL_SCANCODE_BACKSPACE, 14},
+        {VK_DELETE, SDLK_DELETE,    SDL_SCANCODE_DELETE,    111},
+        {VK_HOME,   SDLK_HOME,      SDL_SCANCODE_HOME,      102},
+        {VK_END,    SDLK_END,       SDL_SCANCODE_END,       107},
 };
 #define NAV_KEYS ((int) (sizeof(k_nav) / sizeof(k_nav[0])))
+#define NAV_CODE_KP_ENTER 96    /* the keypad's Enter is the same key to the interface */
 
 /* What marks a key event as one the reader fed, in SDL's window field: no
  * window has this number, and nothing in the app reads the field. */
 #define FED_WINDOW_ID 0x6b626466u
 
-/* The same key from the other source inside this long is that key again, not
- * a second press. ⓘ Upstream's own figure for telling an echo (keyboard_evdev.c). */
-#define ECHO_MS 250u
+/* How long a key taken from one source waits for the same key from the other
+ * before it is forgotten. ⓘ Long, and counted rather than timed: the app's loop
+ * can stall for a second on the very key press that asked for a bridge, and a
+ * copy that turned up after a short window was taken as a second press
+ * (build 454 on the C3: one Enter bridged a pad and released it again). */
+#define TWIN_MS 2000u
+#define TWINS_MAX 4
 
 /* Reader thread only: the keys whose press was fed, so their release is too. */
 static bool s_fed_down[NAV_KEYS];
 
-/* When each key was last taken, by source (fed, webOS) and by press or release.
- * App's loop only. */
-static Uint32 s_taken[2][2][NAV_KEYS];
+/* A bridged keyboard's own input nodes, opened by the app's loop while the
+ * overlay is up and read there without being taken, and the keys of theirs
+ * that are down. App's loop only. */
+#define BRIDGED_NODES_MAX 8
+#define BRIDGED_NODE_NUMBERS 64
+static int s_bridged_fds[BRIDGED_NODES_MAX];
+static int s_bridged_n = 0;
+static bool s_bridged_down[NAV_KEYS];
+
+/* The kernel's input event as it is laid out for a program, and its type for a
+ * key. ⓘ Written out rather than taken from linux/input.h: that header's KEY_
+ * and BTN_ names have no business meeting the rest of what this file includes. */
+struct evdev_event {
+    unsigned long sec;
+    unsigned long usec;
+    unsigned short type;
+    unsigned short code;
+    int value;
+};
+#define EVDEV_TYPE_KEY 1
+#define EVDEV_VALUE_REPEAT 2
+
+/* Keys taken from one source and not yet matched by their twin from the other:
+ * how many, and when the last was taken. By source (fed, webOS), by press or
+ * release, by key. App's loop only. */
+static int s_owed[2][2][NAV_KEYS];
+static Uint32 s_owed_at[2][2][NAV_KEYS];
 
 /* Counts for the control port and the log. The first two are the reader
  * thread's; the rest belong to the app's loop. */
@@ -214,6 +247,92 @@ static void feed_overlay(int slot, bool down, char modifiers) {
     SDL_AtomicAdd(&s_fed, 1);
 }
 
+static int nav_slot_for_code(unsigned short code) {
+    if (code == NAV_CODE_KP_ENTER) {
+        code = 28;
+    }
+    for (int i = 0; i < NAV_KEYS; i++) {
+        if (k_nav[i].code == code) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+/* ⭐ A BRIDGED KEYBOARD WORKS THE OVERLAY TOO (rhoquinn8217, 2026-10-01: "If a
+ * bridged keyboard enters the overlay, results in no control and I have to
+ * rely on a different input"). The bridge core holds such a keyboard for the
+ * stream and lets it go while the overlay is open, sending the host nothing;
+ * it left webOS to hand the keys to the app, which a C3 did not do. So while
+ * the overlay is open the app's loop opens the keyboard's own input nodes and
+ * reads them, WITHOUT taking them. ⓘ Nothing can reach the host this way:
+ * the nodes are closed again as the overlay closes, and while the core holds
+ * them a reader that has not taken them hears nothing anyway. */
+static void close_bridged_nodes(void) {
+    /* The interface must not be left holding a key the core is about to take
+     * back unseen. */
+    for (int slot = 0; slot < NAV_KEYS; slot++) {
+        if (s_bridged_down[slot]) {
+            s_bridged_down[slot] = false;
+            feed_overlay(slot, false, 0);
+        }
+    }
+    for (int i = 0; i < s_bridged_n; i++) {
+        close(s_bridged_fds[i]);
+    }
+    s_bridged_n = 0;
+}
+
+static void open_bridged_nodes(void) {
+    close_bridged_nodes();
+    if (!ctm_bridge_active()) {
+        return;
+    }
+    for (int number = 0; number < BRIDGED_NODE_NUMBERS && s_bridged_n < BRIDGED_NODES_MAX; number++) {
+        char path[32];
+        snprintf(path, sizeof(path), "/dev/input/event%d", number);
+        if (!ctm_bridge_gesture_event_is_bridged(path)) {
+            continue;
+        }
+        const int fd = open(path, O_RDONLY | O_NONBLOCK | O_CLOEXEC);
+        if (fd < 0) {
+            continue;
+        }
+        s_bridged_fds[s_bridged_n++] = fd;
+        keyboard_log("the overlay reads %s itself: it is bridged", path);
+    }
+}
+
+static void read_bridged_nodes(void) {
+    for (int i = 0; i < s_bridged_n; i++) {
+        /* ⓘ A bounded burst: a pad's node, read here if the core is not
+         * holding it, can say a great deal. */
+        for (int burst = 0; burst < 64; burst++) {
+            struct evdev_event ev;
+            const ssize_t got = read(s_bridged_fds[i], &ev, sizeof(ev));
+            if (got != (ssize_t) sizeof(ev)) {
+                if (got < 0 && errno == ENODEV) {
+                    /* The device went: its place is taken by the last one. */
+                    close(s_bridged_fds[i]);
+                    s_bridged_fds[i] = s_bridged_fds[--s_bridged_n];
+                    i--;
+                }
+                break;
+            }
+            if (ev.type != EVDEV_TYPE_KEY || ev.value == EVDEV_VALUE_REPEAT) {
+                continue;
+            }
+            const int slot = nav_slot_for_code(ev.code);
+            const bool down = ev.value != 0;
+            if (slot < 0 || down == s_bridged_down[slot]) {
+                continue;
+            }
+            s_bridged_down[slot] = down;
+            feed_overlay(slot, down, 0);
+        }
+    }
+}
+
 bool bridge_keyboard_evdev_key(stream_input_t *input, short vk, bool down, char modifiers) {
     SDL_AtomicAdd(&s_evdev_keys, 1);
     const int slot = nav_slot_for_vk(vk);
@@ -275,19 +394,37 @@ int bridge_keyboard_sdl_key(const struct SDL_KeyboardEvent *event) {
     }
     const int state = event->type == SDL_KEYUP ? 1 : 0;
     const int source = ours ? 0 : 1;
-    const Uint32 now = SDL_GetTicks() | 1u;
-    const Uint32 other = s_taken[1 - source][state][slot];
-    if (other != 0 && now - other < ECHO_MS) {
-        s_echoes++;
-        return BRIDGE_KEYBOARD_KEY_DROP;
+    const int other = 1 - source;
+    const Uint32 now = SDL_GetTicks();
+    /* Is this the twin of a key already taken from the other source? */
+    if (s_owed[other][state][slot] > 0) {
+        if (now - s_owed_at[other][state][slot] < TWIN_MS) {
+            s_owed[other][state][slot]--;
+            s_echoes++;
+            return BRIDGE_KEYBOARD_KEY_DROP;
+        }
+        s_owed[other][state][slot] = 0;   /* too old to be this key again */
     }
     if (ours && !s_overlay_open) {
         /* Fed for an overlay that has closed since. A release still has to
          * reach the interface, or the key stays down in it. */
         return state == 1 ? BRIDGE_KEYBOARD_KEY_RELEASE : BRIDGE_KEYBOARD_KEY_DROP;
     }
-    s_taken[source][state][slot] = now;
-    if (!ours && s_overlay_open) {
+    if (!s_overlay_open) {
+        /* An ordinary key for the stream: nothing is fed outside the overlay,
+         * so nothing is owed for it. */
+        return BRIDGE_KEYBOARD_KEY_PASS;
+    }
+    /* Taken, and its twin from the other source is owed, if that source
+     * delivers this keyboard at all. */
+    if (s_owed[source][state][slot] > 0 && now - s_owed_at[source][state][slot] >= TWIN_MS) {
+        s_owed[source][state][slot] = 0;
+    }
+    if (s_owed[source][state][slot] < TWINS_MAX) {
+        s_owed[source][state][slot]++;
+    }
+    s_owed_at[source][state][slot] = now;
+    if (!ours) {
         s_sdl_nav++;
     }
     return BRIDGE_KEYBOARD_KEY_PASS;
@@ -400,12 +537,14 @@ static void watch_input_devices(void) {
 void bridge_keyboard_tick(bool overlay_shown) {
     stream_input_t *input = live_input();
     if (overlay_shown != s_overlay_open) {
+        /* ⓘ Nothing is let go: the keyboards the grab holds stay held and its
+         * reader feeds the overlay from them. A bridged keyboard is read from
+         * here for as long as the overlay is up. */
         s_overlay_open = overlay_shown;
-        /* ⓘ Let go and taken again through the reader's own handles, with the
-         * reader left running: stopping it would hold the overlay up for as
-         * long as its thread takes to notice. */
-        if (input != NULL) {
-            session_input_hold_keyboard_grab(input, overlay_shown);
+        if (overlay_shown) {
+            open_bridged_nodes();
+        } else {
+            close_bridged_nodes();
         }
         const int fed = SDL_AtomicGet(&s_fed);
         if (overlay_shown) {
@@ -413,9 +552,9 @@ void bridge_keyboard_tick(bool overlay_shown) {
             s_open_nav = s_sdl_nav;
             s_open_echoes = s_echoes;
         } else if (fed != s_open_fed || s_sdl_nav != s_open_nav || s_echoes != s_open_echoes) {
-            /* The record of who gave the overlay its keys: on some sets webOS
-             * hands a keyboard's keys to the app and on some it does not. */
-            keyboard_log("overlay closed: the grab fed it %d key event(s); %d came from webOS"
+            /* The record of who gave the overlay its keys: webOS hands some
+             * keyboards' keys to the app and not others. */
+            keyboard_log("overlay closed: the reader fed it %d key event(s); %d came from webOS"
                          " (a keyboard or the remote), and %d more were the same key twice",
                          fed - s_open_fed, s_sdl_nav - s_open_nav, s_echoes - s_open_echoes);
         }
@@ -428,6 +567,9 @@ void bridge_keyboard_tick(bool overlay_shown) {
             act_on_shortcut(shortcut);
         }
     }
+    if (s_overlay_open) {
+        read_bridged_nodes();
+    }
     if (input == NULL) {
         /* No stream: nothing is held, so nothing is watched or owed. */
         s_nodes_known = false;
@@ -439,21 +581,21 @@ void bridge_keyboard_tick(bool overlay_shown) {
         return;
     }
     s_look_again_at = 0;
-    /* Let go of everything, then take again: the scan skips what is bridged
-     * (bridge_keyboard_node_is_bridged) and finds what has been released or
+    /* Let go of everything, then look again: the scan skips what is bridged
+     * (bridge_keyboard_node_is_bridged) and takes what has been released or
      * has just connected. ⓘ Whatever Bridge Override says: it leaves the
      * keyboard alone. */
     session_input_set_keyboard_grab(input, false);
     session_input_set_keyboard_grab(input, true);
-    /* Taken with the overlay open: they are the overlay's until it closes. */
-    if (s_overlay_open) {
-        session_input_hold_keyboard_grab(input, true);
-    }
     const bool holding = input->keyboard_evdev != NULL;
     commons_log_info("Input", "Keyboard grab looked again: %s",
                      holding ? "holding the keyboards that are not bridged" : "no keyboard to hold");
     keyboard_log("grab looked again: %s",
                  holding ? "holding the keyboards that are not bridged" : "no keyboard to hold");
+    /* What is bridged may just have changed, from the overlay's own panel. */
+    if (s_overlay_open) {
+        open_bridged_nodes();
+    }
 }
 
 #else /* !TARGET_WEBOS */

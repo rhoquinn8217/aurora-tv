@@ -130,15 +130,6 @@ void session_input_set_keyboard_grab(stream_input_t *input, bool on) {
 #endif
 }
 
-void session_input_hold_keyboard_grab(stream_input_t *input, bool held) {
-#if TARGET_WEBOS
-    keyboard_evdev_set_grabbed(input->keyboard_evdev, !held);
-#else
-    (void) input;
-    (void) held;
-#endif
-}
-
 void session_input_deinit(stream_input_t *input) {
     stream_input_touchpad_mouse_deinit(input);
 #if TARGET_WEBOS
