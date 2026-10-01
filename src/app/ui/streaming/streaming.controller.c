@@ -837,9 +837,13 @@ static void vmouse_ends_override(streaming_controller_t *controller) {
 
 /* ⭐ IT TOGGLES IN PLACE (rhoquinn8217, 2026-09-30): the overlay stays open
  * and the label says the new state, with no notice. The control port's
- * switch still posts one, since nothing else would show it there. */
+ * switch still posts one, since nothing else would show it there.
+ * ⛔ Not calling hide_overlay() is not enough: every overlay button bubbles
+ * its click to the view, whose own CLICKED handler hides the overlay
+ * (on_view_created). Build 449 left it out and the overlay still closed. */
 static void toggle_bridge_override(lv_event_t *event) {
     streaming_controller_t *controller = lv_event_get_user_data(event);
+    lv_event_stop_bubbling(event);
     if (app_configuration == NULL) {
         return;
     }
