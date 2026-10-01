@@ -457,9 +457,9 @@ void streaming_mouse_mode_warn(void) {
         return;
     }
     commons_log_info("Streaming", "mouse-mode warning: showing for %d ms", MOUSE_NOTICE_MS);
-    /* Names the overlay button as it is labelled -- "Virtual Mouse: On" begins
-     * with it -- so the instruction points at something findable. The settings
-     * pane already phrases it the same way. */
+    /* Names the overlay button EXACTLY as it is labelled -- "Virtual Mouse",
+     * streaming.view.c -- so the instruction points at something findable.
+     * The settings pane already phrases it the same way. */
     show_timed_notice(controller,
                       locstr("Virtual mouse is on and will affect bridged controllers. "
                              "Toggle Virtual Mouse off in the streaming overlay."));
@@ -835,26 +835,23 @@ static void vmouse_ends_override(streaming_controller_t *controller) {
                              "The Input settings apply again."));
 }
 
+/* ⭐ IT TOGGLES IN PLACE (rhoquinn8217, 2026-09-30): the overlay stays open
+ * and the label says the new state, with no notice. The control port's
+ * switch still posts one, since nothing else would show it there. */
 static void toggle_bridge_override(lv_event_t *event) {
     streaming_controller_t *controller = lv_event_get_user_data(event);
-    hide_overlay(event);
     if (app_configuration == NULL) {
         return;
     }
     bridge_override_set(controller->global->session, !app_configuration->bridge_override);
-    streaming_bridge_override_changed();
+    refresh_input_buttons(controller);
 }
 
-/* The two buttons whose labels carry a state. Set each time the overlay opens,
- * since either can change while it is closed: the virtual mouse from the
- * keyboard, Bridge Override from the control port. */
+/* The one button whose label carries a state. Set each time the overlay
+ * opens, since the control port can switch it while it is closed.
+ * ⓘ Virtual Mouse keeps GuiDev1994's plain label (rhoquinn8217, 2026-09-30:
+ * "I want to keep gui's ui clean"); "Virtual Mouse: On/Off" was ours. */
 static void refresh_input_buttons(streaming_controller_t *controller) {
-    session_t *session = controller->global != NULL ? controller->global->session : NULL;
-    if (controller->vmouse_label != NULL) {
-        lv_label_set_text(controller->vmouse_label, session_vmouse_active(session)
-                                                    ? locstr("Virtual Mouse: On")
-                                                    : locstr("Virtual Mouse: Off"));
-    }
     if (controller->override_label != NULL) {
         lv_label_set_text(controller->override_label, bridge_override_active()
                                                       ? locstr("Bridge Override: On")

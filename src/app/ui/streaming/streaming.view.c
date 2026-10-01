@@ -267,7 +267,6 @@ lv_obj_t *streaming_scene_create(lv_fragment_t *self, lv_obj_t *parent) {
     controller->actions = actions;
     controller->kbd_btn = kbd_btn;
     controller->vmouse_btn = vmouse_btn;
-    controller->vmouse_label = vmouse_label;
     controller->quit_btn = exit_btn;
     controller->suspend_btn = suspend_btn;
     controller->stats = stats;

@@ -20,9 +20,8 @@ typedef struct {
     lv_obj_t *kbd_btn, *vmouse_btn;
     lv_obj_t *suspend_btn, *quit_btn;
     lv_obj_t *ctm_btn;
-    /* The labels that say a state, set each time the overlay opens:
-     * "Virtual Mouse: On/Off" and "Bridge Override: On/Off". */
-    lv_obj_t *vmouse_label;
+    /* The label that says a state, set each time the overlay opens:
+     * "Bridge Override: On/Off". */
     lv_obj_t *override_btn, *override_label;
     lv_obj_t *stats;
     struct {
