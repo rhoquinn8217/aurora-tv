@@ -47,8 +47,7 @@ static volatile bool s_overlay_open = false;
  * slot is enough, since the loop comes round every millisecond. */
 enum {
     SHORTCUT_NONE = 0,
-    SHORTCUT_OVERLAY,   /* Ctrl+Alt+Shift+O, ours */
-    SHORTCUT_STATS,     /* Ctrl+Alt+Shift+S, Moonlight's; here it opens the overlay */
+    SHORTCUT_OVERLAY,   /* Ctrl+Alt+Shift+S, Moonlight's stats shortcut: here it opens the overlay */
     SHORTCUT_QUIT,      /* Ctrl+Alt+Shift+Q, Moonlight's: ends the stream */
 };
 static SDL_atomic_t s_shortcut;
@@ -437,18 +436,16 @@ bool bridge_keyboard_evdev_key(stream_input_t *input, short vk, bool down, char 
     }
     int shortcut;
     switch (vk) {
-        case VK_O:
-            shortcut = SHORTCUT_OVERLAY;
-            break;
         case VK_S:
-            shortcut = SHORTCUT_STATS;
+            shortcut = SHORTCUT_OVERLAY;
             break;
         case VK_Q:
             shortcut = SHORTCUT_QUIT;
             break;
         default:
             /* ⓘ Moonlight's Z, X, M, C and D only write a log line in this app
-             * (performPendingSpecialKeyCombo), so they stay the host's. */
+             * (performPendingSpecialKeyCombo), so they stay the host's. O is
+             * a letter like any other again. */
             return false;
     }
     /* The host saw Ctrl, Alt and Shift go down and will not see them come up
@@ -520,13 +517,10 @@ void bridge_keyboard_counts(char *buf, size_t len) {
 static void act_on_shortcut(int shortcut) {
     switch (shortcut) {
         case SHORTCUT_OVERLAY:
-        case SHORTCUT_STATS: {
-            const char key = shortcut == SHORTCUT_OVERLAY ? 'O' : 'S';
-            commons_log_info("Input", "Keyboard evdev: Ctrl+Alt+Shift+%c, opening the overlay", key);
-            keyboard_log("shortcut Ctrl+Alt+Shift+%c on a keyboard the TV has: opening the overlay", key);
+            commons_log_info("Input", "Keyboard evdev: Ctrl+Alt+Shift+S, opening the overlay");
+            keyboard_log("shortcut Ctrl+Alt+Shift+S on a keyboard the TV has: opening the overlay");
             bus_pushevent(USER_OPEN_OVERLAY, NULL, NULL);
             break;
-        }
         case SHORTCUT_QUIT:
             commons_log_info("Input", "Keyboard evdev: Ctrl+Alt+Shift+Q, ending the stream");
             keyboard_log("shortcut Ctrl+Alt+Shift+Q on a keyboard the TV has: ending the stream");

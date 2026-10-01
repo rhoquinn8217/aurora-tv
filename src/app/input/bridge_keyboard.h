@@ -31,8 +31,12 @@
  * stream_input_handle_key(), which is where the Ctrl+Alt+Shift shortcuts were
  * found. So that path asks here first:
  *
- * - Ctrl+Alt+Shift+O opens the overlay (ours), and so does Ctrl+Alt+Shift+S
- *   (Moonlight's stats shortcut, which is what it does in this app);
+ * - Ctrl+Alt+Shift+S opens the overlay: Moonlight's stats shortcut, which is
+ *   what it has always done in this app. ⓘ O did the same from 2026-09-15,
+ *   added in the belief that there was no shortcut, and was taken out again
+ *   on 2026-10-01 (rhoquinn8217: "I added O because I thought we didn't have
+ *   one. We can remove it"). A bridged keyboard's S is found by the bridge
+ *   core in its reports;
  * - Ctrl+Alt+Shift+Q ends the stream (Moonlight's quit), as the overlay's
  *   Disconnect does;
  * - Moonlight's other five (Z, X, M, C, D) do nothing in this app beyond a log

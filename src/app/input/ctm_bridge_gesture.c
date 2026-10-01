@@ -1990,7 +1990,7 @@ bool ctm_bridge_gesture_request_bridge(const char *node) {
     return false;
 }
 
-/* ⭐ A bridged keyboard pressed Ctrl+Alt+Shift+O (rhoquinn8217, 2026-09-13).
+/* ⭐ A bridged keyboard pressed Ctrl+Alt+Shift+S (rhoquinn8217, 2026-09-13).
  * When: the keyboard's input thread, so it only posts: the overlay opens on the
  * main thread, exactly as it does for a keyboard the TV reads. */
 static void gesture_overlay_requested(void) {
