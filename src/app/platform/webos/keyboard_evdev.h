@@ -20,3 +20,8 @@ void keyboard_evdev_stop(keyboard_evdev_t *kbd);
 
 /** True if a HID keyboard event was seen recently (use to drop SDL echoes). */
 bool keyboard_evdev_busy(const keyboard_evdev_t *kbd);
+
+/** Let the grabbed nodes go, or take them again, with the reader left running.
+ * For the streaming overlay, which reads the keyboard itself while it is open
+ * (input/bridge_keyboard.h). */
+void keyboard_evdev_set_grabbed(keyboard_evdev_t *kbd, bool grabbed);

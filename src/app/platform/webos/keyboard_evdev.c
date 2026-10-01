@@ -385,6 +385,17 @@ void keyboard_evdev_stop(keyboard_evdev_t *kbd) {
     free(kbd);
 }
 
+void keyboard_evdev_set_grabbed(keyboard_evdev_t *kbd, bool grabbed) {
+    if (kbd == NULL) {
+        return;
+    }
+    for (int i = 0; i < kbd->nfds; i++) {
+        if (kbd->fds[i] >= 0) {
+            (void) ioctl(kbd->fds[i], EVIOCGRAB, grabbed ? 1 : 0);
+        }
+    }
+}
+
 bool keyboard_evdev_busy(const keyboard_evdev_t *kbd) {
     if (kbd == NULL || kbd->last_event_ticks == 0) {
         return false;

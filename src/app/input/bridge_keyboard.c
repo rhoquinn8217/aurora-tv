@@ -14,6 +14,9 @@
 #include "stream/session.h"
 #include "stream/session_priv.h"
 #include "stream/input/session_input.h"
+#include "stream/input/vk.h"
+#include "util/bus.h"
+#include "util/user_event.h"
 
 /* How long after the last bridge or release the TV's grab looks again. Long
  * enough for every part of one device to be plugged or let go (they follow each
@@ -22,6 +25,11 @@
 
 /* When the look-again is due, in SDL ticks. 0: nothing is due. */
 static Uint32 s_look_again_at = 0;
+
+/* The overlay is open: the TV's keyboards are let go for it, and the reader
+ * sends the host nothing. ⓘ Written by the app's loop, read by the reader
+ * thread; a key that crosses the change either way is harmless. */
+static volatile bool s_overlay_open = false;
 
 static stream_input_t *live_input(void) {
     if (global == NULL || global->session == NULL) {
@@ -58,12 +66,37 @@ void bridge_keyboard_before_plug(void) {
     bridge_keyboard_changed();
 }
 
-void bridge_keyboard_tick(void) {
+bool bridge_keyboard_evdev_key(stream_input_t *input, short vk, bool down, char modifiers) {
+    if (s_overlay_open) {
+        return true;   /* the overlay has the keyboard */
+    }
+    const char chord = MODIFIER_CTRL | MODIFIER_ALT | MODIFIER_SHIFT;
+    if (down && vk == VK_O && (modifiers & chord) == chord) {
+        /* The host saw Ctrl, Alt and Shift go down, and will not see them
+         * come up: the overlay has the keyboard from here. */
+        stream_input_flush_pressed_keys(input);
+        bus_pushevent(USER_OPEN_OVERLAY, NULL, NULL);
+        commons_log_info("Input", "Keyboard evdev: overlay shortcut pressed");
+        return true;
+    }
+    return false;
+}
+
+void bridge_keyboard_tick(bool overlay_shown) {
+    stream_input_t *input = live_input();
+    if (overlay_shown != s_overlay_open) {
+        s_overlay_open = overlay_shown;
+        /* ⓘ Let go and taken again through the reader's own handles, with the
+         * reader left running: stopping it would hold the overlay up for as
+         * long as its thread takes to notice. */
+        if (input != NULL) {
+            session_input_hold_keyboard_grab(input, overlay_shown);
+        }
+    }
     if (s_look_again_at == 0 || !SDL_TICKS_PASSED(SDL_GetTicks(), s_look_again_at)) {
         return;
     }
     s_look_again_at = 0;
-    stream_input_t *input = live_input();
     if (input == NULL) {
         return;
     }
@@ -73,6 +106,10 @@ void bridge_keyboard_tick(void) {
     session_input_set_keyboard_grab(input, false);
     if (!bridge_override_active()) {
         session_input_set_keyboard_grab(input, true);
+        /* Taken with the overlay open: they are the overlay's until it closes. */
+        if (s_overlay_open) {
+            session_input_hold_keyboard_grab(input, true);
+        }
     }
     commons_log_info("Input", "Keyboard grab looked again after a bridge change (override %s)",
                      bridge_override_active() ? "on, grab left off" : "off");
@@ -91,7 +128,16 @@ void bridge_keyboard_before_plug(void) {
 void bridge_keyboard_changed(void) {
 }
 
-void bridge_keyboard_tick(void) {
+void bridge_keyboard_tick(bool overlay_shown) {
+    (void) overlay_shown;
+}
+
+bool bridge_keyboard_evdev_key(stream_input_t *input, short vk, bool down, char modifiers) {
+    (void) input;
+    (void) vk;
+    (void) down;
+    (void) modifiers;
+    return false;
 }
 
 #endif /* TARGET_WEBOS */

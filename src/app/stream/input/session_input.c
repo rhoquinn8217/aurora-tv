@@ -28,11 +28,17 @@
 
 #if TARGET_WEBOS
 #include "platform/webos/keyboard_evdev.h"
+#include "input/bridge_keyboard.h"
 #include "logging.h"
 
 static void session_keyboard_evdev_cb(short vk, bool down, char modifiers, void *userdata) {
     stream_input_t *input = userdata;
     if (input == NULL || !input->started || input->view_only) {
+        return;
+    }
+    /* ⭐ The overlay's shortcut, and the overlay's turn with the keyboard: this
+     * path goes around stream_input_handle_key(), where both used to live. */
+    if (bridge_keyboard_evdev_key(input, vk, down, modifiers)) {
         return;
     }
     stream_input_send_key_event(input, vk, down, modifiers);
@@ -123,6 +129,15 @@ void session_input_set_keyboard_grab(stream_input_t *input, bool on) {
 #else
     (void) input;
     (void) on;
+#endif
+}
+
+void session_input_hold_keyboard_grab(stream_input_t *input, bool held) {
+#if TARGET_WEBOS
+    keyboard_evdev_set_grabbed(input->keyboard_evdev, !held);
+#else
+    (void) input;
+    (void) held;
 #endif
 }
 

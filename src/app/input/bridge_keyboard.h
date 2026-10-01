@@ -24,12 +24,23 @@
  * by losing a race; it LETS GO of every keyboard just before anything is
  * bridged; and it LOOKS AGAIN a moment after anything is bridged or released,
  * taking back the keyboards that are not bridged. Bridge Override no longer has
- * to be on for a bridged keyboard to type once. */
+ * to be on for a bridged keyboard to type once.
+ *
+ * ⭐ AND THE OVERLAY'S SHORTCUT WORKS ON A KEYBOARD THE TV HAS (rhoquinn8217,
+ * 2026-09-30: "it doesn't work unless the keyboard is bridged. It should work
+ * all the time"). Upstream's grab sends a keyboard's keys straight to the host,
+ * around stream_input_handle_key(), which is where Ctrl+Alt+Shift+O was
+ * found; and it went on sending them with the overlay open. So that path asks
+ * here first: the shortcut opens the overlay, and while the overlay is open
+ * the grab lets its keyboards go for the TV to read and sends the host
+ * nothing, the way the bridge core does for a bridged keyboard. */
 
 #ifndef BRIDGE_KEYBOARD_H
 #define BRIDGE_KEYBOARD_H
 
 #include <stdbool.h>
+
+typedef struct stream_input_t stream_input_t;
 
 /* Is this input node (/dev/input/eventN) part of a device that is bridged right
  * now? Asked by the TV's keyboard grab for each keyboard it is about to take. */
@@ -44,7 +55,13 @@ void bridge_keyboard_before_plug(void);
  * shortly, once the last change has settled. */
 void bridge_keyboard_changed(void);
 
-/* Once per pass of the app's loop: does the look-again when it is due. */
-void bridge_keyboard_tick(void);
+/* Once per pass of the app's loop: does the look-again when it is due, and
+ * hands the TV's keyboards to the overlay while it is open. */
+void bridge_keyboard_tick(bool overlay_shown);
+
+/* A key from the TV's own keyboard grab, on its reader thread, before it is
+ * sent to the host. True when it is not to be sent: it completed the overlay's
+ * shortcut, or the overlay is open and the keyboard is the TV's. */
+bool bridge_keyboard_evdev_key(stream_input_t *input, short vk, bool down, char modifiers);
 
 #endif /* BRIDGE_KEYBOARD_H */

@@ -360,7 +360,7 @@ void app_process_events(app_t *app) {
      * unaffected either way. Nothing else could produce that pattern. */
     ctm_bridge_gesture_tick(&app->input, app->session, streaming_overlay_shown());
     /* The TV's keyboard grab looking again after a bridge or a release. */
-    bridge_keyboard_tick();
+    bridge_keyboard_tick(streaming_overlay_shown());
 
     /* ⓘ Upstream v1.2.9's touchpad tap-hold, for its touchpad mouse mode. It
      * reads the same SDL touchpad state our gesture polls above; neither
