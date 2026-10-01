@@ -155,6 +155,9 @@ bool ctm_bridge_plug_index(int index);
  * session table, never enumerates. Call it from a tick; it returns how many it
  * released so the caller can log only when it acts. */
 int ctm_bridge_reap_gone_hosts(void);
+/* ⭐ Release any session whose DEVICE has gone: a bridged keyboard asleep, a
+ * cable pulled. As cheap as the one above, and called beside it. */
+int ctm_bridge_reap_gone_devices(void);
 
 void ctm_bridge_unplug_index(int index);
 

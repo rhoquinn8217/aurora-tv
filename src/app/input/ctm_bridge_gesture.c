@@ -2033,6 +2033,18 @@ void ctm_bridge_gesture_tick(struct app_input_t *input, struct session_t *sessio
             bridge_keyboard_changed();
         }
     }
+    /* ⭐ AND ANYTHING WHOSE DEVICE HAS GONE: a bridged keyboard asleep, a cable
+     * pulled. The core ends such a session itself; stopping it here closes
+     * the device's node, which must not stay open a moment longer than it
+     * has to (ctm_bridge_reap_gone_devices). */
+    {
+        const int dropped = ctm_bridge_reap_gone_devices();
+        if (dropped > 0) {
+            gesture_log("device gone: released %d session(s) -- a bridged device dropped off", dropped);
+            /* A keyboard that comes back is the TV's to take. */
+            bridge_keyboard_changed();
+        }
+    }
 
     /* ⭐⭐ HOLD A BRIDGED CONTROLLER'S INPUT WHILE THE OVERLAY IS UP.
      *
