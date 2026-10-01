@@ -334,6 +334,12 @@ static int open_keyboards(keyboard_evdev_t *kbd) {
         }
         kbd->fds[n++] = fd;
         commons_log_info("Input", "Keyboard evdev: grabbed %s", path);
+        {
+            /* For the record a person can read: input/bridge_keyboard.h. */
+            char held[96] = "";
+            (void) ioctl(fd, EVIOCGNAME(sizeof(held) - 1), held);
+            bridge_keyboard_took(path, held);
+        }
     }
     closedir(dir);
     return n;

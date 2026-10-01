@@ -43,37 +43,72 @@
  *
  * While the overlay is open the grab lets its keyboards go for the TV to read
  * and sends the host nothing, the way the bridge core does for a bridged
- * keyboard. ⓘ Each shortcut and each look-again is written to
- * logs/tv-keyboard.log, where it can be read on every set. */
+ * keyboard.
+ *
+ * ⭐ AND THE GRAB FEEDS THE OVERLAY ITSELF (rhoquinn8217 on the C3, 2026-10-01:
+ * "escape or any key doesn't work in the overlay screen"). Letting the
+ * keyboards go only helps where webOS then hands their keys to the app. It did
+ * on the C1 with a USB keyboard; on the C3 with a Bluetooth one nothing
+ * arrived, in the overlay or from a keyboard the grab did not hold. So the
+ * reader, which goes on reading while the overlay is open, turns the keys the
+ * interface understands (the arrows, Enter, Escape, Tab, Backspace, Delete,
+ * Home, End) into SDL key events of its own. Where webOS delivers the same key
+ * as well, whichever copy comes second is dropped.
+ *
+ * ⭐ AND A KEYBOARD THAT CONNECTS MID-STREAM IS TAKEN (rhoquinn8217, the same
+ * morning: "connecting a keyboard while the stream has already started doesn't
+ * register"). The grab looks again whenever an input device arrives or goes.
+ *
+ * ⓘ What the grab holds, each shortcut, each look-again and who gave the
+ * overlay its keys are written to logs/tv-keyboard.log, where they can be read
+ * on every set. */
 
 #ifndef BRIDGE_KEYBOARD_H
 #define BRIDGE_KEYBOARD_H
 
 #include <stdbool.h>
+#include <stddef.h>
 
 typedef struct stream_input_t stream_input_t;
+struct SDL_KeyboardEvent;
 
 /* Is this input node (/dev/input/eventN) part of a device that is bridged right
  * now? Asked by the TV's keyboard grab for each keyboard it is about to take. */
 bool bridge_keyboard_node_is_bridged(const char *event_path);
+
+/* The TV's keyboard grab has taken this node. For the record only. */
+void bridge_keyboard_took(const char *event_path, const char *name);
 
 /* Something is about to be bridged: the TV's keyboard grab lets go of every
  * keyboard, so the bridge core's own grab is not refused. It looks again by
  * itself afterwards (bridge_keyboard_changed). */
 void bridge_keyboard_before_plug(void);
 
-/* Something was bridged or released: the TV's keyboard grab looks again
- * shortly, once the last change has settled. */
+/* Something was bridged or released, or an input device arrived or went: the
+ * TV's keyboard grab looks again shortly, once the last change has settled. */
 void bridge_keyboard_changed(void);
 
-/* Once per pass of the app's loop: does the look-again when it is due, hands
- * the TV's keyboards to the overlay while it is open, and acts on a shortcut
- * the reader thread found. */
+/* Once per pass of the app's loop: watches for input devices arriving or going,
+ * does the look-again when it is due, hands the TV's keyboards to the overlay
+ * while it is open, and acts on a shortcut the reader thread found. */
 void bridge_keyboard_tick(bool overlay_shown);
 
 /* A key from the TV's own keyboard grab, on its reader thread, before it is
  * sent to the host. True when it is not to be sent: it completed one of
- * Aurora's shortcuts, or the overlay is open and the keyboard is the TV's. */
+ * Aurora's shortcuts, or the overlay is open and the key is the overlay's. */
 bool bridge_keyboard_evdev_key(stream_input_t *input, short vk, bool down, char modifiers);
+
+/* A key event taken off SDL's queue by the interface, on the app's loop, before
+ * anything else looks at it. What to do with it: */
+enum {
+    BRIDGE_KEYBOARD_KEY_PASS = 0,   /* nothing of ours: carry on as usual */
+    BRIDGE_KEYBOARD_KEY_DROP,       /* the same key twice, or fed for an overlay that has closed */
+    BRIDGE_KEYBOARD_KEY_RELEASE,    /* drop it, and the interface's key is no longer down */
+};
+int bridge_keyboard_sdl_key(const struct SDL_KeyboardEvent *event);
+
+/* The counts as one line, for the control port: key events the grab's reader
+ * saw and fed, and key events that came through SDL. */
+void bridge_keyboard_counts(char *buf, size_t len);
 
 #endif /* BRIDGE_KEYBOARD_H */

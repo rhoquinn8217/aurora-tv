@@ -15,6 +15,7 @@
 #include "util/log_overlay.h"
 #include "lv_drv_sdl_key.h"
 #include "stream/session_events.h"
+#include "input/bridge_keyboard.h"
 
 #if TARGET_WEBOS
 
@@ -169,6 +170,18 @@ static void sdl_input_read(lv_indev_drv_t *drv, lv_indev_data_t *data) {
         }
     } else if (SDL_PeepEvents(&e, 1, SDL_GETEVENT, SDL_KEYDOWN, SDL_KEYUP) > 0) {
 #if TARGET_WEBOS
+        /* The TV's keyboard grab feeds the overlay itself, and webOS may hand
+         * over the same key as well: input/bridge_keyboard.h. */
+        const int fed = bridge_keyboard_sdl_key(&e.key);
+        if (fed != BRIDGE_KEYBOARD_KEY_PASS) {
+            if (fed == BRIDGE_KEYBOARD_KEY_RELEASE) {
+                state->state = LV_INDEV_STATE_RELEASED;
+            }
+            data->continue_reading = true;
+            data->key = state->key;
+            data->state = state->state;
+            return;
+        }
         webos_key_input_mode(input, &e.key);
         /* punktfunk-style: Yellow cycles on-screen log (Off → Live → Frozen). */
         if ((int) e.key.keysym.scancode == SDL_SCANCODE_WEBOS_YELLOW) {
