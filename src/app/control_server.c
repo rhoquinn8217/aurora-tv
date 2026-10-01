@@ -27,6 +27,7 @@
 #include "stream/session.h"
 #include "stream/video/session_video.h"
 #include "ui/streaming/streaming.controller.h"
+#include "input/bridge_override.h"
 
 #if defined(TARGET_WEBOS)
 #include "ctm_bridge_glue.h"
@@ -121,7 +122,8 @@ static void cmd_help(control_job_t *job)
                "bridge-group <n>        bridge every part of a device, exactly as its panel row does\n"
                "release-group <n>       release every part of a device, exactly as its panel row does\n"
                "bridge-all, release-all every part, as the panel's buttons do\n"
-               "set <name> <on|off>     a switch, without the remote: boost, light, rumble, tone\n"
+               "set <name> <on|off>     a switch, without the remote: boost, light, rumble, tone, override\n"
+               "input                   the stream's live input state: Bridge Override and what it switches\n"
                "set settle <ms>         how long to let the link settle before a DS4 handback tone\n"
                "signal refuse <n>       play a device's refusal signal; no plug has to fail\n"
                "<device> is its number, its node, its vid:pid, or part of its name; <n> is from groups\n");
@@ -143,7 +145,7 @@ static void cmd_set(control_job_t *job, const char *args)
     char name[32] = "";
     char value[16] = "";
     if (args == NULL || sscanf(args, "%31s %15s", name, value) != 2) {
-        reply(job, "ERR usage: set <boost|light|rumble|tone> <on|off>, or set settle <ms>\n");
+        reply(job, "ERR usage: set <boost|light|rumble|tone|override> <on|off>, or set settle <ms>\n");
         return;
     }
     /* ⛔⛔ BEFORE THE on/off CHECK, AND THAT IS THE WHOLE POINT.
@@ -183,6 +185,18 @@ static void cmd_set(control_job_t *job, const char *args)
               on ? "on" : "off");
         return;
     }
+    /* ⭐ Bridge Override through the SAME two calls its overlay button makes, so
+     * a run from here tests the button's path, notice included. */
+    if (strcasecmp(name, "override") == 0) {
+        bridge_override_set(s_app->session, on);
+        streaming_bridge_override_changed();
+        char state[256];
+        bridge_override_describe(s_app->session != NULL ? session_get_input(s_app->session) : NULL,
+                                 state, sizeof state);
+        reply(job, "OK %s%s\n", state,
+              on && !bridge_override_active() ? " -- Enable Device Bridging is off, so it does not act" : "");
+        return;
+    }
 #if defined(TARGET_WEBOS)
     if (strcasecmp(name, "light") == 0 || strcasecmp(name, "rumble") == 0 ||
         strcasecmp(name, "tone") == 0) {
@@ -199,7 +213,7 @@ static void cmd_set(control_job_t *job, const char *args)
         return;
     }
 #endif
-    reply(job, "ERR try boost, light, rumble, tone or settle\n");
+    reply(job, "ERR try boost, light, rumble, tone, override or settle\n");
 }
 
 static void cmd_status(control_job_t *job)
@@ -213,7 +227,20 @@ static void cmd_status(control_job_t *job)
     reply(job, " bridge=%s listener=%s agent=\"%s\"",
           ctm_bridge_active() ? "running" : "stopped", listener, agent);
 #endif
-    reply(job, "\n");
+    reply(job, " override=%s\n", bridge_override_active() ? "on" : "off");
+}
+
+/* The stream's LIVE input state, which is what Bridge Override changes. The
+ * saved settings are not it: the override never writes them. */
+static void cmd_input(control_job_t *job)
+{
+    if (s_app->session == NULL) {
+        reply(job, "ERR no stream is running\n");
+        return;
+    }
+    char state[256];
+    bridge_override_describe(session_get_input(s_app->session), state, sizeof state);
+    reply(job, "OK %s\n", state);
 }
 
 static const char *host_state_name(SERVER_STATE_ENUM code)
@@ -844,6 +871,8 @@ static void run_command(control_job_t *job)
         cmd_stats(job);
     } else if (strcasecmp(verb, "set") == 0) {
         cmd_set(job, args);
+    } else if (strcasecmp(verb, "input") == 0) {
+        cmd_input(job);
 #if defined(TARGET_WEBOS)
     } else if (strcasecmp(verb, "devices") == 0) {
         cmd_devices(job);

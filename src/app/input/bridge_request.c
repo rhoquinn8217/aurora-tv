@@ -3,6 +3,7 @@
 #if defined(TARGET_WEBOS)
 
 #include "ctm_bridge_gesture.h"
+#include "bridge_keyboard.h"
 
 bridge_request_result_t bridge_request_device(const ctm_bridge_dev_t *dev)
 {
@@ -31,6 +32,10 @@ bridge_request_result_t bridge_request_device(const ctm_bridge_dev_t *dev)
     if (ctm_bridge_gesture_request_bridge(dev->node)) {
         return BRIDGE_REQUEST_ASKED;
     }
+    /* ⭐ The TV's own keyboard grab lets go first, or the core's grab of a
+     * keyboard is refused and every key reaches the host twice. It takes the
+     * keyboards that are not bridged back by itself (bridge_keyboard.h). */
+    bridge_keyboard_before_plug();
     return ctm_bridge_plug_index(dev->index) ? BRIDGE_REQUEST_PLUGGED : BRIDGE_REQUEST_FAILED;
 }
 
@@ -43,6 +48,8 @@ void bridge_release_device(const ctm_bridge_dev_t *dev)
      * path, and it tears every session down at once while holding the device
      * lock. */
     ctm_bridge_unplug_index(dev->index);
+    /* A released keyboard is the TV's again: its grab looks again shortly. */
+    bridge_keyboard_changed();
 }
 
 const char *bridge_request_result_name(bridge_request_result_t result)

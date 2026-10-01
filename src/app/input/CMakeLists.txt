@@ -6,4 +6,6 @@ target_sources(moonlight-lib PRIVATE
         ctm_bridge_gesture.c
         bridge_request.c
         device_groups.c
-        auto_bridge.c)
+        auto_bridge.c
+        bridge_override.c
+        bridge_keyboard.c)

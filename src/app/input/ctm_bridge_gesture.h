@@ -56,6 +56,10 @@ void ctm_bridge_gesture_reset(SDL_JoystickID id);
  * is not an SDL controller and has no gesture path to borrow. */
 bool ctm_bridge_gesture_request_bridge(const char *node);
 
+/* Is the input node dev_path (/dev/input/eventN) part of a device that is
+ * bridged right now? For the TV's keyboard grab: see bridge_keyboard.h. */
+bool ctm_bridge_gesture_event_is_bridged(const char *dev_path);
+
 /* Repaint the player colour on every watched controller.
  *
  * ⭐ For the two moments a controller returns to the TV's own world: a stream

@@ -127,6 +127,21 @@ lv_obj_t *streaming_scene_create(lv_fragment_t *self, lv_obj_t *parent) {
         lv_obj_add_flag(ctm_btn, LV_OBJ_FLAG_HIDDEN);
     }
 
+    /* ⭐ Bridge Override, beside the USB Bridge button and hidden with it, for
+     * the same focus-order reason. Its label is set each time the overlay
+     * opens, so it always says the state. See input/bridge_override.h. */
+    lv_obj_t *override_btn = lv_btn_create(actions);
+    lv_obj_add_flag(override_btn, LV_OBJ_FLAG_EVENT_BUBBLE);
+    lv_obj_add_style(override_btn, &controller->overlay_button_style, 0);
+    lv_obj_add_style(override_btn, &controller->overlay_button_style_focused, LV_STATE_FOCUS_KEY);
+    lv_obj_set_style_bg_color(override_btn, lv_palette_main(LV_PALETTE_DEEP_PURPLE), 0);
+    lv_obj_t *override_label = lv_label_create(override_btn);
+    lv_obj_add_style(override_label, &controller->overlay_button_label_style, 0);
+    lv_label_set_text(override_label, locstr("Bridge Override: Off"));
+    if (app_configuration && !app_configuration->bridge_enable) {
+        lv_obj_add_flag(override_btn, LV_OBJ_FLAG_HIDDEN);
+    }
+
     lv_obj_t *actions_spacing = lv_obj_create(actions);
     lv_obj_remove_style_all(actions_spacing);
     lv_obj_set_flex_grow(actions_spacing, 1);
@@ -247,6 +262,8 @@ lv_obj_t *streaming_scene_create(lv_fragment_t *self, lv_obj_t *parent) {
 
     controller->video = video;
     controller->ctm_btn = ctm_btn;
+    controller->override_btn = override_btn;
+    controller->override_label = override_label;
     controller->actions = actions;
     controller->kbd_btn = kbd_btn;
     controller->vmouse_btn = vmouse_btn;

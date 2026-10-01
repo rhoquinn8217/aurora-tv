@@ -77,6 +77,15 @@ void session_input_init(stream_input_t *input, session_t *session, app_input_t *
 
 void session_input_deinit(stream_input_t *input);
 
+/** Take or release the USB keyboard grab mid-stream (webOS only). Taking it
+ * twice, or releasing it when not held, does nothing. */
+void session_input_set_keyboard_grab(stream_input_t *input, bool on);
+
+/* The streaming overlay is open (held) or closed: the keyboard grab lets its
+ * nodes go for the TV to read, or takes them again, with its reader left
+ * running. See input/bridge_keyboard.h. */
+void session_input_hold_keyboard_grab(stream_input_t *input, bool held);
+
 void session_input_interrupt(stream_input_t *input);
 
 void session_input_started(stream_input_t *input);

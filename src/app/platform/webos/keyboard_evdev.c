@@ -2,6 +2,7 @@
 
 #include "logging.h"
 #include "stream/input/vk.h"
+#include "input/bridge_keyboard.h"
 
 #include <Limelight.h>
 
@@ -319,6 +320,12 @@ static int open_keyboards(keyboard_evdev_t *kbd) {
             close(fd);
             continue;
         }
+        /* A bridged keyboard is the bridge's: see input/bridge_keyboard.h. */
+        if (bridge_keyboard_node_is_bridged(path)) {
+            commons_log_info("Input", "Keyboard evdev: %s is bridged, left to the bridge", path);
+            close(fd);
+            continue;
+        }
         if (ioctl(fd, EVIOCGRAB, 1) < 0) {
             commons_log_warn("Input", "Keyboard evdev: EVIOCGRAB failed on %s: %s",
                              path, strerror(errno));
@@ -376,6 +383,17 @@ void keyboard_evdev_stop(keyboard_evdev_t *kbd) {
         }
     }
     free(kbd);
+}
+
+void keyboard_evdev_set_grabbed(keyboard_evdev_t *kbd, bool grabbed) {
+    if (kbd == NULL) {
+        return;
+    }
+    for (int i = 0; i < kbd->nfds; i++) {
+        if (kbd->fds[i] >= 0) {
+            (void) ioctl(kbd->fds[i], EVIOCGRAB, grabbed ? 1 : 0);
+        }
+    }
 }
 
 bool keyboard_evdev_busy(const keyboard_evdev_t *kbd) {

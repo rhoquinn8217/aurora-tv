@@ -193,6 +193,7 @@ void settings_initialize(app_settings_t *config, char *conf_dir) {
     config->bridge_mic_bt = false;   /* never armed on this branch */
     set_string(&config->bridge_auto_macs, "");
     config->bridge_auto_all = false;
+    config->bridge_override = false;
     config->rotate = 0;
     config->absmouse = true;
     config->virtual_mouse = false;
@@ -312,6 +313,7 @@ bool settings_save(app_settings_t *config) {
         }
     }
     ini_write_bool(fp, "bridge_auto_all", config->bridge_auto_all);
+    ini_write_bool(fp, "bridge_override", config->bridge_override);
 
     ini_write_section(fp, "input");
     ini_write_bool(fp, "absmouse", config->absmouse);
@@ -572,6 +574,8 @@ static int settings_parse(app_settings_t *config, const char *section, const cha
         append_csv(&config->bridge_auto_macs, value);
     } else if (INI_NAME_MATCH("bridge_auto_all")) {
         config->bridge_auto_all = INI_IS_TRUE(value);
+    } else if (INI_NAME_MATCH("bridge_override")) {
+        config->bridge_override = INI_IS_TRUE(value);
     } else if (INI_NAME_MATCH("absmouse")) {
         config->absmouse = INI_IS_TRUE(value);
     } else if (INI_NAME_MATCH("virtual_mouse")) {

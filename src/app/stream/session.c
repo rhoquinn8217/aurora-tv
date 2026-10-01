@@ -2,6 +2,8 @@
 #include "input/ctm_bridge_gesture.h"
 #include "input/auto_bridge.h"
 #endif
+#include "input/bridge_override.h"
+#include "input/bridge_keyboard.h"
 #include "app.h"
 #include "app_settings.h"
 #include "session_priv.h"
@@ -163,7 +165,8 @@ bool session_start_input(session_t *session) {
     }
 #endif
     session_input_started(&session->input);
-    if (session->config.vmouse) {
+    /* ⓘ Bridge Override keeps the virtual mouse off; see input/bridge_override.h. */
+    if (session->config.vmouse && !bridge_override_active()) {
         session_input_set_vmouse_active(&session->input.vmouse, true);
     }
     {
@@ -185,6 +188,8 @@ bool session_start_input(session_t *session) {
             // Stream came back after an auto-reconnect: the bridge was left
             // running so the controllers stayed plugged through the outage.
             // Re-plug anything a longer outage dropped (no-op when still plugged).
+            // The TV's keyboard grab lets go first, as for any bridge.
+            bridge_keyboard_before_plug();
             ctm_bridge_plug_all();
         } else {
             // Keep Moonlight's controllers open (UI nav still works); host sends are
@@ -237,6 +242,14 @@ bool session_has_input(session_t *session) {
 }
 
 void session_toggle_vmouse(session_t *session) {
+    /* ⭐ Every way of switching the virtual mouse comes through here: the
+     * overlay button and the USER_TOGGLE_VMOUSE event both do. The overlay's
+     * own callers switch Bridge Override off first, since the press wins
+     * there; this holds the mouse off for anything that does not. */
+    if (bridge_override_active()) {
+        session_input_set_vmouse_active(&session->input.vmouse, false);
+        return;
+    }
     bool value = !session_input_is_vmouse_active(&session->input.vmouse);
     session_input_set_vmouse_active(&session->input.vmouse, value);
 }
