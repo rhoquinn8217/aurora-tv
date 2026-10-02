@@ -22,9 +22,6 @@ typedef struct {
     lv_obj_t *ctm_btn;
     /* Asks the USB server on the host for its settings window. */
     lv_obj_t *ds5usbip_btn;
-    /* The label that says a state, set each time the overlay opens:
-     * "Bridge Override: On/Off". ⓘ The button is hidden for now. */
-    lv_obj_t *override_btn, *override_label;
     lv_obj_t *stats;
     struct {
         lv_obj_t *header;

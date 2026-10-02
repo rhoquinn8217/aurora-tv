@@ -133,8 +133,8 @@ typedef struct app_settings_t {
      * it is the user's explicit choice, never the unasked auto-plug. */
     bool bridge_auto_all;
     /* ⭐ Bridge Override: the TV's own mouse and touchpad handling off for the
-     * stream. Off by default, and acts only with bridge_enable set. ⓘ Its
-     * button in the streaming overlay is hidden for now (bridge_override.h).
+     * stream. Off by default, and acts only with bridge_enable set. ⓘ It has
+     * no button: bridge_override.h says how a person switches it.
      * ⛔ It never writes the Input settings it overrides; see
      * input/bridge_override.h. */
     bool bridge_override;

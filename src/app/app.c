@@ -1,4 +1,5 @@
 #include "ui/streaming/streaming.controller.h"   /* streaming_overlay_shown */
+#include "ui/streaming/bridge_prompt.h"
 #include <stdbool.h>
 #include <SDL.h>
 #include <assert.h>
@@ -358,9 +359,14 @@ void app_process_events(app_t *app) {
      * touchpad did nothing. ⭐ Those are exactly the fields the blanker zeroes,
      * and the gyro is exactly what it deliberately leaves alone. Output is
      * unaffected either way. Nothing else could produce that pattern. */
-    ctm_bridge_gesture_tick(&app->input, app->session, streaming_overlay_shown());
+    /* ⓘ The question a bridge raises takes the input the same way the
+     * overlay does (ui/streaming/bridge_prompt.h), so both count here: a
+     * bridged controller is held while either is up, and a keyboard works
+     * either. */
+    const bool interface_has_input = streaming_overlay_shown() || bridge_prompt_shown();
+    ctm_bridge_gesture_tick(&app->input, app->session, interface_has_input);
     /* The TV's keyboard grab looking again after a bridge or a release. */
-    bridge_keyboard_tick(streaming_overlay_shown());
+    bridge_keyboard_tick(interface_has_input);
 
     /* ⓘ Upstream v1.2.9's touchpad tap-hold, for its touchpad mouse mode. It
      * reads the same SDL touchpad state our gesture polls above; neither
