@@ -7,16 +7,18 @@
  * handling off for the stream (input/bridge_override.h), and this is where a
  * person is offered it: at the moment they bridge a controller.
  *
- * It asks, with a count on its one button, and goes away by itself:
+ * It warns, offers the fix on its one button with a count, and goes away by
+ * itself:
  *
- *     Warning: Binding conflicts will occur with Virtual Mouse on. It is
- *     recommended to turn off Virtual Mouse for bridged controllers.
+ *     Warning: Turn off Virtual Mouse to prevent binding conflicts with
+ *     bridged controllers.
+ *                                         [ Turn off Virtual Mouse (10) ]
  *
- *     Turn off Virtual Mouse?                              [ OK (10) ]
- *
- * (rhoquinn8217's wording, 2026-10-01.) OK switches it off. Circle, Back or
- * Escape, or the count running out, leaves everything as it was. With the
- * touchpad's mouse mode on instead, or as well, the text names that.
+ * (rhoquinn8217's wording, 2026-10-01, their second: the first was two
+ * sentences and a question, with a button that said OK.) The button switches
+ * it off. Circle, Back or Escape, or the count running out, leaves everything
+ * as it was. With the touchpad's mouse mode on instead, or as well, the words
+ * name that.
  *
  * ⓘ IT SITS BOTTOM LEFT, CLEAR OF THE EDGES, AND IT IS ALL THERE IS. Nothing is
  * shown once it is answered, and nothing when Virtual Mouse brings the TV's
@@ -24,11 +26,12 @@
  * settings applied again, for one build; rhoquinn8217 took both out the same
  * day, "for now", to have the pop-up alone.
  *
- * ⓘ IT IS SMALL AND SEE-THROUGH, because it shares the picture with a game:
- * narrower than the app's other dialogues, in the small type, with the picture
- * showing through its background. The picture behind it is dimmed while it is
- * up, as behind any dialogue here, and that dim is what says the pop-up has
- * the input. ⛔ So nothing may climb back over the dim while it is up: the USB
+ * ⓘ IT IS WIDE, SHORT AND SEE-THROUGH, because it shares the picture with a
+ * game: as wide as its one sentence on one line, so a line of text and a
+ * button are all its height, in the small type, with the picture showing
+ * through its background. The picture behind it is dimmed while it is up, as
+ * behind any dialogue here, and that dim is what says the pop-up has the
+ * input. ⛔ So nothing may climb back over the dim while it is up: the USB
  * Bridge panel did, and now waits behind a dialogue (ctm_panel.c).
  *
  * ⛔ IT MUST NOT NEED ANYONE. This was a two-button dialog once, and became a
@@ -70,5 +73,18 @@ void bridge_prompt_dismiss(void);
 int bridge_prompt_seconds_left(void);
 
 bool bridge_prompt_accept(void);
+
+/* For the control port: where it sits and how big it is, in pixels, as it is
+ * laid out now, with the picture's own size beside it and how many lines the
+ * warning takes. ⓘ Its look cannot be checked from a terminal; its shape can,
+ * and "the warning is on one line, 60 pixels in from the corner" is the part
+ * of the look that a number settles. False when it is not up. */
+typedef struct {
+    int x, y, width, height;
+    int screen_width, screen_height;
+    int text_lines;
+} bridge_prompt_measure_t;
+
+bool bridge_prompt_measure(bridge_prompt_measure_t *out);
 
 #endif /* BRIDGE_PROMPT_H */

@@ -257,7 +257,16 @@ static void cmd_prompt(control_job_t *job, const char *args)
     }
     const int left = bridge_prompt_seconds_left();
     if (left > 0) {
-        reply(job, "OK prompt=up seconds=%d\n", left);
+        /* ⓘ Its shape as well as its count: `at` is its top left corner, and
+         * `lines` how many the warning takes, so "one line, in from the corner"
+         * is read here rather than off a television. */
+        bridge_prompt_measure_t m;
+        if (bridge_prompt_measure(&m)) {
+            reply(job, "OK prompt=up seconds=%d size=%dx%d at=%d,%d lines=%d screen=%dx%d\n", left,
+                  m.width, m.height, m.x, m.y, m.text_lines, m.screen_width, m.screen_height);
+        } else {
+            reply(job, "OK prompt=up seconds=%d\n", left);
+        }
     } else {
         reply(job, "OK prompt=down\n");
     }
