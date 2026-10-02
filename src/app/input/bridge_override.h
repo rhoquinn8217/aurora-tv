@@ -1,5 +1,11 @@
-/* Bridge Override: one switch, beside the USB Bridge button in the streaming
- * overlay, that turns the TV's own mouse and touchpad handling off.
+/* Bridge Override: one switch that turns the TV's own mouse and touchpad
+ * handling off.
+ *
+ * ⛔ ITS BUTTON IS HIDDEN FOR NOW. It stood beside the USB Bridge button in
+ * the streaming overlay until 2026-10-01, when the DS5-USBIP button took that
+ * place (rhoquinn8217: "I want to move that somewhere else"). The switch is
+ * untouched: it keeps its saved state, Virtual Mouse still ends it, and the
+ * control port still sets it.
  *
  * ⭐ WHY IT EXISTS. A bridged controller reaches the host as itself, over
  * USB/IP, and the TV goes on READING it. The virtual mouse turns its sticks and

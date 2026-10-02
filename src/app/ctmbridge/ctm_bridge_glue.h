@@ -159,6 +159,14 @@ int ctm_bridge_reap_gone_hosts(void);
  * cable pulled. As cheap as the one above, and called beside it. */
 int ctm_bridge_reap_gone_devices(void);
 
+/* ⭐ Ask the USB server on the host to open its settings window, for a device
+ * that is bridged: the overlay's DS5-USBIP button. The request goes out on
+ * that device's own connection, so the window opens on its tab. With several
+ * bridged it is the first controller the panel lists, or the first device
+ * when none is a controller. True when it was sent, with the device's name in
+ * `name`; false when nothing is bridged and connected. */
+bool ctm_bridge_open_config(char *name, size_t name_len);
+
 void ctm_bridge_unplug_index(int index);
 
 /* Plug every recognised controller (skips already-plugged); returns count newly

@@ -796,6 +796,65 @@ int ctm_bridge_reap_gone_devices(void)
     return reaped;
 }
 
+/* ⭐ THE DS5-USBIP BUTTON'S REQUEST (rhoquinn8217, 2026-09-28: "a bridge opens
+ * the config window. Can we use the same mechanism?"). The USB server opens its
+ * settings window by itself when a device is bridged, whatever the device is.
+ * This asks it to do the same again for one that already is, with one message
+ * on that device's own connection, so nothing has to be bridged a second time
+ * and the game never sees a controller leave.
+ *
+ * ⓘ WHICH DEVICE. A button on the overlay's bar has no row in hand, so it is
+ * the first bridged CONTROLLER in the order the panel lists them, or the first
+ * bridged device of any kind when no controller is. The window has a tab for
+ * each device, so the others are one press away.
+ *
+ * ⓘ The rows come from the last scan and nothing is enumerated here: whether
+ * a device is bridged is the session table's answer, and a connected device
+ * keeps its key (ctm_bridge_node_is_plugged says the same). */
+bool ctm_bridge_open_config(char *name, size_t name_len)
+{
+    if (name != NULL && name_len > 0) {
+        name[0] = '\0';
+    }
+    /* ⛔ Not before the bridge is running: nothing can be bridged outside a
+     * stream, and looking would bring the core up early. */
+    if (!ctm_bridge_active()) {
+        return false;
+    }
+    bool sent = false;
+    pthread_mutex_lock(&s_dev_mutex);
+    for (int pass = 0; pass < 2 && !sent; ++pass) {
+        for (int i = 0; i < g_devices.count && !sent; ++i) {
+            const logical_device_t *item = &g_devices.items[i];
+            /* The TV's own remote is not a session, and has no settings there. */
+            if (item_is_tv_remote(item) || item_is_controller(item) != (pass == 0)) {
+                continue;
+            }
+            /* Under the core's table lock, and past a stopping entry: its
+             * controller may be freed by the path tearing it down. */
+            pthread_mutex_lock(&g_sessions_mutex);
+            for (int s = 0; s < g_session_count; ++s) {
+                if (g_sessions[s].stopping || g_sessions[s].controller == NULL ||
+                    strcmp(g_sessions[s].key, item->key) != 0) {
+                    continue;
+                }
+                sent = ctm_controller_open_config(g_sessions[s].controller) == 0;
+                break;
+            }
+            pthread_mutex_unlock(&g_sessions_mutex);
+            if (sent) {
+                if (name != NULL && name_len > 0) {
+                    snprintf(name, name_len, "%s", item->name);
+                }
+                log_append("ctm glue: asked the USB server to open its settings window on '%s'",
+                           item->name);
+            }
+        }
+    }
+    pthread_mutex_unlock(&s_dev_mutex);
+    return sent;
+}
+
 void ctm_bridge_unplug_index(int index)
 {
     pthread_mutex_lock(&s_dev_mutex);

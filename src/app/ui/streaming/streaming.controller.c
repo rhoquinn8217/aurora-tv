@@ -34,6 +34,8 @@ static void toggle_vmouse(lv_event_t *event);
 
 static void toggle_bridge_override(lv_event_t *event);
 
+static void open_listener_config(lv_event_t *event);
+
 static void refresh_input_buttons(streaming_controller_t *controller);
 
 static void vmouse_ends_override(streaming_controller_t *controller);
@@ -643,6 +645,7 @@ static void on_view_created(lv_fragment_t *self, lv_obj_t *view) {
     lv_obj_add_event_cb(controller->kbd_btn, open_keyboard, LV_EVENT_CLICKED, self);
     lv_obj_add_event_cb(controller->vmouse_btn, toggle_vmouse, LV_EVENT_CLICKED, self);
     lv_obj_add_event_cb(controller->ctm_btn, ctm_panel_open, LV_EVENT_CLICKED, self);
+    lv_obj_add_event_cb(controller->ds5usbip_btn, open_listener_config, LV_EVENT_CLICKED, self);
     lv_obj_add_event_cb(controller->override_btn, toggle_bridge_override, LV_EVENT_CLICKED, self);
     lv_obj_add_event_cb(controller->base.obj, hide_overlay, LV_EVENT_CLICKED, self);
     lv_obj_add_event_cb(controller->overlay, overlay_key_cb, LV_EVENT_KEY, controller);
@@ -851,8 +854,33 @@ static void toggle_bridge_override(lv_event_t *event) {
     refresh_input_buttons(controller);
 }
 
+/* ⭐ THE DS5-USBIP BUTTON (rhoquinn8217, 2026-09-28: "I want the DS5-USBIP
+ * overlay button to work for any pad"). The USB server on the host opens its
+ * settings window by itself when a device is bridged. This asks it to do the
+ * same again for a device that already is (ctm_bridge_open_config), and the
+ * overlay closes behind the press like any other button's, so the window is
+ * what the person sees next.
+ * ⛔ With nothing bridged there is nobody to ask. The overlay stays open and
+ * says so, rather than closing on a press that did nothing. */
+static void open_listener_config(lv_event_t *event) {
+    streaming_controller_t *controller = lv_event_get_user_data(event);
+    char name[128];
+    if (ctm_bridge_open_config(name, sizeof(name))) {
+        commons_log_info("Streaming", "DS5-USBIP: asked the host for its settings window on %s", name);
+        /* ⓘ The click bubbles on to the view, which hides the overlay. */
+        return;
+    }
+    lv_event_stop_bubbling(event);
+    commons_log_info("Streaming", "DS5-USBIP: nothing is bridged, so nothing was asked");
+    show_timed_notice(controller,
+                      locstr("DS5-USBIP opens for a bridged device, and nothing is bridged.\n"
+                             "Bridge one from USB Bridge first."));
+}
+
 /* The one button whose label carries a state. Set each time the overlay
  * opens, since the control port can switch it while it is closed.
+ * ⓘ That button is hidden for now (streaming.view.c); the label is still
+ * kept right, for the day it is shown again.
  * ⓘ Virtual Mouse keeps GuiDev1994's plain label (rhoquinn8217, 2026-09-30:
  * "I want to keep gui's ui clean"); "Virtual Mouse: On/Off" was ours. */
 static void refresh_input_buttons(streaming_controller_t *controller) {

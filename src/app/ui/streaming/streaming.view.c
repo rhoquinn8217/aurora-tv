@@ -127,9 +127,29 @@ lv_obj_t *streaming_scene_create(lv_fragment_t *self, lv_obj_t *parent) {
         lv_obj_add_flag(ctm_btn, LV_OBJ_FLAG_HIDDEN);
     }
 
-    /* ⭐ Bridge Override, beside the USB Bridge button and hidden with it, for
-     * the same focus-order reason. Its label is set each time the overlay
-     * opens, so it always says the state. See input/bridge_override.h. */
+    /* ⭐ DS5-USBIP, beside the USB Bridge button and hidden with it, for the
+     * same focus-order reason. It asks the USB server on the host to open its
+     * settings window for a device that is bridged (open_listener_config in
+     * the controller). ⓘ It stands where Bridge Override stood until
+     * 2026-10-01, at rhoquinn8217's word. */
+    lv_obj_t *ds5usbip_btn = lv_btn_create(actions);
+    lv_obj_add_flag(ds5usbip_btn, LV_OBJ_FLAG_EVENT_BUBBLE);
+    lv_obj_add_style(ds5usbip_btn, &controller->overlay_button_style, 0);
+    lv_obj_add_style(ds5usbip_btn, &controller->overlay_button_style_focused, LV_STATE_FOCUS_KEY);
+    lv_obj_set_style_bg_color(ds5usbip_btn, lv_palette_main(LV_PALETTE_DEEP_PURPLE), 0);
+    lv_obj_t *ds5usbip_label = lv_label_create(ds5usbip_btn);
+    lv_obj_add_style(ds5usbip_label, &controller->overlay_button_label_style, 0);
+    lv_label_set_text(ds5usbip_label, locstr("DS5-USBIP"));
+    if (app_configuration && !app_configuration->bridge_enable) {
+        lv_obj_add_flag(ds5usbip_btn, LV_OBJ_FLAG_HIDDEN);
+    }
+
+    /* ⛔ BRIDGE OVERRIDE'S BUTTON IS HIDDEN FOR NOW (rhoquinn8217, 2026-10-01:
+     * "I want to move that somewhere else"). Only the button: the switch
+     * keeps its saved state, Virtual Mouse still ends it and the control
+     * port still sets it. ⓘ Still created, hidden like any other button
+     * here, so the code that sets its label has something to set and showing
+     * it again is the one line below. See input/bridge_override.h. */
     lv_obj_t *override_btn = lv_btn_create(actions);
     lv_obj_add_flag(override_btn, LV_OBJ_FLAG_EVENT_BUBBLE);
     lv_obj_add_style(override_btn, &controller->overlay_button_style, 0);
@@ -138,9 +158,7 @@ lv_obj_t *streaming_scene_create(lv_fragment_t *self, lv_obj_t *parent) {
     lv_obj_t *override_label = lv_label_create(override_btn);
     lv_obj_add_style(override_label, &controller->overlay_button_label_style, 0);
     lv_label_set_text(override_label, locstr("Bridge Override: Off"));
-    if (app_configuration && !app_configuration->bridge_enable) {
-        lv_obj_add_flag(override_btn, LV_OBJ_FLAG_HIDDEN);
-    }
+    lv_obj_add_flag(override_btn, LV_OBJ_FLAG_HIDDEN);
 
     lv_obj_t *actions_spacing = lv_obj_create(actions);
     lv_obj_remove_style_all(actions_spacing);
@@ -262,6 +280,7 @@ lv_obj_t *streaming_scene_create(lv_fragment_t *self, lv_obj_t *parent) {
 
     controller->video = video;
     controller->ctm_btn = ctm_btn;
+    controller->ds5usbip_btn = ds5usbip_btn;
     controller->override_btn = override_btn;
     controller->override_label = override_label;
     controller->actions = actions;
