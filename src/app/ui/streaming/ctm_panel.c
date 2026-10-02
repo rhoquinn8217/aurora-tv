@@ -144,11 +144,34 @@ static int         s_ctm_flash_left = 0;
  *
  * ⓘ It also removes the case for a refresh button: the only thing that went
  * stale while the panel sat open now does not. */
+/* Is a dialogue in front of the panel on the top layer? A message box made
+ * without a parent puts its backdrop there, with the box inside it. */
+static bool ctm_dialogue_in_front(void) {
+    const lv_obj_t *layer = lv_obj_get_parent(s_ctm_panel);
+    if (layer == NULL) {
+        return false;
+    }
+    const uint32_t count = lv_obj_get_child_cnt(layer);
+    for (uint32_t i = lv_obj_get_index(s_ctm_panel) + 1; i < count; i++) {
+        if (lv_obj_check_type(lv_obj_get_child(layer, (int32_t) i), &lv_msgbox_backdrop_class)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 static void ctm_online_tick(lv_timer_t *t) {
     LV_UNUSED(t);
     /* ⓘ Kept in front: stats pinned while the panel is open are added to the
-     * top layer after it, and would cover it again. */
-    if (s_ctm_panel) {
+     * top layer after it, and would cover it again.
+     * ⛔ BUT NEVER IN FRONT OF A DIALOGUE. A dialogue dims everything behind
+     * it, and the dim is what says it has the input. The panel climbed back
+     * over that dim within a second of a bridge raising its question: bright
+     * again beside a pop-up that still had the input, and with its own
+     * full-screen layer over the pop-up's button, where a pointer's click
+     * went to the panel instead (rhoquinn8217, 2026-10-01). It waits behind
+     * until the dialogue has gone. */
+    if (s_ctm_panel && !ctm_dialogue_in_front()) {
         const lv_obj_t *layer = lv_obj_get_parent(s_ctm_panel);
         if (layer && lv_obj_get_index(s_ctm_panel) + 1 != lv_obj_get_child_cnt(layer)) {
             lv_obj_move_foreground(s_ctm_panel);
@@ -592,7 +615,20 @@ static void ctm_close_click_cb(lv_event_t *e) {
  * nothing acts on Select at all. On a lone corner that is wrong twice over --
  * it has no neighbour to move to, and Select is the only thing anyone will
  * press on it. ➡️ Up and Down still walk the group; Left and Right do nothing,
- * because there is nothing beside it; Select and Back both close. */
+ * because there is nothing beside it; Select and Back both close.
+ *
+ * ⛔⛔ SELECT CLOSES IT WHEN THE BUTTON COMES UP, NOT WHEN IT GOES DOWN, and it
+ * is NOT handled here. It used to be: this closed the panel on the key event,
+ * which arrives as Select goes DOWN. Closing hands the input back to the
+ * overlay, whose USB Bridge button still has the focus, since that is what
+ * opened the panel. The same press then came UP, the click that a release
+ * makes went to whatever had the focus by then, and that was USB Bridge: the
+ * panel closed and opened again (rhoquinn8217, 2026-10-01).
+ * ➡️ Select reaches the corner as a click, when the button comes up
+ * (ctm_close_click_cb), with nothing of the press left over to land anywhere
+ * else. Back is safe here because a release of Back makes no click.
+ * ⚠️ The rule it follows: nothing that moves the input to another group may
+ * act on Select going down. */
 static void ctm_close_key_cb(lv_event_t *e) {
     switch (lv_event_get_key(e)) {
         case LV_KEY_UP:
@@ -603,7 +639,6 @@ static void ctm_close_key_cb(lv_event_t *e) {
             lv_group_focus_next(s_ctm_nav_group);
             lv_obj_scroll_to_view(lv_group_get_focused(s_ctm_nav_group), LV_ANIM_ON);
             break;
-        case LV_KEY_ENTER:
         case LV_KEY_ESC:
             ctm_request_close();
             break;

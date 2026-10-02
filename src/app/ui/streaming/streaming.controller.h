@@ -22,9 +22,6 @@ typedef struct {
     lv_obj_t *ctm_btn;
     /* Asks the USB server on the host for its settings window. */
     lv_obj_t *ds5usbip_btn;
-    /* The label that says a state, set each time the overlay opens:
-     * "Bridge Override: On/Off". ⓘ The button is hidden for now. */
-    lv_obj_t *override_btn, *override_label;
     lv_obj_t *stats;
     struct {
         lv_obj_t *header;
@@ -45,10 +42,10 @@ typedef struct {
     lv_obj_t *stats_quality_indicator;  /* Colored dot: green/yellow/red by latency */
     lv_obj_t *stats_pin;
     lv_obj_t *notice, *notice_label;
-    /* T-170: the top-left warning that the TV's mouse mode is on, and the
-     * timer that takes it away. Separate from `notice` above, which is the
-     * top-right connection notice and is held open by state rather than time
-     * -- sharing one would make the two fight. */
+    /* The top-left notice that goes away by itself, and the timer that takes
+     * it away. Separate from `notice` above, which is the top-right connection
+     * notice and is held open by state rather than time -- sharing one would
+     * make the two fight. */
     lv_obj_t *mouse_notice, *mouse_notice_label;
     lv_timer_t *mouse_notice_timer;
     lv_obj_t *soft_kbd;
@@ -87,12 +84,8 @@ void streaming_toggle_stats_pin(void);
 
 void streaming_notice_show(const char *message);
 
-/* T-170: warn, for a few seconds, that the TV's own mouse mode is on while a
- * controller has just been bridged. Does nothing when mouse mode is off, or
- * outside a stream. Safe to call repeatedly -- it resets its own timer. */
+/* A controller has just been bridged: if the TV's own mouse controls are on,
+ * ask whether to turn them off (bridge_prompt.h). Does nothing when they are
+ * off, or outside a stream. Safe to call repeatedly -- a second call restarts
+ * the question's count. */
 void streaming_mouse_mode_warn(void);
-
-/* Bridge Override was switched, from the overlay or the control port: say what
- * that did, in the same top-left notice, and bring the button labels up to
- * date. Does nothing outside a stream. */
-void streaming_bridge_override_changed(void);

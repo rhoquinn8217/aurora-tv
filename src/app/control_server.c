@@ -23,10 +23,12 @@
 #include "app_version.h"
 #include "logging.h"
 #include "util/bus.h"
+#include "util/user_event.h"
 #include "backend/pcmanager.h"
 #include "stream/session.h"
 #include "stream/video/session_video.h"
 #include "ui/streaming/streaming.controller.h"
+#include "ui/streaming/bridge_prompt.h"
 #include "input/bridge_override.h"
 #include "input/bridge_keyboard.h"
 
@@ -124,7 +126,8 @@ static void cmd_help(control_job_t *job)
                "release-group <n>       release every part of a device, exactly as its panel row does\n"
                "bridge-all, release-all every part, as the panel's buttons do\n"
                "open-config             ask the host for its settings window, as the overlay's DS5-USBIP button does\n"
-               "set <name> <on|off>     a switch, without the remote: boost, light, rumble, tone, override\n"
+               "set <name> <on|off>     a switch, without the remote: boost, light, rumble, tone, override, vmouse\n"
+               "prompt [ok|dismiss]     the question a bridge raises: is it up, or answer it without a hand\n"
                "input                   the stream's live input state: Bridge Override and what it switches\n"
                "keys                    key events counted since the app started: the TV's keyboard grab, and webOS\n"
                "set settle <ms>         how long to let the link settle before a DS4 handback tone\n"
@@ -148,7 +151,7 @@ static void cmd_set(control_job_t *job, const char *args)
     char name[32] = "";
     char value[16] = "";
     if (args == NULL || sscanf(args, "%31s %15s", name, value) != 2) {
-        reply(job, "ERR usage: set <boost|light|rumble|tone|override> <on|off>, or set settle <ms>\n");
+        reply(job, "ERR usage: set <boost|light|rumble|tone|override|vmouse> <on|off>, or set settle <ms>\n");
         return;
     }
     /* ⛔⛔ BEFORE THE on/off CHECK, AND THAT IS THE WHOLE POINT.
@@ -188,11 +191,26 @@ static void cmd_set(control_job_t *job, const char *args)
               on ? "on" : "off");
         return;
     }
-    /* ⭐ Bridge Override through the SAME two calls its overlay button makes, so
-     * a run from here tests the button's path, notice included. */
+    /* ⭐ Virtual Mouse through the event its overlay button's twin on the
+     * remote raises, so it ends Bridge Override exactly as a press does. */
+    if (strcasecmp(name, "vmouse") == 0) {
+        if (s_app->session == NULL) {
+            reply(job, "ERR no stream is running\n");
+            return;
+        }
+        const bool active = session_vmouse_active(s_app->session);
+        if (on != active) {
+            bus_pushevent(USER_TOGGLE_VMOUSE, NULL, NULL);
+        }
+        reply(job, "OK virtual mouse %s%s\n", on ? "on" : "off",
+              on != active ? ": asked for, as its button does" : " already");
+        return;
+    }
+    /* ⭐ Bridge Override by name, which a person never sees: the question a
+     * bridge raises switches it on and Virtual Mouse switches it off. Here
+     * it is set directly. Nothing is shown on the TV, as with either of those. */
     if (strcasecmp(name, "override") == 0) {
         bridge_override_set(s_app->session, on);
-        streaming_bridge_override_changed();
         char state[256];
         bridge_override_describe(s_app->session != NULL ? session_get_input(s_app->session) : NULL,
                                  state, sizeof state);
@@ -216,7 +234,54 @@ static void cmd_set(control_job_t *job, const char *args)
         return;
     }
 #endif
-    reply(job, "ERR try boost, light, rumble, tone, override or settle\n");
+    reply(job, "ERR try boost, light, rumble, tone, override, vmouse or settle\n");
+}
+
+/* The question a bridge raises (ui/streaming/bridge_prompt.h): whether it is
+ * up and how long it has left, and its two answers without a hand. */
+static void cmd_prompt(control_job_t *job, const char *args)
+{
+    if (args != NULL && strcasecmp(args, "ok") == 0) {
+        if (bridge_prompt_accept()) {
+            reply(job, "OK pressed: the TV's mouse controls are off\n");
+        } else {
+            reply(job, "ERR the question is not up\n");
+        }
+        return;
+    }
+    if (args != NULL && strcasecmp(args, "dismiss") == 0) {
+        const bool up = bridge_prompt_shown();
+        bridge_prompt_dismiss();
+        reply(job, up ? "OK dismissed: nothing changed\n" : "ERR the question is not up\n");
+        return;
+    }
+    const int left = bridge_prompt_seconds_left();
+    if (left > 0) {
+        /* ⓘ Its shape as well as its count: `at` is its top left corner,
+         * `bottom` its lower edge, `buttons_top` the top of the overlay's row
+         * of buttons that it has to stay above, and `lines` how many the
+         * warning takes. So "one line, in from the corner, clear of the
+         * buttons" is read here rather than off a television. */
+        bridge_prompt_measure_t m;
+        if (bridge_prompt_measure(&m)) {
+            reply(job, "OK prompt=up seconds=%d size=%dx%d at=%d,%d bottom=%d buttons_top=%d lines=%d row=%d "
+                       "selected=%d highlighted=%s screen=%dx%d\n",
+                  left, m.width, m.height, m.x, m.y, m.y + m.height, m.buttons_top, m.text_lines, m.row_width,
+                  m.selected, m.highlighted ? "yes" : "no", m.screen_width, m.screen_height);
+        } else {
+            reply(job, "OK prompt=up seconds=%d\n", left);
+        }
+    } else {
+        /* The message its button leaves, in the same place, for a few seconds. */
+        bridge_prompt_measure_t m;
+        const int note_ms = bridge_prompt_note_measure(&m);
+        if (note_ms >= 0) {
+            reply(job, "OK prompt=down note=up ms_left=%d size=%dx%d at=%d,%d bottom=%d buttons_top=%d lines=%d\n",
+                  note_ms, m.width, m.height, m.x, m.y, m.y + m.height, m.buttons_top, m.text_lines);
+        } else {
+            reply(job, "OK prompt=down note=down\n");
+        }
+    }
 }
 
 static void cmd_status(control_job_t *job)
@@ -900,6 +965,8 @@ static void run_command(control_job_t *job)
         cmd_input(job);
     } else if (strcasecmp(verb, "keys") == 0) {
         cmd_keys(job);
+    } else if (strcasecmp(verb, "prompt") == 0) {
+        cmd_prompt(job, args);
 #if defined(TARGET_WEBOS)
     } else if (strcasecmp(verb, "devices") == 0) {
         cmd_devices(job);

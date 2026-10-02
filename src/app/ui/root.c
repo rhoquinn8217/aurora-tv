@@ -11,6 +11,7 @@
 #include "stream/input/session_input.h"
 
 #include "streaming/streaming.controller.h"
+#include "streaming/bridge_prompt.h"
 #include "launcher/launcher.controller.h"
 
 #include "logging.h"
@@ -235,7 +236,9 @@ bool ui_dispatch_userevent(app_t *app, int which, void *data1, void *data2) {
 }
 
 bool ui_should_block_input() {
-    return streaming_overlay_shown() || streaming_soft_keyboard_shown();
+    /* ⓘ And the question a bridge raises, which takes the input the same
+     * way for as long as it is up (streaming/bridge_prompt.h). */
+    return streaming_overlay_shown() || streaming_soft_keyboard_shown() || bridge_prompt_shown();
 }
 
 void ui_display_size(app_ui_t *ui, int width, int height) {

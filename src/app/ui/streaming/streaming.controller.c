@@ -23,6 +23,7 @@
 #include "ctm_bridge_glue.h"
 #include "ctm_panel.h"
 #include "input/bridge_override.h"
+#include "bridge_prompt.h"
 
 static void exit_streaming(lv_event_t *event);
 
@@ -32,11 +33,7 @@ static void open_keyboard(lv_event_t *event);
 
 static void toggle_vmouse(lv_event_t *event);
 
-static void toggle_bridge_override(lv_event_t *event);
-
 static void open_listener_config(lv_event_t *event);
-
-static void refresh_input_buttons(streaming_controller_t *controller);
 
 static void vmouse_ends_override(streaming_controller_t *controller);
 
@@ -393,10 +390,8 @@ bool streaming_refresh_stats() {
     return true;
 }
 
-/* T-170. The warning goes away on its own after this long. If a second
- * controller is bridged while it is still up, the timer is RESET rather than a
- * second notice raised -- bridging three pads at once should read as one
- * warning, not three.
+/* The top-left notice goes away on its own after this long. A second message
+ * while it is still up RESETS the timer rather than raising a second notice.
  *
  * 7s, up from 5 (rhoquinn8217, 2026-09-19, on the first run): it is two
  * sentences and one of them names where to go, so it wants reading, not
@@ -416,10 +411,11 @@ static void mouse_notice_expired(lv_timer_t *timer) {
     lv_timer_del(timer);
 }
 
-/* The top-left notice, with whatever it has to say. Shared by the mouse-mode
- * warning and Bridge Override, since both are the same kind of message about
- * the same buttons. A second message while one is up replaces its text and
- * restarts its time, rather than stacking. */
+/* The top-left notice, with whatever it has to say. A second message while one
+ * is up replaces its text and restarts its time, rather than stacking.
+ * ⓘ Only the DS5-USBIP button uses it now. Bridging a controller with the TV's
+ * mouse controls on raises a question instead (bridge_prompt.h), and nothing is
+ * said when that is answered or when Virtual Mouse undoes it. */
 static void show_timed_notice(streaming_controller_t *controller, const char *text) {
     if (controller == NULL || controller->mouse_notice == NULL) {
         return;
@@ -434,12 +430,14 @@ static void show_timed_notice(streaming_controller_t *controller, const char *te
     }
 }
 
-/* Raised when a controller is bridged and the TV's own mouse mode is on.
+/* Raised when a controller is bridged. If the TV's own mouse controls are on,
+ * a person is asked whether to turn them off (bridge_prompt.h).
  *
- * Deliberately NOT a question. It was a two-button dialog first; rhoquinn8217
- * replaced it because a modal cannot appear on an AUTO bridge without waiting
- * for an answer nobody is there to give, and auto bridge takes several devices
- * at stream start. A notice that fades needs no one present. */
+ * ⓘ It has been three things. A two-button dialog first, which rhoquinn8217
+ * replaced because it could not appear on an AUTO bridge without waiting for
+ * an answer nobody was there to give. Then a notice that faded, which could
+ * only tell a person to go and switch Virtual Mouse off themselves. Now a
+ * question that answers itself after ten seconds (rhoquinn8217, 2026-10-01). */
 void streaming_mouse_mode_warn(void) {
     /* Every branch says which one it took. The first run warned on a manual
      * bridge and stayed silent on an auto bridge, and four readings of the
@@ -449,38 +447,9 @@ void streaming_mouse_mode_warn(void) {
         commons_log_info("Streaming", "mouse-mode warning: no streaming view yet");
         return;
     }
-    /* No session means no virtual mouse to be on, so nothing to warn about. */
-    if (controller->global == NULL || controller->global->session == NULL) {
-        commons_log_info("Streaming", "mouse-mode warning: no session");
-        return;
-    }
-    if (!session_vmouse_active(controller->global->session)) {
-        commons_log_info("Streaming", "mouse-mode warning: virtual mouse is OFF, nothing to say");
-        return;
-    }
-    commons_log_info("Streaming", "mouse-mode warning: showing for %d ms", MOUSE_NOTICE_MS);
-    /* Names the overlay button EXACTLY as it is labelled -- "Virtual Mouse",
-     * streaming.view.c -- so the instruction points at something findable.
-     * The settings pane already phrases it the same way. */
-    show_timed_notice(controller,
-                      locstr("Virtual mouse is on and will affect bridged controllers. "
-                             "Toggle Virtual Mouse off in the streaming overlay."));
-}
-
-void streaming_bridge_override_changed(void) {
-    streaming_controller_t *controller = current_controller;
-    if (controller == NULL || controller->mouse_notice == NULL) {
-        return;
-    }
-    refresh_input_buttons(controller);
-    /* ⭐ It says what it switched off, by the names the Input settings use,
-     * because the Input menu itself still shows the person's own choices. */
-    const bool on = bridge_override_active();
-    commons_log_info("Streaming", "Bridge Override notice: %s", on ? "on" : "off");
-    show_timed_notice(controller, on
-            ? locstr("Bridge Override is on. Virtual Mouse, touchpad mouse, multi-touch, natural scrolling\n"
-                     "and battery reporting are off.")
-            : locstr("Bridge Override is off. The Input settings apply again."));
+    /* ⓘ Whether there is anything to ask, and every branch of that, is the
+     * pop-up's own to decide and to log. */
+    bridge_prompt_request();
 }
 
 void streaming_notice_show(const char *message) {
@@ -516,6 +485,9 @@ static void controller_dtor(lv_fragment_t *self) {
     if (current_controller == fragment) {
         current_controller = NULL;
     }
+    /* The stream is ending: the pop-up a bridge raised goes with it,
+     * unanswered, and so does the message its button leaves. */
+    bridge_prompt_stream_ended();
     /* The notice is deleted with lv_layer_sys, but the TIMER is not owned by
      * any object -- left running it would fire into a freed fragment. */
     if (fragment->mouse_notice_timer != NULL) {
@@ -646,7 +618,6 @@ static void on_view_created(lv_fragment_t *self, lv_obj_t *view) {
     lv_obj_add_event_cb(controller->vmouse_btn, toggle_vmouse, LV_EVENT_CLICKED, self);
     lv_obj_add_event_cb(controller->ctm_btn, ctm_panel_open, LV_EVENT_CLICKED, self);
     lv_obj_add_event_cb(controller->ds5usbip_btn, open_listener_config, LV_EVENT_CLICKED, self);
-    lv_obj_add_event_cb(controller->override_btn, toggle_bridge_override, LV_EVENT_CLICKED, self);
     lv_obj_add_event_cb(controller->base.obj, hide_overlay, LV_EVENT_CLICKED, self);
     lv_obj_add_event_cb(controller->overlay, overlay_key_cb, LV_EVENT_KEY, controller);
     lv_obj_add_event_cb(controller->base.obj, on_cancel_key, LV_EVENT_CANCEL, controller);
@@ -828,30 +799,13 @@ static void toggle_vmouse(lv_event_t *event) {
 
 /* Virtual Mouse pressed while Bridge Override is on: the press wins
  * (rhoquinn8217, 2026-09-30, in place of a notice refusing it). The override
- * goes off and the virtual mouse comes on. The notice says both, because the
- * override's other switches came back with it. */
+ * goes off and the virtual mouse comes on.
+ * ⭐ Since 2026-10-01 this is the ONLY way a person switches it off. It is
+ * switched on by the question a bridge raises (bridge_prompt.h) and has no
+ * button of its own. ⓘ Nothing is said about it: the override's other
+ * switches come back with the mouse, without a notice. */
 static void vmouse_ends_override(streaming_controller_t *controller) {
     bridge_override_release_for_vmouse(controller->global->session);
-    refresh_input_buttons(controller);
-    show_timed_notice(controller,
-                      locstr("Virtual Mouse is on, and Bridge Override is off. "
-                             "The Input settings apply again."));
-}
-
-/* ⭐ IT TOGGLES IN PLACE (rhoquinn8217, 2026-09-30): the overlay stays open
- * and the label says the new state, with no notice. The control port's
- * switch still posts one, since nothing else would show it there.
- * ⛔ Not calling hide_overlay() is not enough: every overlay button bubbles
- * its click to the view, whose own CLICKED handler hides the overlay
- * (on_view_created). Build 449 left it out and the overlay still closed. */
-static void toggle_bridge_override(lv_event_t *event) {
-    streaming_controller_t *controller = lv_event_get_user_data(event);
-    lv_event_stop_bubbling(event);
-    if (app_configuration == NULL) {
-        return;
-    }
-    bridge_override_set(controller->global->session, !app_configuration->bridge_override);
-    refresh_input_buttons(controller);
 }
 
 /* ⭐ THE DS5-USBIP BUTTON (rhoquinn8217, 2026-09-28: "I want the DS5-USBIP
@@ -875,23 +829,6 @@ static void open_listener_config(lv_event_t *event) {
     show_timed_notice(controller,
                       locstr("DS5-USBIP opens for a bridged device, and nothing is bridged.\n"
                              "Bridge one from USB Bridge first."));
-}
-
-/* The one button whose label carries a state. Set each time the overlay
- * opens, since the control port can switch it while it is closed.
- * ⓘ That button is hidden for now (streaming.view.c); the label is still
- * kept right, for the day it is shown again.
- * ⓘ Virtual Mouse keeps GuiDev1994's plain label (rhoquinn8217, 2026-09-30:
- * "I want to keep gui's ui clean"); "Virtual Mouse: On/Off" was ours. */
-static void refresh_input_buttons(streaming_controller_t *controller) {
-    if (controller->override_label != NULL) {
-        lv_label_set_text(controller->override_label, bridge_override_active()
-                                                      ? locstr("Bridge Override: On")
-                                                      : locstr("Bridge Override: Off"));
-    }
-    /* The labels change width, and the button points below are read from
-     * where the buttons ended up. */
-    lv_obj_update_layout(controller->actions);
 }
 
 static void stream_fragment_del_timer_cb(lv_timer_t *timer) {
@@ -922,6 +859,9 @@ bool show_overlay(streaming_controller_t *controller) {
     if (overlay_showing) {
         return false;
     }
+    /* The overlay is opening over the question a bridge raised: that goes,
+     * unanswered, rather than sit on top holding the input. */
+    bridge_prompt_dismiss();
     overlay_showing = true;
     lv_obj_clear_flag(controller->base.obj, LV_OBJ_FLAG_HIDDEN);
 
@@ -932,7 +872,6 @@ bool show_overlay(streaming_controller_t *controller) {
 
     app_stop_text_input(&controller->global->ui.input);
 
-    refresh_input_buttons(controller);
     update_buttons_layout(controller);
 
     return true;
