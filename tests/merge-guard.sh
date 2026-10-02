@@ -47,7 +47,46 @@ need "USB Bridge pane registered" \
 need "USB Bridge pane declared" \
      src/app/ui/settings/settings.controller.h "settings_pane_usbbridge_cls"
 need "USB Bridge pane compiled" \
-     src/app/ui/settings/panes/CMakeLists.txt "usbbridge.pane.c"
+     src/app/ctmbridge/app_sources.cmake "usbbridge.pane.c"
+
+# --- the fork's build files ----------------------------------------------
+# ⛔ EVERYTHING OF OURS HANGS OFF ONE LINE IN A FILE OF UPSTREAM'S. If a merge
+# takes upstream's side of src/app/CMakeLists.txt, nothing of ours is compiled.
+# ⓘ That fails the build loudly, which the other cases in this file do not; the
+# check is here because it names the cause in one second.
+need "the bridge's build file is still called" \
+     src/app/CMakeLists.txt "add_subdirectory(ctmbridge)"
+need "our source list is read" \
+     src/app/ctmbridge/CMakeLists.txt "app_sources.cmake"
+need "the build number's file is read" \
+     src/app/ctmbridge/CMakeLists.txt "build_number.cmake"
+
+# ⓘ The build number lives in a file of ours and nowhere else. On the line under
+# upstream's version it conflicted with every release that was merged (13 of
+# 13), so a merge that brings it back there has undone the move.
+need "the build number is in our file" \
+     src/app/ctmbridge/build_number.cmake "^set(CTM_BUILD_NUMBER [0-9][0-9]*)"
+absent "the build number is NOT back in upstream's build file" \
+       CMakeLists.txt "CTM_BUILD_NUMBER"
+
+# Every source file our list names is in the tree.
+for f in $(grep -o 'src/app/[A-Za-z0-9_./]*\.c' src/app/ctmbridge/app_sources.cmake 2>/dev/null); do
+    if [ -f "$f" ]; then
+        pass=$((pass + 1))
+    else
+        echo "⛔ LOST: $f"
+        echo "   named in src/app/ctmbridge/app_sources.cmake and not in the tree"
+        fail=$((fail + 1))
+    fi
+done
+
+# ⚠️ A FILE THAT SHOWS A VERSION MUST BE NAMED IN build_number.cmake, which gives
+# it the header that carries the build number. One that upstream adds, printing
+# APP_VERSION, would compile and show the version WITHOUT the build number.
+for f in $(grep -rl "APP_VERSION" src/app --include='*.c' 2>/dev/null); do
+    need "the build number reaches the version $f shows" \
+         src/app/ctmbridge/build_number.cmake "$f"
+done
 
 # --- the settings themselves ---------------------------------------------
 # ⓘ Each is read somewhere that would silently do nothing if the field vanished.
@@ -78,21 +117,47 @@ need "input hold handed to the core" \
 # ⚠️ BY CONTENT, NOT BY BRANCH NAME. A working copy checked out under any other
 # name -- a bisect branch, a local experiment -- would otherwise be judged
 # against the wrong rules and report a loss that is not one.
-if grep -q "CTM_BT_MIC_ARMING=1" CMakeLists.txt 2>/dev/null; then
+# ⓘ The switch may sit in any of the fork's build files: on a branch cut before
+# the build number moved, it and the suffix are still in the root CMakeLists.txt.
+BUILD_FILES="CMakeLists.txt src/app/ctmbridge/CMakeLists.txt src/app/ctmbridge/app_sources.cmake src/app/ctmbridge/build_number.cmake"
+
+build_files_have() {   # build_files_have <pattern>
+    cat $BUILD_FILES 2>/dev/null | grep -q "$1"
+}
+
+need_built() {     # need_built <description> <pattern>
+    if build_files_have "$2"; then
+        pass=$((pass + 1))
+    else
+        echo "⛔ LOST: $1"
+        echo "   expected in one of the build files ($BUILD_FILES) : $2"
+        fail=$((fail + 1))
+    fi
+}
+
+absent_built() {   # absent_built <description> <pattern>
+    if build_files_have "$2"; then
+        echo "⛔ PRESENT AND SHOULD NOT BE: $1"
+        echo "   found in one of the build files ($BUILD_FILES) : $2"
+        fail=$((fail + 1))
+    else
+        pass=$((pass + 1))
+    fi
+}
+
+if build_files_have "CTM_BT_MIC_ARMING=1"; then
     branch=mic-capture-experimental
 else
     branch=stable
 fi
 case "$branch" in
     mic-capture-experimental)
-        need "experimental arms the BT microphone" \
-             CMakeLists.txt "CTM_BT_MIC_ARMING=1"
-        need "experimental marks its packages" \
-             CMakeLists.txt 'CTM_BUILD_SUFFIX "_EXP"'
+        need_built "experimental arms the BT microphone" "CTM_BT_MIC_ARMING=1"
+        need_built "experimental marks its packages" 'CTM_BUILD_SUFFIX "_EXP"'
         ;;
     *)
-        absent "stable must NOT define CTM_BT_MIC_ARMING" \
-               CMakeLists.txt "add_compile_definitions(CTM_BT_MIC_ARMING"
+        absent_built "stable must NOT define CTM_BT_MIC_ARMING" \
+                     "add_compile_definitions(CTM_BT_MIC_ARMING"
         ;;
 esac
 

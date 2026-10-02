@@ -13,7 +13,6 @@
 #include "input/bridge_keyboard.h"
 #endif
 #include "config.h"
-#include "app_version.h"
 
 #include "logging.h"
 #include "logging_ext_sdl.h"

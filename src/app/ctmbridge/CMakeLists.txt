@@ -51,3 +51,10 @@ target_include_directories(ctmbridge PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(ctmbridge PUBLIC pthread m)
 
 target_link_libraries(moonlight-lib PUBLIC ctmbridge)
+
+# Everything else this fork adds to the build is in two files beside this one,
+# so that upstream's own build files stay exactly as upstream wrote them.
+include(${CMAKE_CURRENT_LIST_DIR}/app_sources.cmake)
+# The fork's build number is apart from the bridge itself, and a tree without
+# that file builds with upstream's version and nothing else changed.
+include(${CMAKE_CURRENT_LIST_DIR}/build_number.cmake OPTIONAL)

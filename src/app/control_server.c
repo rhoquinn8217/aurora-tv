@@ -20,7 +20,6 @@
 #include "lvgl.h"
 
 #include "app.h"
-#include "app_version.h"
 #include "logging.h"
 #include "util/bus.h"
 #include "util/user_event.h"

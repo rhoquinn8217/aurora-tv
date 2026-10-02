@@ -1,27 +1,7 @@
 cmake_minimum_required(VERSION 3.19)
 set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
 
-# Keep the fork's upstream version; CTM changes bump only the build number,
-# shown as "1.3.0 (N)" in the app. appinfo/ipk stay at the numeric version.
-#
-# The version follows GuiDev1994's releases as they are merged forward. The
-# build number is ours, he does not have it, and it keeps counting across a
-# merge -- resetting it would make old builds and new ones share numbers, and
-# every log and test note that names one would become ambiguous.
 set(MOONLIGHT_VERSION "1.3.0")
-set(CTM_BUILD_NUMBER 466)
-
-# A tag after the build number, so a build you can SEE says what it is.
-#   R    the rooted LG monitor's build -- trunk with T-210's stream-boost
-#        switch cherry-picked on, which must never go on any other set
-#   EXP  an experimental branch, such as the DualSense BT mic capture
-# Set by build-aurora-docker.ps1: -Rooted implies R, -Suffix EXP for the rest.
-#
-# !! IT IS A SEPARATE VARIABLE ON PURPOSE. build-aurora-docker.ps1 scans for
-# !! `set(CTM_BUILD_NUMBER (\d+))` in two places -- to pick the next number and
-# !! to name the package -- so a letter inside that value would break both and
-# !! the next plain build would silently reuse a number.
-set(CTM_BUILD_SUFFIX "")
 
 project(moonlight VERSION ${MOONLIGHT_VERSION} LANGUAGES C CXX)
 
@@ -108,10 +88,6 @@ else ()
 endif ()
 option(FEATURE_GAMEPAD_TOUCHPAD_GRAB "Take exclusive access of controller touchpad devices"
         ${GAMEPAD_TOUCHPAD_GRAB_DEFAULT})
-# A command port on 127.0.0.1 that lets a terminal on the TV launch a stream
-# and bridge devices without the remote. Loopback only; see
-# src/app/control_server.h.
-option(AURORA_TERMINAL_CONTROL "Listen on 127.0.0.1 for commands from a terminal on the TV" ON)
 set(FEATURE_INPUT_LIBCEC ON)
 set(FEATURE_EMBEDDED_SHELL OFF)
 set(FEATURE_WINDOW_FULLSCREEN_DESKTOP ON)
@@ -277,12 +253,8 @@ set_target_properties(moonlight-lib PROPERTIES
 target_compile_definitions(moonlight-lib PUBLIC "$<$<CONFIG:DEBUG>:DEBUG>")
 string(LENGTH ${CMAKE_SOURCE_DIR} SOURCE_DIR_LENGTH)
 target_compile_definitions(moonlight-lib PUBLIC SOURCE_DIR_LENGTH=${SOURCE_DIR_LENGTH})
-# The version lives in a generated header, app_version.h -- see its template.
-target_compile_definitions(moonlight-lib PUBLIC APPLOG_HOST=1)
+target_compile_definitions(moonlight-lib PUBLIC APP_VERSION="${PROJECT_VERSION}" APPLOG_HOST=1)
 target_compile_definitions(moonlight-lib PUBLIC LV_LVGL_H_INCLUDE_SIMPLE=1)
-if (AURORA_TERMINAL_CONTROL)
-    target_compile_definitions(moonlight-lib PUBLIC AURORA_TERMINAL_CONTROL=1)
-endif ()
 
 target_include_directories(moonlight-lib PUBLIC ${CMAKE_SOURCE_DIR}/core/libgamestream)
 
@@ -375,7 +347,6 @@ target_link_libraries(moonlight-lib PUBLIC commons-logging commons-gamecontrolle
         commons-sockaddr commons-hostport)
 
 configure_file(src/app/config.h.in ${CMAKE_CURRENT_BINARY_DIR}/config.h @ONLY)
-configure_file(src/app/app_version.h.in ${CMAKE_CURRENT_BINARY_DIR}/app_version.h @ONLY)
 target_include_directories(moonlight-lib PUBLIC ${CMAKE_CURRENT_BINARY_DIR})
 
 if (OS_WINDOWS)

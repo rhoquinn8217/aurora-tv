@@ -3,7 +3,13 @@
  * ⭐ A HEADER, NOT A COMPILE FLAG. As a flag on moonlight-lib, the version
  * changed the command line of every file in the library, so each build-number
  * bump recompiled all ~110 of them. configure_file rewrites this only when the
- * version changes, and only the few files that print it include it. */
+ * version changes, and only the few files that show it are given it.
+ *
+ * ⓘ NOTHING INCLUDES THIS BY NAME. src/app/ctmbridge/build_number.cmake puts it
+ * ahead of each file that shows a version, on that file's command line, so
+ * upstream's files need no edit for it. It replaces upstream's APP_VERSION,
+ * which is the version without this fork's build number. */
 #pragma once
 
+#undef APP_VERSION
 #define APP_VERSION "@PROJECT_VERSION@ (@CTM_BUILD_NUMBER@@CTM_BUILD_SUFFIX@)"
