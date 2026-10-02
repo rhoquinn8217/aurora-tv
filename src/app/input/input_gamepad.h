@@ -11,13 +11,6 @@ bool app_input_init_gamepad(app_input_t *input, int device_index);
 
 void app_input_close_gamepad(app_input_t *input, SDL_JoystickID sdl_id);
 
-/* Close every open SDL controller — release moonlight's input grip when the CTM
- * bridge takes over all input. */
-void app_input_close_all_gamepads(app_input_t *input);
-
-/* (Re)open all currently-connected SDL controllers — after the CTM bridge stops. */
-void app_input_open_all_gamepads(app_input_t *input);
-
 /**
  * Open any SDL joysticks that are present but not tracked yet.
  * Needed when JOYDEVICEADDED was missed (common with a second BT DualSense on webOS).
