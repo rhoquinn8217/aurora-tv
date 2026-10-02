@@ -66,7 +66,6 @@ static void update_buttons_layout(streaming_controller_t *controller);
 
 static void pin_toggle(lv_event_t *e);
 
-
 static void streaming_set_stats_pinned(streaming_controller_t *controller, bool pinned);
 
 /** Pretty codec label for stats (matches session_video video_format_name strings). */
@@ -128,9 +127,6 @@ const lv_fragment_class_t streaming_controller_class = {
 
 static bool overlay_showing = false, overlay_pinned = false;
 static streaming_controller_t *current_controller = NULL;
-
-/* CTM Bridge overlay panel state (see the master/detail implementation below).
- * Declared up here because on_delete_obj() references it for teardown cleanup. */
 
 bool streaming_overlay_shown() {
     return overlay_showing;
@@ -836,24 +832,6 @@ static void stream_fragment_del_timer_cb(lv_timer_t *timer) {
     lv_timer_del(timer);
     lv_fragment_del(fragment);
 }
-
-/* ===================================================================
- * CTM Bridge overlay panel - master/detail, controller-navigable.
- *
- * Overlay-resident (parented to controller->detached_root, NOT a modal
- * lv_msgbox): a modal flips the UI to key/gamepad input mode, which makes
- * root.c hide the webOS Magic-Remote cursor - that was the "pointer
- * disappears" bug. As an act-screen container it behaves like the action
- * bar, so the cursor returns whenever the remote moves.
- *
- * Two focus groups mirror the launcher's nav_group/detail_group:
- *   sidebar  Up/Down = pick controller (right pane live-previews)
- *            Select(A)/Right = enter detail,  Back(B) = close panel
- *   detail   Up/Down = move between settings, Left/Right = change value
- *            Select(A) = toggle plug / cycle audio,  Back(B) = sidebar
- * The Magic-Remote pointer can click or drag anything directly. */
-
-
 
 bool show_overlay(streaming_controller_t *controller) {
     if (overlay_showing) {
