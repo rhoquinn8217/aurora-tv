@@ -108,10 +108,6 @@ int app_init(app_t *app, app_settings_loader *settings_loader, int argc, char *a
      * Measured 2026-08-06 on the rooted monitor. */
     SDL_SetHint(SDL_HINT_JOYSTICK_HIDAPI_PS5, "1");
     SDL_SetHint(SDL_HINT_JOYSTICK_HIDAPI_PS5_RUMBLE, "1");
-    if (app->settings.syskey_capture) {
-        SDL_SetHint(SDL_HINT_WEBOS_ACCESS_POLICY_KEYS_HOME, "true");
-        SDL_SetHint(SDL_HINT_WEBOS_ACCESS_POLICY_RIBBON, "false");
-    }
 #else
     if (app->settings.syskey_capture) {
         SDL_SetHint(SDL_HINT_GRAB_KEYBOARD, "1");
