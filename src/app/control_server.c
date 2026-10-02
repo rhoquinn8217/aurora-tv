@@ -28,6 +28,7 @@
 #include "stream/video/session_video.h"
 #include "ui/streaming/streaming.controller.h"
 #include "input/bridge_override.h"
+#include "input/bridge_keyboard.h"
 
 #if defined(TARGET_WEBOS)
 #include "ctm_bridge_glue.h"
@@ -124,6 +125,7 @@ static void cmd_help(control_job_t *job)
                "bridge-all, release-all every part, as the panel's buttons do\n"
                "set <name> <on|off>     a switch, without the remote: boost, light, rumble, tone, override\n"
                "input                   the stream's live input state: Bridge Override and what it switches\n"
+               "keys                    key events counted since the app started: the TV's keyboard grab, and webOS\n"
                "set settle <ms>         how long to let the link settle before a DS4 handback tone\n"
                "signal refuse <n>       play a device's refusal signal; no plug has to fail\n"
                "<device> is its number, its node, its vid:pid, or part of its name; <n> is from groups\n");
@@ -241,6 +243,16 @@ static void cmd_input(control_job_t *job)
     char state[256];
     bridge_override_describe(session_get_input(s_app->session), state, sizeof state);
     reply(job, "OK %s\n", state);
+}
+
+/* Where key events have come from since the app started: the TV's keyboard
+ * grab, and webOS through SDL. Works with no stream too, which is how to see
+ * whether webOS hands a keyboard's keys to the app at all. */
+static void cmd_keys(control_job_t *job)
+{
+    char counts[160];
+    bridge_keyboard_counts(counts, sizeof counts);
+    reply(job, "OK %s\n", counts);
 }
 
 static const char *host_state_name(SERVER_STATE_ENUM code)
@@ -873,6 +885,8 @@ static void run_command(control_job_t *job)
         cmd_set(job, args);
     } else if (strcasecmp(verb, "input") == 0) {
         cmd_input(job);
+    } else if (strcasecmp(verb, "keys") == 0) {
+        cmd_keys(job);
 #if defined(TARGET_WEBOS)
     } else if (strcasecmp(verb, "devices") == 0) {
         cmd_devices(job);

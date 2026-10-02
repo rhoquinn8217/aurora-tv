@@ -47,7 +47,7 @@ void ctm_bridge_set_mic_capture(bool on);
 void ctm_bridge_set_input_held(bool held);
 
 /* Who to tell when a bridged keyboard presses the overlay's shortcut,
- * Ctrl+Alt+Shift+O. ⚠️ Called on the keyboard's input thread. */
+ * Ctrl+Alt+Shift+S. ⚠️ Called on the keyboard's input thread. */
 void bridge_set_overlay_request(void (*cb)(void));
 
 void ctm_bridge_stop(void);
@@ -155,6 +155,9 @@ bool ctm_bridge_plug_index(int index);
  * session table, never enumerates. Call it from a tick; it returns how many it
  * released so the caller can log only when it acts. */
 int ctm_bridge_reap_gone_hosts(void);
+/* ⭐ Release any session whose DEVICE has gone: a bridged keyboard asleep, a
+ * cable pulled. As cheap as the one above, and called beside it. */
+int ctm_bridge_reap_gone_devices(void);
 
 void ctm_bridge_unplug_index(int index);
 

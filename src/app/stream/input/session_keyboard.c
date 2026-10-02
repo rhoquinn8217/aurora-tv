@@ -23,11 +23,6 @@ enum KeyCombo {
     KeyComboToggleMouseMode,
     KeyComboToggleCursorHide,
     KeyComboToggleMinimize,
-    /* ⭐ Ctrl+Alt+Shift+O opens the streaming overlay (rhoquinn8217,
-     * 2026-09-13): Moonlight's pattern, with a letter neither Moonlight nor
-     * Aurora uses. This is a keyboard the TV reads; a bridged keyboard's
-     * shortcut is found by the bridge core in its reports. */
-    KeyComboOpenOverlay,
     KeyComboMax
 };
 
@@ -46,7 +41,6 @@ static struct SpecialKeyCombo m_SpecialKeyCombos[KeyComboMax] = {
         {KeyComboToggleMouseMode,    SDLK_m, SDL_SCANCODE_M, true},
         {KeyComboToggleCursorHide,   SDLK_c, SDL_SCANCODE_C, true},
         {KeyComboToggleMinimize,     SDLK_d, SDL_SCANCODE_D, true},
-        {KeyComboOpenOverlay,        SDLK_o, SDL_SCANCODE_O, true},
 };
 
 enum KeyCombo _pending_key_combo = KeyComboMax;
@@ -254,8 +248,12 @@ void stream_input_handle_key(stream_input_t *input, const SDL_KeyboardEvent *eve
          * ran, and the keyboard was dead for the rest of the stream.
          * ➡️ Release on the host whatever it saw pressed, open the overlay, and
          * leave nothing pending. The releases still to come land on the overlay,
-         * or on the stream as harmless key-ups. */
-        if (_pending_key_combo == KeyComboOpenOverlay) {
+         * or on the stream as harmless key-ups.
+         * ⓘ The shortcut is Ctrl+Alt+Shift+S: Moonlight's stats shortcut, which
+         * has always opened the overlay here. O sat beside it from 2026-09-15 to
+         * 2026-10-01, added in the belief that there was none, and this was
+         * written for it. A bridged keyboard's S is found by the bridge core. */
+        if (_pending_key_combo == KeyComboToggleStatsOverlay) {
             SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "Detected overlay combo");
             stream_input_flush_pressed_keys(input);
             bus_pushevent(USER_OPEN_OVERLAY, NULL, NULL);

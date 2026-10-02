@@ -1990,7 +1990,7 @@ bool ctm_bridge_gesture_request_bridge(const char *node) {
     return false;
 }
 
-/* ⭐ A bridged keyboard pressed Ctrl+Alt+Shift+O (rhoquinn8217, 2026-09-13).
+/* ⭐ A bridged keyboard pressed Ctrl+Alt+Shift+S (rhoquinn8217, 2026-09-13).
  * When: the keyboard's input thread, so it only posts: the overlay opens on the
  * main thread, exactly as it does for a keyboard the TV reads. */
 static void gesture_overlay_requested(void) {
@@ -2030,6 +2030,18 @@ void ctm_bridge_gesture_tick(struct app_input_t *input, struct session_t *sessio
         if (reaped > 0) {
             gesture_log("host gone: released %d controller(s) -- the USB server stopped answering", reaped);
             /* A keyboard among them is the TV's again. */
+            bridge_keyboard_changed();
+        }
+    }
+    /* ⭐ AND ANYTHING WHOSE DEVICE HAS GONE: a bridged keyboard asleep, a cable
+     * pulled. The core ends such a session itself; stopping it here closes
+     * the device's node, which must not stay open a moment longer than it
+     * has to (ctm_bridge_reap_gone_devices). */
+    {
+        const int dropped = ctm_bridge_reap_gone_devices();
+        if (dropped > 0) {
+            gesture_log("device gone: released %d session(s) -- a bridged device dropped off", dropped);
+            /* A keyboard that comes back is the TV's to take. */
             bridge_keyboard_changed();
         }
     }

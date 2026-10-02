@@ -181,7 +181,7 @@ static void glue_hotplug_cb(void *ud, const ctm_controller_dev_t *dev, int prese
  * enumerates on the host yet feels dead. Idempotent. */
 static bool s_core_up = false;
 
-/* ⭐ Who to tell when a bridged keyboard presses Ctrl+Alt+Shift+O (rhoquinn8217,
+/* ⭐ Who to tell when a bridged keyboard presses Ctrl+Alt+Shift+S (rhoquinn8217,
  * 2026-09-13). Its grab keeps the keys from Aurora's own shortcuts, so the core
  * finds the shortcut and calls this from the keyboard's input thread. ⓘ Set by
  * the app, which owns the event bus; this library cannot include it. */
@@ -744,6 +744,51 @@ int ctm_bridge_reap_gone_hosts(void)
     for (int i = 0; i < gone_count; ++i) {
         log_append("ctm glue: host gone -- releasing '%s'", gone[i]);
         dropped_remember_locked(gone[i]);   /* a reconnect may put it back */
+        stop_session(gone[i]);
+        ++reaped;
+    }
+    pthread_mutex_unlock(&s_dev_mutex);
+    return reaped;
+}
+
+/* ⭐⭐ RELEASE ANYTHING WHOSE DEVICE HAS GONE. 2026-10-01.
+ *
+ * The twin of the reaper above, for the other end of the bridge: a bridged
+ * device that drops off, such as a Bluetooth keyboard gone to sleep or a cable
+ * pulled. The core ends that session itself and raises `device_gone`. Its
+ * entry, and the device's own node, are still held until someone stops it, and
+ * `stop_session()` joins the session thread, so it is done from here.
+ *
+ * ⛔ IT MUST NOT WAIT. Until the entry is stopped the device's node stays open,
+ * and on a set that keeps its device files permanently, an open handle on a
+ * device that has gone stops anything opening the one that takes its number
+ * next. The core's input thread says how that was found.
+ *
+ * ⓘ Nothing is remembered for a reconnect: that list is for a HOST that went
+ * away, and this device is not there to be plugged again. Cheap for the same
+ * reason as the reaper above: a walk of the session table, no enumeration. */
+int ctm_bridge_reap_gone_devices(void)
+{
+    int reaped = 0;
+    char gone[MAX_SESSIONS][96];
+    int gone_count = 0;
+
+    pthread_mutex_lock(&s_dev_mutex);
+    /* Under the core's table lock too, and past a stopping entry, as above. */
+    pthread_mutex_lock(&g_sessions_mutex);
+    for (int i = 0; i < g_session_count && gone_count < MAX_SESSIONS; ++i) {
+        ctm_controller_t *c = g_sessions[i].controller;
+        if (!c || g_sessions[i].stopping) continue;
+        ctm_controller_status_t st;
+        ctm_controller_get_status(c, &st);
+        if (!st.device_gone) continue;
+        snprintf(gone[gone_count], sizeof(gone[gone_count]), "%s", g_sessions[i].key);
+        ++gone_count;
+    }
+    pthread_mutex_unlock(&g_sessions_mutex);
+    /* Collected first, stopped second, for the reason given above. */
+    for (int i = 0; i < gone_count; ++i) {
+        log_append("ctm glue: device gone -- releasing '%s'", gone[i]);
         stop_session(gone[i]);
         ++reaped;
     }

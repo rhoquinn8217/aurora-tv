@@ -334,6 +334,12 @@ static int open_keyboards(keyboard_evdev_t *kbd) {
         }
         kbd->fds[n++] = fd;
         commons_log_info("Input", "Keyboard evdev: grabbed %s", path);
+        {
+            /* For the record a person can read: input/bridge_keyboard.h. */
+            char held[96] = "";
+            (void) ioctl(fd, EVIOCGNAME(sizeof(held) - 1), held);
+            bridge_keyboard_took(path, held);
+        }
     }
     closedir(dir);
     return n;
@@ -383,17 +389,6 @@ void keyboard_evdev_stop(keyboard_evdev_t *kbd) {
         }
     }
     free(kbd);
-}
-
-void keyboard_evdev_set_grabbed(keyboard_evdev_t *kbd, bool grabbed) {
-    if (kbd == NULL) {
-        return;
-    }
-    for (int i = 0; i < kbd->nfds; i++) {
-        if (kbd->fds[i] >= 0) {
-            (void) ioctl(kbd->fds[i], EVIOCGRAB, grabbed ? 1 : 0);
-        }
-    }
 }
 
 bool keyboard_evdev_busy(const keyboard_evdev_t *kbd) {

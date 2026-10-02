@@ -476,8 +476,8 @@ void streaming_bridge_override_changed(void) {
     const bool on = bridge_override_active();
     commons_log_info("Streaming", "Bridge Override notice: %s", on ? "on" : "off");
     show_timed_notice(controller, on
-            ? locstr("Bridge Override is on. Virtual Mouse, touchpad mouse, multi-touch, natural scrolling,\n"
-                     "battery reporting and the USB keyboard grab are off.")
+            ? locstr("Bridge Override is on. Virtual Mouse, touchpad mouse, multi-touch, natural scrolling\n"
+                     "and battery reporting are off.")
             : locstr("Bridge Override is off. The Input settings apply again."));
 }
 
