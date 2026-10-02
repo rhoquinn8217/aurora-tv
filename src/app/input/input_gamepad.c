@@ -147,24 +147,6 @@ void app_input_close_gamepad(app_input_t *input, SDL_JoystickID sdl_id) {
     app_input_gamepad_state_deinit(state);
 }
 
-void app_input_close_all_gamepads(app_input_t *input) {
-    for (short i = 0, j = app_input_get_max_gamepads(input); i < j; i++) {
-        app_gamepad_state_t *state = app_input_gamepad_state_by_index(input, i);
-        if (state != NULL) {
-            app_input_close_gamepad(input, state->instance_id);
-        }
-    }
-}
-
-void app_input_open_all_gamepads(app_input_t *input) {
-    for (int i = 0, n = SDL_NumJoysticks(); i < n; i++) {
-        if (app_input_get_gamepads_count(input) >= app_input_get_max_gamepads(input)) {
-            break;
-        }
-        app_input_init_gamepad(input, i);
-    }
-}
-
 app_gamepad_state_t *app_input_gamepad_state_init(app_input_t *input, SDL_GameController *controller) {
     int index = new_gamepad_state_index(input, controller);
     if (index < 0) {

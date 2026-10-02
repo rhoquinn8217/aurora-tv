@@ -380,33 +380,6 @@ void session_config_init(app_t *app, session_config_t *config, const SERVER_DATA
     config->hardware_mouse = app_config->hardware_mouse;
     config->local_audio = app_config->localaudio;
     config->view_only = app_config->viewonly;
-    /* The bridge forwards the physical controller itself, so moonlight must not
-     * also present it -- but only the GAMEPAD conflicts. Keyboard, mouse and
-     * touch have no bridged counterpart and stay working. */
-    /* ⛔⛔ THE HOST GAMEPAD IS NO LONGER SUPPRESSED, AND THE SETTING IS GONE.
-     *
-     * ⓘ What it used to do: with the bridge enabled, Moonlight stopped
-     * announcing ANY gamepad to the host, because a bridged controller arrives
-     * on the PC directly and the host would otherwise see it twice.
-     *
-     * ⛔ That is a sledgehammer, and it stopped being necessary. We retire the
-     * emulated pad PER CONTROLLER, at the moment that controller is bridged --
-     * see gesture_moonlight_set_excluded. The global gate solves the same
-     * problem by never offering a gamepad at all.
-     *
-     * ⚠️ AND IT COST THE CASE THAT MATTERS: two controllers, one bridged. The
-     * other had no route to the host whatsoever. Someone who never bridged got
-     * nothing at all.
-     *
-     * ⭐ rhoquinn8217, 2026-08-19: "when you start a stream, aurora-tv automatically
-     * gives the keyboards, mice and controllers to the PC. No bridging, no
-     * extra steps. It just works. That's how ours should work by default." ⓘ It
-     * is also how GuiDev1994's does -- he has no such gate.
-     *
-     * ➡️ Bridging is now something done ON TOP of a working stream, not instead
-     * of one. What gates it is whether the ways of ASKING are available: the
-     * gesture and the USB Bridge panel, which have their own settings. */
-    config->ctm_bridge = true;
     config->sops = app_config->sops;
     if (app_config->stick_deadzone < 0) {
         config->stick_deadzone = 0;

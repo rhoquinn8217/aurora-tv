@@ -2,10 +2,4 @@ target_sources(moonlight-lib PRIVATE
         app_input.c
         input_event.c
         input_gamepad.c
-        input_gamepad_mapping.c
-        ctm_bridge_gesture.c
-        bridge_request.c
-        device_groups.c
-        auto_bridge.c
-        bridge_override.c
-        bridge_keyboard.c)
+        input_gamepad_mapping.c)

@@ -47,7 +47,7 @@ typedef struct stream_input_t {
     uint32_t pointerGesturePressTime;
     int pointerGestureStartX;
     int pointerGestureStartY;
-    bool view_only, no_sdl_mouse, no_host_gamepad;
+    bool view_only, no_sdl_mouse;
     /* Controllers handed to the bridge, by moonlight slot.
      *
      * A STORED mask, deliberately, rather than a question asked of the bridge

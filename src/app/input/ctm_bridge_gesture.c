@@ -889,7 +889,41 @@ static stream_input_t *s_stream_input;
  * SEPARATE FROM THE BRIDGE STATE ON PURPOSE. The bridge decides whether a
  * controller is plugged; this only mirrors that decision into the stream so
  * the host stops seeing two of the same pad. Asking the bridge from inside
- * the send path was tried and crashed the app. */
+ * the send path was tried and crashed the app.
+ *
+ * ⭐ PER CONTROLLER, AND THE ONLY SUPPRESSION THERE IS. Until 2026-08-19 a
+ * stream with the bridge enabled announced NO gamepad to the host at all,
+ * because a bridged controller arrives on the PC directly and the host would
+ * otherwise see it twice. That is a sledgehammer, and it cost the case that
+ * matters: two controllers, one bridged, and the other had no route to the
+ * host whatsoever. Someone who never bridged got nothing at all.
+ * rhoquinn8217, 2026-08-19: "when you start a stream, aurora-tv automatically
+ * gives the keyboards, mice and controllers to the PC. No bridging, no extra
+ * steps. It just works. That's how ours should work by default."
+ * ➡️ So a stream behaves exactly as upstream's does until a controller is
+ * bridged, and only that controller changes: bridging is done ON TOP of a
+ * working stream, not instead of one. What gates it is whether the ways of
+ * ASKING are available, the gesture and the USB Bridge panel.
+ * ⓘ The two session-wide switches that did the old thing, no_host_gamepad and
+ * ctm_bridge in the session's config, stayed in upstream's structs unread
+ * until 2026-10-02 and are gone.
+ *
+ * ⚠️ WHY IT IS A REMOVE AND AN ARRIVE, AND NOT SILENCE. The old gate announced
+ * nothing at all, on the belief that this kept a phantom pad off the host. It
+ * does not. Measured on the C1, 2026-08-10: with nothing announced, both pads
+ * still appeared in Windows the moment a stick moved, because ordinary input
+ * events carry a mask the host builds pads from. Suppressing the announcement
+ * left the pad on the host and made it impossible to retire, since the remove
+ * path only acts on something that was announced.
+ *
+ * ⓘ THE ANNOUNCE AT STREAM START NEEDS NO CHECK OF ITS OWN. Upstream's
+ * session_input_started() offers every controller to
+ * stream_input_send_gamepad_arrive(), and that asks
+ * stream_input_gamepad_sends_moonlight(), which is where the mask is read. A
+ * pad that is excluded when a stream comes back from a reconnect is refused
+ * there. session_input_started() carried a second copy of the check until
+ * 2026-10-02 and is upstream's text again; tests/merge-guard.sh checks that
+ * the arrive still asks. */
 static void gesture_moonlight_set_excluded(SDL_GameController *controller, bool excluded) {
     if (!s_stream_input || !controller) {
         return;
