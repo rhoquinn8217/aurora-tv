@@ -123,6 +123,7 @@ static void cmd_help(control_job_t *job)
                "bridge-group <n>        bridge every part of a device, exactly as its panel row does\n"
                "release-group <n>       release every part of a device, exactly as its panel row does\n"
                "bridge-all, release-all every part, as the panel's buttons do\n"
+               "open-config             ask the host for its settings window, as the overlay's DS5-USBIP button does\n"
                "set <name> <on|off>     a switch, without the remote: boost, light, rumble, tone, override\n"
                "input                   the stream's live input state: Bridge Override and what it switches\n"
                "keys                    key events counted since the app started: the TV's keyboard grab, and webOS\n"
@@ -739,6 +740,18 @@ static void cmd_release_all(control_job_t *job)
     reply(job, "OK released %d device(s)\n", released);
 }
 
+/* The overlay's DS5-USBIP button, without a hand on it: the same call, so a
+ * check from a terminal exercises what a press does. */
+static void cmd_open_config(control_job_t *job)
+{
+    char name[128];
+    if (ctm_bridge_open_config(name, sizeof name)) {
+        reply(job, "OK asked the host to open its settings window on %s\n", name);
+    } else {
+        reply(job, "ERR nothing is bridged, so there is no device to open it for\n");
+    }
+}
+
 /* A device by its number in groups. Returns its position, or -1 with the
  * reason already written. */
 static int select_group(control_job_t *job, int count, const char *sel)
@@ -906,6 +919,8 @@ static void run_command(control_job_t *job)
         cmd_bridge_all(job);
     } else if (strcasecmp(verb, "release-all") == 0) {
         cmd_release_all(job);
+    } else if (strcasecmp(verb, "open-config") == 0) {
+        cmd_open_config(job);
 #endif
     } else {
         reply(job, "ERR unknown command '%s'; try help\n", verb);
