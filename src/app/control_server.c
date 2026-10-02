@@ -271,7 +271,15 @@ static void cmd_prompt(control_job_t *job, const char *args)
             reply(job, "OK prompt=up seconds=%d\n", left);
         }
     } else {
-        reply(job, "OK prompt=down\n");
+        /* The message its button leaves, in the same place, for a few seconds. */
+        bridge_prompt_measure_t m;
+        const int note_ms = bridge_prompt_note_measure(&m);
+        if (note_ms >= 0) {
+            reply(job, "OK prompt=down note=up ms_left=%d size=%dx%d at=%d,%d bottom=%d buttons_top=%d lines=%d\n",
+                  note_ms, m.width, m.height, m.x, m.y, m.y + m.height, m.buttons_top, m.text_lines);
+        } else {
+            reply(job, "OK prompt=down note=down\n");
+        }
     }
 }
 

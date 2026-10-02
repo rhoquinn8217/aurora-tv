@@ -23,11 +23,20 @@
  * ⓘ IT SITS BOTTOM LEFT, CLEAR OF THE EDGE AND ABOVE THE OVERLAY'S ROW OF
  * BUTTONS, AND IT IS ALL THERE IS. It is in that one place whether the overlay
  * is open or not: a bridge from the USB Bridge panel raises it with the
- * overlay open, and lower down it lay across the overlay's buttons. Nothing is
- * shown once it is answered, and nothing when Virtual Mouse brings the TV's
- * controls back. A notice said what had gone off, and another that the Input
- * settings applied again, for one build; rhoquinn8217 took both out the same
- * day, "for now", to have the pop-up alone.
+ * overlay open, and lower down it lay across the overlay's buttons.
+ *
+ * ⭐ ITS BUTTON IS ANSWERED, IN THE SAME PLACE, AND NOTHING ELSE IS:
+ *
+ *     Virtual Mouse has turned off. Toggle it back on in the streaming overlay.
+ *
+ * (rhoquinn8217's wording, 2026-10-01.) Only the button raises it. The count
+ * running out and a dismissal change nothing and say nothing, and nothing is
+ * said when Virtual Mouse brings the TV's controls back. It takes no input,
+ * goes by itself, and goes at once if what it says stops being true.
+ * ⓘ The history: build 460 had a notice at the top left listing everything
+ * that had gone off, and another when the Input settings applied again. Both
+ * were taken out the same day, "for now", to have the pop-up alone, and this
+ * one came back in the pop-up's place with its own words.
  *
  * ⓘ IT IS WIDE, SHORT AND SEE-THROUGH, because it shares the picture with a
  * game: as wide as its one sentence on one line, so a line of text and a
@@ -67,9 +76,12 @@ void bridge_prompt_request(void);
 /* Is it up? While it is, the interface has the input. */
 bool bridge_prompt_shown(void);
 
-/* Close it and change nothing: the stream is ending, or the overlay is opening
- * over it. */
+/* Close it and change nothing: the overlay is opening over it. */
 void bridge_prompt_dismiss(void);
+
+/* The stream is ending: the pop-up goes, unanswered, and so does the message a
+ * pressed button left on the screen. */
+void bridge_prompt_stream_ended(void);
 
 /* For the control port: the seconds left on the count, 0 when it is not up;
  * and its button, pressed without a hand. False when it is not up. */
@@ -92,5 +104,9 @@ typedef struct {
 } bridge_prompt_measure_t;
 
 bool bridge_prompt_measure(bridge_prompt_measure_t *out);
+
+/* The same for the message a pressed button leaves. Returns the milliseconds
+ * it has left, or -1 when it is not on the screen. */
+int bridge_prompt_note_measure(bridge_prompt_measure_t *out);
 
 #endif /* BRIDGE_PROMPT_H */

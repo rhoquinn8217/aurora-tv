@@ -54,11 +54,23 @@
  * can push its last word onto a second line. */
 #define PROMPT_SLACK 2
 
+/* ⭐ THE MESSAGE AFTER THE BUTTON (rhoquinn8217, 2026-10-01): pressing the
+ * button is answered, in the pop-up's own place, with what went off and where
+ * to bring it back. Only the button raises it: the count running out and a
+ * dismissal change nothing, so they say nothing.
+ * ⓘ It stays this long, the time the app's other timed notice has for two
+ * sentences, and takes no input: the game has the controller back at once. */
+#define PROMPT_NOTE_MS 7000
+/* How often it asks whether it is still true. */
+#define PROMPT_NOTE_TICK_MS 250
+
 /* What it says, for whichever of the TV's mouse controls is on. */
 typedef struct {
     const char *warning;
     /* The button, before its count. It names what pressing it does. */
     const char *action;
+    /* The message once the button has been pressed. */
+    const char *done;
 } prompt_words_t;
 
 static lv_obj_t *s_mbox = NULL;
@@ -77,22 +89,36 @@ static const char *s_action = "";
 static char s_button_label[96];
 static const char *s_btn_map[] = {s_button_label, ""};
 
+/* The message after the button, for the words the pop-up is showing. */
+static const char *s_done = "";
+static lv_obj_t *s_note = NULL;
+static lv_timer_t *s_note_timer = NULL;
+static uint32_t s_note_since = 0;
+
 static prompt_words_t prompt_words(bool vmouse, bool touchpad_mouse) {
+    /* ⓘ Virtual Mouse in the overlay is the way back for all three: pressing
+     * it puts every one of the TV's mouse controls back as the Input settings
+     * have them, and Virtual Mouse on. */
     if (vmouse && touchpad_mouse) {
         return (prompt_words_t) {
                 locstr("Warning: Turn off Virtual Mouse and the touchpad's mouse mode to prevent binding conflicts "
                        "with bridged controllers."),
-                locstr("Turn off both")};
+                locstr("Turn off both"),
+                locstr("Virtual Mouse and the touchpad's mouse mode have turned off. "
+                       "Toggle Virtual Mouse on in the streaming overlay to bring both back.")};
     }
     if (vmouse) {
         return (prompt_words_t) {
                 locstr("Warning: Turn off Virtual Mouse to prevent binding conflicts with bridged controllers."),
-                locstr("Turn off Virtual Mouse")};
+                locstr("Turn off Virtual Mouse"),
+                locstr("Virtual Mouse has turned off. Toggle it back on in the streaming overlay.")};
     }
     return (prompt_words_t) {
             locstr("Warning: Turn off the touchpad's mouse mode to prevent binding conflicts with bridged "
                    "controllers."),
-            locstr("Turn off touchpad mouse mode")};
+            locstr("Turn off touchpad mouse mode"),
+            locstr("The touchpad's mouse mode has turned off. "
+                   "Toggle Virtual Mouse on in the streaming overlay to bring it back.")};
 }
 
 /* The top of the overlay's row of buttons, in pixels down the picture, read
@@ -147,6 +173,78 @@ static lv_coord_t line_width(const char *text, const lv_font_t *font, lv_coord_t
     return size.x;
 }
 
+static void note_remove(void) {
+    if (s_note_timer != NULL) {
+        lv_timer_del(s_note_timer);
+        s_note_timer = NULL;
+    }
+    if (s_note != NULL) {
+        lv_obj_del(s_note);
+        s_note = NULL;
+        commons_log_info("Streaming", "bridge prompt: the message after the button is gone");
+    }
+}
+
+/* ⓘ It is on screen only while what it says is true. Virtual Mouse pressed in
+ * the overlay brings the TV's controls back, and takes this down with them; so
+ * does the stream ending. */
+static void note_tick(lv_timer_t *timer) {
+    (void) timer;
+    if (lv_tick_elaps(s_note_since) >= PROMPT_NOTE_MS || !bridge_override_active() || global == NULL ||
+        global->session == NULL) {
+        note_remove();
+    }
+}
+
+/* The message after the button: the pop-up's box without a button, where the
+ * pop-up was.
+ *
+ * ⭐ THE SAME LOOK WITH NO DIM BEHIND IT. The pop-up is half see-through over a
+ * picture that a dialogue's backdrop has already darkened. This takes no
+ * input, so it has no backdrop, and at the pop-up's own strength it would lie
+ * on the picture at full brightness, where a notice at 40% could not be read
+ * (rhoquinn8217, 2026-09-19). So the two layers are worked into one: it is
+ * given the backdrop's share as well as its own, and comes out as dark and as
+ * see-through as the pop-up looked.
+ * ⓘ On the system layer, like the app's other notices: nothing else that comes
+ * up can lie over it, and a dialogue's dim does not grey it. */
+static void note_show(const char *text, lv_opa_t dim_opa, lv_color_t dim_color) {
+    note_remove();
+    if (text == NULL || text[0] == '\0') {
+        return;
+    }
+    lv_obj_t *note = lv_obj_create(lv_layer_sys());
+    lv_obj_clear_flag(note, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_style_pad_all(note, PROMPT_PAD, 0);
+    lv_obj_set_style_max_width(note, lv_disp_get_hor_res(NULL) - 2 * PROMPT_MARGIN, 0);
+    /* Of what shows, how much is the backdrop's colour and how much the
+     * box's own; the rest is the picture. */
+    const uint32_t dim_share = (uint32_t) dim_opa * (255 - PROMPT_BG_OPA) / 255;
+    const uint32_t box_share = PROMPT_BG_OPA;
+    const lv_color_t box_color = lv_obj_get_style_bg_color(note, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(note, lv_color_mix(box_color, dim_color,
+                                                 (uint8_t) (box_share * 255 / (box_share + dim_share))), 0);
+    lv_obj_set_style_bg_opa(note, (lv_opa_t) LV_MIN(box_share + dim_share, 255), 0);
+
+    lv_obj_t *label = lv_label_create(note);
+    const lv_font_t *font = lv_theme_get_font_small(note);
+    lv_obj_set_style_text_font(label, font, 0);
+    lv_label_set_long_mode(label, LV_LABEL_LONG_WRAP);
+    lv_obj_set_width(label, LV_PCT(100));
+    lv_label_set_text(label, text);
+    /* As wide as its words on one line, as the pop-up is. */
+    const lv_coord_t edges = 2 * PROMPT_PAD + 2 * lv_obj_get_style_border_width(note, LV_PART_MAIN);
+    lv_obj_set_size(note, line_width(text, font, lv_obj_get_style_text_letter_space(label, LV_PART_MAIN)) +
+                          edges + PROMPT_SLACK, LV_SIZE_CONTENT);
+    /* Its lower left corner where the pop-up's was. */
+    lv_obj_align(note, LV_ALIGN_BOTTOM_LEFT, PROMPT_MARGIN, -prompt_lift());
+
+    s_note = note;
+    s_note_since = lv_tick_get();
+    s_note_timer = lv_timer_create(note_tick, PROMPT_NOTE_TICK_MS, NULL);
+    commons_log_info("Streaming", "bridge prompt: the message after the button is up for %d ms", PROMPT_NOTE_MS);
+}
+
 /* The theme's message box, made compact and see-through. ⓘ Everything here is
  * a style of this one box: the theme and the app's other dialogues are as they
  * were. */
@@ -172,6 +270,7 @@ static void make_compact(lv_obj_t *mbox) {
  * again if a second bridge finds a different control on. */
 static void set_words(lv_obj_t *mbox, const prompt_words_t *words) {
     s_action = words->action;
+    s_done = words->done;
     lv_obj_t *label = lv_msgbox_get_text(mbox);
     if (label != NULL) {
         lv_label_set_text(label, words->warning);
@@ -231,10 +330,19 @@ static void on_deleted(lv_event_t *event) {
     }
 }
 
+/* The button was pressed. ⚠️ Call it while the pop-up still stands: the message
+ * that follows takes its look from the pop-up and its backdrop. */
 static void switch_off(const char *by) {
     commons_log_info("Streaming", "bridge prompt: accepted, %s -- the TV's mouse controls go off", by);
-    /* ⓘ Nothing is shown afterwards: the pop-up closing is the answer. */
     bridge_override_set(global != NULL ? global->session : NULL, true);
+    /* ⓘ Said only if it is so: the switch does not act with device bridging
+     * off, though nothing bridges then to raise the pop-up either. */
+    if (!bridge_override_active() || s_mbox == NULL) {
+        return;
+    }
+    const lv_obj_t *backdrop = lv_obj_get_parent(s_mbox);
+    note_show(s_done, lv_obj_get_style_bg_opa(backdrop, LV_PART_MAIN),
+              lv_obj_get_style_bg_color(backdrop, LV_PART_MAIN));
 }
 
 static void on_button(lv_event_t *event) {
@@ -291,6 +399,9 @@ void bridge_prompt_request(void) {
     }
     commons_log_info("Streaming", "bridge prompt: asking for %d s (virtual mouse %s, touchpad mouse %s)",
                      PROMPT_SECONDS, vmouse ? "on" : "off", touchpad_mouse ? "on" : "off");
+    /* ⓘ The message a button left behind is in this same place, and what it
+     * says stopped being true when the controls came back on. */
+    note_remove();
     s_action = words.action;
     show_count();
     s_outcome = NULL;
@@ -343,30 +454,47 @@ bool bridge_prompt_accept(void) {
     return true;
 }
 
-bool bridge_prompt_measure(bridge_prompt_measure_t *out) {
-    if (s_mbox == NULL || out == NULL) {
-        return false;
-    }
+void bridge_prompt_stream_ended(void) {
+    bridge_prompt_dismiss();
+    note_remove();
+}
+
+static void measure(const lv_obj_t *box, const lv_obj_t *label, bridge_prompt_measure_t *out) {
     /* ⓘ Laid out now rather than at the next redraw, so a reading taken the
      * moment it is raised is of the box as it will be drawn. */
-    lv_obj_update_layout(s_mbox);
-    lv_area_t box;
-    lv_obj_get_coords(s_mbox, &box);
-    out->x = box.x1;
-    out->y = box.y1;
-    out->width = lv_area_get_width(&box);
-    out->height = lv_area_get_height(&box);
+    lv_obj_update_layout(box);
+    lv_area_t area;
+    lv_obj_get_coords(box, &area);
+    out->x = area.x1;
+    out->y = area.y1;
+    out->width = lv_area_get_width(&area);
+    out->height = lv_area_get_height(&area);
     out->screen_width = lv_disp_get_hor_res(NULL);
     out->screen_height = lv_disp_get_ver_res(NULL);
     out->buttons_top = overlay_buttons_top();
     out->text_lines = 0;
-    lv_obj_t *label = lv_msgbox_get_text(s_mbox);
     if (label != NULL) {
-        const lv_font_t *font = lv_obj_get_style_text_font(label, LV_PART_MAIN);
-        const lv_coord_t line = lv_font_get_line_height(font) + lv_obj_get_style_text_line_space(label, LV_PART_MAIN);
+        const lv_coord_t space = lv_obj_get_style_text_line_space(label, LV_PART_MAIN);
+        const lv_coord_t line = lv_font_get_line_height(lv_obj_get_style_text_font(label, LV_PART_MAIN)) + space;
         if (line > 0) {
-            out->text_lines = (lv_obj_get_height(label) + lv_obj_get_style_text_line_space(label, LV_PART_MAIN)) / line;
+            out->text_lines = (lv_obj_get_height(label) + space) / line;
         }
     }
+}
+
+bool bridge_prompt_measure(bridge_prompt_measure_t *out) {
+    if (s_mbox == NULL || out == NULL) {
+        return false;
+    }
+    measure(s_mbox, lv_msgbox_get_text(s_mbox), out);
     return true;
+}
+
+int bridge_prompt_note_measure(bridge_prompt_measure_t *out) {
+    if (s_note == NULL || out == NULL) {
+        return -1;
+    }
+    measure(s_note, lv_obj_get_child(s_note, 0), out);
+    const uint32_t shown = lv_tick_elaps(s_note_since);
+    return shown >= PROMPT_NOTE_MS ? 0 : (int) (PROMPT_NOTE_MS - shown);
 }

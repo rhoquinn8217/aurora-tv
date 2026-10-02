@@ -485,9 +485,9 @@ static void controller_dtor(lv_fragment_t *self) {
     if (current_controller == fragment) {
         current_controller = NULL;
     }
-    /* The stream is ending: the question a bridge raised goes with it,
-     * unanswered. */
-    bridge_prompt_dismiss();
+    /* The stream is ending: the pop-up a bridge raised goes with it,
+     * unanswered, and so does the message its button leaves. */
+    bridge_prompt_stream_ended();
     /* The notice is deleted with lv_layer_sys, but the TIMER is not owned by
      * any object -- left running it would fire into a freed fragment. */
     if (fragment->mouse_notice_timer != NULL) {
