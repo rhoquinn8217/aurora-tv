@@ -202,6 +202,12 @@ void ctm_bridge_pointer_feed(int x, int y, int w, int h, unsigned buttons, int w
  * Enter equal the HID usage) through the pointer device's keyboard report. */
 void ctm_bridge_pointer_feed_key(unsigned hid_usage, bool down);
 
+/* The commit of the bridge core this build was made from, as the build
+ * recorded it (src/app/ctmbridge/CMakeLists.txt): twelve hex digits, or
+ * "unknown". A build made against a core folder that is not the recorded commit
+ * says so here too. */
+const char *bridge_core_commit(void);
+
 #ifdef __cplusplus
 }
 #endif

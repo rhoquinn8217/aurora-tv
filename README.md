@@ -116,11 +116,14 @@ installed on the host:
 scripts/build-ipk.sh
 ```
 
-[ctm-bridge-webos](https://github.com/rhoquinn8217/ctm-bridge-webos) must be
-checked out as a **sibling directory**. This app compiles its `ctmbridge` library
-straight from those sources rather than linking a prebuilt one, and the script
-mounts that sibling into the container for exactly that reason. The build stops
-with a message naming the expected path if it is not there.
+[ctm-bridge-webos](https://github.com/rhoquinn8217/ctm-bridge-webos) is a
+**submodule** of this repository, at `third_party/ctm-bridge-webos`, beside the
+six that GuiDev1994's aurora-tv already carries. This app compiles its
+`ctmbridge` library straight from those sources rather than linking a prebuilt
+one, and each commit of this repository records the exact commit of the core it
+is built with. A clone made with `--recursive` has it; in any other checkout,
+`git submodule update --init --recursive` fetches it. If the folder is empty,
+the build stops and names that command.
 
 The bridge core carries its own test suite, run by `tests/run-tests.sh` in that
 repo.

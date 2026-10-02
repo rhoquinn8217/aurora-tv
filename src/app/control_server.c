@@ -291,8 +291,8 @@ static void cmd_status(control_job_t *job)
                          : ctm_bridge_agent_online() ? "online" : "offline";
     char agent[128] = "";
     ctm_bridge_agent(agent, sizeof agent);
-    reply(job, " bridge=%s listener=%s agent=\"%s\"",
-          ctm_bridge_active() ? "running" : "stopped", listener, agent);
+    reply(job, " bridge=%s listener=%s agent=\"%s\" core=%s",
+          ctm_bridge_active() ? "running" : "stopped", listener, agent, bridge_core_commit());
 #endif
     reply(job, " override=%s\n", bridge_override_active() ? "on" : "off");
 }

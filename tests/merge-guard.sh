@@ -88,6 +88,26 @@ for f in $(grep -rl "APP_VERSION" src/app --include='*.c' 2>/dev/null); do
          src/app/ctmbridge/build_number.cmake "$f"
 done
 
+# --- the bridge core -----------------------------------------------------
+# ⭐ THE CORE IS A SUBMODULE, third_party/ctm-bridge-webos, and every commit here
+# records exactly which commit of it is built. It used to be read from the folder
+# beside the checkout, which a clone does not have and which built whatever it
+# held, committed or not. A merge that took upstream's .gitmodules, or brought
+# the old path back into the bridge's build file, would undo that.
+need "the core is declared as a submodule" \
+     .gitmodules "third_party/ctm-bridge-webos"
+need "the build reads the core from inside the tree" \
+     src/app/ctmbridge/CMakeLists.txt "CMAKE_SOURCE_DIR}/third_party/ctm-bridge-webos"
+absent "the build does NOT read the folder beside the checkout" \
+       src/app/ctmbridge/CMakeLists.txt "/\.\./ctm-bridge-webos"
+if git ls-files -s third_party/ctm-bridge-webos 2>/dev/null | grep -q '^160000 '; then
+    pass=$((pass + 1))
+else
+    echo "⛔ LOST: the core's commit is recorded"
+    echo "   expected: third_party/ctm-bridge-webos as a submodule entry (git ls-files -s)"
+    fail=$((fail + 1))
+fi
+
 # --- the settings themselves ---------------------------------------------
 # ⓘ Each is read somewhere that would silently do nothing if the field vanished.
 for s in bridge_enable bridge_gesture bridge_signal_light bridge_signal_rumble \
