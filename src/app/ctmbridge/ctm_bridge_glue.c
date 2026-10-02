@@ -1,8 +1,9 @@
 /* moonlight-facing glue for the embedded CTM bridge core. Replicates the startup
  * the standalone app does in ui_app.c (stopSniff worker -> discover agent ->
  * enumerate -> bridge), minus the LVGL UI. Runs the bridge in-process; the
- * controller threads own the physical HID (hidraw + EVIOCGRAB), so moonlight must
- * have released its own input grip (see the ctm_bridge setting). */
+ * controller threads own the physical HID (hidraw + EVIOCGRAB), so moonlight
+ * stops forwarding a controller while it is bridged: one controller at a time,
+ * by the app (gesture_moonlight_set_excluded in input/ctm_bridge_gesture.c). */
 
 #include "ctm_bridge_glue.h"
 

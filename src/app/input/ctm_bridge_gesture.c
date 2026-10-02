@@ -889,7 +889,24 @@ static stream_input_t *s_stream_input;
  * SEPARATE FROM THE BRIDGE STATE ON PURPOSE. The bridge decides whether a
  * controller is plugged; this only mirrors that decision into the stream so
  * the host stops seeing two of the same pad. Asking the bridge from inside
- * the send path was tried and crashed the app. */
+ * the send path was tried and crashed the app.
+ *
+ * ⭐ PER CONTROLLER, AND THE ONLY SUPPRESSION THERE IS. Until 2026-08-19 a
+ * stream with the bridge enabled announced NO gamepad to the host at all,
+ * because a bridged controller arrives on the PC directly and the host would
+ * otherwise see it twice. That is a sledgehammer, and it cost the case that
+ * matters: two controllers, one bridged, and the other had no route to the
+ * host whatsoever. Someone who never bridged got nothing at all.
+ * rhoquinn8217, 2026-08-19: "when you start a stream, aurora-tv automatically
+ * gives the keyboards, mice and controllers to the PC. No bridging, no extra
+ * steps. It just works. That's how ours should work by default."
+ * ➡️ So a stream behaves exactly as upstream's does until a controller is
+ * bridged, and only that controller changes: bridging is done ON TOP of a
+ * working stream, not instead of one. What gates it is whether the ways of
+ * ASKING are available, the gesture and the USB Bridge panel.
+ * ⓘ The two session-wide switches that did the old thing, no_host_gamepad and
+ * ctm_bridge in the session's config, stayed in upstream's structs unread
+ * until 2026-10-02 and are gone. */
 static void gesture_moonlight_set_excluded(SDL_GameController *controller, bool excluded) {
     if (!s_stream_input || !controller) {
         return;
