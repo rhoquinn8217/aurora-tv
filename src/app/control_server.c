@@ -264,9 +264,10 @@ static void cmd_prompt(control_job_t *job, const char *args)
          * buttons" is read here rather than off a television. */
         bridge_prompt_measure_t m;
         if (bridge_prompt_measure(&m)) {
-            reply(job, "OK prompt=up seconds=%d size=%dx%d at=%d,%d bottom=%d buttons_top=%d lines=%d screen=%dx%d\n",
-                  left, m.width, m.height, m.x, m.y, m.y + m.height, m.buttons_top, m.text_lines,
-                  m.screen_width, m.screen_height);
+            reply(job, "OK prompt=up seconds=%d size=%dx%d at=%d,%d bottom=%d buttons_top=%d lines=%d row=%d "
+                       "selected=%d highlighted=%s screen=%dx%d\n",
+                  left, m.width, m.height, m.x, m.y, m.y + m.height, m.buttons_top, m.text_lines, m.row_width,
+                  m.selected, m.highlighted ? "yes" : "no", m.screen_width, m.screen_height);
         } else {
             reply(job, "OK prompt=up seconds=%d\n", left);
         }

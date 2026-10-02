@@ -7,31 +7,37 @@
  * handling off for the stream (input/bridge_override.h), and this is where a
  * person is offered it: at the moment they bridge a controller.
  *
- * It warns, offers the fix on its one button with a count, and goes away by
- * itself:
+ * It warns, offers the fix and its refusal as two buttons, counts, and goes
+ * away by itself:
  *
  *     Warning: Turn off Virtual Mouse to prevent binding conflicts with
  *     bridged controllers.
- *                                         [ Turn off Virtual Mouse (10) ]
+ *                      [ Turn off Virtual Mouse ]  [ Leave it on (10) ]
  *
  * (rhoquinn8217's wording, 2026-10-01, their second: the first was two
- * sentences and a question, with a button that said OK.) The button switches
- * it off. Circle, Back or Escape, or the count running out, leaves everything
- * as it was. With the touchpad's mouse mode on instead, or as well, the words
- * name that.
+ * sentences and a question, with a button that said OK.) The first button
+ * switches it off. The second leaves everything as it was, and so do Circle,
+ * Back or Escape, and the count running out. With the touchpad's mouse mode on
+ * instead, or as well, the words name that.
+ *
+ * ⭐ THE COUNT IS ON THE BUTTON THE COUNT TAKES. A count on a button reads as
+ * "this happens at zero", and at zero it is left on. It had one button for a
+ * few builds, "Turn off Virtual Mouse (10)": the count sat on the one thing
+ * that did not happen at zero, and nothing on the screen said how to say no.
  *
  * ⓘ IT SITS BOTTOM LEFT, CLEAR OF THE EDGE AND ABOVE THE OVERLAY'S ROW OF
  * BUTTONS, AND IT IS ALL THERE IS. It is in that one place whether the overlay
  * is open or not: a bridge from the USB Bridge panel raises it with the
  * overlay open, and lower down it lay across the overlay's buttons.
  *
- * ⭐ ITS BUTTON IS ANSWERED, IN THE SAME PLACE, AND NOTHING ELSE IS:
+ * ⭐ ITS FIRST BUTTON IS ANSWERED, IN THE SAME PLACE, AND NOTHING ELSE IS:
  *
  *     Virtual Mouse has turned off. Toggle it back on in the streaming overlay.
  *
- * (rhoquinn8217's wording, 2026-10-01.) Only the button raises it. The count
- * running out and a dismissal change nothing and say nothing, and nothing is
- * said when Virtual Mouse brings the TV's controls back. It takes no input,
+ * (rhoquinn8217's wording, 2026-10-01.) Only that button raises it. The second
+ * button, the count running out and a dismissal change nothing and say
+ * nothing, and nothing is said when Virtual Mouse brings the TV's controls
+ * back. It takes no input,
  * goes by itself, and goes at once if what it says stops being true.
  * ⓘ The history: build 460 had a notice at the top left listing everything
  * that had gone off, and another when the Input settings applied again. Both
@@ -39,8 +45,8 @@
  * one came back in the pop-up's place with its own words.
  *
  * ⓘ IT IS WIDE, SHORT AND SEE-THROUGH, because it shares the picture with a
- * game: as wide as its one sentence on one line, so a line of text and a
- * button are all its height, in the small type, with the picture showing
+ * game: as wide as its one sentence on one line, so a line of text and a row
+ * of buttons are all its height, in the small type, with the picture showing
  * through its background. The picture behind it is dimmed while it is up, as
  * behind any dialogue here, and that dim is what says the pop-up has the
  * input. ⛔ So nothing may climb back over the dim while it is up: the USB
@@ -84,7 +90,8 @@ void bridge_prompt_dismiss(void);
 void bridge_prompt_stream_ended(void);
 
 /* For the control port: the seconds left on the count, 0 when it is not up;
- * and its button, pressed without a hand. False when it is not up. */
+ * and its first button, the one that turns it off, pressed without a hand.
+ * False when it is not up. ⓘ Its second button does what a dismissal does. */
 int bridge_prompt_seconds_left(void);
 
 bool bridge_prompt_accept(void);
@@ -101,6 +108,12 @@ typedef struct {
      * bottom edge, y + height, is meant to be short of this. -1 if unknown. */
     int buttons_top;
     int text_lines;
+    /* The pop-up only: how wide its row of two buttons is, which of them is
+     * selected (0 turns it off, 1 leaves it on, -1 neither), and whether the
+     * selected one is drawn highlighted. */
+    int row_width;
+    int selected;
+    bool highlighted;
 } bridge_prompt_measure_t;
 
 bool bridge_prompt_measure(bridge_prompt_measure_t *out);

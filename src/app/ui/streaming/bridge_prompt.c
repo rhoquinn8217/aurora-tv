@@ -48,28 +48,47 @@
 #define PROMPT_PAD LV_DPX(12)
 #define PROMPT_GAP LV_DPX(8)
 #define PROMPT_BG_OPA LV_OPA_50
-/* The room either side of the button's words. */
+/* The room either side of a button's words. */
 #define PROMPT_BUTTON_PAD LV_DPX(12)
 /* ⓘ Pixels over the sentence's own width, so that no rounding in the layout
  * can push its last word onto a second line. */
 #define PROMPT_SLACK 2
 
 /* ⭐ THE MESSAGE AFTER THE BUTTON (rhoquinn8217, 2026-10-01): pressing the
- * button is answered, in the pop-up's own place, with what went off and where
- * to bring it back. Only the button raises it: the count running out and a
- * dismissal change nothing, so they say nothing.
+ * button that turns it off is answered, in the pop-up's own place, with what
+ * went off and where to bring it back. Only that button raises it: the other
+ * button, the count running out and a dismissal change nothing, so they say
+ * nothing.
  * ⓘ It stays this long, the time the app's other timed notice has for two
  * sentences, and takes no input: the game has the controller back at once. */
 #define PROMPT_NOTE_MS 7000
 /* How often it asks whether it is still true. */
 #define PROMPT_NOTE_TICK_MS 250
 
+/* ⭐ TWO BUTTONS, EACH NAMING WHAT IT DOES, AND THE COUNT ON THE ONE THE COUNT
+ * TAKES (rhoquinn8217, 2026-10-01, asking for an opinion and going with it).
+ * It had one, "Turn off Virtual Mouse (10)", and that was wrong twice over:
+ * - nothing on the screen said how to say no. A person waited out the count
+ *   with their controller held, or happened to know that Circle dismisses it
+ * - a count on a button reads as "this happens at zero", and it sat on the
+ *   one thing that does NOT happen at zero
+ * ⓘ Named rather than Yes and No: they can be answered without reading the
+ * sentence, and Yes and No would need a question written beside them.
+ * ⓘ The first is highlighted to start, since it is what the warning advises;
+ * Left and Right move between them, and the library's button row does that. */
+enum {
+    PROMPT_BUTTON_TURN_OFF = 0,
+    PROMPT_BUTTON_LEAVE = 1,
+};
+
 /* What it says, for whichever of the TV's mouse controls is on. */
 typedef struct {
     const char *warning;
-    /* The button, before its count. It names what pressing it does. */
+    /* The first button: what pressing it does. */
     const char *action;
-    /* The message once the button has been pressed. */
+    /* The second button, before its count: what happens if it is left. */
+    const char *leave;
+    /* The message once the first button has been pressed. */
     const char *done;
 } prompt_words_t;
 
@@ -79,15 +98,14 @@ static int s_seconds = 0;
 /* Why it is closing, for the log: set by whoever closes it, and "dismissed"
  * when the theme's own Back handling does. */
 static const char *s_outcome = NULL;
-/* The stream's mouse grab was let go so a pointer can press the button. */
+/* The stream's mouse grab was let go so a pointer can press a button. */
 static bool s_released_grab = false;
 
-/* The button's text is drawn from here every time, so the count is changed in
- * place and the button redrawn; the map itself is never set again, which
- * would take the selection off the button. */
-static const char *s_action = "";
-static char s_button_label[96];
-static const char *s_btn_map[] = {s_button_label, ""};
+/* The buttons' words are drawn from here every time, so the count is changed
+ * in place and the row redrawn; the map itself is never set again. */
+static const char *s_leave = "";
+static char s_leave_label[96];
+static const char *s_btn_map[] = {"", s_leave_label, ""};
 
 /* The message after the button, for the words the pop-up is showing. */
 static const char *s_done = "";
@@ -104,6 +122,7 @@ static prompt_words_t prompt_words(bool vmouse, bool touchpad_mouse) {
                 locstr("Warning: Turn off Virtual Mouse and the touchpad's mouse mode to prevent binding conflicts "
                        "with bridged controllers."),
                 locstr("Turn off both"),
+                locstr("Leave them on"),
                 locstr("Virtual Mouse and the touchpad's mouse mode have turned off. "
                        "Toggle Virtual Mouse on in the streaming overlay to bring both back.")};
     }
@@ -111,12 +130,14 @@ static prompt_words_t prompt_words(bool vmouse, bool touchpad_mouse) {
         return (prompt_words_t) {
                 locstr("Warning: Turn off Virtual Mouse to prevent binding conflicts with bridged controllers."),
                 locstr("Turn off Virtual Mouse"),
+                locstr("Leave it on"),
                 locstr("Virtual Mouse has turned off. Toggle it back on in the streaming overlay.")};
     }
     return (prompt_words_t) {
             locstr("Warning: Turn off the touchpad's mouse mode to prevent binding conflicts with bridged "
                    "controllers."),
             locstr("Turn off touchpad mouse mode"),
+            locstr("Leave it on"),
             locstr("The touchpad's mouse mode has turned off. "
                    "Toggle Virtual Mouse on in the streaming overlay to bring it back.")};
 }
@@ -269,35 +290,43 @@ static void make_compact(lv_obj_t *mbox) {
  * on one line, the button as wide as its own words. For when it is made, and
  * again if a second bridge finds a different control on. */
 static void set_words(lv_obj_t *mbox, const prompt_words_t *words) {
-    s_action = words->action;
+    s_btn_map[PROMPT_BUTTON_TURN_OFF] = words->action;
+    s_leave = words->leave;
     s_done = words->done;
+    /* The row of buttons first: the box may not be narrower than it. */
+    lv_coord_t row_width = 0;
+    lv_obj_t *btns = lv_msgbox_get_btns(mbox);
+    if (btns != NULL) {
+        /* ⓘ The two are the same width, the wider one's words and the room
+         * either side: the library shares a row out equally. The count is
+         * taken at its widest, so the row keeps one size while it counts
+         * down. ⓘ The library's own width for a message box's buttons is a
+         * fixed one, which these words do not fit in. */
+        const lv_font_t *font = lv_obj_get_style_text_font(btns, LV_PART_ITEMS);
+        const lv_coord_t space = lv_obj_get_style_text_letter_space(btns, LV_PART_ITEMS);
+        char widest[sizeof(s_leave_label)];
+        snprintf(widest, sizeof(widest), "%s (%d)", words->leave, PROMPT_SECONDS);
+        const lv_coord_t button = LV_MAX(line_width(words->action, font, space), line_width(widest, font, space)) +
+                                  2 * PROMPT_BUTTON_PAD;
+        row_width = 2 * button + lv_obj_get_style_pad_column(btns, LV_PART_MAIN) +
+                    lv_obj_get_style_pad_left(btns, LV_PART_MAIN) + lv_obj_get_style_pad_right(btns, LV_PART_MAIN);
+        lv_obj_set_width(btns, row_width);
+        lv_obj_invalidate(btns);
+    }
     lv_obj_t *label = lv_msgbox_get_text(mbox);
     if (label != NULL) {
         lv_label_set_text(label, words->warning);
         const lv_coord_t edges = lv_obj_get_style_pad_left(mbox, LV_PART_MAIN) +
                                  lv_obj_get_style_pad_right(mbox, LV_PART_MAIN) +
                                  2 * lv_obj_get_style_border_width(mbox, LV_PART_MAIN);
-        lv_obj_set_width(mbox, line_width(words->warning, lv_obj_get_style_text_font(label, LV_PART_MAIN),
-                                          lv_obj_get_style_text_letter_space(label, LV_PART_MAIN)) +
-                               edges + PROMPT_SLACK);
-    }
-    lv_obj_t *btns = lv_msgbox_get_btns(mbox);
-    if (btns != NULL) {
-        /* ⓘ For the count at its widest, so the button keeps one size while
-         * it counts down. The library gives a message box's button a fixed
-         * width, which these words do not fit in. */
-        char widest[sizeof(s_button_label)];
-        snprintf(widest, sizeof(widest), "%s (%d)", words->action, PROMPT_SECONDS);
-        lv_obj_set_width(btns, line_width(widest, lv_obj_get_style_text_font(btns, LV_PART_ITEMS),
-                                          lv_obj_get_style_text_letter_space(btns, LV_PART_ITEMS)) +
-                               2 * PROMPT_BUTTON_PAD +
-                               lv_obj_get_style_pad_left(btns, LV_PART_MAIN) +
-                               lv_obj_get_style_pad_right(btns, LV_PART_MAIN));
+        const lv_coord_t sentence = line_width(words->warning, lv_obj_get_style_text_font(label, LV_PART_MAIN),
+                                               lv_obj_get_style_text_letter_space(label, LV_PART_MAIN));
+        lv_obj_set_width(mbox, LV_MAX(sentence, row_width) + edges + PROMPT_SLACK);
     }
 }
 
 static void show_count(void) {
-    snprintf(s_button_label, sizeof(s_button_label), "%s (%d)", s_action, s_seconds);
+    snprintf(s_leave_label, sizeof(s_leave_label), "%s (%d)", s_leave, s_seconds);
     if (s_mbox != NULL) {
         lv_obj_t *btns = lv_msgbox_get_btns(s_mbox);
         if (btns != NULL) {
@@ -350,8 +379,17 @@ static void on_button(lv_event_t *event) {
     if (mbox != s_mbox || s_outcome != NULL) {
         return;
     }
-    s_outcome = "the button was pressed";
-    switch_off("the button was pressed");
+    /* ⓘ The row sends the number of the button with the event. */
+    const uint32_t *sent = lv_event_get_param(event);
+    const uint32_t pressed = sent != NULL ? *sent : lv_msgbox_get_active_btn(mbox);
+    /* ⛔ Only the first button changes anything. Anything else, a number that
+     * is not a button's included, leaves it on. */
+    if (pressed == PROMPT_BUTTON_TURN_OFF) {
+        s_outcome = "its first button was pressed";
+        switch_off("its first button was pressed");
+    } else {
+        s_outcome = "its second button was pressed, nothing changed";
+    }
     /* ⓘ Not deleted inside its own event: the box is closed on the next pass. */
     lv_msgbox_close_async(mbox);
 }
@@ -402,7 +440,10 @@ void bridge_prompt_request(void) {
     /* ⓘ The message a button left behind is in this same place, and what it
      * says stopped being true when the controls came back on. */
     note_remove();
-    s_action = words.action;
+    /* ⓘ Both buttons have their words before the box is made: the library
+     * counts the buttons by their words, and an empty one ends the row. */
+    s_btn_map[PROMPT_BUTTON_TURN_OFF] = words.action;
+    s_leave = words.leave;
     show_count();
     s_outcome = NULL;
     s_mbox = lv_msgbox_create(NULL, NULL, words.warning, s_btn_map, false);
@@ -413,11 +454,16 @@ void bridge_prompt_request(void) {
     /* Bottom left, off the middle of the picture, and above the overlay's row
      * of buttons (rhoquinn8217, 2026-10-01). */
     lv_obj_align(s_mbox, LV_ALIGN_BOTTOM_LEFT, PROMPT_MARGIN, -prompt_lift());
-    /* The one button is the answer, so it is selected from the start: a press
-     * of Cross, OK or Enter takes it without an arrow first. */
+    /* The first button is what the warning advises, so it is the one selected
+     * from the start: a press of Cross, OK or Enter takes it without an arrow
+     * first. ⭐ And it is SHOWN as selected. The highlight is the row's
+     * focus-key state, which is set here outright rather than left to how the
+     * row came by its focus: with two buttons, a row with no highlight gives
+     * no way to know which one Cross is about to press. */
     lv_obj_t *btns = lv_msgbox_get_btns(s_mbox);
     if (btns != NULL) {
-        lv_btnmatrix_set_selected_btn(btns, 0);
+        lv_btnmatrix_set_selected_btn(btns, PROMPT_BUTTON_TURN_OFF);
+        lv_obj_add_state(btns, LV_STATE_FOCUS_KEY);
     }
     s_timer = lv_timer_create(on_second, 1000, NULL);
     /* A pointer has to be able to press it. The overlay and the on-screen
@@ -473,6 +519,9 @@ static void measure(const lv_obj_t *box, const lv_obj_t *label, bridge_prompt_me
     out->screen_height = lv_disp_get_ver_res(NULL);
     out->buttons_top = overlay_buttons_top();
     out->text_lines = 0;
+    out->row_width = 0;
+    out->selected = -1;
+    out->highlighted = false;
     if (label != NULL) {
         const lv_coord_t space = lv_obj_get_style_text_line_space(label, LV_PART_MAIN);
         const lv_coord_t line = lv_font_get_line_height(lv_obj_get_style_text_font(label, LV_PART_MAIN)) + space;
@@ -487,6 +536,13 @@ bool bridge_prompt_measure(bridge_prompt_measure_t *out) {
         return false;
     }
     measure(s_mbox, lv_msgbox_get_text(s_mbox), out);
+    lv_obj_t *btns = lv_msgbox_get_btns(s_mbox);
+    if (btns != NULL) {
+        out->row_width = lv_obj_get_width(btns);
+        const uint16_t selected = lv_btnmatrix_get_selected_btn(btns);
+        out->selected = selected == LV_BTNMATRIX_BTN_NONE ? -1 : (int) selected;
+        out->highlighted = lv_obj_has_state(btns, LV_STATE_FOCUS_KEY);
+    }
     return true;
 }
 
