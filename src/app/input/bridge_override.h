@@ -19,7 +19,7 @@
  * mode (the touchpad is sent as a touchpad), multi-touch gestures, natural
  * scrolling and battery reports to the host. ⓘ The last three never reach a
  * bridged pad anyway; they are included so that everything the override leaves
- * off is off for every pad, and the notice that lists them is true.
+ * off is off for every pad.
  *
  * ⛔ NOT THE KEYBOARD (rhoquinn8217, 2026-09-30). It used to switch upstream
  * v1.3.0's USB keyboard grab off as well, because that grab held a keyboard's

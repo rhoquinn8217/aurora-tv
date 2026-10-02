@@ -208,10 +208,9 @@ static void cmd_set(control_job_t *job, const char *args)
     }
     /* ⭐ Bridge Override by name, which a person never sees: the question a
      * bridge raises switches it on and Virtual Mouse switches it off. Here
-     * it is set directly, with the notice either of those shows. */
+     * it is set directly. Nothing is shown on the TV, as with either of those. */
     if (strcasecmp(name, "override") == 0) {
         bridge_override_set(s_app->session, on);
-        streaming_bridge_override_changed();
         char state[256];
         bridge_override_describe(s_app->session != NULL ? session_get_input(s_app->session) : NULL,
                                  state, sizeof state);

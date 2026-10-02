@@ -21,6 +21,10 @@
  * which was set for reading two sentences: this one is read and then acted on. */
 #define PROMPT_SECONDS 10
 
+/* How far it sits from the left and the bottom of the picture: in the corner,
+ * and clear of both edges. 60 pixels of a 1080-line picture. */
+#define PROMPT_MARGIN LV_DPX(30)
+
 static lv_obj_t *s_mbox = NULL;
 static lv_timer_t *s_timer = NULL;
 static int s_seconds = 0;
@@ -88,9 +92,8 @@ static void on_deleted(lv_event_t *event) {
 
 static void switch_off(const char *by) {
     commons_log_info("Streaming", "bridge prompt: OK, %s -- the TV's mouse controls go off", by);
+    /* ⓘ Nothing is shown afterwards: the pop-up closing is the answer. */
     bridge_override_set(global != NULL ? global->session : NULL, true);
-    /* Says what went off, by the names the Input settings use. */
-    streaming_bridge_override_changed();
 }
 
 static void on_button(lv_event_t *event) {
@@ -152,7 +155,8 @@ void bridge_prompt_request(void) {
     s_mbox = lv_msgbox_create(NULL, NULL, text, s_btn_map, false);
     lv_obj_add_event_cb(s_mbox, on_button, LV_EVENT_VALUE_CHANGED, NULL);
     lv_obj_add_event_cb(s_mbox, on_deleted, LV_EVENT_DELETE, NULL);
-    lv_obj_center(s_mbox);
+    /* Bottom left, off the middle of the picture (rhoquinn8217, 2026-10-01). */
+    lv_obj_align(s_mbox, LV_ALIGN_BOTTOM_LEFT, PROMPT_MARGIN, -PROMPT_MARGIN);
     /* The one button is the answer, so it is selected from the start: a press
      * of Cross, OK or Enter takes it without an arrow first. */
     lv_obj_t *btns = lv_msgbox_get_btns(s_mbox);

@@ -390,10 +390,8 @@ bool streaming_refresh_stats() {
     return true;
 }
 
-/* T-170. The warning goes away on its own after this long. If a second
- * controller is bridged while it is still up, the timer is RESET rather than a
- * second notice raised -- bridging three pads at once should read as one
- * warning, not three.
+/* The top-left notice goes away on its own after this long. A second message
+ * while it is still up RESETS the timer rather than raising a second notice.
  *
  * 7s, up from 5 (rhoquinn8217, 2026-09-19, on the first run): it is two
  * sentences and one of them names where to go, so it wants reading, not
@@ -413,10 +411,11 @@ static void mouse_notice_expired(lv_timer_t *timer) {
     lv_timer_del(timer);
 }
 
-/* The top-left notice, with whatever it has to say. Shared by the mouse-mode
- * warning and Bridge Override, since both are the same kind of message about
- * the same buttons. A second message while one is up replaces its text and
- * restarts its time, rather than stacking. */
+/* The top-left notice, with whatever it has to say. A second message while one
+ * is up replaces its text and restarts its time, rather than stacking.
+ * ⓘ Only the DS5-USBIP button uses it now. Bridging a controller with the TV's
+ * mouse controls on raises a question instead (bridge_prompt.h), and nothing is
+ * said when that is answered or when Virtual Mouse undoes it. */
 static void show_timed_notice(streaming_controller_t *controller, const char *text) {
     if (controller == NULL || controller->mouse_notice == NULL) {
         return;
@@ -451,23 +450,6 @@ void streaming_mouse_mode_warn(void) {
     /* ⓘ Whether there is anything to ask, and every branch of that, is the
      * pop-up's own to decide and to log. */
     bridge_prompt_request();
-}
-
-void streaming_bridge_override_changed(void) {
-    streaming_controller_t *controller = current_controller;
-    if (controller == NULL || controller->mouse_notice == NULL) {
-        return;
-    }
-    /* ⭐ It says what it switched off, by the names the Input settings use,
-     * because the Input menu itself still shows the person's own choices.
-     * ⓘ And never the switch's own name: a person is only ever asked about
-     * Virtual Mouse (bridge_prompt.h). */
-    const bool on = bridge_override_active();
-    commons_log_info("Streaming", "Bridge Override notice: %s", on ? "on" : "off");
-    show_timed_notice(controller, on
-            ? locstr("Virtual Mouse, touchpad mouse, multi-touch, natural scrolling\n"
-                     "and battery reporting are off.")
-            : locstr("The Input settings apply again."));
 }
 
 void streaming_notice_show(const char *message) {
@@ -820,12 +802,10 @@ static void toggle_vmouse(lv_event_t *event) {
  * goes off and the virtual mouse comes on.
  * ⭐ Since 2026-10-01 this is the ONLY way a person switches it off. It is
  * switched on by the question a bridge raises (bridge_prompt.h) and has no
- * button of its own. The notice says the Input settings are back, because
- * the override's other switches came back with the mouse. */
+ * button of its own. ⓘ Nothing is said about it: the override's other
+ * switches come back with the mouse, without a notice. */
 static void vmouse_ends_override(streaming_controller_t *controller) {
     bridge_override_release_for_vmouse(controller->global->session);
-    show_timed_notice(controller,
-                      locstr("Virtual Mouse is on. The Input settings apply again."));
 }
 
 /* ⭐ THE DS5-USBIP BUTTON (rhoquinn8217, 2026-09-28: "I want the DS5-USBIP

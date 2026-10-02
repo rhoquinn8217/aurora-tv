@@ -18,6 +18,12 @@
  * Escape, or the count running out, leaves everything as it was. With the
  * touchpad's mouse mode on instead, or as well, the text names that.
  *
+ * ⓘ IT SITS BOTTOM LEFT, CLEAR OF THE EDGES, AND IT IS ALL THERE IS. Nothing is
+ * shown once it is answered, and nothing when Virtual Mouse brings the TV's
+ * controls back. A notice said what had gone off, and another that the Input
+ * settings applied again, for one build; rhoquinn8217 took both out the same
+ * day, "for now", to have the pop-up alone.
+ *
  * ⛔ IT MUST NOT NEED ANYONE. This was a two-button dialog once, and became a
  * notice that fades because Auto Bridge takes several devices as a stream
  * starts, with nobody there to answer. The count is what lets it be a question
