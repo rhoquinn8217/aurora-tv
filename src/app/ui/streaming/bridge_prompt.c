@@ -21,9 +21,17 @@
  * which was set for reading two sentences: this one is read and then acted on. */
 #define PROMPT_SECONDS 10
 
-/* How far it sits from the left and the bottom of the picture: in the corner,
- * and clear of both edges. 60 pixels of a 1080-line picture. */
+/* How far it sits from the left of the picture: in the corner, and clear of the
+ * edge. 60 pixels of a 1920-wide picture. ⓘ Also how far from the bottom, when
+ * there is no row of buttons to sit above. */
 #define PROMPT_MARGIN LV_DPX(30)
+
+/* ⭐ IT SITS ABOVE THE OVERLAY'S ROW OF BUTTONS, by this much (rhoquinn8217,
+ * 2026-10-01: a little higher, to clear them). A bridge from the USB Bridge
+ * panel raises it with the overlay open, and at the margin alone it lay across
+ * the top of Full keyboard, Virtual Mouse and the rest. ⓘ The same place
+ * whether the overlay is open or not, so it is found where it was last time. */
+#define PROMPT_CLEAR LV_DPX(10)
 
 /* ⭐ WIDE, SHORT AND SEE-THROUGH (rhoquinn8217, 2026-10-01): it shares the
  * picture with a game, so it is a strip along the bottom, not a block out of
@@ -85,6 +93,51 @@ static prompt_words_t prompt_words(bool vmouse, bool touchpad_mouse) {
             locstr("Warning: Turn off the touchpad's mouse mode to prevent binding conflicts with bridged "
                    "controllers."),
             locstr("Turn off touchpad mouse mode")};
+}
+
+/* The top of the overlay's row of buttons, in pixels down the picture, read
+ * off the buttons themselves so that it follows whatever that row becomes.
+ * ⓘ The overlay is laid out whether or not it is shown, so this answers the
+ * same either way. -1 when there is no streaming screen to ask. */
+static lv_coord_t overlay_buttons_top(void) {
+    lv_fragment_t *top = global != NULL && global->ui.fm != NULL ? lv_fragment_manager_get_top(global->ui.fm) : NULL;
+    if (top == NULL || top->cls != &streaming_controller_class) {
+        return -1;
+    }
+    const streaming_controller_t *controller = (const streaming_controller_t *) top;
+    if (controller->actions == NULL) {
+        return -1;
+    }
+    lv_obj_update_layout(controller->actions);
+    lv_coord_t row_top = -1;
+    const uint32_t count = lv_obj_get_child_cnt(controller->actions);
+    for (uint32_t i = 0; i < count; i++) {
+        const lv_obj_t *child = lv_obj_get_child(controller->actions, (int32_t) i);
+        /* ⓘ Buttons only: the row also holds a spacer, which is not one, and
+         * buttons that are hidden with device bridging switched off. */
+        if (!lv_obj_check_type(child, &lv_btn_class) || lv_obj_has_flag(child, LV_OBJ_FLAG_HIDDEN)) {
+            continue;
+        }
+        lv_area_t area;
+        lv_obj_get_coords(child, &area);
+        if (row_top < 0 || area.y1 < row_top) {
+            row_top = area.y1;
+        }
+    }
+    return row_top;
+}
+
+/* How far its bottom edge sits above the bottom of the picture. */
+static lv_coord_t prompt_lift(void) {
+    const lv_coord_t screen = lv_disp_get_ver_res(NULL);
+    const lv_coord_t buttons = overlay_buttons_top();
+    /* ⛔ Only a row that is where a row along the bottom would be. A layout
+     * not worked out yet reads as zero, and trusting that would send the
+     * pop-up off the top of the picture. */
+    if (buttons > screen / 2 && buttons < screen) {
+        return screen - buttons + PROMPT_CLEAR;
+    }
+    return PROMPT_MARGIN;
 }
 
 /* How wide some words come out on one line. */
@@ -246,8 +299,9 @@ void bridge_prompt_request(void) {
     lv_obj_add_event_cb(s_mbox, on_deleted, LV_EVENT_DELETE, NULL);
     make_compact(s_mbox);
     set_words(s_mbox, &words);
-    /* Bottom left, off the middle of the picture (rhoquinn8217, 2026-10-01). */
-    lv_obj_align(s_mbox, LV_ALIGN_BOTTOM_LEFT, PROMPT_MARGIN, -PROMPT_MARGIN);
+    /* Bottom left, off the middle of the picture, and above the overlay's row
+     * of buttons (rhoquinn8217, 2026-10-01). */
+    lv_obj_align(s_mbox, LV_ALIGN_BOTTOM_LEFT, PROMPT_MARGIN, -prompt_lift());
     /* The one button is the answer, so it is selected from the start: a press
      * of Cross, OK or Enter takes it without an arrow first. */
     lv_obj_t *btns = lv_msgbox_get_btns(s_mbox);
@@ -304,6 +358,7 @@ bool bridge_prompt_measure(bridge_prompt_measure_t *out) {
     out->height = lv_area_get_height(&box);
     out->screen_width = lv_disp_get_hor_res(NULL);
     out->screen_height = lv_disp_get_ver_res(NULL);
+    out->buttons_top = overlay_buttons_top();
     out->text_lines = 0;
     lv_obj_t *label = lv_msgbox_get_text(s_mbox);
     if (label != NULL) {

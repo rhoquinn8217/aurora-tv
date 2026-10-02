@@ -615,7 +615,20 @@ static void ctm_close_click_cb(lv_event_t *e) {
  * nothing acts on Select at all. On a lone corner that is wrong twice over --
  * it has no neighbour to move to, and Select is the only thing anyone will
  * press on it. ➡️ Up and Down still walk the group; Left and Right do nothing,
- * because there is nothing beside it; Select and Back both close. */
+ * because there is nothing beside it; Select and Back both close.
+ *
+ * ⛔⛔ SELECT CLOSES IT WHEN THE BUTTON COMES UP, NOT WHEN IT GOES DOWN, and it
+ * is NOT handled here. It used to be: this closed the panel on the key event,
+ * which arrives as Select goes DOWN. Closing hands the input back to the
+ * overlay, whose USB Bridge button still has the focus, since that is what
+ * opened the panel. The same press then came UP, the click that a release
+ * makes went to whatever had the focus by then, and that was USB Bridge: the
+ * panel closed and opened again (rhoquinn8217, 2026-10-01).
+ * ➡️ Select reaches the corner as a click, when the button comes up
+ * (ctm_close_click_cb), with nothing of the press left over to land anywhere
+ * else. Back is safe here because a release of Back makes no click.
+ * ⚠️ The rule it follows: nothing that moves the input to another group may
+ * act on Select going down. */
 static void ctm_close_key_cb(lv_event_t *e) {
     switch (lv_event_get_key(e)) {
         case LV_KEY_UP:
@@ -626,7 +639,6 @@ static void ctm_close_key_cb(lv_event_t *e) {
             lv_group_focus_next(s_ctm_nav_group);
             lv_obj_scroll_to_view(lv_group_get_focused(s_ctm_nav_group), LV_ANIM_ON);
             break;
-        case LV_KEY_ENTER:
         case LV_KEY_ESC:
             ctm_request_close();
             break;

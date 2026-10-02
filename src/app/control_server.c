@@ -257,13 +257,16 @@ static void cmd_prompt(control_job_t *job, const char *args)
     }
     const int left = bridge_prompt_seconds_left();
     if (left > 0) {
-        /* ⓘ Its shape as well as its count: `at` is its top left corner, and
-         * `lines` how many the warning takes, so "one line, in from the corner"
-         * is read here rather than off a television. */
+        /* ⓘ Its shape as well as its count: `at` is its top left corner,
+         * `bottom` its lower edge, `buttons_top` the top of the overlay's row
+         * of buttons that it has to stay above, and `lines` how many the
+         * warning takes. So "one line, in from the corner, clear of the
+         * buttons" is read here rather than off a television. */
         bridge_prompt_measure_t m;
         if (bridge_prompt_measure(&m)) {
-            reply(job, "OK prompt=up seconds=%d size=%dx%d at=%d,%d lines=%d screen=%dx%d\n", left,
-                  m.width, m.height, m.x, m.y, m.text_lines, m.screen_width, m.screen_height);
+            reply(job, "OK prompt=up seconds=%d size=%dx%d at=%d,%d bottom=%d buttons_top=%d lines=%d screen=%dx%d\n",
+                  left, m.width, m.height, m.x, m.y, m.y + m.height, m.buttons_top, m.text_lines,
+                  m.screen_width, m.screen_height);
         } else {
             reply(job, "OK prompt=up seconds=%d\n", left);
         }

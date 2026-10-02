@@ -20,7 +20,10 @@
  * as it was. With the touchpad's mouse mode on instead, or as well, the words
  * name that.
  *
- * ⓘ IT SITS BOTTOM LEFT, CLEAR OF THE EDGES, AND IT IS ALL THERE IS. Nothing is
+ * ⓘ IT SITS BOTTOM LEFT, CLEAR OF THE EDGE AND ABOVE THE OVERLAY'S ROW OF
+ * BUTTONS, AND IT IS ALL THERE IS. It is in that one place whether the overlay
+ * is open or not: a bridge from the USB Bridge panel raises it with the
+ * overlay open, and lower down it lay across the overlay's buttons. Nothing is
  * shown once it is answered, and nothing when Virtual Mouse brings the TV's
  * controls back. A notice said what had gone off, and another that the Input
  * settings applied again, for one build; rhoquinn8217 took both out the same
@@ -82,6 +85,9 @@ bool bridge_prompt_accept(void);
 typedef struct {
     int x, y, width, height;
     int screen_width, screen_height;
+    /* The top of the overlay's row of buttons, which it sits above: its
+     * bottom edge, y + height, is meant to be short of this. -1 if unknown. */
+    int buttons_top;
     int text_lines;
 } bridge_prompt_measure_t;
 
