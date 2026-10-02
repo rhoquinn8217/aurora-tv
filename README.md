@@ -17,7 +17,7 @@ including **microphone support on USB**, **auto bridging** and
 functions and features work the same way. Refer to the original for support on
 those.
 
-The modified version of ctm-bridge-webos requires
+The modified version of ctm-bridge-webos expects
 [DS5-USBIP](https://github.com/rhoquinn8217/CTM-USBIP) running on your host PC
 to bridge controllers.
 
