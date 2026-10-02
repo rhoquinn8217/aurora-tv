@@ -103,6 +103,23 @@ done
 need "bridged controllers excluded from Moonlight" \
      src/app/stream/input/session_gamepad.c "moonlightExcludedMask"
 
+# ⚠️ WE LEAN ON UPSTREAM'S OWN CODE HERE. The announce at stream start has no
+# check of ours any more: session_input_started() is upstream's text, and an
+# excluded controller is refused inside stream_input_send_gamepad_arrive(),
+# which asks stream_input_gamepad_sends_moonlight(), where the mask is read.
+# If a release stops the arrive from asking, a controller that is still
+# bridged when a stream reconnects is announced again and the host has two.
+if awk '/^void stream_input_send_gamepad_arrive/,/^}/' \
+       src/app/stream/input/session_gamepad.c 2>/dev/null |
+   grep -q "stream_input_gamepad_sends_moonlight"; then
+    pass=$((pass + 1))
+else
+    echo "⛔ LOST: the announce asks whether a controller is excluded"
+    echo "   expected inside stream_input_send_gamepad_arrive() in"
+    echo "   src/app/stream/input/session_gamepad.c : stream_input_gamepad_sends_moonlight"
+    fail=$((fail + 1))
+fi
+
 # --- the overlay input hold ----------------------------------------------
 # ⓘ Took three attempts to get right; the condition is easy to lose in a merge
 # because it sits inside a function of his that he also edits.

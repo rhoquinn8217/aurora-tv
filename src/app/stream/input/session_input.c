@@ -155,33 +155,14 @@ void session_input_interrupt(stream_input_t *input) {
 
 void session_input_started(stream_input_t *input) {
     input->started = true;
-    if (input->view_only) {
-        return;
+    if (!input->view_only) {
+        stream_input_touchpad_mouse_init(input);
     }
     /* Pick up pads whose JOYDEVICEADDED never reached us (2nd DualSense on webOS). */
     app_input_scan_gamepads(input->input);
-    /* ⓘ Upstream v1.2.9 guarded its touchpad-mouse init with `if (!view_only)`.
-     * Our early return above says the same thing for the whole function, so the
-     * call simply sits after it. ⚠️ Neither guard existed at the fork: we each
-     * added one independently, ours covering the announce loop below and his
-     * covering this init. */
-    stream_input_touchpad_mouse_init(input);
-    /* Announce every controller EXCEPT ones already handed to the bridge.
-     *
-     * This returned early whenever the bridge was enabled, announcing nothing
-     * at all -- the comment said that prevented a phantom pad on the host. It
-     * does not. Measured on C1 2026-08-10: with nothing announced, both pads
-     * still appeared in Windows the moment a stick moved, because ordinary
-     * input events carry a mask the host builds pads from. The suppression
-     * removed the announcement and not the pad, and left the pad impossible
-     * to retire, since the remove path only acts on something announced. */
-
     for (int i = 0, j = app_input_get_max_gamepads(input->input); i < j; ++i) {
         app_gamepad_state_t *gamepad = app_input_gamepad_state_by_index(input->input, i);
         if (gamepad == NULL) {
-            continue;
-        }
-        if (input->moonlightExcludedMask & (1u << gamepad->gs_id)) {
             continue;
         }
         stream_input_send_gamepad_arrive(input, gamepad);
