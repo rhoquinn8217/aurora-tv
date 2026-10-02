@@ -1036,3 +1036,12 @@ void ctm_bridge_agent(char *out, size_t out_len)
      * 2026-08-20. ➡️ Callers ask ctm_bridge_agent_online() for the state. */
     snprintf(out, out_len, "%s", g_agent_host[0] ? g_agent_host : "not set");
 }
+
+#ifndef BRIDGE_CORE_COMMIT
+#define BRIDGE_CORE_COMMIT "unknown"
+#endif
+
+const char *bridge_core_commit(void)
+{
+    return BRIDGE_CORE_COMMIT;
+}
