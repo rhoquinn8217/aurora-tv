@@ -24,6 +24,13 @@
  * settings applied again, for one build; rhoquinn8217 took both out the same
  * day, "for now", to have the pop-up alone.
  *
+ * ⓘ IT IS SMALL AND SEE-THROUGH, because it shares the picture with a game:
+ * narrower than the app's other dialogues, in the small type, with the picture
+ * showing through its background. The picture behind it is dimmed while it is
+ * up, as behind any dialogue here, and that dim is what says the pop-up has
+ * the input. ⛔ So nothing may climb back over the dim while it is up: the USB
+ * Bridge panel did, and now waits behind a dialogue (ctm_panel.c).
+ *
  * ⛔ IT MUST NOT NEED ANYONE. This was a two-button dialog once, and became a
  * notice that fades because Auto Bridge takes several devices as a stream
  * starts, with nobody there to answer. The count is what lets it be a question

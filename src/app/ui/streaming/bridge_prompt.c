@@ -25,6 +25,20 @@
  * and clear of both edges. 60 pixels of a 1080-line picture. */
 #define PROMPT_MARGIN LV_DPX(30)
 
+/* ⭐ SMALL, AND SEE-THROUGH (rhoquinn8217, 2026-10-01): it shares the picture
+ * with a game. As the theme makes a message box it was 768 pixels wide of a
+ * 1920-wide picture; this is 576, and shorter with it.
+ * - three tenths of the picture's width, where the theme gives four at least
+ * - the small type the notices use, where the theme gives the normal one
+ * - half the theme's padding, and a smaller gap above the button
+ * - the background at half strength, so the picture shows through it
+ * ⚠️ None of it has been measured on a set: the widths are the percentages
+ * worked out, and how tall it comes out depends on where the text wraps. */
+#define PROMPT_WIDTH_PCT 30
+#define PROMPT_PAD LV_DPX(12)
+#define PROMPT_GAP LV_DPX(8)
+#define PROMPT_BG_OPA LV_OPA_50
+
 static lv_obj_t *s_mbox = NULL;
 static lv_timer_t *s_timer = NULL;
 static int s_seconds = 0;
@@ -41,19 +55,41 @@ static char s_ok_label[32];
 static const char *s_btn_map[] = {s_ok_label, ""};
 
 static const char *prompt_text(bool vmouse, bool touchpad_mouse) {
+    /* ⓘ The question starts a line of its own, with no blank line above it:
+     * a blank line is a line of height the box does not have to spare. */
     if (vmouse && touchpad_mouse) {
         return locstr("Warning: Binding conflicts will occur with Virtual Mouse on and the touchpad sent as a mouse. "
-                      "It is recommended to turn both off for bridged controllers.\n\n"
+                      "It is recommended to turn both off for bridged controllers.\n"
                       "Turn off both?");
     }
     if (vmouse) {
         return locstr("Warning: Binding conflicts will occur with Virtual Mouse on. "
-                      "It is recommended to turn off Virtual Mouse for bridged controllers.\n\n"
+                      "It is recommended to turn off Virtual Mouse for bridged controllers.\n"
                       "Turn off Virtual Mouse?");
     }
     return locstr("Warning: Binding conflicts will occur with the touchpad sent as a mouse. "
-                  "It is recommended to turn that off for bridged controllers.\n\n"
+                  "It is recommended to turn that off for bridged controllers.\n"
                   "Turn off the touchpad's mouse mode?");
+}
+
+/* The theme's message box, made small and see-through. ⓘ Everything here is a
+ * style of this one box: the theme and the app's other dialogues are as they
+ * were. */
+static void make_compact(lv_obj_t *mbox) {
+    /* ⛔ The theme puts a least width of 40% on every message box, as a style
+     * of the box's own. It has to come off first, or a width under it is
+     * ignored. */
+    lv_obj_set_style_min_width(mbox, 0, 0);
+    lv_obj_set_width(mbox, LV_PCT(PROMPT_WIDTH_PCT));
+    lv_obj_set_style_pad_all(mbox, PROMPT_PAD, 0);
+    lv_obj_set_style_pad_row(mbox, PROMPT_GAP, 0);
+    /* ⓘ The border stays solid, so the box keeps an edge over any picture,
+     * and so does the button. */
+    lv_obj_set_style_bg_opa(mbox, PROMPT_BG_OPA, 0);
+    lv_obj_t *label = lv_msgbox_get_text(mbox);
+    if (label != NULL) {
+        lv_obj_set_style_text_font(label, lv_theme_get_font_small(mbox), 0);
+    }
 }
 
 static void show_count(void) {
@@ -155,6 +191,7 @@ void bridge_prompt_request(void) {
     s_mbox = lv_msgbox_create(NULL, NULL, text, s_btn_map, false);
     lv_obj_add_event_cb(s_mbox, on_button, LV_EVENT_VALUE_CHANGED, NULL);
     lv_obj_add_event_cb(s_mbox, on_deleted, LV_EVENT_DELETE, NULL);
+    make_compact(s_mbox);
     /* Bottom left, off the middle of the picture (rhoquinn8217, 2026-10-01). */
     lv_obj_align(s_mbox, LV_ALIGN_BOTTOM_LEFT, PROMPT_MARGIN, -PROMPT_MARGIN);
     /* The one button is the answer, so it is selected from the start: a press

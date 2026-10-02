@@ -144,11 +144,34 @@ static int         s_ctm_flash_left = 0;
  *
  * ⓘ It also removes the case for a refresh button: the only thing that went
  * stale while the panel sat open now does not. */
+/* Is a dialogue in front of the panel on the top layer? A message box made
+ * without a parent puts its backdrop there, with the box inside it. */
+static bool ctm_dialogue_in_front(void) {
+    const lv_obj_t *layer = lv_obj_get_parent(s_ctm_panel);
+    if (layer == NULL) {
+        return false;
+    }
+    const uint32_t count = lv_obj_get_child_cnt(layer);
+    for (uint32_t i = lv_obj_get_index(s_ctm_panel) + 1; i < count; i++) {
+        if (lv_obj_check_type(lv_obj_get_child(layer, (int32_t) i), &lv_msgbox_backdrop_class)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 static void ctm_online_tick(lv_timer_t *t) {
     LV_UNUSED(t);
     /* ⓘ Kept in front: stats pinned while the panel is open are added to the
-     * top layer after it, and would cover it again. */
-    if (s_ctm_panel) {
+     * top layer after it, and would cover it again.
+     * ⛔ BUT NEVER IN FRONT OF A DIALOGUE. A dialogue dims everything behind
+     * it, and the dim is what says it has the input. The panel climbed back
+     * over that dim within a second of a bridge raising its question: bright
+     * again beside a pop-up that still had the input, and with its own
+     * full-screen layer over the pop-up's button, where a pointer's click
+     * went to the panel instead (rhoquinn8217, 2026-10-01). It waits behind
+     * until the dialogue has gone. */
+    if (s_ctm_panel && !ctm_dialogue_in_front()) {
         const lv_obj_t *layer = lv_obj_get_parent(s_ctm_panel);
         if (layer && lv_obj_get_index(s_ctm_panel) + 1 != lv_obj_get_child_cnt(layer)) {
             lv_obj_move_foreground(s_ctm_panel);
