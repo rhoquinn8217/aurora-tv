@@ -1,5 +1,3 @@
-#include "ui/streaming/streaming.controller.h"   /* streaming_overlay_shown */
-#include "ui/streaming/bridge_prompt.h"
 #include <stdbool.h>
 #include <SDL.h>
 #include <assert.h>
@@ -8,10 +6,7 @@
 #include "lvgl/util/lv_app_utils.h"
 
 #include "app.h"
-#if defined(TARGET_WEBOS)
-#include "input/ctm_bridge_gesture.h"
-#include "input/bridge_keyboard.h"
-#endif
+#include "bridge_app.h"
 #include "config.h"
 
 #include "logging.h"
@@ -33,7 +28,6 @@
 #include "stream/embed_wrapper.h"
 #include "profile/profile_manager.h"
 #include "util/log_overlay.h"
-#include "control_server.h"
 
 PCONFIGURATION app_configuration = NULL;
 
@@ -50,22 +44,7 @@ int app_init(app_t *app, app_settings_loader *settings_loader, int argc, char *a
     commons_logging_init("aurora");
     SDL_LogSetOutputFunction(commons_sdl_log, NULL);
     SDL_SetAssertionHandler(app_assertion_handler_abort, NULL);
-    /* ⛔⛔ BEFORE SDL TOUCHES ANY CONTROLLER.
-     *
-     * A DualSense told to stream microphone audio keeps doing it when a
-     * program dies -- it only forgets when its Bluetooth link drops. So an app
-     * that crashed while one was streaming comes back to find SDL reading
-     * encoded sound as sticks and buttons, several hundred times a second.
-     *
-     * Measured 2026-08-13: that is exactly what happened. The app crashed,
-     * restarted, and its menus were activated at random until the controller
-     * was powered off.
-     *
-     * ⚠️ MOVING THIS BELOW SDL_Init WOULD QUIETLY REMOVE THE PROTECTION.
-     * Nothing in this app arms a microphone; this is here for the state we
-     * cannot cause and cannot otherwise escape. */
-    ctm_mic_safety_disarm_all();
-
+    bridge_app_before_sdl();   /* This fork: always before SDL_Init; see bridge_app.c. */
     SDL_Init(0);
     commons_log_info("APP", "Start Aurora. Version %s", APP_VERSION);
     settings_loader(&app->settings);
@@ -100,14 +79,7 @@ int app_init(app_t *app, app_settings_loader *settings_loader, int argc, char *a
     /* Do not ignore Nintendo VID 0x057e over Bluetooth. That wildcard hid every
      * Switch-mode pad (including 8BitDo) from SDL HIDAPI and left rumble on
      * hid-nintendo, which never finishes on those clones (PR #78). */
-    /* Ask PlayStation controllers for their full input report rather than
-     * waiting for a reason to. Over Bluetooth a DualSense sends a cut-down
-     * report -- sticks and buttons, ten bytes, no touchpad at all -- until a
-     * host asks for more. Without this the touchpad gesture that bridges a
-     * controller has nothing to read, so it can only ever work on a cable.
-     * Measured 2026-08-06 on the rooted monitor. */
-    SDL_SetHint(SDL_HINT_JOYSTICK_HIDAPI_PS5, "1");
-    SDL_SetHint(SDL_HINT_JOYSTICK_HIDAPI_PS5_RUMBLE, "1");
+    bridge_app_sdl_hints();
 #else
     if (app->settings.syskey_capture) {
         SDL_SetHint(SDL_HINT_GRAB_KEYBOARD, "1");
@@ -128,17 +100,14 @@ int app_init(app_t *app, app_settings_loader *settings_loader, int argc, char *a
     log_overlay_init();
 
     global = app;
-
-    /* ⓘ Once the UI and the bus are up, because every command runs through
-     * them. A no-op unless built with AURORA_TERMINAL_CONTROL. */
-    control_server_start(app);
+    bridge_app_started(app);
 
     SS4S_PostInit(argc, argv);
     return 0;
 }
 
 void app_deinit(app_t *app) {
-    control_server_stop();
+    bridge_app_stopping();
     app_bus_drain();
     app_session_destroy(app);
     app_ui_close(&app->ui);
@@ -184,18 +153,7 @@ static int app_event_filter(void *userdata, SDL_Event *event) {
             if (app_ui_is_opened(&app->ui) && app->session != NULL) {
                 session_interrupt(app->session, false, STREAMING_INTERRUPT_BACKGROUND);
             }
-            /* ⛔ THE PLAYER COLOUR IS NOT PAINTED HERE, and it was tried.
-             *
-             * ⚠️ Painting on this event puts the colour up BEFORE the teardown
-             * that follows it -- so a bridged controller went blue and then
-             * black as the bridge came down. Measured 2026-08-19.
-             *
-             * ⭐ session_stop_input paints instead, after the bridge has
-             * actually stopped, which is the right moment for both this path
-             * and a normal stream end. ⓘ If the colour does NOT appear on an
-             * app switch, that means the teardown never reaches
-             * session_stop_input -- worth knowing, and a question that has been
-             * open a while. */
+            /* This fork: the player colour is painted in session_stop_input, not here. Why: ctmbridge/NOTES.md, "The player colour on an app switch". */
             break;
         }
         case SDL_APP_DIDENTERFOREGROUND: {
@@ -341,37 +299,10 @@ static int app_event_filter(void *userdata, SDL_Event *event) {
 void app_process_events(app_t *app) {
     SDL_PumpEvents();
     SDL_FilterEvents(app_event_filter, app);
-    /* ⛔⛔ streaming_overlay_shown(), NOT app_ui_is_opened(). Third attempt, and
-     * this one has evidence rather than reasoning behind it.
-     *
-     * ⓘ app_ui_is_opened asks whether the LVGL display exists, and on webOS it
-     * exists for the whole life of the app -- the video is drawn behind it. So
-     * it reads TRUE while a game is being played, and the input hold stayed on
-     * the entire time.
-     *
-     * ⚠️ THE SYMPTOM THAT PROVED IT: on a bridged DualSense, the lightbar,
-     * rumble, speaker and GYRO all worked while buttons, sticks and the
-     * touchpad did nothing. ⭐ Those are exactly the fields the blanker zeroes,
-     * and the gyro is exactly what it deliberately leaves alone. Output is
-     * unaffected either way. Nothing else could produce that pattern. */
-    /* ⓘ The question a bridge raises takes the input the same way the
-     * overlay does (ui/streaming/bridge_prompt.h), so both count here: a
-     * bridged controller is held while either is up, and a keyboard works
-     * either. */
-    const bool interface_has_input = streaming_overlay_shown() || bridge_prompt_shown();
-    ctm_bridge_gesture_tick(&app->input, app->session, interface_has_input);
-    /* The TV's keyboard grab looking again after a bridge or a release. */
-    bridge_keyboard_tick(interface_has_input);
-
-    /* ⓘ Upstream v1.2.9's touchpad tap-hold, for its touchpad mouse mode. It
-     * reads the same SDL touchpad state our gesture polls above; neither
-     * consumes events, so the two coexist. ⚠️ With touchpad_mode = mouse a
-     * two-finger hold would bridge AND drive the host cursor -- the mode is
-     * opt-in and defaults to native, so that is a choice, not a collision. */
+    bridge_app_events(app);
     if (app->session != NULL) {
         session_update_touchpad_tap_hold(app->session);
     }
-
 }
 
 void app_quit_confirm() {

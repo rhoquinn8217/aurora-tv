@@ -210,6 +210,23 @@ GFE still needs the bitmap at launch. The fork's retry label, and its `ret` and
 
 **Merge guard:** "a stream that drops resumes in place".
 
+## The player colour on an app switch
+
+**Where:** `src/app/app.c`, `app_event_filter()`, on
+`SDL_APP_WILLENTERBACKGROUND`. The fork adds no code here, only the line that
+says why.
+
+The player colour is not painted on this event, and it was tried. Painting
+here puts the colour up before the teardown that follows it, so a bridged
+controller went blue and then black as the bridge came down (measured
+2026-08-19). `session_stop_input()` paints instead, after the bridge has
+actually stopped, which is the right moment both for this path and for a
+normal end of a stream.
+
+If the colour does not appear on an app switch, the teardown never reached
+`session_stop_input()`. That is worth knowing, and it has been an open
+question for a while.
+
 ## Stream boost
 
 **Where:** `src/app/ui/settings/panes/experimental.pane.c`, the "Stream boost"

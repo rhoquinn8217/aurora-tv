@@ -184,12 +184,29 @@ else
 fi
 
 # --- the overlay input hold ----------------------------------------------
-# ⓘ Took three attempts to get right; the condition is easy to lose in a merge
-# because it sits inside a function of his that he also edits.
+# ⓘ Took three attempts to get right. The condition lives in bridge_app.c now,
+# and app.c, upstream's file, keeps the one call that runs it.
 need "input hold driven by the real overlay state" \
-     src/app/app.c "streaming_overlay_shown()"
+     src/app/bridge_app.c "streaming_overlay_shown()"
 need "input hold handed to the core" \
      src/app/ctmbridge/ctm_bridge_glue.c "ctm_bridge_set_input_held"
+
+# --- the calls app.c makes into bridge_app.c --------------------------------
+# ⓘ app.c is upstream's application file and edited in most releases. The
+# fork's code there is five one-line calls into src/app/bridge_app.c, and a
+# merge that takes upstream's side of app.c drops them without a sound.
+need "app.c disarms a microphone left streaming, at start" \
+     src/app/app.c "bridge_app_before_sdl();"
+in_order "... and does it before SDL_Init" \
+     src/app/app.c "int app_init" "bridge_app_before_sdl();" "SDL_Init(0);"
+need "app.c asks PlayStation controllers for their full report" \
+     src/app/app.c "bridge_app_sdl_hints();"
+need "app.c starts the command port" \
+     src/app/app.c "bridge_app_started(app);"
+need "app.c stops the command port" \
+     src/app/app.c "bridge_app_stopping();"
+in_order "app.c runs the bridge's turn after SDL's events are filtered" \
+     src/app/app.c "void app_process_events" "SDL_FilterEvents(app_event_filter, app);" "bridge_app_events(app);"
 
 # --- the branch switch ---------------------------------------------------
 # ⛔ THE ONE LINE THAT SEPARATES THE BRANCHES. On stable it must be absent, so
