@@ -25,6 +25,7 @@
 #include "util/user_event.h"
 #include "backend/pcmanager.h"
 #include "stream/session.h"
+#include "stream/bridge_session.h"
 #include "stream/video/session_video.h"
 #include "ui/streaming/streaming.controller.h"
 #include "ui/streaming/bridge_prompt.h"
@@ -197,7 +198,7 @@ static void cmd_set(control_job_t *job, const char *args)
             reply(job, "ERR no stream is running\n");
             return;
         }
-        const bool active = session_vmouse_active(s_app->session);
+        const bool active = bridge_session_vmouse_active(s_app->session);
         if (on != active) {
             bus_pushevent(USER_TOGGLE_VMOUSE, NULL, NULL);
         }

@@ -211,6 +211,26 @@ need "app.c stops the command port" \
 in_order "app.c runs the bridge's turn after SDL's events are filtered" \
      src/app/app.c "void app_process_events" "SDL_FilterEvents(app_event_filter, app);" "bridge_app_events(app);"
 
+# --- the calls the stream files make into files of ours ------------------------
+# ⓘ session.c and session_events.c are upstream's stream files. The bridge's
+# start and stop, its hold on the virtual mouse and the remote's pointer are a
+# call each into src/app/stream/bridge_session.c and bridge_pointer.c, and the
+# order of each call against upstream's own line beside it is what makes it
+# work.
+need "session.c lets Bridge Override keep the virtual mouse off at stream start" \
+     src/app/stream/session.c "session->config.vmouse && bridge_session_vmouse_allowed()"
+in_order "session.c starts the bridge after the input has started" \
+     src/app/stream/session.c "bool session_start_input" \
+     "session_input_started(&session->input);" "bridge_session_started(session);"
+in_order "session.c stops the bridge after the input has stopped" \
+     src/app/stream/session.c "void session_stop_input" \
+     "session_input_stopped(&session->input);" "bridge_session_stopped();"
+need "session.c lets Bridge Override hold the virtual mouse off on a toggle" \
+     src/app/stream/session.c "if (bridge_session_hold_vmouse_off(session)) {"
+in_order "the remote's pointer takes its events before the stream's own input" \
+     src/app/stream/session_events.c "bool session_handle_input_event" \
+     "bridge_pointer_event(session, event)" "switch (event->type)"
+
 # --- the branch switch ---------------------------------------------------
 # ⛔ THE ONE LINE THAT SEPARATES THE BRANCHES. On stable it must be absent, so
 # every gated block compiles out. On mic-capture-experimental it must be 1.

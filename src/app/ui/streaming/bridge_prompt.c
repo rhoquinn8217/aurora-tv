@@ -14,6 +14,7 @@
 #include "input/bridge_override.h"
 #include "stream/session.h"
 #include "stream/session_priv.h"
+#include "stream/bridge_session.h"
 #include "streaming.controller.h"
 #include "util/i18n.h"
 
@@ -417,7 +418,7 @@ void bridge_prompt_request(void) {
         return;
     }
     stream_input_t *input = session_get_input(global->session);
-    const bool vmouse = session_vmouse_active(global->session);
+    const bool vmouse = bridge_session_vmouse_active(global->session);
     const bool touchpad_mouse = input != NULL && input->touchpad_mode == TOUCHPAD_MODE_MOUSE;
     if (!vmouse && !touchpad_mouse) {
         commons_log_info("Streaming", "bridge prompt: Virtual Mouse and the touchpad's mouse mode are both off, "
