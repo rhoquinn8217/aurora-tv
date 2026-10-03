@@ -39,6 +39,49 @@ absent() {         # absent <description> <file> <pattern>
     fi
 }
 
+need_count() {     # need_count <description> <file> <pattern> <lines>
+    n=$(grep -c "$3" "$2" 2>/dev/null)
+    if [ "${n:-0}" = "$4" ]; then
+        pass=$((pass + 1))
+    else
+        echo "⛔ LOST: $1"
+        echo "   expected $4 lines in $2 matching : $3 (found ${n:-0})"
+        fail=$((fail + 1))
+    fi
+}
+
+# The two below read one function: from the line that begins with <start> to
+# the first line that begins with "}". Texts are matched as they are written,
+# not as patterns. A function that is not there counts as lost.
+in_order() {       # in_order <description> <file> <start> <first text> <second text>
+    if awk -v s="$3" -v a="$4" -v b="$5" '
+        index($0, s) == 1 { inside = 1 }
+        inside && !ia && index($0, a) { ia = NR }
+        inside && !ib && index($0, b) { ib = NR }
+        inside && /^}/ { inside = 0 }
+        END { exit !(ia && ib && ia < ib) }' "$2" 2>/dev/null; then
+        pass=$((pass + 1))
+    else
+        echo "⛔ LOST: $1"
+        echo "   expected in $2, inside $3 : \"$4\" before \"$5\""
+        fail=$((fail + 1))
+    fi
+}
+
+absent_in_function() {   # absent_in_function <description> <file> <start> <text>
+    if awk -v s="$3" -v t="$4" '
+        index($0, s) == 1 { inside = 1; seen = 1 }
+        inside && index($0, t) { hit = 1 }
+        inside && /^}/ { inside = 0 }
+        END { exit !(seen && !hit) }' "$2" 2>/dev/null; then
+        pass=$((pass + 1))
+    else
+        echo "⛔ LOST: $1"
+        echo "   expected in $2, inside $3, no \"$4\" (or the function is gone)"
+        fail=$((fail + 1))
+    fi
+}
+
 # --- the settings section ------------------------------------------------
 # ⛔ This exact line was deleted by his v1.2.2. Everything else in the section
 # can survive a merge and still be unreachable if this one goes.
@@ -197,6 +240,55 @@ case "$branch" in
                      "add_compile_definitions(CTM_BT_MIC_ARMING"
         ;;
 esac
+
+# --- the places ctmbridge/NOTES.md explains ------------------------------
+# ⓘ Each change below was explained by a long comment in a file of upstream's.
+# The explanation is in src/app/ctmbridge/NOTES.md now, one line at the place
+# points to it, and these checks take over the warnings it carried.
+need "a pad already opened is not opened again" \
+     src/app/input/input_event.c "app_input_gamepad_state_by_instance_id(input, joy_instance_id) != NULL"
+need "the host's lightbar waits while a bridge signal draws" \
+     src/app/input/input_gamepad.c "ctm_bridge_gesture_light_busy(state->controller)"
+need_count "upstream's wired feedback stays off a pad the bridge is using, at all four entry points" \
+     src/app/input/input_gamepad.c "ctm_bridge_gesture_pad_is_ours(state->controller)" 4
+need "Select and Start are held back while both bumpers are down" \
+     src/app/stream/input/session_gamepad.c "CHORD_GATE_HELD) == CHORD_GATE_HELD"
+in_order "a controller is removed from the host before its bit is set" \
+     src/app/stream/input/session_input.c "void stream_input_exclude_gamepad" \
+     "stream_input_send_gamepad_remove(input, gamepad)" "moonlightExcludedMask |="
+in_order "its bit is cleared before it is announced again" \
+     src/app/stream/input/session_input.c "void stream_input_restore_gamepad" \
+     "moonlightExcludedMask &=" "stream_input_send_gamepad_arrive(input, gamepad)"
+absent_in_function "the remove path does not consult the mask" \
+     src/app/stream/input/session_gamepad.c "void stream_input_send_gamepad_remove" "moonlightExcludedMask"
+need "the overlay's shortcut acts at once" \
+     src/app/stream/input/session_keyboard.c "_pending_key_combo == KeyComboToggleStatsOverlay"
+need "a stream that drops resumes in place" \
+     src/app/stream/session_worker.c "interrupt_reason == STREAMING_INTERRUPT_NETWORK"
+need "the stream boost is a setting" \
+     src/app/ui/settings/panes/experimental.pane.c "app_configuration->stream_priority"
+need "the stream boost setting is read before the connection starts" \
+     src/app/stream/session_worker.c "settings.stream_priority"
+
+# ⓘ The notes and the code stay in step: every "This fork:" line names a section
+# that exists, and every section is named by at least one such line.
+NOTES=src/app/ctmbridge/NOTES.md
+named=$(grep -rho --exclude=NOTES.md 'ctmbridge/NOTES\.md, "[^"]*"' src 2>/dev/null | sed 's/^.*, "//; s/"$//' | sort -u)
+written=$(tr -d '\r' < "$NOTES" 2>/dev/null | sed -n 's/^## //p' | sort -u)
+if [ -n "$named" ] && [ "$named" = "$written" ]; then
+    pass=$((pass + 1))
+else
+    echo "⛔ LOST: the one-line notes and $NOTES name the same sections"
+    echo "   named in the code but not a section there:"
+    printf '%s\n' "$named" | while IFS= read -r s; do
+        printf '%s\n' "$written" | grep -qxF "$s" || echo "     $s"
+    done
+    echo "   a section there that no line of code names:"
+    printf '%s\n' "$written" | while IFS= read -r s; do
+        printf '%s\n' "$named" | grep -qxF "$s" || echo "     $s"
+    done
+    fail=$((fail + 1))
+fi
 
 # --- the panel -----------------------------------------------------------
 need "USB Bridge panel present" \

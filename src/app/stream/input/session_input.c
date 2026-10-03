@@ -198,16 +198,7 @@ void session_input_screen_keyboard_closed(stream_input_t *input) {
 #endif
     stream_input_flush_pressed_keys(input);
 }
-/* --- handing a controller to the bridge, and taking it back ---------------
- *
- * THE ORDER IN EACH IS LOAD-BEARING, and doing it the other way round makes
- * both a no-op: the send paths consult the mask, so a remove sent after the
- * bit is set would refuse, and an arrive sent before the bit is cleared would
- * refuse too.
- *
- * `started` is checked because a controller can be bridged before a stream
- * begins. There is nothing to tell the host at that point -- the mask is
- * enough, and session_input_started() reads it when the stream opens. */
+/* This fork: a controller handed to the bridge and back; the order matters. Why: ctmbridge/NOTES.md, "Handing a controller over, in order". */
 void stream_input_exclude_gamepad(stream_input_t *input, app_gamepad_state_t *gamepad) {
     if (input == NULL || gamepad == NULL || gamepad->gs_id < 0) {
         return;

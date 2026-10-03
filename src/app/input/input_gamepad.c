@@ -357,33 +357,7 @@ void app_input_gamepad_set_motion_event_state(app_input_t *input, unsigned short
 
 void app_input_gamepad_set_controller_led(app_input_t *input, unsigned short controllerNumber, uint8_t r, uint8_t g,
                                           uint8_t b) {
-    /* ⭐⭐ THE HOST'S LIGHTBAR WRITES ARE FORWARDED HERE, AND THIS IS WHERE THEY
-     * STOP WHILE THE CONTROLLER IS STILL OURS.
-     *
-     * ⓘ Moonlight's emulated pad has a lightbar, so Windows and Steam paint it
-     * -- and that colour arrives over the stream and lands on the PHYSICAL
-     * controller through this function. ⭐ Which means the host has been a
-     * SECOND WRITER on that light the whole time a stream is running, not
-     * because of anything the bridge does.
-     *
-     * ⚠️ That is not the host taking the light: this call is ours, and the TV
-     * chooses to pass it on -- the same way the overlay stays reachable while
-     * streaming. So it can equally choose not to.
-     *
-     * ⛔ And it should not, while we are drawing. Two writers on one light is
-     * what every "flicker" report today has turned out to be, and no amount of
-     * writing more carefully on our side fixes a second writer.
-     *
-     * ⭐ Once a controller is BRIDGED its emulated pad is retired, so nothing
-     * comes through here for it at all and the host owns the light properly,
-     * over its own connection. */
-    /* ⓘ Always dropped while a pattern draws. The escape hatch that forwarded
-     * them anyway (CTM_HOST_OWNS_LIGHTBAR) served the flicker hunt, which is
-     * over, and was removed 2026-09-15. */
-    /* ⭐ UPSTREAM 1.2.10 looks the pad up by gs_id rather than by the array
-     * slot, because the host's controllerNumber is the gs_id and the slots are
-     * sparse -- the same correction it made to rumble. Taken as it stands; our
-     * gate simply moves onto the controller it hands back. */
+    /* This fork: the host's lightbar waits while a bridge signal draws. Why: ctmbridge/NOTES.md, "The host's lightbar". */
     app_gamepad_state_t *state = app_input_gamepad_state_by_gs_id(input, controllerNumber);
     if (state == NULL || state->controller == NULL) {
         return;
@@ -392,16 +366,7 @@ void app_input_gamepad_set_controller_led(app_input_t *input, unsigned short con
         return;
     }
 #if TARGET_WEBOS
-    /* ⭐ UPSTREAM 1.3.0 added its own wired DualSense feedback, dualsense_usb.c,
-     * which writes the host's lightbar, trigger and LED packets straight to
-     * hidraw. That is a second writer on the same node and the same report as
-     * the bridge, and its state is sticky -- every write re-asserts every field
-     * it has ever been given, so a trigger packet repaints the lightbar too.
-     *
-     * ⛔ So it stays off a pad that is ours: while a pattern draws, and while
-     * the pad is bridged. The same gate sits on all four of its entry points,
-     * because any one of them re-asserts the lightbar. Outside those windows it
-     * runs exactly as upstream wrote it. */
+    /* This fork: upstream's wired feedback stays off a pad the bridge is using. Why: ctmbridge/NOTES.md, "Upstream's wired DualSense feedback". */
     if (state->ds_usb != NULL && !ctm_bridge_gesture_pad_is_ours(state->controller) &&
         dualsense_usb_set_lightbar(state->ds_usb, r, g, b)) {
         return;
