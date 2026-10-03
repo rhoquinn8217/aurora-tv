@@ -30,9 +30,6 @@ struct session_t {
     int app_id;
     char *app_name;
     bool interrupted;
-    /* Why the wait loop was woken; valid only while interrupted is set. The
-     * worker uses it to decide whether the drop is worth auto-reconnecting. */
-    streaming_interrupt_reason_t interrupt_reason;
     bool quitapp;
 #if FEATURE_EMBEDDED_SHELL
     bool embed;

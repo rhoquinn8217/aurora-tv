@@ -27,15 +27,6 @@
 static const char aurora_build_tag[] __attribute__((used)) = "aurora-v1.3.0";
 #endif
 
-/* This fork: a stream that drops resumes in place. Why: ctmbridge/NOTES.md, "Reconnect after a network drop". */
-#define SESSION_RECONNECT_MAX_ATTEMPTS 8
-#define SESSION_RECONNECT_MAX_ELAPSED_MS 90000
-#define SESSION_RECONNECT_STABLE_MS 30000
-
-static bool session_worker_reconnect_allowed(int attempts, Uint32 since);
-
-static bool session_worker_reconnect_wait(session_t *session, int attempt);
-
 int session_worker(session_t *session) {
     app_t *app = session->app;
     session_set_state(session, STREAMING_CONNECTING);
@@ -44,14 +35,6 @@ int session_worker(session_t *session) {
     PSERVER_DATA server = session->server;
     int appId = session->app_id;
     session->player = NULL;
-    /* streamed = USER_STREAM_OPEN has been pushed; from then on every exit must
-     * go through shutdown so USER_STREAM_CLOSE is pushed exactly once (input /
-     * CTM bridge stop and UI reopen hang off it). */
-    bool streamed = false;
-    bool li_active = false;
-    int reconnect_attempts = 0;
-    Uint32 reconnect_since = 0;
-    Uint32 stream_up_since = 0;
 #if TARGET_WEBOS
     webos_game_mode_state_t *game_mode_state = NULL;
     webos_stream_priority_state_t *stream_prio = NULL;
@@ -95,21 +78,18 @@ int session_worker(session_t *session) {
      * and NDL places Center/LFE on the surrounds. Do not also send a second
      * permute via Sunshine config. */
     const char *surround_params = NULL;
-    short gamepad_mask;
-    int ret;
-
-    /* His webOS 5.1 surround block, v1.2.4. Deliberately ABOVE the retry
-     * label: surround_params does not change between attempts, and setting it
-     * inside the loop would redo the work and re-log on every retry. */
 #if TARGET_WEBOS
     if (session->config.stream.audioConfiguration == AUDIO_CONFIGURATION_51_SURROUND) {
         surround_params = "642014523";
         commons_log_info("Session", "webOS 5.1 surroundParams=642014523 (FL FR SL SR FC LFE)");
     }
 #endif
-
-    connect:
-    /* This fork: the retry label; upstream's launch below as it stands. Why: ctmbridge/NOTES.md, "Reconnect after a network drop". */
+    short gamepad_mask;
+    /* Refresh local pad list so Arrival can announce every attached controller
+     * (2nd DualSense on webOS often missed JOYDEVICEADDED). Always launch with
+     * gcmap=0 on Sunshine/Apollo: a non-zero mask plus Controller Arrival made
+     * the host allocate two ViGEm pads for one physical controller on first connect.
+     * GFE still needs the bitmap at launch. */
     app_input_scan_gamepads(&app->input);
     if (server->isGfe) {
         gamepad_mask = app_input_gamepads_mask(&app->input);
@@ -118,31 +98,18 @@ int session_worker(session_t *session) {
     }
     commons_log_info("Session", "Launch gamepad mask=0x%x (local count=%d, gfe=%d)", gamepad_mask,
                      app_input_get_gamepads_count(&app->input), server->isGfe ? 1 : 0);
-    ret = gs_start_app(client, server, &session->config.stream, appId, server->isGfe, session->config.sops,
-                       session->config.local_audio, gamepad_mask, surround_params);
+    int ret = gs_start_app(client, server, &session->config.stream, appId, server->isGfe, session->config.sops,
+                           session->config.local_audio, gamepad_mask, surround_params);
     if (ret != GS_OK) {
+        session_set_state(session, STREAMING_ERROR);
         const char *gs_error = NULL;
         gs_get_error(&gs_error);
-        commons_log_error("Session", "Failed to launch session: gamestream returned %d, gs_error=%s", ret, gs_error);
-        if (streamed && session_worker_reconnect_allowed(reconnect_attempts, reconnect_since)) {
-            if (session_worker_reconnect_wait(session, ++reconnect_attempts)) {
-                goto connect;
-            }
-            // Interrupted while waiting (user/background/quit): leave quietly
-            streaming_error(session, GS_OK, "");
-            goto shutdown;
-        }
-        if (!streamed) {
-            session_set_state(session, STREAMING_ERROR);
-        }
         if (gs_error) {
             streaming_error(session, ret, "Failed to launch session: %s (code %d)", gs_error, ret);
         } else {
             streaming_error(session, ret, "Failed to launch session: gamestream returned %d", ret);
         }
-        if (streamed) {
-            goto shutdown;
-        }
+        commons_log_error("Session", "Failed to launch session: gamestream returned %d, gs_error=%s", ret, gs_error);
         goto thread_cleanup;
     }
 
@@ -170,19 +137,7 @@ int session_worker(session_t *session) {
                                         session_connection_callbacks_prepare(session),
                                         &ss4s_dec_callbacks, &ss4s_aud_callbacks, session, 0, session, 0);
     if (startResult != 0) {
-        commons_log_error("Session", "Failed to start connection: Limelight returned %d", startResult);
-        if (streamed && session_worker_reconnect_allowed(reconnect_attempts, reconnect_since)) {
-            SS4S_PlayerClose(session->player);
-            session->player = NULL;
-            if (session_worker_reconnect_wait(session, ++reconnect_attempts)) {
-                goto connect;
-            }
-            streaming_error(session, GS_OK, "");
-            goto shutdown;
-        }
-        if (!streamed) {
-            session_set_state(session, STREAMING_ERROR);
-        }
+        session_set_state(session, STREAMING_ERROR);
         switch (startResult) {
             case CALLBACKS_SESSION_ERROR_VDEC_UNSUPPORTED:
                 streaming_error(session, GS_WRONG_STATE, "Unsupported video codec.");
@@ -204,16 +159,9 @@ int session_worker(session_t *session) {
                 break;
             }
         }
-        if (streamed) {
-            goto shutdown;
-        }
+        commons_log_error("Session", "Failed to start connection: Limelight returned %d", startResult);
         goto thread_cleanup;
     }
-    li_active = true;
-
-    /* ⓘ HIS BLOCK MOVED HERE IN v1.2.5, ours stays above it. Both are wanted:
-     * li_active is ours -- it is how the shutdown path knows a connection was
-     * actually started -- and his tree has no such flag. */
 #if TARGET_WEBOS
     /* After the decoder is up: changing picture mode before LiStartConnection
      * can tear down NDL and make the session exit immediately. */
@@ -236,63 +184,21 @@ int session_worker(session_t *session) {
         };
         session->abr = adaptive_bitrate_start(&abr_config);
     }
-    streamed = true;
-    stream_up_since = SDL_GetTicks();
     SDL_LockMutex(session->mutex);
     while (!session->interrupted) {
         // Wait until interrupted
         SDL_CondWait(session->cond, session->mutex);
     }
-    /* Decide on auto-reconnect while still holding the mutex, so re-arming
-     * interrupted can't race a concurrent session_interrupt(). */
-    bool reconnect = session->interrupt_reason == STREAMING_INTERRUPT_NETWORK && !session->quitapp;
-    if (reconnect) {
-        if (SDL_TICKS_PASSED(SDL_GetTicks(), stream_up_since + SESSION_RECONNECT_STABLE_MS)) {
-            reconnect_attempts = 0;
-        }
-        if (reconnect_attempts == 0) {
-            reconnect_since = SDL_GetTicks();
-        }
-        reconnect = session_worker_reconnect_allowed(reconnect_attempts, reconnect_since);
-        if (reconnect) {
-            session->interrupted = false;
-        }
-    }
     SDL_UnlockMutex(session->mutex);
     /* The stream is ending, whoever ended it: stop adaptive bitrate first, so
      * no bitrate request can reach the host after its stream has gone (see
-     * adaptive_bitrate_stop). A successful reconnect starts a fresh one. */
+     * adaptive_bitrate_stop). */
     adaptive_bitrate_stop(session->abr);
     session->abr = NULL;
-    if (reconnect) {
-        commons_log_warn("Session", "Connection lost with a network error; trying to resume");
-        session_set_state(session, STREAMING_CONNECTING);
-        bus_pushevent(USER_STREAM_CONNECTING, NULL, NULL);
-        LiStopConnection();
-        li_active = false;
-        SS4S_PlayerClose(session->player);
-        session->player = NULL;
-        streaming_error(session, GS_OK, "");
-        if (session_worker_reconnect_wait(session, ++reconnect_attempts)) {
-#if FEATURE_INPUT_EVMOUSE
-            if (!session->config.view_only && session->config.hardware_mouse) {
-                // The network interrupt stopped the evmouse worker; bring it back
-                session_evmouse_restart(&session->input.evmouse);
-                session_evmouse_wait_ready(&session->input.evmouse);
-            }
-#endif
-            goto connect;
-        }
-        // Interrupted during the backoff: exit quietly through normal shutdown
-    }
-    shutdown:
     bus_pushevent(USER_STREAM_CLOSE, NULL, NULL);
 
     session_set_state(session, STREAMING_DISCONNECTING);
-    if (li_active) {
-        LiStopConnection();
-        li_active = false;
-    }
+    LiStopConnection();
 
     if (session->quitapp) {
         commons_log_info("Session", "Sending app quit request ...");
@@ -305,8 +211,8 @@ int session_worker(session_t *session) {
     uuidstr_fromstr(&update_ctx.uuid, server->uuid);
     pcmanager_update_by_host(&update_ctx, server->serverInfo.address, server->extPort, true);
 
-    // Keep the error state (if any) so the finish handler shows the dialog
-    session_set_state(session, streaming_errno != GS_OK ? STREAMING_ERROR : STREAMING_NONE);
+    // Don't always reset status as error state should be kept
+    session_set_state(session, STREAMING_NONE);
     thread_cleanup:
 #if TARGET_WEBOS
     session->webos_game_mode = NULL;
@@ -327,32 +233,4 @@ int session_worker(session_t *session) {
     bus_pushevent(USER_STREAM_FINISHED, NULL, NULL);
     app_bus_post(app, (bus_actionfunc) app_session_destroy, app);
     return 0;
-}
-
-static bool session_worker_reconnect_allowed(int attempts, Uint32 since) {
-    return attempts < SESSION_RECONNECT_MAX_ATTEMPTS &&
-           !SDL_TICKS_PASSED(SDL_GetTicks(), since + SESSION_RECONNECT_MAX_ELAPSED_MS);
-}
-
-/* Interruptible backoff before a reconnect attempt. Returns true when the wait
- * elapsed and the retry should proceed, false when the session got interrupted
- * (user quit/suspend, background, app shutdown) in the meantime. */
-static bool session_worker_reconnect_wait(session_t *session, int attempt) {
-    Uint32 delay = attempt <= 1 ? 500 : (Uint32) (attempt - 1) * 1000;
-    if (delay > 5000) {
-        delay = 5000;
-    }
-    commons_log_info("Session", "Reconnect attempt %d/%d in %u ms", attempt, SESSION_RECONNECT_MAX_ATTEMPTS, delay);
-    SDL_LockMutex(session->mutex);
-    Uint32 deadline = SDL_GetTicks() + delay;
-    while (!session->interrupted) {
-        Uint32 now = SDL_GetTicks();
-        if (SDL_TICKS_PASSED(now, deadline)) {
-            break;
-        }
-        SDL_CondWaitTimeout(session->cond, session->mutex, deadline - now);
-    }
-    bool proceed = !session->interrupted;
-    SDL_UnlockMutex(session->mutex);
-    return proceed;
 }

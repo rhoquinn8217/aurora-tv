@@ -13,7 +13,7 @@ typedef struct session_evmouse_t {
     SDL_bool disabled;
     /* Latched stop request: set by interrupt/deinit so a worker still inside
      * evmouse_open_default() exits instead of listening forever (the interrupt
-     * would otherwise hit a NULL dev and be lost). Cleared by restart. */
+     * would otherwise hit a NULL dev and be lost). */
     SDL_bool stopped;
     /* Set once the worker published its open result (dev != NULL on success);
      * wait_ready waits on this instead of dev so a failed open (no mouse
@@ -28,10 +28,6 @@ void session_evmouse_deinit(session_evmouse_t *mouse);
 void session_evmouse_wait_ready(session_evmouse_t *mouse);
 
 void session_evmouse_interrupt(session_evmouse_t *mouse);
-
-/* Join the (interrupted) worker and spawn a fresh one; used when the session
- * auto-reconnects after a network drop. Caller must be the session worker. */
-void session_evmouse_restart(session_evmouse_t *mouse);
 
 void session_evmouse_disable(session_evmouse_t *mouse);
 

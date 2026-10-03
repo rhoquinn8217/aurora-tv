@@ -60,97 +60,6 @@ static void ctm_glue_enumerate(void)
 static pthread_mutex_t s_dev_mutex = PTHREAD_MUTEX_INITIALIZER;
 static ctm_monitor_t *s_monitor = NULL;
 
-/* ⭐⭐ WHAT A RECONNECT MAY PUT BACK: ONLY WHAT AN OUTAGE TOOK.
- *
- * ⛔ THE FAULT: when a stream came back from an auto-reconnect, every recognised
- * controller that was not bridged got bridged, including ones nobody had asked
- * for, and plugged directly, so their emulated pads stayed on the host too. It
- * went unnoticed while most controllers could not be bridged anyway; a wired
- * Xbox pad can be now (2026-09-13).
- *
- * ➡️ The reaper remembers each device it releases because the host went away,
- * and the reconnect re-plugs exactly those. A device the user released is
- * never on the list. Cleared whenever the bridge starts or stops.
- *
- * ⓘ Kept by logical device key: a per-node session's key is "<device>#<node>",
- * and the part before the '#' is the device. Guarded by s_dev_mutex. */
-#define DROPPED_MAX 16
-static char s_dropped[DROPPED_MAX][96];
-static int s_dropped_count = 0;
-
-static void dropped_remember_locked(const char *session_key)
-{
-    char item_key[96];
-    snprintf(item_key, sizeof(item_key), "%s", session_key);
-    char *hash = strchr(item_key, '#');
-    if (hash) {
-        *hash = '\0';
-    }
-    for (int i = 0; i < s_dropped_count; ++i) {
-        if (strcmp(s_dropped[i], item_key) == 0) {
-            return;
-        }
-    }
-    if (s_dropped_count < DROPPED_MAX) {
-        snprintf(s_dropped[s_dropped_count++], sizeof(s_dropped[0]), "%s", item_key);
-    }
-}
-
-static int dropped_index_locked(const char *item_key)
-{
-    for (int i = 0; i < s_dropped_count; ++i) {
-        if (strcmp(s_dropped[i], item_key) == 0) {
-            return i;
-        }
-    }
-    return -1;
-}
-
-static void dropped_forget_locked(int index)
-{
-    if (index < 0 || index >= s_dropped_count) {
-        return;
-    }
-    for (int i = index; i + 1 < s_dropped_count; ++i) {
-        memcpy(s_dropped[i], s_dropped[i + 1], sizeof(s_dropped[0]));
-    }
-    --s_dropped_count;
-}
-
-/* Re-plug what an outage dropped. Caller MUST hold s_dev_mutex. */
-static int glue_plug_all_locked(void)
-{
-    if (s_dropped_count == 0) {
-        return 0;   /* nothing was dropped: the common case, and no enumeration */
-    }
-    ctm_glue_enumerate();
-    int count = 0;
-    for (int i = 0; i < g_devices.count; ++i) {
-        logical_device_t *item = &g_devices.items[i];
-        const int dropped = dropped_index_locked(item->key);
-        if (dropped < 0) {
-            continue;   /* never bridged, or released on purpose */
-        }
-        if (item_is_tv_remote(item)) {
-            continue;   /* the pointer synthesizer, plugged by ctm_bridge_start */
-        }
-        if (session_index_for_key(item->key) >= 0) {
-            dropped_forget_locked(dropped);
-            continue;   /* already plugged */
-        }
-        if (plug_in_item(item)) {
-            count++;
-            dropped_forget_locked(dropped);
-            log_append("ctm glue: re-plugged '%s' (%s) after an outage", item->name,
-                       bridge_kind_for_item(item));
-        }
-    }
-    if (count > 0) {
-        publish_bt_macs();
-    }
-    return count;
-}
-
 /* Hotplug callback (monitor thread): on any connect/disconnect, re-sync by
  * plugging newly-present recognised controllers. Serialised with the panel via
  * s_dev_mutex; disconnect cleanup is handled by the controller thread, which
@@ -279,10 +188,6 @@ bool ctm_bridge_start(void)
         return true;
     }
     ctm_glue_ensure_core();
-    /* A new bridge owes nothing to the last one's outages. */
-    pthread_mutex_lock(&s_dev_mutex);
-    s_dropped_count = 0;
-    pthread_mutex_unlock(&s_dev_mutex);
 
     /* ⭐⭐ START THE AGENT PROBE WHEN THE BRIDGE COMES UP, not when something is
      * first plugged.
@@ -744,7 +649,6 @@ int ctm_bridge_reap_gone_hosts(void)
      * entry that shifts down into the current index. */
     for (int i = 0; i < gone_count; ++i) {
         log_append("ctm glue: host gone -- releasing '%s'", gone[i]);
-        dropped_remember_locked(gone[i]);   /* a reconnect may put it back */
         stop_session(gone[i]);
         ++reaped;
     }
@@ -765,9 +669,8 @@ int ctm_bridge_reap_gone_hosts(void)
  * device that has gone stops anything opening the one that takes its number
  * next. The core's input thread says how that was found.
  *
- * ⓘ Nothing is remembered for a reconnect: that list is for a HOST that went
- * away, and this device is not there to be plugged again. Cheap for the same
- * reason as the reaper above: a walk of the session table, no enumeration. */
+ * ⓘ Cheap for the same reason as the reaper above: a walk of the session
+ * table, no enumeration. */
 int ctm_bridge_reap_gone_devices(void)
 {
     int reaped = 0;
@@ -919,15 +822,6 @@ void ctm_bridge_pointer_feed_key(unsigned hid_usage, bool down)
     ctm_hostmouse_feed_key((uint8_t) hid_usage, down);
 }
 
-int ctm_bridge_plug_all(void)
-{
-    ctm_glue_ensure_core();
-    pthread_mutex_lock(&s_dev_mutex);
-    int count = glue_plug_all_locked();
-    pthread_mutex_unlock(&s_dev_mutex);
-    return count;
-}
-
 void ctm_bridge_unplug_all(void)
 {
     pthread_mutex_lock(&s_dev_mutex);
@@ -999,9 +893,6 @@ void ctm_bridge_stop(void)
         s_monitor = NULL;
     }
     release_local_sessions_on_exit();
-    pthread_mutex_lock(&s_dev_mutex);
-    s_dropped_count = 0;
-    pthread_mutex_unlock(&s_dev_mutex);
     g_running = false;
     if (g_stop_sniff_thread_started) {
         pthread_join(g_stop_sniff_thread, NULL);

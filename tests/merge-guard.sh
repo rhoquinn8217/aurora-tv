@@ -185,7 +185,7 @@ need "bridged controllers excluded from Moonlight" \
 # excluded controller is refused inside stream_input_send_gamepad_arrive(),
 # which asks stream_input_gamepad_sends_moonlight(), where the mask is read.
 # If a release stops the arrive from asking, a controller that is still
-# bridged when a stream reconnects is announced again and the host has two.
+# excluded is announced to the host as well, and the host has two.
 if awk '/^void stream_input_send_gamepad_arrive/,/^}/' \
        src/app/stream/input/session_gamepad.c 2>/dev/null |
    grep -q "stream_input_gamepad_sends_moonlight"; then
@@ -317,8 +317,6 @@ absent_in_function "the remove path does not consult the mask" \
      src/app/stream/input/session_gamepad.c "void stream_input_send_gamepad_remove" "moonlightExcludedMask"
 need "the overlay's shortcut acts at once" \
      src/app/stream/input/session_keyboard.c "_pending_key_combo == KeyComboToggleStatsOverlay"
-need "a stream that drops resumes in place" \
-     src/app/stream/session_worker.c "interrupt_reason == STREAMING_INTERRUPT_NETWORK"
 need "the stream boost is a setting" \
      src/app/ui/settings/panes/experimental.pane.c "app_configuration->stream_priority"
 need "the stream boost setting is read before the connection starts" \

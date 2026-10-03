@@ -122,7 +122,6 @@ void session_interrupt(session_t *session, bool quitapp, streaming_interrupt_rea
     session_input_interrupt(&session->input);
     session->quitapp = quitapp;
     session->interrupted = true;
-    session->interrupt_reason = reason;
 #if FEATURE_EMBEDDED_SHELL
     if (session->embed && session->embed_process) {
         embed_interrupt(session->embed_process);

@@ -446,11 +446,6 @@ static bool on_event(lv_fragment_t *self, int code, void *userdata) {
             break;
         }
         case USER_STREAM_CLOSE: {
-            /* A failed auto-reconnect arrives here with the "Connecting..."
-             * dialog still open; close it before showing the next one. */
-            if (controller->progress) {
-                lv_msgbox_close(controller->progress);
-            }
             controller->progress = progress_dialog_create(locstr("Disconnecting..."));
             lv_obj_add_flag(controller->overlay, LV_OBJ_FLAG_HIDDEN);
             lv_obj_add_flag(controller->stats, LV_OBJ_FLAG_HIDDEN);

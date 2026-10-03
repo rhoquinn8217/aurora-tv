@@ -14,8 +14,8 @@
 bool bridge_session_vmouse_allowed(void);
 
 /* In session_start_input(), after the input has started: the bridge's
- * settings go in, then the bridge starts, or picks up again after a
- * reconnect, and the devices marked for Auto Bridge are bridged. */
+ * settings go in, then the bridge starts, and the devices marked for Auto
+ * Bridge are bridged. */
 void bridge_session_started(session_t *session);
 
 /* In session_stop_input(), after the input has stopped: the bridge stops and

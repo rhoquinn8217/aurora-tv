@@ -135,7 +135,7 @@ it too.
 The announce at stream start needs no check of the fork's: upstream's
 `stream_input_send_gamepad_arrive()` asks
 `stream_input_gamepad_sends_moonlight()`, which reads the mask, so a controller
-that is still bridged when a stream reconnects is refused there.
+that is still excluded is refused there.
 
 **Merge guard:** "bridged controllers excluded from Moonlight", and "the
 announce asks whether a controller is excluded".
@@ -186,29 +186,6 @@ the belief that there was none, and this was written for it. A bridged
 keyboard's S is found by the bridge core.
 
 **Merge guard:** "the overlay's shortcut acts at once".
-
-## Reconnect after a network drop
-
-**Where:** `src/app/stream/session_worker.c`: `session_worker()`, the
-`connect:` label in it, `session_worker_reconnect_allowed()` and
-`session_worker_reconnect_wait()`.
-
-A stream that dies with a network error is resumed in place. There is no
-`USER_STREAM_CLOSE` or finish, so input and the bridge stay up, and the screen
-shows "Connecting..." instead of going back to the launcher. It is bounded by
-attempts and by time, and a stream that stayed up for a while resets the
-attempt budget, so an occasional blip never exhausts it. This came with Ciprian
-Misaila's original integration of the bridge.
-
-At the `connect:` label upstream's own code runs as upstream wrote it. v1.2.10
-refreshes the pads before launch, so a pad whose arrival the app never heard is
-still found. v1.3.0 launches Sunshine and Apollo with `gcmap=0` and learns the
-pads from Controller Arrival instead, because a non-zero mask plus Arrival made
-the host allocate two ViGEm pads for one physical controller on first connect;
-GFE still needs the bitmap at launch. The fork's retry label, and its `ret` and
-`gamepad_mask` declared above the label, are kept. The rest is upstream's.
-
-**Merge guard:** "a stream that drops resumes in place".
 
 ## The player colour on an app switch
 
