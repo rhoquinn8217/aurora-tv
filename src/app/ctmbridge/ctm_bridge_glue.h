@@ -167,6 +167,13 @@ int ctm_bridge_reap_gone_devices(void);
  * `name`; false when nothing is bridged and connected. */
 bool ctm_bridge_open_config(char *name, size_t name_len);
 
+/* Would ctm_bridge_open_config reach a device right now? The same test,
+ * without asking: a live session for a bridged device other than the TV's
+ * remote. 1 yes, 0 no, -1 when it cannot say without waiting, because the
+ * device list or the core's session table is being worked on. ⓘ For the
+ * DS5-USBIP button's look, on the interface thread, which must not wait. */
+int bridge_open_config_ready(void);
+
 void ctm_bridge_unplug_index(int index);
 
 /* Plug every recognised controller (skips already-plugged); returns count newly
