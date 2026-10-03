@@ -186,8 +186,11 @@ fi
 # --- the overlay input hold ----------------------------------------------
 # ⓘ Took three attempts to get right. The condition lives in bridge_app.c now,
 # and app.c, upstream's file, keeps the one call that runs it.
+# ⚠️ Matched on the assignment, not on the call alone: the comment above it
+# names streaming_overlay_shown() too, and a check on the bare name passed
+# with the code itself broken (found 2026-10-02 by breaking it on purpose).
 need "input hold driven by the real overlay state" \
-     src/app/bridge_app.c "streaming_overlay_shown()"
+     src/app/bridge_app.c "interface_has_input = streaming_overlay_shown()"
 need "input hold handed to the core" \
      src/app/ctmbridge/ctm_bridge_glue.c "ctm_bridge_set_input_held"
 
