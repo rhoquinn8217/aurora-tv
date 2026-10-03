@@ -22,9 +22,10 @@ void bridge_session_started(session_t *session);
  * every controller shows its player colour again. */
 void bridge_session_stopped(void);
 
-/* At the top of session_toggle_vmouse(): true when Bridge Override holds the
- * virtual mouse off, which it has then just made sure of. */
-bool bridge_session_hold_vmouse_off(session_t *session);
+/* At the top of session_toggle_vmouse(): a press of Virtual Mouse with Bridge
+ * Override on switches the override off and the virtual mouse on, and is not a
+ * toggle. True when that is what it did. */
+bool bridge_session_vmouse_pressed(session_t *session);
 
 /* Is the TV's own mouse mode driving the cursor right now? So that a caller
  * does not have to reach into the session's input. */

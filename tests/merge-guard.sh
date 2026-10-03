@@ -239,8 +239,8 @@ in_order "session.c starts the bridge after the input has started" \
 in_order "session.c stops the bridge after the input has stopped" \
      src/app/stream/session.c "void session_stop_input" \
      "session_input_stopped(&session->input);" "bridge_session_stopped();"
-need "session.c lets Bridge Override hold the virtual mouse off on a toggle" \
-     src/app/stream/session.c "if (bridge_session_hold_vmouse_off(session)) {"
+need "a Virtual Mouse press switches Bridge Override off, in session.c" \
+     src/app/stream/session.c "if (bridge_session_vmouse_pressed(session)) {"
 in_order "the remote's pointer takes its events before the stream's own input" \
      src/app/stream/session_events.c "bool session_handle_input_event" \
      "bridge_pointer_event(session, event)" "switch (event->type)"
@@ -347,8 +347,33 @@ fi
 # --- the panel -----------------------------------------------------------
 need "USB Bridge panel present" \
      src/app/ui/streaming/ctm_panel.c "ctm_panel_open"
-need "panel offers the overlay button" \
-     src/app/ui/streaming/streaming.view.c "app_configuration->bridge\.enable"
+# ⓘ The overlay's USB Bridge and DS5-USBIP buttons are made by
+# src/app/ui/streaming/bridge_overlay.c, called from upstream's view. Right
+# after Virtual Mouse and before the spacer is what puts them third and fourth
+# in the row and in the focus order.
+in_order "the overlay's bridge buttons come after Virtual Mouse" \
+     src/app/ui/streaming/streaming.view.c "lv_obj_t *streaming_scene_create" \
+     'lv_label_set_text(vmouse_label, locstr("Virtual Mouse"));' "bridge_overlay_buttons_create(controller, actions);"
+in_order "the overlay's bridge buttons come before the spacer" \
+     src/app/ui/streaming/streaming.view.c "lv_obj_t *streaming_scene_create" \
+     "bridge_overlay_buttons_create(controller, actions);" "lv_obj_t *actions_spacing = lv_obj_create(actions);"
+
+# --- the pop-up a bridge raises, in upstream's streaming screen ----------------
+# ⓘ Each is one line in streaming.controller.c, and losing any of them
+# compiles: no question when a controller is bridged, a question left sitting
+# on top of the overlay holding the input, or one outliving its stream.
+in_order "a bridged controller raises the pop-up" \
+     src/app/ui/streaming/streaming.controller.c "static bool on_event" \
+     "case USER_CTM_MOUSE_MODE_WARN:" "bridge_prompt_request();"
+in_order "the overlay sends the pop-up away as it opens" \
+     src/app/ui/streaming/streaming.controller.c "bool show_overlay" \
+     "bridge_prompt_dismiss();" "overlay_showing = true;"
+in_order "the pop-up and its message go with the stream" \
+     src/app/ui/streaming/streaming.controller.c "static void controller_dtor" \
+     "bridge_prompt_stream_ended();" "fragment->soft_kbd = NULL;"
+in_order "the USB Bridge panel goes before the screen's focus group" \
+     src/app/ui/streaming/streaming.controller.c "static void on_delete_obj" \
+     "ctm_panel_on_owner_deleted(controller);" "lv_group_del(controller->group);"
 
 echo
 if [ "$fail" -eq 0 ]; then

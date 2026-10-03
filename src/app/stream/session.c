@@ -177,7 +177,7 @@ bool session_has_input(session_t *session) {
 }
 
 void session_toggle_vmouse(session_t *session) {
-    if (bridge_session_hold_vmouse_off(session)) {
+    if (bridge_session_vmouse_pressed(session)) {
         return;
     }
     bool value = !session_input_is_vmouse_active(&session->input.vmouse);

@@ -82,17 +82,23 @@ void bridge_session_stopped(void) {
 #endif
 }
 
-bool bridge_session_hold_vmouse_off(session_t *session) {
-    /* ⭐ Every way of switching the virtual mouse comes through
-     * session_toggle_vmouse(): the overlay button and the USER_TOGGLE_VMOUSE
-     * event both do. The overlay's own callers switch Bridge Override off
-     * first, since the press wins there; this holds the mouse off for anything
-     * that does not. */
-    if (bridge_override_active()) {
-        session_input_set_vmouse_active(&session->input.vmouse, false);
-        return true;
+bool bridge_session_vmouse_pressed(session_t *session) {
+    /* ⭐ THE PRESS WINS (rhoquinn8217, 2026-09-30, in place of a notice refusing
+     * it): Virtual Mouse pressed while Bridge Override is on switches the
+     * override off and the virtual mouse on.
+     * ⓘ Every way of switching the virtual mouse comes through
+     * session_toggle_vmouse(): the overlay's button, and the USER_TOGGLE_VMOUSE
+     * event, which the control port sends. So this is the one place that
+     * decides it, and the overlay's two handlers are upstream's.
+     * ⭐ Since 2026-10-01 this is the ONLY way a person switches the override
+     * off. The question a bridge raises switches it on (bridge_prompt.h), and
+     * it has no button of its own. ⓘ Nothing is said about it: the override's
+     * other switches come back with the mouse, without a notice. */
+    if (!bridge_override_active()) {
+        return false;
     }
-    return false;
+    bridge_override_release_for_vmouse(session);
+    return true;
 }
 
 bool bridge_session_vmouse_active(session_t *session) {
