@@ -259,16 +259,17 @@ int session_worker(session_t *session) {
         }
     }
     SDL_UnlockMutex(session->mutex);
+    /* The stream is ending, whoever ended it: stop adaptive bitrate first, so
+     * no bitrate request can reach the host after its stream has gone (see
+     * adaptive_bitrate_stop). A successful reconnect starts a fresh one. */
+    adaptive_bitrate_stop(session->abr);
+    session->abr = NULL;
     if (reconnect) {
         commons_log_warn("Session", "Connection lost with a network error; trying to resume");
         session_set_state(session, STREAMING_CONNECTING);
         bus_pushevent(USER_STREAM_CONNECTING, NULL, NULL);
         LiStopConnection();
         li_active = false;
-        /* Host is unreachable: stop the ABR service without the restore
-         * round-trips; a successful reconnect starts a fresh one. */
-        adaptive_bitrate_stop(session->abr, false);
-        session->abr = NULL;
         SS4S_PlayerClose(session->player);
         session->player = NULL;
         streaming_error(session, GS_OK, "");
@@ -314,10 +315,9 @@ int session_worker(session_t *session) {
     webos_stream_priority_leave(stream_prio);
     stream_prio = NULL;
 #endif
-    /* Restore only on a clean exit: streaming_errno != GS_OK means the session
-     * ended in error/disconnect and the host is likely unreachable -- the
-     * restore round-trips would just block teardown on timeouts. */
-    adaptive_bitrate_stop(session->abr, streaming_errno == GS_OK);
+    /* Stopped when the stream began to end, so NULL here on every path today;
+     * kept as a guard for any path added later. */
+    adaptive_bitrate_stop(session->abr);
     session->abr = NULL;
     session_connection_callbacks_reset(session);
     if (session->player != NULL) {
