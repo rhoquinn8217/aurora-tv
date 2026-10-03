@@ -39,6 +39,49 @@ absent() {         # absent <description> <file> <pattern>
     fi
 }
 
+need_count() {     # need_count <description> <file> <pattern> <lines>
+    n=$(grep -c "$3" "$2" 2>/dev/null)
+    if [ "${n:-0}" = "$4" ]; then
+        pass=$((pass + 1))
+    else
+        echo "⛔ LOST: $1"
+        echo "   expected $4 lines in $2 matching : $3 (found ${n:-0})"
+        fail=$((fail + 1))
+    fi
+}
+
+# The two below read one function: from the line that begins with <start> to
+# the first line that begins with "}". Texts are matched as they are written,
+# not as patterns. A function that is not there counts as lost.
+in_order() {       # in_order <description> <file> <start> <first text> <second text>
+    if awk -v s="$3" -v a="$4" -v b="$5" '
+        index($0, s) == 1 { inside = 1 }
+        inside && !ia && index($0, a) { ia = NR }
+        inside && !ib && index($0, b) { ib = NR }
+        inside && /^}/ { inside = 0 }
+        END { exit !(ia && ib && ia < ib) }' "$2" 2>/dev/null; then
+        pass=$((pass + 1))
+    else
+        echo "⛔ LOST: $1"
+        echo "   expected in $2, inside $3 : \"$4\" before \"$5\""
+        fail=$((fail + 1))
+    fi
+}
+
+absent_in_function() {   # absent_in_function <description> <file> <start> <text>
+    if awk -v s="$3" -v t="$4" '
+        index($0, s) == 1 { inside = 1; seen = 1 }
+        inside && index($0, t) { hit = 1 }
+        inside && /^}/ { inside = 0 }
+        END { exit !(seen && !hit) }' "$2" 2>/dev/null; then
+        pass=$((pass + 1))
+    else
+        echo "⛔ LOST: $1"
+        echo "   expected in $2, inside $3, no \"$4\" (or the function is gone)"
+        fail=$((fail + 1))
+    fi
+}
+
 # --- the settings section ------------------------------------------------
 # ⛔ This exact line was deleted by his v1.2.2. Everything else in the section
 # can survive a merge and still be unreachable if this one goes.
@@ -109,12 +152,26 @@ else
 fi
 
 # --- the settings themselves ---------------------------------------------
-# ⓘ Each is read somewhere that would silently do nothing if the field vanished.
-for s in bridge_enable bridge_gesture bridge_signal_light bridge_signal_rumble \
-         bridge_signal_tone bridge_mic_wired bridge_mic_bt; do
-    need "setting $s" src/app/app_settings.h "$s"
-    need "setting $s persisted" src/app/app_settings.c "$s"
-done
+# ⓘ The ten bridge settings are one member of upstream's settings struct, and
+# src/app/bridge_settings.c holds the rest. Upstream's settings code makes
+# three calls into it, and losing any of them compiles: without the defaults
+# every switch starts off and the auto-bridge list is unset, without the save
+# a change is gone at the next start, and without the read every TV is back
+# to the defaults.
+need "the bridge's settings are a member of the app's" \
+     src/app/app_settings.h "bridge_settings_t bridge;"
+in_order "the bridge's defaults are set after the settings are cleared" \
+     src/app/app_settings.c "void settings_initialize" \
+     "memset(config, 0, sizeof(CONFIGURATION));" "bridge_settings_defaults(&config->bridge);"
+in_order "the bridge's settings are saved while the file is open" \
+     src/app/app_settings.c "bool settings_save" \
+     'fopen(config->ini_path, "w");' "bridge_settings_write(fp, &config->bridge);"
+in_order "the bridge's settings are saved before the file is closed" \
+     src/app/app_settings.c "bool settings_save" \
+     "bridge_settings_write(fp, &config->bridge);" "return fclose(fp) == 0;"
+in_order "the bridge's settings are read with the rest" \
+     src/app/app_settings.c "static int settings_parse" \
+     "if (bridge_settings_parse(&config->bridge, name, value)) {" 'INI_FULL_MATCH("streaming", "width")'
 
 # --- the per-controller exclusion ----------------------------------------
 # ⚠️ HIS FILE, AND HE REWROTE THIS FUNCTION IN v1.2.2. Without the mask a
@@ -141,12 +198,52 @@ else
 fi
 
 # --- the overlay input hold ----------------------------------------------
-# ⓘ Took three attempts to get right; the condition is easy to lose in a merge
-# because it sits inside a function of his that he also edits.
+# ⓘ Took three attempts to get right. The condition lives in bridge_app.c now,
+# and app.c, upstream's file, keeps the one call that runs it.
+# ⚠️ Matched on the assignment, not on the call alone: the comment above it
+# names streaming_overlay_shown() too, and a check on the bare name passed
+# with the code itself broken (found 2026-10-02 by breaking it on purpose).
 need "input hold driven by the real overlay state" \
-     src/app/app.c "streaming_overlay_shown()"
+     src/app/bridge_app.c "interface_has_input = streaming_overlay_shown()"
 need "input hold handed to the core" \
      src/app/ctmbridge/ctm_bridge_glue.c "ctm_bridge_set_input_held"
+
+# --- the calls app.c makes into bridge_app.c --------------------------------
+# ⓘ app.c is upstream's application file and edited in most releases. The
+# fork's code there is five one-line calls into src/app/bridge_app.c, and a
+# merge that takes upstream's side of app.c drops them without a sound.
+need "app.c disarms a microphone left streaming, at start" \
+     src/app/app.c "bridge_app_before_sdl();"
+in_order "... and does it before SDL_Init" \
+     src/app/app.c "int app_init" "bridge_app_before_sdl();" "SDL_Init(0);"
+need "app.c asks PlayStation controllers for their full report" \
+     src/app/app.c "bridge_app_sdl_hints();"
+need "app.c starts the command port" \
+     src/app/app.c "bridge_app_started(app);"
+need "app.c stops the command port" \
+     src/app/app.c "bridge_app_stopping();"
+in_order "app.c runs the bridge's turn after SDL's events are filtered" \
+     src/app/app.c "void app_process_events" "SDL_FilterEvents(app_event_filter, app);" "bridge_app_events(app);"
+
+# --- the calls the stream files make into files of ours ------------------------
+# ⓘ session.c and session_events.c are upstream's stream files. The bridge's
+# start and stop, its hold on the virtual mouse and the remote's pointer are a
+# call each into src/app/stream/bridge_session.c and bridge_pointer.c, and the
+# order of each call against upstream's own line beside it is what makes it
+# work.
+need "session.c lets Bridge Override keep the virtual mouse off at stream start" \
+     src/app/stream/session.c "session->config.vmouse && bridge_session_vmouse_allowed()"
+in_order "session.c starts the bridge after the input has started" \
+     src/app/stream/session.c "bool session_start_input" \
+     "session_input_started(&session->input);" "bridge_session_started(session);"
+in_order "session.c stops the bridge after the input has stopped" \
+     src/app/stream/session.c "void session_stop_input" \
+     "session_input_stopped(&session->input);" "bridge_session_stopped();"
+need "a Virtual Mouse press switches Bridge Override off, in session.c" \
+     src/app/stream/session.c "if (bridge_session_vmouse_pressed(session)) {"
+in_order "the remote's pointer takes its events before the stream's own input" \
+     src/app/stream/session_events.c "bool session_handle_input_event" \
+     "bridge_pointer_event(session, event)" "switch (event->type)"
 
 # --- the branch switch ---------------------------------------------------
 # ⛔ THE ONE LINE THAT SEPARATES THE BRANCHES. On stable it must be absent, so
@@ -198,11 +295,85 @@ case "$branch" in
         ;;
 esac
 
+# --- the places ctmbridge/NOTES.md explains ------------------------------
+# ⓘ Each change below was explained by a long comment in a file of upstream's.
+# The explanation is in src/app/ctmbridge/NOTES.md now, one line at the place
+# points to it, and these checks take over the warnings it carried.
+need "a pad already opened is not opened again" \
+     src/app/input/input_event.c "app_input_gamepad_state_by_instance_id(input, joy_instance_id) != NULL"
+need "the host's lightbar waits while a bridge signal draws" \
+     src/app/input/input_gamepad.c "ctm_bridge_gesture_light_busy(state->controller)"
+need_count "upstream's wired feedback stays off a pad the bridge is using, at all four entry points" \
+     src/app/input/input_gamepad.c "ctm_bridge_gesture_pad_is_ours(state->controller)" 4
+need "Select and Start are held back while both bumpers are down" \
+     src/app/stream/input/session_gamepad.c "CHORD_GATE_HELD) == CHORD_GATE_HELD"
+in_order "a controller is removed from the host before its bit is set" \
+     src/app/stream/input/session_input.c "void stream_input_exclude_gamepad" \
+     "stream_input_send_gamepad_remove(input, gamepad)" "moonlightExcludedMask |="
+in_order "its bit is cleared before it is announced again" \
+     src/app/stream/input/session_input.c "void stream_input_restore_gamepad" \
+     "moonlightExcludedMask &=" "stream_input_send_gamepad_arrive(input, gamepad)"
+absent_in_function "the remove path does not consult the mask" \
+     src/app/stream/input/session_gamepad.c "void stream_input_send_gamepad_remove" "moonlightExcludedMask"
+need "the overlay's shortcut acts at once" \
+     src/app/stream/input/session_keyboard.c "_pending_key_combo == KeyComboToggleStatsOverlay"
+need "a stream that drops resumes in place" \
+     src/app/stream/session_worker.c "interrupt_reason == STREAMING_INTERRUPT_NETWORK"
+need "the stream boost is a setting" \
+     src/app/ui/settings/panes/experimental.pane.c "app_configuration->stream_priority"
+need "the stream boost setting is read before the connection starts" \
+     src/app/stream/session_worker.c "settings.stream_priority"
+
+# ⓘ The notes and the code stay in step: every "This fork:" line names a section
+# that exists, and every section is named by at least one such line.
+NOTES=src/app/ctmbridge/NOTES.md
+named=$(grep -rho --exclude=NOTES.md 'ctmbridge/NOTES\.md, "[^"]*"' src 2>/dev/null | sed 's/^.*, "//; s/"$//' | sort -u)
+written=$(tr -d '\r' < "$NOTES" 2>/dev/null | sed -n 's/^## //p' | sort -u)
+if [ -n "$named" ] && [ "$named" = "$written" ]; then
+    pass=$((pass + 1))
+else
+    echo "⛔ LOST: the one-line notes and $NOTES name the same sections"
+    echo "   named in the code but not a section there:"
+    printf '%s\n' "$named" | while IFS= read -r s; do
+        printf '%s\n' "$written" | grep -qxF "$s" || echo "     $s"
+    done
+    echo "   a section there that no line of code names:"
+    printf '%s\n' "$written" | while IFS= read -r s; do
+        printf '%s\n' "$named" | grep -qxF "$s" || echo "     $s"
+    done
+    fail=$((fail + 1))
+fi
+
 # --- the panel -----------------------------------------------------------
 need "USB Bridge panel present" \
      src/app/ui/streaming/ctm_panel.c "ctm_panel_open"
-need "panel offers the overlay button" \
-     src/app/ui/streaming/streaming.view.c "bridge_enable"
+# ⓘ The overlay's USB Bridge and DS5-USBIP buttons are made by
+# src/app/ui/streaming/bridge_overlay.c, called from upstream's view. Right
+# after Virtual Mouse and before the spacer is what puts them third and fourth
+# in the row and in the focus order.
+in_order "the overlay's bridge buttons come after Virtual Mouse" \
+     src/app/ui/streaming/streaming.view.c "lv_obj_t *streaming_scene_create" \
+     'lv_label_set_text(vmouse_label, locstr("Virtual Mouse"));' "bridge_overlay_buttons_create(controller, actions);"
+in_order "the overlay's bridge buttons come before the spacer" \
+     src/app/ui/streaming/streaming.view.c "lv_obj_t *streaming_scene_create" \
+     "bridge_overlay_buttons_create(controller, actions);" "lv_obj_t *actions_spacing = lv_obj_create(actions);"
+
+# --- the pop-up a bridge raises, in upstream's streaming screen ----------------
+# ⓘ Each is one line in streaming.controller.c, and losing any of them
+# compiles: no question when a controller is bridged, a question left sitting
+# on top of the overlay holding the input, or one outliving its stream.
+in_order "a bridged controller raises the pop-up" \
+     src/app/ui/streaming/streaming.controller.c "static bool on_event" \
+     "case USER_CTM_MOUSE_MODE_WARN:" "bridge_prompt_request();"
+in_order "the overlay sends the pop-up away as it opens" \
+     src/app/ui/streaming/streaming.controller.c "bool show_overlay" \
+     "bridge_prompt_dismiss();" "overlay_showing = true;"
+in_order "the pop-up and its message go with the stream" \
+     src/app/ui/streaming/streaming.controller.c "static void controller_dtor" \
+     "bridge_prompt_stream_ended();" "fragment->soft_kbd = NULL;"
+in_order "the USB Bridge panel goes before the screen's focus group" \
+     src/app/ui/streaming/streaming.controller.c "static void on_delete_obj" \
+     "ctm_panel_on_owner_deleted(controller);" "lv_group_del(controller->group);"
 
 echo
 if [ "$fail" -eq 0 ]; then

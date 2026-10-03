@@ -239,20 +239,7 @@ void stream_input_handle_key(stream_input_t *input, const SDL_KeyboardEvent *eve
             }
         }
 
-        /* ⛔⛔ THE OVERLAY'S SHORTCUT ACTS AT ONCE, IT DOES NOT WAIT FOR EVERY KEY
-         * TO BE UP (rhoquinn8217, 2026-09-15, build 346: "I was able to type for
-         * awhile but after attempting the chord, the keyboard stopped working").
-         * A pending combo ignores every key press until SDL's own keyboard state
-         * shows ALL keys released, and on webOS a key release does not always
-         * arrive (see session_events.c), so one key stayed down, the combo never
-         * ran, and the keyboard was dead for the rest of the stream.
-         * ➡️ Release on the host whatever it saw pressed, open the overlay, and
-         * leave nothing pending. The releases still to come land on the overlay,
-         * or on the stream as harmless key-ups.
-         * ⓘ The shortcut is Ctrl+Alt+Shift+S: Moonlight's stats shortcut, which
-         * has always opened the overlay here. O sat beside it from 2026-09-15 to
-         * 2026-10-01, added in the belief that there was none, and this was
-         * written for it. A bridged keyboard's S is found by the bridge core. */
+        /* This fork: the overlay's shortcut acts at once. Why: ctmbridge/NOTES.md, "The overlay's keyboard shortcut". */
         if (_pending_key_combo == KeyComboToggleStatsOverlay) {
             SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "Detected overlay combo");
             stream_input_flush_pressed_keys(input);

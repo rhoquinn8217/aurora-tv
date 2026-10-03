@@ -14,6 +14,7 @@
 #include "input/bridge_override.h"
 #include "stream/session.h"
 #include "stream/session_priv.h"
+#include "stream/bridge_session.h"
 #include "streaming.controller.h"
 #include "util/i18n.h"
 
@@ -112,6 +113,10 @@ static const char *s_done = "";
 static lv_obj_t *s_note = NULL;
 static lv_timer_t *s_note_timer = NULL;
 static uint32_t s_note_since = 0;
+/* Which message is up, for the log, and what has to stay so for it to stay:
+ * NULL when only its time and the stream decide. */
+static const char *s_note_what = "";
+static bool (*s_note_true)(void) = NULL;
 
 static prompt_words_t prompt_words(bool vmouse, bool touchpad_mouse) {
     /* ⓘ Virtual Mouse in the overlay is the way back for all three: pressing
@@ -202,19 +207,31 @@ static void note_remove(void) {
     if (s_note != NULL) {
         lv_obj_del(s_note);
         s_note = NULL;
-        commons_log_info("Streaming", "bridge prompt: the message after the button is gone");
+        commons_log_info("Streaming", "bridge prompt: %s is gone", s_note_what);
     }
 }
 
 /* ⓘ It is on screen only while what it says is true. Virtual Mouse pressed in
- * the overlay brings the TV's controls back, and takes this down with them; so
- * does the stream ending. */
+ * the overlay brings the TV's controls back, and takes the message after the
+ * button down with them; the stream ending takes down either message. */
 static void note_tick(lv_timer_t *timer) {
     (void) timer;
-    if (lv_tick_elaps(s_note_since) >= PROMPT_NOTE_MS || !bridge_override_active() || global == NULL ||
-        global->session == NULL) {
+    if (lv_tick_elaps(s_note_since) >= PROMPT_NOTE_MS || (s_note_true != NULL && !s_note_true()) ||
+        global == NULL || global->session == NULL) {
         note_remove();
     }
+}
+
+/* The dim the theme puts behind a dialogue, for a message with no dialogue
+ * under it: read off a backdrop made for the purpose inside `parent`, so that
+ * nothing outside it is redrawn, and deleted at once. ⓘ The theme gives every
+ * dialogue's backdrop the same. */
+static void dialogue_dim(lv_obj_t *parent, lv_opa_t *opa, lv_color_t *color) {
+    lv_obj_t *backdrop = lv_obj_class_create_obj(&lv_msgbox_backdrop_class, parent);
+    lv_obj_class_init_obj(backdrop);
+    *opa = lv_obj_get_style_bg_opa(backdrop, LV_PART_MAIN);
+    *color = lv_obj_get_style_bg_color(backdrop, LV_PART_MAIN);
+    lv_obj_del(backdrop);
 }
 
 /* The message after the button: the pop-up's box without a button, where the
@@ -228,14 +245,27 @@ static void note_tick(lv_timer_t *timer) {
  * given the backdrop's share as well as its own, and comes out as dark and as
  * see-through as the pop-up looked.
  * ⓘ On the system layer, like the app's other notices: nothing else that comes
- * up can lie over it, and a dialogue's dim does not grey it. */
-static void note_show(const char *text, lv_opa_t dim_opa, lv_color_t dim_color) {
+ * up can lie over it, and a dialogue's dim does not grey it.
+ *
+ * `backdrop` is the dim behind the pop-up it follows; NULL for a message that
+ * follows no pop-up, which takes the theme's dim for a dialogue, so that both
+ * messages look the same. `what` names it in the log, and `still_true`, when
+ * not NULL, is asked four times a second whether it may stay. */
+static void note_show(const char *text, const char *what, bool (*still_true)(void), const lv_obj_t *backdrop) {
     note_remove();
     if (text == NULL || text[0] == '\0') {
         return;
     }
     lv_obj_t *note = lv_obj_create(lv_layer_sys());
     lv_obj_clear_flag(note, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+    lv_opa_t dim_opa;
+    lv_color_t dim_color;
+    if (backdrop != NULL) {
+        dim_opa = lv_obj_get_style_bg_opa(backdrop, LV_PART_MAIN);
+        dim_color = lv_obj_get_style_bg_color(backdrop, LV_PART_MAIN);
+    } else {
+        dialogue_dim(note, &dim_opa, &dim_color);
+    }
     lv_obj_set_style_pad_all(note, PROMPT_PAD, 0);
     lv_obj_set_style_max_width(note, lv_disp_get_hor_res(NULL) - 2 * PROMPT_MARGIN, 0);
     /* Of what shows, how much is the backdrop's colour and how much the
@@ -261,9 +291,11 @@ static void note_show(const char *text, lv_opa_t dim_opa, lv_color_t dim_color) 
     lv_obj_align(note, LV_ALIGN_BOTTOM_LEFT, PROMPT_MARGIN, -prompt_lift());
 
     s_note = note;
+    s_note_what = what;
+    s_note_true = still_true;
     s_note_since = lv_tick_get();
     s_note_timer = lv_timer_create(note_tick, PROMPT_NOTE_TICK_MS, NULL);
-    commons_log_info("Streaming", "bridge prompt: the message after the button is up for %d ms", PROMPT_NOTE_MS);
+    commons_log_info("Streaming", "bridge prompt: %s is up for %d ms", what, PROMPT_NOTE_MS);
 }
 
 /* The theme's message box, made compact and see-through. ⓘ Everything here is
@@ -369,9 +401,7 @@ static void switch_off(const char *by) {
     if (!bridge_override_active() || s_mbox == NULL) {
         return;
     }
-    const lv_obj_t *backdrop = lv_obj_get_parent(s_mbox);
-    note_show(s_done, lv_obj_get_style_bg_opa(backdrop, LV_PART_MAIN),
-              lv_obj_get_style_bg_color(backdrop, LV_PART_MAIN));
+    note_show(s_done, "the message after the button", bridge_override_active, lv_obj_get_parent(s_mbox));
 }
 
 static void on_button(lv_event_t *event) {
@@ -417,7 +447,7 @@ void bridge_prompt_request(void) {
         return;
     }
     stream_input_t *input = session_get_input(global->session);
-    const bool vmouse = session_vmouse_active(global->session);
+    const bool vmouse = bridge_session_vmouse_active(global->session);
     const bool touchpad_mouse = input != NULL && input->touchpad_mode == TOUCHPAD_MODE_MOUSE;
     if (!vmouse && !touchpad_mouse) {
         commons_log_info("Streaming", "bridge prompt: Virtual Mouse and the touchpad's mouse mode are both off, "
@@ -503,6 +533,14 @@ bool bridge_prompt_accept(void) {
 void bridge_prompt_stream_ended(void) {
     bridge_prompt_dismiss();
     note_remove();
+}
+
+void bridge_prompt_note(const char *text) {
+    /* ⓘ Not while the pop-up is up: it is in this same place. */
+    if (s_mbox != NULL) {
+        return;
+    }
+    note_show(text, "the DS5-USBIP message", NULL, NULL);
 }
 
 static void measure(const lv_obj_t *box, const lv_obj_t *label, bridge_prompt_measure_t *out) {

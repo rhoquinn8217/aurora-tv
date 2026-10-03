@@ -121,14 +121,7 @@ static lv_obj_t *create_obj(lv_fragment_t *self, lv_obj_t *container) {
 #endif
 
 #if TARGET_WEBOS
-    /* ⭐⭐ T-245: ONE BUILD FOR EVERY SET.
-     * The stream boost crashes the rooted LG 34SR65QC at every stream start, and
-     * until now the only way round it was a second package built by
-     * build-aurora-docker.ps1 -Rooted. ⛔ That cost the same mistake twice --
-     * builds 392 and 421 were both overwritten, because only the rooted path
-     * bumps the build number. A switch here retires the second package.
-     * ⓘ Rooted sets only: on an unrooted TV the boost never runs, so the row
-     * would be a control that does nothing. */
+    /* This fork: the stream boost as a setting, rooted sets only. Why: ctmbridge/NOTES.md, "Stream boost". */
     if (webos_game_mode_is_rooted()) {
         pref_checkbox(view, locstr("Stream boost"), &app_configuration->stream_priority, false);
         pref_desc_label(view,

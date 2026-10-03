@@ -30,21 +30,11 @@ static int settings_parse(app_settings_t *config, const char *section, const cha
 
 static void set_string(char **field, const char *value);
 
-static void append_csv(char **field, const char *value);
-
 static void set_int(int *field, const char *value);
 
 #define SETTINGS_COUNT(values) (sizeof(values) / sizeof((values)[0]))
 
 static const char *const touchpad_mode_values[] = {"mouse", "native"};
-
-void settings_set_auto_macs(app_settings_t *config, const char *csv) {
-    if (config == NULL) {
-        return;
-    }
-    set_string(&config->bridge_auto_macs, csv ? csv : "");
-}
-
 
 void settings_sync_refresh_rate(app_settings_t *config) {
     settings_reconcile_refresh_rate(config);
@@ -175,25 +165,7 @@ void settings_initialize(app_settings_t *config, char *conf_dir) {
     config->quitappafter = false;
     config->autoresume = false;
     config->viewonly = false;
-    /* ⭐⭐ OFF ON A FRESH INSTALL (rhoquinn8217, 2026-09-08). Bridging needs a
-     * listener running on the PC, so it cannot work until someone has set that
-     * up; shipping it on means a feature that appears broken to everyone who
-     * has not. ➡️ Turning it on is the moment the Auto Bridge section is first
-     * met, which is why that section sits directly under this switch.
-     * ✅ Existing installs are untouched: settings_load applies these defaults
-     * and THEN lets the file override them, and the conf directory survives an
-     * ipk install -- verified on the C1, whose pairing keys predate every
-     * install since. */
-    config->bridge_enable = false;
-    config->bridge_gesture = true;
-    config->bridge_signal_light = true;
-    config->bridge_signal_rumble = true;
-    config->bridge_signal_tone = true;
-    config->bridge_mic_wired = true;
-    config->bridge_mic_bt = false;   /* never armed on this branch */
-    set_string(&config->bridge_auto_macs, "");
-    config->bridge_auto_all = false;
-    config->bridge_override = false;
+    bridge_settings_defaults(&config->bridge);   /* This fork: see bridge_settings.h. */
     config->rotate = 0;
     config->absmouse = true;
     config->virtual_mouse = false;
@@ -287,33 +259,7 @@ bool settings_save(app_settings_t *config) {
     ini_write_bool(fp, "quitappafter", config->quitappafter);
     ini_write_bool(fp, "autoresume", config->autoresume);
     ini_write_bool(fp, "viewonly", config->viewonly);
-    ini_write_bool(fp, "bridge_enable", config->bridge_enable);
-    ini_write_bool(fp, "bridge_gesture", config->bridge_gesture);
-    ini_write_bool(fp, "bridge_signal_light", config->bridge_signal_light);
-    ini_write_bool(fp, "bridge_signal_rumble", config->bridge_signal_rumble);
-    ini_write_bool(fp, "bridge_signal_tone", config->bridge_signal_tone);
-    ini_write_bool(fp, "bridge_mic_wired", config->bridge_mic_wired);
-    ini_write_bool(fp, "bridge_mic_bt", config->bridge_mic_bt);
-    /* ⭐ ONE LINE PER MARK, not the whole list on one. A mark carries the device's
-     * name since 2026-09-14, and the INI reader cuts a line at 200 characters
-     * (inih's INI_MAX_LINE), which three or four marks on one line would pass --
-     * losing the rest without a word. bridge_auto_macs, the old one-line list, is
-     * still read. */
-    if (config->bridge_auto_macs != NULL) {
-        char list[4096];
-        snprintf(list, sizeof list, "%s", config->bridge_auto_macs);
-        char *save = NULL;
-        for (char *tok = strtok_r(list, ",", &save); tok != NULL; tok = strtok_r(NULL, ",", &save)) {
-            while (*tok == ' ') {
-                tok++;
-            }
-            if (*tok != '\0') {
-                ini_write_string(fp, "bridge_auto_mark", tok);
-            }
-        }
-    }
-    ini_write_bool(fp, "bridge_auto_all", config->bridge_auto_all);
-    ini_write_bool(fp, "bridge_override", config->bridge_override);
+    bridge_settings_write(fp, &config->bridge);
 
     ini_write_section(fp, "input");
     ini_write_bool(fp, "absmouse", config->absmouse);
@@ -445,6 +391,9 @@ static int indexed_setting_parse(const char *value, const char *const values[],
 }
 
 static int settings_parse(app_settings_t *config, const char *section, const char *name, const char *value) {
+    if (bridge_settings_parse(&config->bridge, name, value)) {
+        return 1;
+    }
     if (INI_FULL_MATCH("streaming", "width")) {
         set_int(&config->stream.width, value);
     } else if (INI_FULL_MATCH("streaming", "height")) {
@@ -554,28 +503,6 @@ static int settings_parse(app_settings_t *config, const char *section, const cha
         config->autoresume = INI_IS_TRUE(value);
     } else if (INI_NAME_MATCH("viewonly")) {
         config->viewonly = INI_IS_TRUE(value);
-    } else if (INI_NAME_MATCH("bridge_enable")) {
-        config->bridge_enable = INI_IS_TRUE(value);
-    } else if (INI_NAME_MATCH("bridge_gesture")) {
-        config->bridge_gesture = INI_IS_TRUE(value);
-    } else if (INI_NAME_MATCH("bridge_signal_light")) {
-        config->bridge_signal_light = INI_IS_TRUE(value);
-    } else if (INI_NAME_MATCH("bridge_signal_rumble")) {
-        config->bridge_signal_rumble = INI_IS_TRUE(value);
-    } else if (INI_NAME_MATCH("bridge_signal_tone")) {
-        config->bridge_signal_tone = INI_IS_TRUE(value);
-    } else if (INI_NAME_MATCH("bridge_mic_wired")) {
-        config->bridge_mic_wired = INI_IS_TRUE(value);
-    } else if (INI_NAME_MATCH("bridge_mic_bt")) {
-        config->bridge_mic_bt = INI_IS_TRUE(value);
-    } else if (INI_NAME_MATCH("bridge_auto_mark") || INI_NAME_MATCH("bridge_auto_macs")) {
-        /* ⓘ bridge_auto_mark is one mark a line; bridge_auto_macs is the old
-         * comma-separated list, read so marks saved before 2026-09-14 survive. */
-        append_csv(&config->bridge_auto_macs, value);
-    } else if (INI_NAME_MATCH("bridge_auto_all")) {
-        config->bridge_auto_all = INI_IS_TRUE(value);
-    } else if (INI_NAME_MATCH("bridge_override")) {
-        config->bridge_override = INI_IS_TRUE(value);
     } else if (INI_NAME_MATCH("absmouse")) {
         config->absmouse = INI_IS_TRUE(value);
     } else if (INI_NAME_MATCH("virtual_mouse")) {
@@ -643,25 +570,6 @@ static int settings_parse(app_settings_t *config, const char *section, const cha
 static void set_string(char **field, const char *value) {
     free_nullable(*field);
     *field = value != NULL ? strdup(value) : NULL;
-}
-
-/* Adds value to a comma-separated list, as a new entry. */
-static void append_csv(char **field, const char *value) {
-    if (value == NULL || value[0] == '\0') {
-        return;
-    }
-    if (*field == NULL || (*field)[0] == '\0') {
-        set_string(field, value);
-        return;
-    }
-    const size_t len = strlen(*field) + 1 + strlen(value) + 1;
-    char *joined = malloc(len);
-    if (joined == NULL) {
-        return;
-    }
-    snprintf(joined, len, "%s,%s", *field, value);
-    free(*field);
-    *field = joined;
 }
 
 static void set_int(int *field, const char *value) {

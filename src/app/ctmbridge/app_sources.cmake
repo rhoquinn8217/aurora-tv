@@ -8,6 +8,8 @@
 # !! A new source file of the fork's goes in this list. tests/merge-guard.sh
 # !! checks that every one named here still exists.
 target_sources(moonlight-lib PRIVATE
+        ${CMAKE_SOURCE_DIR}/src/app/bridge_app.c
+        ${CMAKE_SOURCE_DIR}/src/app/bridge_settings.c
         ${CMAKE_SOURCE_DIR}/src/app/control_server.c
         ${CMAKE_SOURCE_DIR}/src/app/input/auto_bridge.c
         ${CMAKE_SOURCE_DIR}/src/app/input/bridge_keyboard.c
@@ -15,8 +17,11 @@ target_sources(moonlight-lib PRIVATE
         ${CMAKE_SOURCE_DIR}/src/app/input/bridge_request.c
         ${CMAKE_SOURCE_DIR}/src/app/input/ctm_bridge_gesture.c
         ${CMAKE_SOURCE_DIR}/src/app/input/device_groups.c
+        ${CMAKE_SOURCE_DIR}/src/app/stream/bridge_pointer.c
+        ${CMAKE_SOURCE_DIR}/src/app/stream/bridge_session.c
         ${CMAKE_SOURCE_DIR}/src/app/ui/settings/auto_bridge_window.c
         ${CMAKE_SOURCE_DIR}/src/app/ui/settings/panes/usbbridge.pane.c
+        ${CMAKE_SOURCE_DIR}/src/app/ui/streaming/bridge_overlay.c
         ${CMAKE_SOURCE_DIR}/src/app/ui/streaming/bridge_prompt.c
         ${CMAKE_SOURCE_DIR}/src/app/ui/streaming/ctm_panel.c)
 

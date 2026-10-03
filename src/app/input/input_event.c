@@ -16,16 +16,7 @@ void app_input_handle_event(app_input_t *input, const SDL_Event *event) {
             commons_log_warn("Input", "Too many controllers, ignoring.");
             return;
         }
-        /* ⛔⛔ THE SAME GUARD UPSTREAM GAVE THE CONTROLLER EVENT BELOW, which
-         * this one needs now that v1.2.10 has three other openers: the scan at
-         * init, at session start and before launch, plus CONTROLLERDEVICEADDED.
-         * A pad the scan has already opened arrives here again on its own queued
-         * event, is opened a SECOND time, and takes a second gs_id -- so the
-         * launch mask carries two bits and the host makes two pads for one
-         * controller.
-         * ⚠️ MEASURED 2026-09-21 on the C1, in Apollo's own log: "Gamepad 0 will
-         * be DualShock 4" and "Gamepad 1 will be DualShock 4", two milliseconds
-         * apart, with a single Edge connected. */
+        /* This fork: a pad already opened is not opened again. Why: ctmbridge/NOTES.md, "A pad opened twice". */
 #if SDL_VERSION_ATLEAST(2, 0, 6)
         SDL_JoystickID joy_instance_id = SDL_JoystickGetDeviceInstanceID(event->jdevice.which);
         if (joy_instance_id >= 0 && app_input_gamepad_state_by_instance_id(input, joy_instance_id) != NULL) {

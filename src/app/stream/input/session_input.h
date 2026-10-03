@@ -48,12 +48,7 @@ typedef struct stream_input_t {
     int pointerGestureStartX;
     int pointerGestureStartY;
     bool view_only, no_sdl_mouse;
-    /* Controllers handed to the bridge, by moonlight slot.
-     *
-     * A STORED mask, deliberately, rather than a question asked of the bridge
-     * on every send. Deriving it live meant calling into the bridge from
-     * inside limelight's send path, and that crashed the app. Ported from the
-     * working prototype, which stores it. */
+    /* This fork: controllers handed to the bridge, by Moonlight slot. Why: ctmbridge/NOTES.md, "One controller left out". */
     uint16_t moonlightExcludedMask;
     uint8_t stick_deadzone;
     bool report_gamepad_battery;

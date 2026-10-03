@@ -1,4 +1,5 @@
 #include "streaming.controller.h"
+#include "bridge_overlay.h"
 #include "app.h"
 
 #include <string.h>
@@ -108,42 +109,7 @@ lv_obj_t *streaming_scene_create(lv_fragment_t *self, lv_obj_t *parent) {
     lv_obj_t *vmouse_label = lv_label_create(vmouse_btn);
     lv_obj_add_style(vmouse_label, &controller->overlay_button_label_style, 0);
     lv_label_set_text(vmouse_label, locstr("Virtual Mouse"));
-
-    // CTM Bridge button: third in the actions bar (Soft keyboard, Virtual Mouse,
-    // then CTM Bridge). Created after vmouse_btn so both its flex position and its
-    // focus-group order fall to the right of Virtual Mouse.
-    /* ⭐ Hidden rather than absent when switched off: the overlay's focus order
-     * is built from these children, and removing one shifts everything after
-     * it. ⓘ A hidden object keeps its place and takes no focus. */
-    lv_obj_t *ctm_btn = lv_btn_create(actions);
-    lv_obj_add_flag(ctm_btn, LV_OBJ_FLAG_EVENT_BUBBLE);
-    lv_obj_add_style(ctm_btn, &controller->overlay_button_style, 0);
-    lv_obj_add_style(ctm_btn, &controller->overlay_button_style_focused, LV_STATE_FOCUS_KEY);
-    lv_obj_set_style_bg_color(ctm_btn, lv_palette_main(LV_PALETTE_PURPLE), 0);
-    lv_obj_t *ctm_label = lv_label_create(ctm_btn);
-    lv_obj_add_style(ctm_label, &controller->overlay_button_label_style, 0);
-    lv_label_set_text(ctm_label, locstr("USB Bridge"));
-    if (app_configuration && !app_configuration->bridge_enable) {
-        lv_obj_add_flag(ctm_btn, LV_OBJ_FLAG_HIDDEN);
-    }
-
-    /* ⭐ DS5-USBIP, beside the USB Bridge button and hidden with it, for the
-     * same focus-order reason. It asks the USB server on the host to open its
-     * settings window for a device that is bridged (open_listener_config in
-     * the controller). ⓘ It stands where Bridge Override stood until
-     * 2026-10-01, at rhoquinn8217's word. That switch has no button now:
-     * the question a bridge raises turns it on (bridge_prompt.h). */
-    lv_obj_t *ds5usbip_btn = lv_btn_create(actions);
-    lv_obj_add_flag(ds5usbip_btn, LV_OBJ_FLAG_EVENT_BUBBLE);
-    lv_obj_add_style(ds5usbip_btn, &controller->overlay_button_style, 0);
-    lv_obj_add_style(ds5usbip_btn, &controller->overlay_button_style_focused, LV_STATE_FOCUS_KEY);
-    lv_obj_set_style_bg_color(ds5usbip_btn, lv_palette_main(LV_PALETTE_DEEP_PURPLE), 0);
-    lv_obj_t *ds5usbip_label = lv_label_create(ds5usbip_btn);
-    lv_obj_add_style(ds5usbip_label, &controller->overlay_button_label_style, 0);
-    lv_label_set_text(ds5usbip_label, locstr("DS5-USBIP"));
-    if (app_configuration && !app_configuration->bridge_enable) {
-        lv_obj_add_flag(ds5usbip_btn, LV_OBJ_FLAG_HIDDEN);
-    }
+    bridge_overlay_buttons_create(controller, actions);   /* This fork: USB Bridge and DS5-USBIP; see bridge_overlay.h. */
 
     lv_obj_t *actions_spacing = lv_obj_create(actions);
     lv_obj_remove_style_all(actions_spacing);
@@ -264,8 +230,6 @@ lv_obj_t *streaming_scene_create(lv_fragment_t *self, lv_obj_t *parent) {
     lv_obj_add_flag(overlay, LV_OBJ_FLAG_HIDDEN);
 
     controller->video = video;
-    controller->ctm_btn = ctm_btn;
-    controller->ds5usbip_btn = ds5usbip_btn;
     controller->actions = actions;
     controller->kbd_btn = kbd_btn;
     controller->vmouse_btn = vmouse_btn;

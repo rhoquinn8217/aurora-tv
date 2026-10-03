@@ -89,6 +89,13 @@ void bridge_prompt_dismiss(void);
  * pressed button left on the screen. */
 void bridge_prompt_stream_ended(void);
 
+/* Something else to say in the pop-up's place, with the look and the time of
+ * the message its first button leaves, which it replaces if that is up. Used
+ * by the DS5-USBIP button when nothing is bridged (rhoquinn8217, 2026-10-02:
+ * "move it to the bottom left with the other one"; it was a notice of its own
+ * at the top left). */
+void bridge_prompt_note(const char *text);
+
 /* For the control port: the seconds left on the count, 0 when it is not up;
  * and its first button, the one that turns it off, pressed without a hand.
  * False when it is not up. ⓘ Its second button does what a dismissal does. */

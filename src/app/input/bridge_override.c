@@ -17,8 +17,8 @@ bool bridge_override_active(void) {
     /* ⓘ Only with bridging enabled: with it off there is nothing bridged for
      * the TV's own handling to get in the way of, and the switch is hidden with
      * the USB Bridge button, so it could not be seen to be on. */
-    return app_configuration != NULL && app_configuration->bridge_enable &&
-           app_configuration->bridge_override;
+    return app_configuration != NULL && app_configuration->bridge.enable &&
+           app_configuration->bridge.override;
 }
 
 void bridge_override_apply(stream_input_t *input) {
@@ -64,7 +64,7 @@ void bridge_override_set(session_t *session, bool on) {
     if (app_configuration == NULL) {
         return;
     }
-    app_configuration->bridge_override = on;
+    app_configuration->bridge.override = on;
     if (session == NULL) {
         commons_log_info("Input", "Bridge override %s, from the next stream", on ? "on" : "off");
         return;

@@ -27,11 +27,7 @@
 static const char aurora_build_tag[] __attribute__((used)) = "aurora-v1.3.0";
 #endif
 
-/* Auto-reconnect policy: a stream that dies with a network error is resumed in
- * place (no USER_STREAM_CLOSE/FINISHED, so input and the CTM bridge stay up and
- * the UI shows "Connecting..." instead of bouncing back to the launcher).
- * Bounded by attempts AND wall time; a stream that stayed up for a while resets
- * the attempt budget so an occasional blip never exhausts it (flap guard). */
+/* This fork: a stream that drops resumes in place. Why: ctmbridge/NOTES.md, "Reconnect after a network drop". */
 #define SESSION_RECONNECT_MAX_ATTEMPTS 8
 #define SESSION_RECONNECT_MAX_ELAPSED_MS 90000
 #define SESSION_RECONNECT_STABLE_MS 30000
@@ -113,14 +109,7 @@ int session_worker(session_t *session) {
 #endif
 
     connect:
-    /* ⭐ UPSTREAM 1.2.10: refresh before launch, so a pad whose arrival the app
-     * never heard is still found. ⓘ Our retry label and our already-declared
-     * ret / gamepad_mask are kept; the rest is his.
-     *
-     * ⭐ UPSTREAM 1.3.0: Sunshine and Apollo now launch with gcmap=0 and learn
-     * the pads from Controller Arrival instead. A non-zero mask plus Arrival
-     * made the host allocate two ViGEm pads for one physical controller on
-     * first connect. GFE still needs the bitmap at launch. Taken as it stands. */
+    /* This fork: the retry label; upstream's launch below as it stands. Why: ctmbridge/NOTES.md, "Reconnect after a network drop". */
     app_input_scan_gamepads(&app->input);
     if (server->isGfe) {
         gamepad_mask = app_input_gamepads_mask(&app->input);

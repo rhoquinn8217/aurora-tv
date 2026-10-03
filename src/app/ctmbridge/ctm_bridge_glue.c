@@ -856,6 +856,40 @@ bool ctm_bridge_open_config(char *name, size_t name_len)
     return sent;
 }
 
+int bridge_open_config_ready(void)
+{
+    if (!ctm_bridge_active()) {
+        return 0;
+    }
+    /* ⛔ Never waits: a device scan holds the list for a quarter of a second
+     * and more, and the interface thread asks this four times a second. */
+    if (pthread_mutex_trylock(&s_dev_mutex) != 0) {
+        return -1;
+    }
+    if (pthread_mutex_trylock(&g_sessions_mutex) != 0) {
+        pthread_mutex_unlock(&s_dev_mutex);
+        return -1;
+    }
+    int ready = 0;
+    for (int i = 0; i < g_devices.count && !ready; ++i) {
+        const logical_device_t *item = &g_devices.items[i];
+        /* As ctm_bridge_open_config: the TV's own remote is not a session. */
+        if (item_is_tv_remote(item)) {
+            continue;
+        }
+        for (int s = 0; s < g_session_count; ++s) {
+            if (!g_sessions[s].stopping && g_sessions[s].controller != NULL &&
+                strcmp(g_sessions[s].key, item->key) == 0) {
+                ready = 1;
+                break;
+            }
+        }
+    }
+    pthread_mutex_unlock(&g_sessions_mutex);
+    pthread_mutex_unlock(&s_dev_mutex);
+    return ready;
+}
+
 void ctm_bridge_unplug_index(int index)
 {
     pthread_mutex_lock(&s_dev_mutex);

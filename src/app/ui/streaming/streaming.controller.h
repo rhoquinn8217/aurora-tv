@@ -19,9 +19,6 @@ typedef struct {
     lv_obj_t *actions;
     lv_obj_t *kbd_btn, *vmouse_btn;
     lv_obj_t *suspend_btn, *quit_btn;
-    lv_obj_t *ctm_btn;
-    /* Asks the USB server on the host for its settings window. */
-    lv_obj_t *ds5usbip_btn;
     lv_obj_t *stats;
     struct {
         lv_obj_t *header;
@@ -42,12 +39,6 @@ typedef struct {
     lv_obj_t *stats_quality_indicator;  /* Colored dot: green/yellow/red by latency */
     lv_obj_t *stats_pin;
     lv_obj_t *notice, *notice_label;
-    /* The top-left notice that goes away by itself, and the timer that takes
-     * it away. Separate from `notice` above, which is the top-right connection
-     * notice and is held open by state rather than time -- sharing one would
-     * make the two fight. */
-    lv_obj_t *mouse_notice, *mouse_notice_label;
-    lv_timer_t *mouse_notice_timer;
     lv_obj_t *soft_kbd;
     lv_style_t overlay_button_style;
     lv_style_t overlay_button_style_focused;
@@ -83,9 +74,3 @@ bool streaming_refresh_stats();
 void streaming_toggle_stats_pin(void);
 
 void streaming_notice_show(const char *message);
-
-/* A controller has just been bridged: if the TV's own mouse controls are on,
- * ask whether to turn them off (bridge_prompt.h). Does nothing when they are
- * off, or outside a stream. Safe to call repeatedly -- a second call restarts
- * the question's count. */
-void streaming_mouse_mode_warn(void);

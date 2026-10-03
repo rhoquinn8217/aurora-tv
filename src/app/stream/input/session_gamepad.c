@@ -16,21 +16,7 @@
 
 #define QUIT_BUTTONS (PLAY_FLAG | BACK_FLAG | LB_FLAG | RB_FLAG)
 
-/* T-216. The two chord buttons the HOST acts on by itself: Select and Start,
- * which are View and Menu on an Xbox pad. Steam opens its on-screen keyboard
- * and an app switcher from them.
- *
- * ⛔ THE LEAK. Every press goes to the host the moment it arrives, and the chord
- * is only recognised once all four are down -- so rolling through it left
- * Steam's keyboard and the app switcher sitting behind the overlay, every time.
- *
- * ⭐ THE RULE (rhoquinn8217, 2026-09-18): while BOTH BUMPERS are held, these two
- * belong to the chord and are not sent at all. Nobody holds LB and RB together
- * and then reaches for Start in a game, so nothing real is taken away -- and it
- * costs no latency anywhere, which a delay on the bumpers would have.
- * ⚠️ It does mean the chord is pressed BUMPERS FIRST. Press View before the
- * bumpers are down and the host still sees it, because at that moment it is an
- * ordinary press and there is no way to know otherwise. */
+/* This fork: Select and Start are held back while both bumpers are down. Why: ctmbridge/NOTES.md, "Select and Start held back". */
 #define CHORD_GATED_BUTTONS (BACK_FLAG | PLAY_FLAG)
 #define CHORD_GATE_HELD (LB_FLAG | RB_FLAG)
 /** Hold Select (Back) this long to toggle pinned performance stats (Artemis-style). */
@@ -134,21 +120,7 @@ static bool stream_input_gamepad_sends_moonlight(const stream_input_t *input,
     if (input->view_only || gamepad == NULL) {
         return false;
     }
-    /* Per controller, not per session.
-     *
-     * A switch for the whole session used to do this when the bridge was
-     * enabled, which switched moonlight's gamepad input off for EVERY
-     * controller -- even ones nobody had upgraded, leaving them unusable for
-     * no reason.
-     *
-     * ⭐ IT IS GONE: never set after 2026-08-19, and removed. The per-controller
-     * mask below is the only suppression there is, and upstream's original has
-     * none at all -- so a stream behaves exactly as upstream's does until a
-     * controller is actually bridged, and only that controller changes.
-     *
-     * Reads a stored mask rather than asking the bridge. Deriving the answer
-     * live meant calling into the bridge from inside limelight's send path,
-     * and that crashed the app on 2026-08-10. */
+    /* This fork: a controller handed to the bridge is left out. Why: ctmbridge/NOTES.md, "One controller left out". */
     if (gamepad->gs_id >= 0 &&
         (input->moonlightExcludedMask & (1u << gamepad->gs_id))) {
         return false;
