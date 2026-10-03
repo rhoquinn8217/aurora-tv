@@ -58,7 +58,7 @@ static void abw_apply_all(void);
 static void abw_refresh_boxes(void) {
     for (int i = 0; i < s_count; ++i) {
         if (s_box[i] == NULL) continue;
-        if (auto_bridge_marked(app_configuration->bridge_auto_macs, s_parts, &s_groups[i])) {
+        if (auto_bridge_marked(app_configuration->bridge.auto_macs, s_parts, &s_groups[i])) {
             lv_obj_add_state(s_box[i], LV_STATE_CHECKED);
         } else {
             lv_obj_clear_state(s_box[i], LV_STATE_CHECKED);
@@ -70,15 +70,15 @@ static void abw_mark(int idx, bool on) {
     /* ⛔ Overridden while "Bridge all devices when the stream starts" is on: the
      * cards are greyed, and a press on one must not quietly change the marks
      * beneath. */
-    if (app_configuration->bridge_auto_all) {
+    if (app_configuration->bridge.auto_all) {
         return;
     }
     if (idx < 0 || idx >= s_count || s_box[idx] == NULL) {
         return;
     }
     char out[AUTO_BRIDGE_LIST_MAX];
-    auto_bridge_mark_set(app_configuration->bridge_auto_macs, s_parts, &s_groups[idx], on, out, sizeof out);
-    settings_set_auto_macs(app_configuration, out);
+    auto_bridge_mark_set(app_configuration->bridge.auto_macs, s_parts, &s_groups[idx], on, out, sizeof out);
+    bridge_settings_set_auto_macs(&app_configuration->bridge, out);
     abw_refresh_boxes();
 }
 
@@ -87,7 +87,7 @@ static void abw_mark(int idx, bool on) {
  * the marks underneath are kept, so turning it off brings every tick back
  * unchanged (rhoquinn8217, 2026-09-14). */
 static void abw_apply_all(void) {
-    const bool all = app_configuration->bridge_auto_all;
+    const bool all = app_configuration->bridge.auto_all;
     if (s_box[ABW_ALL] != NULL) {
         if (all) {
             lv_obj_add_state(s_box[ABW_ALL], LV_STATE_CHECKED);
@@ -136,9 +136,9 @@ static void abw_all_notice(void) {
 static void abw_row_click_cb(lv_event_t *e) {
     const int idx = (int) (intptr_t) lv_event_get_user_data(e);
     if (idx == ABW_ALL) {
-        app_configuration->bridge_auto_all = !app_configuration->bridge_auto_all;
+        app_configuration->bridge.auto_all = !app_configuration->bridge.auto_all;
         abw_apply_all();
-        if (app_configuration->bridge_auto_all) {
+        if (app_configuration->bridge.auto_all) {
             abw_all_notice();
         }
         return;

@@ -52,7 +52,7 @@ static void enable_state_update_cb(lv_event_t *e);
  * like they had gone. ⓘ Same pattern basic.pane.c uses for HDR and AV1. */
 static void usbbridge_apply_enabled(usbbridge_pane_t *pane) {
     if (!pane) return;
-    const bool on = app_configuration->bridge_enable;
+    const bool on = app_configuration->bridge.enable;
     for (int i = 0; i < pane->dependent_count; ++i) {
         if (!pane->dependent[i]) continue;
         if (on) {
@@ -125,7 +125,7 @@ const lv_fragment_class_t settings_pane_usbbridge_cls = {
 static void usbb_auto_open_cb(lv_event_t *e)
 {
     LV_UNUSED(e);
-    if (!app_configuration->bridge_enable) {
+    if (!app_configuration->bridge.enable) {
         return;   /* the row is greyed with the rest, but never trust that alone */
     }
     auto_bridge_window_open();
@@ -215,7 +215,7 @@ static lv_obj_t *create_obj(lv_fragment_t *self, lv_obj_t *container) {
     usbb_gap(view);
     lv_obj_t *enable_checkbox =
             pref_checkbox(view, locstr("Enable Device Bridging"),
-                          &app_configuration->bridge_enable, false);
+                          &app_configuration->bridge.enable, false);
     pref_desc_label(view, locstr(
             "Allows device bridging with the USB Bridge Overlay Panel, Auto Bridge, "
             "or gestures (gestures: DualSense/DualSense Edge/DualShock4 only)."), false);
@@ -300,7 +300,7 @@ static lv_obj_t *create_obj(lv_fragment_t *self, lv_obj_t *container) {
      * already gone stale once. */
     usbb_gap(view);
     dependent_checkbox(pane, view, locstr("Enable Gesture Bridging"),
-                       &app_configuration->bridge_gesture);
+                       &app_configuration->bridge.gesture);
     pref_desc_label(view, locstr("Allows the following:"), false);
     pref_desc_label(view, locstr("2-finger touchpad hold: 1 sec. -- Bridge"), false);
     pref_desc_label(view, locstr("2-finger touchpad hold: 4 sec. -- Release"), false);
@@ -319,7 +319,7 @@ static lv_obj_t *create_obj(lv_fragment_t *self, lv_obj_t *container) {
      * behaviour; this is a property of the hardware. */
     usbb_gap(view);
     dependent_checkbox(pane, view, locstr("Enable Wired Microphone"),
-                       &app_configuration->bridge_mic_wired);
+                       &app_configuration->bridge.mic_wired);
     pref_desc_label(view, locstr(
             "Warning: While the DualSense microphone is on, the controller drains its battery "
             "even when it is not in use."), false);
@@ -354,7 +354,7 @@ static lv_obj_t *create_obj(lv_fragment_t *self, lv_obj_t *container) {
 #else
                                      locstr("Enable BT Microphone (Unavailable)"),
 #endif
-                                     &app_configuration->bridge_mic_bt, false);
+                                     &app_configuration->bridge.mic_bt, false);
 #if CTM_BT_MIC_ARMING
     /* ⓘ Selectable only where the arming code exists. */
     (void) bt_mic;
@@ -395,11 +395,11 @@ static lv_obj_t *create_obj(lv_fragment_t *self, lv_obj_t *container) {
      * acknowledgements, and less important. */
     usbb_gap(view);
     dependent_checkbox_inverted(pane, view, locstr("Disable Lightbar Bridge/Release/Refusal Signals"),
-                                &app_configuration->bridge_signal_light);
+                                &app_configuration->bridge.signal_light);
     dependent_checkbox_inverted(pane, view, locstr("Disable Rumble Bridge/Release/Refusal Signals"),
-                                &app_configuration->bridge_signal_rumble);
+                                &app_configuration->bridge.signal_rumble);
     dependent_checkbox_inverted(pane, view, locstr("Disable Audio Tone Bridge/Release/Refusal Signals"),
-                                &app_configuration->bridge_signal_tone);
+                                &app_configuration->bridge.signal_tone);
     pref_desc_label(view, locstr(
             "Warning: With all three signals disabled, check the USB Bridge Overlay Panel or "
             "the Windows controller panel to confirm your device has bridged."), false);

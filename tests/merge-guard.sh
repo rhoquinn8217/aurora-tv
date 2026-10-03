@@ -152,12 +152,26 @@ else
 fi
 
 # --- the settings themselves ---------------------------------------------
-# ⓘ Each is read somewhere that would silently do nothing if the field vanished.
-for s in bridge_enable bridge_gesture bridge_signal_light bridge_signal_rumble \
-         bridge_signal_tone bridge_mic_wired bridge_mic_bt; do
-    need "setting $s" src/app/app_settings.h "$s"
-    need "setting $s persisted" src/app/app_settings.c "$s"
-done
+# ⓘ The ten bridge settings are one member of upstream's settings struct, and
+# src/app/bridge_settings.c holds the rest. Upstream's settings code makes
+# three calls into it, and losing any of them compiles: without the defaults
+# every switch starts off and the auto-bridge list is unset, without the save
+# a change is gone at the next start, and without the read every TV is back
+# to the defaults.
+need "the bridge's settings are a member of the app's" \
+     src/app/app_settings.h "bridge_settings_t bridge;"
+in_order "the bridge's defaults are set after the settings are cleared" \
+     src/app/app_settings.c "void settings_initialize" \
+     "memset(config, 0, sizeof(CONFIGURATION));" "bridge_settings_defaults(&config->bridge);"
+in_order "the bridge's settings are saved while the file is open" \
+     src/app/app_settings.c "bool settings_save" \
+     'fopen(config->ini_path, "w");' "bridge_settings_write(fp, &config->bridge);"
+in_order "the bridge's settings are saved before the file is closed" \
+     src/app/app_settings.c "bool settings_save" \
+     "bridge_settings_write(fp, &config->bridge);" "return fclose(fp) == 0;"
+in_order "the bridge's settings are read with the rest" \
+     src/app/app_settings.c "static int settings_parse" \
+     "if (bridge_settings_parse(&config->bridge, name, value)) {" 'INI_FULL_MATCH("streaming", "width")'
 
 # --- the per-controller exclusion ----------------------------------------
 # ⚠️ HIS FILE, AND HE REWROTE THIS FUNCTION IN v1.2.2. Without the mask a
@@ -334,7 +348,7 @@ fi
 need "USB Bridge panel present" \
      src/app/ui/streaming/ctm_panel.c "ctm_panel_open"
 need "panel offers the overlay button" \
-     src/app/ui/streaming/streaming.view.c "bridge_enable"
+     src/app/ui/streaming/streaming.view.c "app_configuration->bridge\.enable"
 
 echo
 if [ "$fail" -eq 0 ]; then

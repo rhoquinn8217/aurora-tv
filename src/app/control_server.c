@@ -221,16 +221,16 @@ static void cmd_set(control_job_t *job, const char *args)
 #if defined(TARGET_WEBOS)
     if (strcasecmp(name, "light") == 0 || strcasecmp(name, "rumble") == 0 ||
         strcasecmp(name, "tone") == 0) {
-        if (strcasecmp(name, "light") == 0)  app_configuration->bridge_signal_light = on;
-        if (strcasecmp(name, "rumble") == 0) app_configuration->bridge_signal_rumble = on;
-        if (strcasecmp(name, "tone") == 0)   app_configuration->bridge_signal_tone = on;
-        ctm_bridge_set_signals(app_configuration->bridge_signal_light,
-                               app_configuration->bridge_signal_rumble,
-                               app_configuration->bridge_signal_tone);
+        if (strcasecmp(name, "light") == 0)  app_configuration->bridge.signal_light = on;
+        if (strcasecmp(name, "rumble") == 0) app_configuration->bridge.signal_rumble = on;
+        if (strcasecmp(name, "tone") == 0)   app_configuration->bridge.signal_tone = on;
+        ctm_bridge_set_signals(app_configuration->bridge.signal_light,
+                               app_configuration->bridge.signal_rumble,
+                               app_configuration->bridge.signal_tone);
         reply(job, "OK light=%s rumble=%s tone=%s\n",
-              app_configuration->bridge_signal_light ? "on" : "off",
-              app_configuration->bridge_signal_rumble ? "on" : "off",
-              app_configuration->bridge_signal_tone ? "on" : "off");
+              app_configuration->bridge.signal_light ? "on" : "off",
+              app_configuration->bridge.signal_rumble ? "on" : "off",
+              app_configuration->bridge.signal_tone ? "on" : "off");
         return;
     }
 #endif
@@ -595,7 +595,7 @@ static void cmd_devices(control_job_t *job)
          * start, which since 2026-09-14 is decided for its whole device: group
          * is that device's number in groups, and iface the part's interface. */
         const int g = group_of_part(count, i);
-        const char *marked = g >= 0 && auto_bridge_marked(app_configuration->bridge_auto_macs, devs,
+        const char *marked = g >= 0 && auto_bridge_marked(app_configuration->bridge.auto_macs, devs,
                                                           &s_groups[g]) ? "yes" : "no";
         reply(job, "%d bridged=%s kind=%s id=%s:%s bus=%s node=%s player=%d sdl_mac=%s uniq=%s "
                    "serial=%s controller=%s type=%s mark=%s marked=%s group=%d iface=%d name=\"%s\"\n",
@@ -619,7 +619,7 @@ static void cmd_groups(control_job_t *job)
     for (int k = 0; k < count; ++k) {
         const device_group_t *g = &s_groups[k];
         const char *state = g->plugged == 0 ? "BASIC" : g->plugged == g->part_count ? "FULL" : "PARTIAL";
-        const bool marked = auto_bridge_marked(app_configuration->bridge_auto_macs, devs, g);
+        const bool marked = auto_bridge_marked(app_configuration->bridge.auto_macs, devs, g);
         char key[256];
         auto_bridge_mark_key(g, key, sizeof key);
         reply(job, "%d state=%s bridged=%d/%d identity=%s marked=%s key=\"%s\" shown=\"%s\" name=\"%s\" parts=",

@@ -23,14 +23,14 @@ void bridge_session_started(session_t *session) {
      * bridge, so a stream that came back from an auto-reconnect kept
      * whatever the core had from last time -- and a changed setting looked
      * like it did nothing. */
-    ctm_bridge_set_gesture_enabled(app_configuration->bridge_enable &&
-                                   app_configuration->bridge_gesture);
-    ctm_bridge_set_signals(app_configuration->bridge_signal_light,
-                           app_configuration->bridge_signal_rumble,
-                           app_configuration->bridge_signal_tone);
+    ctm_bridge_set_gesture_enabled(app_configuration->bridge.enable &&
+                                   app_configuration->bridge.gesture);
+    ctm_bridge_set_signals(app_configuration->bridge.signal_light,
+                           app_configuration->bridge.signal_rumble,
+                           app_configuration->bridge.signal_tone);
     /* ⓘ Wired only. The Bluetooth setting is greyed out on this branch and
      * the core refuses it regardless -- see app_settings.h. */
-    ctm_bridge_set_mic_capture(app_configuration->bridge_mic_wired);
+    ctm_bridge_set_mic_capture(app_configuration->bridge.mic_wired);
 
     if (ctm_bridge_active()) {
         // Stream came back after an auto-reconnect: the bridge was left
@@ -61,12 +61,12 @@ void bridge_session_started(session_t *session) {
          * stay saved for when it is switched back on, and this ran on them
          * regardless: every device bridged at stream start while bridging
          * was switched off. */
-        if (app_configuration->bridge_enable) {
-            const int n = auto_bridge_run(app_configuration->bridge_auto_macs,
-                                          app_configuration->bridge_auto_all);
+        if (app_configuration->bridge.enable) {
+            const int n = auto_bridge_run(app_configuration->bridge.auto_macs,
+                                          app_configuration->bridge.auto_all);
             if (n > 0) {
                 commons_log_info("Session", "auto bridge: asked for %d %s device(s)", n,
-                                 app_configuration->bridge_auto_all ? "connected" : "marked");
+                                 app_configuration->bridge.auto_all ? "connected" : "marked");
             }
         }
     }

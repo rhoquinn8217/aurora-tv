@@ -1046,7 +1046,7 @@ static bool gesture_poll_one(SDL_GameController *controller, SDL_JoystickID id) 
                  * not. ⓘ The flash restores the player colour itself on its
                  * last step, so the two paths end in the same place. */
                 const bool paint_here =
-                    app_configuration && app_configuration->bridge_signal_light &&
+                    app_configuration && app_configuration->bridge.signal_light &&
                     gesture_signal_here(w->prep_node);
                 if (paint_here) {
                     flash_arm(w, 0xff, 0xff, 0x00, HANDBACK_FLASHES);
@@ -1078,7 +1078,7 @@ static bool gesture_poll_one(SDL_GameController *controller, SDL_JoystickID id) 
                  * ⓘ gesture_signal_here() folds in ctm_bridge_signals_enabled(),
                  * so the switch that used to be tested on this line still is. */
                 if (controller && app_configuration &&
-                    app_configuration->bridge_signal_rumble &&
+                    app_configuration->bridge.signal_rumble &&
                     gesture_signal_here(w->prep_node)) {
                     gesture_rumble_logged(controller, "handback pulse", w->prep_node,
                                           BYE_PULSE_STRENGTH, BYE_PULSE_MS);
@@ -1088,7 +1088,7 @@ static bool gesture_poll_one(SDL_GameController *controller, SDL_JoystickID id) 
                     gesture_log("handback pulse on %s: NOT SENT BY US -- %s",
                                 w->prep_node,
                                 (app_configuration &&
-                                 app_configuration->bridge_signal_rumble)
+                                 app_configuration->bridge.signal_rumble)
                                     ? "the core claims the signal here"
                                     : "the bridge rumble switch is off");
                 }
@@ -1270,7 +1270,7 @@ static bool gesture_poll_one(SDL_GameController *controller, SDL_JoystickID id) 
                      * ⓘ Steady, not a pattern: the host claims the light within
                      * a moment of this and would cut a flash sequence in half. */
                     if (core_signals_ok == false && app_configuration &&
-                        app_configuration->bridge_signal_light) {
+                        app_configuration->bridge.signal_light) {
                         const int green_rc = flash_write(controller, 0x00, 0xff, 0x00);
                         gesture_paint_logged(controller, "bridged green",
                                              w->prep_node, green_rc);
@@ -1352,11 +1352,11 @@ static bool gesture_poll_one(SDL_GameController *controller, SDL_JoystickID id) 
                             /* ⭐ The user's switch. ⓘ The refusal is the one
                              * worth being loudest about, so it is gated last
                              * and independently of the others. */
-                            if (app_configuration->bridge_signal_light)
+                            if (app_configuration->bridge.signal_light)
                                 flash_arm(w, 0xff, 0x00, 0x00, REFUSED_FLASHES);
                         }
                         if (!sounded) {
-                            if (app_configuration->bridge_signal_rumble)
+                            if (app_configuration->bridge.signal_rumble)
                                 w->buzz_left = BUZZ_BURSTS * 2;   /* on and off per burst */
                             w->buzz_next = SDL_GetTicks();
                         }
@@ -1375,7 +1375,7 @@ static bool gesture_poll_one(SDL_GameController *controller, SDL_JoystickID id) 
              * ⭐ Green after the plug only ever shows on success and red only
              * on failure, so the two can never disagree. */
             /* ⭐ Magenta-while-asking is a lightbar signal like any other. */
-            if (app_configuration->bridge_signal_light) {
+            if (app_configuration->bridge.signal_light) {
                 uint8_t level = pulse_level_rising(w->prep_left);
                 flash_write(controller, level, 0, level);   /* red + blue = magenta */
             }
@@ -1451,7 +1451,7 @@ static bool gesture_poll_one(SDL_GameController *controller, SDL_JoystickID id) 
      * whatever the setting says. Only what follows -- noticing a new chord --
      * is the gesture. */
     if (app_configuration &&
-        !(app_configuration->bridge_enable && app_configuration->bridge_gesture)) {
+        !(app_configuration->bridge.enable && app_configuration->bridge.gesture)) {
         w->since = 0;
         w->fired = false;
         return false;

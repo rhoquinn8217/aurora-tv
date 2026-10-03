@@ -9,6 +9,7 @@
 # !! checks that every one named here still exists.
 target_sources(moonlight-lib PRIVATE
         ${CMAKE_SOURCE_DIR}/src/app/bridge_app.c
+        ${CMAKE_SOURCE_DIR}/src/app/bridge_settings.c
         ${CMAKE_SOURCE_DIR}/src/app/control_server.c
         ${CMAKE_SOURCE_DIR}/src/app/input/auto_bridge.c
         ${CMAKE_SOURCE_DIR}/src/app/input/bridge_keyboard.c
