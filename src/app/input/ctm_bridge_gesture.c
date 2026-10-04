@@ -919,9 +919,9 @@ static stream_input_t *s_stream_input;
  * ⓘ THE ANNOUNCE AT STREAM START NEEDS NO CHECK OF ITS OWN. Upstream's
  * session_input_started() offers every controller to
  * stream_input_send_gamepad_arrive(), and that asks
- * stream_input_gamepad_sends_moonlight(), which is where the mask is read. A
- * pad that is excluded when a stream comes back from a reconnect is refused
- * there. session_input_started() carried a second copy of the check until
+ * stream_input_gamepad_sends_moonlight(), which is where the mask is read, so
+ * a pad that is still excluded is refused there. session_input_started()
+ * carried a second copy of the check until
  * 2026-10-02 and is upstream's text again; tests/merge-guard.sh checks that
  * the arrive still asks. */
 static void gesture_moonlight_set_excluded(SDL_GameController *controller, bool excluded) {

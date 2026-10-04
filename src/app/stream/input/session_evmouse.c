@@ -24,8 +24,8 @@ void session_evmouse_init(session_evmouse_t *mouse, session_t *session) {
 
 void session_evmouse_deinit(session_evmouse_t *mouse) {
     if (mouse->thread != NULL) {
-        // Defensive: the worker may still be alive if the session was re-armed
-        // for a reconnect and then aborted before interrupting it again.
+        // Defensive: make sure the worker is told to stop before joining it;
+        // the stopped latch makes a repeated interrupt harmless.
         session_evmouse_interrupt(mouse);
         SDL_WaitThread(mouse->thread, NULL);
         mouse->thread = NULL;
@@ -34,22 +34,6 @@ void session_evmouse_deinit(session_evmouse_t *mouse) {
     mouse->lock = NULL;
     SDL_DestroyCond(mouse->cond);
     mouse->cond = NULL;
-}
-
-void session_evmouse_restart(session_evmouse_t *mouse) {
-    if (mouse->thread != NULL) {
-        // Normally already interrupted by the session interrupt that led here;
-        // re-issue in case the worker had not begun listening at that point.
-        session_evmouse_interrupt(mouse);
-        SDL_WaitThread(mouse->thread, NULL);
-        mouse->thread = NULL;
-    }
-    SDL_LockMutex(mouse->lock);
-    mouse->stopped = SDL_FALSE;
-    mouse->ready = SDL_FALSE;
-    mouse->dev = NULL;
-    SDL_UnlockMutex(mouse->lock);
-    mouse->thread = SDL_CreateThread((SDL_ThreadFunction) mouse_worker, "sessinput", mouse);
 }
 
 void session_evmouse_wait_ready(session_evmouse_t *mouse) {

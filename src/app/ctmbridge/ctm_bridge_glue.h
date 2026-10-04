@@ -176,9 +176,7 @@ int bridge_open_config_ready(void);
 
 void ctm_bridge_unplug_index(int index);
 
-/* Plug every recognised controller (skips already-plugged); returns count newly
- * plugged. Unplug all releases every bridged session. */
-int ctm_bridge_plug_all(void);
+/* Release every bridged session. */
 void ctm_bridge_unplug_all(void);
 
 /* Flat per-controller settings (mirrors the bridge's tv_bridge_worker_settings_t,

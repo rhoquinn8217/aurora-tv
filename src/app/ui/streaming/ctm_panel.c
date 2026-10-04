@@ -456,9 +456,9 @@ static void ctm_toggle_device(int row) {
 /* Bridge every device that is not already bridged, the same way pressing its
  * row would.
  *
- * ⛔ NOT ctm_bridge_plug_all(): that plugs from the core directly and never
- * tells moonlight, so every controller it bridged stayed in the host's panel
- * as an emulated pad AS WELL -- the host saw each of them twice. The row press
+ * ⛔ NOT by plugging from the core directly: that never tells moonlight, so
+ * every controller bridged that way stayed in the host's panel as an emulated
+ * pad AS WELL -- the host saw each of them twice. The row press
  * goes through the gesture, which retires the emulated pad and records that the
  * bridge is ours.
  *
