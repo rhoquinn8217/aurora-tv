@@ -126,7 +126,7 @@ static void abw_notice_cb(lv_event_t *e) {
 static void abw_all_notice(void) {
     static const char *btn_texts[] = {translatable("OK"), ""};
     lv_obj_t *box = lv_msgbox_create_i18n(NULL, NULL, locstr(
-            "When the stream starts, the DS5-USBIP config window will open when devices "
+            "When the stream starts, the DS5-USBIP Controller Configs window will open when devices "
             "begin connecting. Please allow enough time for all devices to bridge."),
             btn_texts, false);
     lv_obj_add_event_cb(box, abw_notice_cb, LV_EVENT_VALUE_CHANGED, NULL);
