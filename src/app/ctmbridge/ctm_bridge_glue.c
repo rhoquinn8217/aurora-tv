@@ -569,6 +569,14 @@ bool ctm_bridge_plug_node(const char *node)
     ctm_glue_ensure_core();
     pthread_mutex_lock(&s_dev_mutex);
     bool ok = plug_in_by_node(node);
+    /* ⭐ THE SAME AS THE DIRECT PLUG BELOW (code review, 2026-10-05). This is
+     * the route for every controller SDL has -- the bridge gesture, a panel
+     * row, Auto Bridge, the control port -- and it never refreshed the list,
+     * so a Bluetooth pad switched on after the core came up was bridged and
+     * then left to sniff mode: on the host, but slow and late. */
+    if (ok) {
+        publish_bt_macs();
+    }
     pthread_mutex_unlock(&s_dev_mutex);
     return ok;
 }
