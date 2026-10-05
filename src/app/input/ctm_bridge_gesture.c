@@ -873,6 +873,8 @@ static bool controller_path_is_node(const char *dev_path, const char *node) {
     return access(sibling, F_OK) == 0;
 }
 
+static void gesture_moonlight_forget_leaving(SDL_JoystickID id);
+
 void ctm_bridge_gesture_reset(SDL_JoystickID id) {
     for (int i = 0; i < MAX_WATCHED; ++i) {
         if (s_watched[i].in_use && s_watched[i].id == id) {
@@ -881,6 +883,10 @@ void ctm_bridge_gesture_reset(SDL_JoystickID id) {
              * of how it got that way. A reseated controller lost its buttons
              * on 2026-08-09 and a grep for arrivals came back empty. */
             gesture_log("controller %d gone", (int)id);
+            /* ⭐ BEFORE the slot is wiped: the release check that would give
+             * the pad's Moonlight slot back needs this slot, and it is about
+             * to be gone. */
+            gesture_moonlight_forget_leaving(id);
             memset(&s_watched[i], 0, sizeof(s_watched[i]));
             return;
         }
@@ -954,6 +960,36 @@ static void gesture_moonlight_set_excluded(SDL_GameController *controller, bool 
     } else {
         stream_input_restore_gamepad(s_stream_input, gp);
         gesture_log("moonlight: slot %d back from the bridge", gp->gs_id);
+    }
+}
+
+/* ⛔⛔ A BRIDGED CONTROLLER THAT LEAVES SDL MUST TAKE ITS EXCLUSION WITH IT.
+ *
+ * The exclusion is cleared in exactly one place on the way back, the release
+ * check in the tick, and that needs the watched slot. A controller switched
+ * off, out of range or out of battery while bridged is removed instead:
+ * ctm_bridge_gesture_reset() wipes the slot, the bit stayed set, and the
+ * controller -- or whichever controller is given that Moonlight slot next --
+ * came back with its arrival refused and every input dropped until the stream
+ * restarted. Seen on the C3 on 2026-10-02 as "came back not bridged"; found
+ * by reading in the code review of 2026-10-05.
+ *
+ * ⓘ NOT stream_input_restore_gamepad(): that announces the controller to the
+ * host, and this one is leaving. The host retired it when it was bridged, so
+ * clearing the bit sends nothing; when the controller comes back, the ordinary
+ * arrival announces it. */
+static void gesture_moonlight_forget_leaving(SDL_JoystickID id) {
+    if (!s_stream_input) {
+        return;
+    }
+    app_gamepad_state_t *gp = app_input_gamepad_state_by_instance_id(s_stream_input->input, id);
+    if (!gp || gp->gs_id < 0) {
+        return;
+    }
+    const uint16_t bit = (uint16_t) (1u << gp->gs_id);
+    if (s_stream_input->moonlightExcludedMask & bit) {
+        s_stream_input->moonlightExcludedMask &= (uint16_t) ~bit;
+        gesture_log("moonlight: slot %d freed as its bridged controller left", gp->gs_id);
     }
 }
 
