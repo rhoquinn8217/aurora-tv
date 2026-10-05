@@ -1062,6 +1062,19 @@ static void ctm_panel_refresh(void) {
     s_ctm_ndev = ctm_bridge_list(s_ctm_devs, DEVICE_PARTS_MAX);
     s_ctm_ngroup = device_groups_build(s_ctm_devs, s_ctm_ndev, s_ctm_groups, DEVICE_GROUPS_MAX);
 
+    /* ⭐ WHAT HAD THE FOCUS, so the refresh can give it back (code review,
+     * 2026-10-05). The end of this function put the focus on the last row
+     * every time, and a press keeps refreshes coming every 400 ms until its
+     * row lands: Up to X, then Select, could release the pad just bridged
+     * instead of closing the panel, and Bridge All lost its focus the same way.
+     * ⓘ Compared by pointer before anything is deleted; the action buttons may
+     * be rebuilt, so what is given back is "Bridge All", whichever object that
+     * is by then. */
+    lv_obj_t *had_focus = lv_group_get_focused(s_ctm_nav_group);
+    const bool focus_on_close = had_focus != NULL && had_focus == s_ctm_close_btn;
+    const bool focus_on_plugall = had_focus != NULL && had_focus == s_ctm_btn_plugall;
+    const bool focus_on_unplugall = had_focus != NULL && had_focus == s_ctm_btn_unplugall;
+
     lv_group_remove_all_objs(s_ctm_nav_group);
     /* The close corner lives in the header, which is not rebuilt, so it goes
      * back into the group first: Up from the first row reaches it. */
@@ -1234,7 +1247,14 @@ static void ctm_panel_refresh(void) {
      * branch here used to guard against. */
     {
         app_input_set_group(&s_ctm_owner->global->ui.input, s_ctm_nav_group);
-        if (s_ctm_ngroup > 0 && s_ctm_dev_rows[s_ctm_sel]) {
+        lv_obj_t *back = focus_on_close     ? s_ctm_close_btn
+                       : focus_on_plugall   ? s_ctm_btn_plugall
+                       : focus_on_unplugall ? s_ctm_btn_unplugall
+                       : NULL;
+        if (back) {
+            lv_group_focus_obj(back);
+            lv_obj_add_state(back, LV_STATE_FOCUS_KEY);
+        } else if (s_ctm_ngroup > 0 && s_ctm_dev_rows[s_ctm_sel]) {
             lv_group_focus_obj(s_ctm_dev_rows[s_ctm_sel]);
             lv_obj_add_state(s_ctm_dev_rows[s_ctm_sel], LV_STATE_FOCUS_KEY);
         }
