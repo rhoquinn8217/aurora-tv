@@ -8,9 +8,9 @@
 This fork of aurora-tv carries a modified version of [ciprianmisaila's
 ctm-bridge-webos](https://github.com/CTM-Bridge/ctm-bridge-webos) controller
 bridge. It offers a DualSense connected to a webOS TV a native connection to a
-host PC with all of its features working: gyro, touchpad, **audio-based rumble**
-and **speaker audio**. It also brings a range of DualSense specific features,
-including **microphone support on USB**, **auto bridging** and
+host PC with gyro, touchpad, **audio-based rumble** and **speaker audio** all
+working. It also brings a range of DualSense specific features, including
+**microphone support on USB**, **auto bridging** and
 **[DS5Dongle](https://github.com/awalol/DS5Dongle)** support.
 
 [GuiDev1994/aurora-tv](https://github.com/GuiDev1994/aurora-tv)'s original
@@ -27,29 +27,30 @@ to bridge controllers.
 
 **Prerequisites**
 
-| | |
+| Requirement | Notes |
 |---|---|
 | **DualSense** | Your controller |
 | **Windows machine** | usbip-win2 and DS5-USBIP run only on Windows |
 | **[vadimgrn/usbip-win2](https://github.com/vadimgrn/usbip-win2/releases)** | Install vadimgrn's usbip-win2 fork on your Windows machine, requires restart. Tested with 0.9.7.7 |
-| **Streaming host** | [Sunshine](https://github.com/LizardByte/Sunshine), [Apollo](https://github.com/ClassicOldSong/Apollo), [Vibepollo](https://github.com/Nonary/Vibepollo), [Vibeshine](https://github.com/Nonary/vibeshine), etc.<br>Any Moonlight-compatible host that works with Moonlight or aurora-tv |
-| **[rhoquinn8217/aurora-tv](https://github.com/rhoquinn8217/aurora-tv)** | Install the ipk on your webOS TV |
+| **Moonlight-compatible host** | [Sunshine](https://github.com/LizardByte/Sunshine), [Apollo](https://github.com/ClassicOldSong/Apollo), [Vibepollo](https://github.com/Nonary/Vibepollo), [Vibeshine](https://github.com/Nonary/vibeshine), etc.<br>Any host that works with Moonlight or aurora-tv |
+| **[rhoquinn8217/aurora-tv](https://github.com/rhoquinn8217/aurora-tv)** | Install the ipk (pending) on your webOS TV |
 
 **Set up DS5-USBIP**
 
-1. Download DS5-USBIP from the [releases page](https://github.com/rhoquinn8217/CTM-USBIP/releases).
+1. Download DS5-USBIP from the [releases page](https://github.com/rhoquinn8217/CTM-USBIP/releases) (pending).
 2. Put the folder somewhere you have write access.
-3. Run DS5-USBIP from that folder:
-
-   ```powershell
-   ctm-usbip.exe agent 48054 --ui
-   ```
+3. Double-click `ctm-usbip.exe` in that folder. It runs in the background, with
+   its icon in the tray: click the icon to open **Controller Configs**, the
+   virtual keyboard, or to quit.
 
 **Bridge and play**
 
 1. Connect a DualSense to the television: via Bluetooth or USB port.
+   Some LG televisions do not run a DualSense over Bluetooth. Use a USB port
+   on those, or a [DS5Dongle](https://github.com/awalol/DS5Dongle) to stay
+   wireless.
 2. Start rhoquinn8217/aurora-tv on the television.
-3. Turn on **Enable Device Bridging** in **Settings → USB Bridge**.
+3. Turn on **Enable Device Bridging** in **Settings (⚙️) → USB Bridge**.
 4. Start the stream to the host.
 5. Press and hold the touchpad with two fingers for a second.
 
@@ -63,47 +64,49 @@ to bridge controllers.
 
 A DualSense connected to a webOS TV over Bluetooth already reached a PC with its
 speaker, haptics and adaptive triggers through ciprianmisaila's bridge. A
-DualSense connected to a USB port on the webOS TV did not bring its speaker,
-haptics or microphone.
+DualSense connected to a USB port on the webOS TV did not bring its audio
+features.
 
 The difference between Bluetooth and the USB port is where the audio lives. Over
 Bluetooth the controller's audio travels inside the same report stream as its
 buttons and sticks, so forwarding the reports carries everything at once. Over
-the USB port the controller is a composite device whose speaker, haptics and
-microphone arrive as a sound card owned by webOS rather than by the
-rhoquinn8217/aurora-tv app reading the DualSense. Audio through the USB port needed a different
-mechanism.
+the USB port the controller is a composite device whose audio arrives as a sound
+card owned by webOS rather than by the rhoquinn8217/aurora-tv app reading the
+DualSense.
+
+This fork's goal is to cover this gap for DualSense controllers and at the same
+time make bridging easy and robust.
 
 ---
 
 ## What this fork adds
 
-| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; | |
+| Addition | &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; What it does |
 |---|---|
 | **DualSense audio over the TV's USB port** | A wired DualSense presents a sound card to webOS alongside its input device. This fork works out which card belongs to which controller, opens it, and carries the speaker and haptic audio out and the microphone in beside the input reports. More than one wired controller can be bridged at a time, each holding its own card. |
 | **DualSense Edge support** | An Edge's reports are shaped exactly like a DualSense's, so it shares the same handling rather than duplicating it. What it needed was its own identity: it is claimed as an Edge rather than folded into the DualSense, and reported as one, which is what lets DS5-USBIP rebuild it with the Edge's own descriptor. |
-| **DS5Dongle support** | A [DS5Dongle](https://github.com/awalol/DS5Dongle) presents over USB as the controller it holds, so it uses the USB path like a wired pad. Identity comes from the controller's own address rather than the adapter's serial number, so per controller settings follow the pad rather than the dongle it was plugged into. |
-| **Easier bridging** | The original bridging panel is replaced by the USB Bridge panel, which presents a simple list of connected devices with quick bridge and release controls. Per DualSense settings for audio mode, headset and speaker volume, latency and haptics gain have moved to the DS5-USBIP config. Before streaming, enable bridging in the **Settings → USB Bridge** menu to use the USB Bridge panel in the streaming overlay. |
-| **Auto bridge control** | New setting allows you to select specific devices or all devices to auto bridge on stream start. It is at **Settings → USB Bridge → Auto Bridge**, and the selection is kept between sessions. |
+| **DS5Dongle support** | A [DS5Dongle](https://github.com/awalol/DS5Dongle) presents over USB as the controller you've paired it to, so it uses the USB path like a wired pad. Identity comes from the controller's MAC address rather than the adapter's serial number, so when set to auto bridge, the app sees the same controller whether it's connected via Bluetooth, USB or with the DS5Dongle. |
+| **Easier bridging** | The original bridging panel is replaced by the USB Bridge panel, which presents a simple list of connected devices with quick bridge and release controls. Per DualSense settings for audio mode, headset and speaker volume, latency and haptics gain have moved to the DS5-USBIP config, and a DS5-USBIP button beside the panel opens the **Controller Configs** window on the host for whichever device is bridged. |
+| **Auto bridge control** | New setting allows you to select specific devices or all devices to auto bridge on stream start. |
 | **DualSense bridge gesture** | DualSense only: a two finger press and hold on the touchpad. One second for quick bridging, four seconds for releasing, without opening the USB Bridge panel. |
-| **DualSense confirmation signals** | DualSense only: bridging, releasing and refusal events are accompanied by controller lightbar, haptic and speaker confirmation signals. Each of the signal types can be turned off in the **Settings → USB Bridge** menu. |
+| **DualSense confirmation signals** | DualSense only: bridging, releasing and refusal events are accompanied by controller lightbar, haptic and speaker confirmation signals. |
 
 ---
 
 ## USB Bridge Settings
 
-Settings located at **Settings → USB Bridge**.
+Located at **Settings (⚙️) → USB Bridge**.
 
-| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; | |
+| Setting | &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; What it does |
 |---|---|
-| **Enable Device Bridging** | The master switch, off by default. All USB Bridge settings are disabled until it is turned on |
-| **Auto Bridge** | A list of the currently connected devices, where specific devices or all devices can be marked to bridge on stream start |
+| **Enable Device Bridging** | The master switch, off by default. All USB Bridge settings are disabled until it is turned on. Turn it on before streaming to use the USB Bridge panel in the streaming overlay |
+| **Auto Bridge** | A list of the currently connected devices, where specific devices or all devices can be marked to bridge on stream start. The selection is kept between sessions |
 | **Enable Gesture Bridging** | Enable DualSense bridging gestures. A two finger hold on the touchpad: one second bridges, four seconds releases |
 | **Enable Wired Microphone** | Enables the microphone on a DualSense connected to a USB port. The controller draws on its battery while the microphone is on, whether or not anything is listening |
 | **Enable BT Microphone (Unavailable)** | Disabled. A bug in webOS makes a Bluetooth DualSense's microphone unusable |
-| **Disable Lightbar Bridge/Release/Refusal Signals** | Turns off the lightbar confirmation signals |
-| **Disable Rumble Bridge/Release/Refusal Signals** | Turns off the rumble confirmation signals |
-| **Disable Audio Tone Bridge/Release/Refusal Signals** | Turns off the audio confirmation signals |
+| **Disable Lightbar Bridge/Release/Refusal Signals** | Turns off the lightbar on a bridge, a release and a refusal |
+| **Disable Rumble Bridge/Release/Refusal Signals** | Turns off the rumble on a bridge, a release and a refusal |
+| **Disable Audio Tone Bridge/Release/Refusal Signals** | Turns off the tone on a bridge, a release and a refusal |
 
 ---
 
