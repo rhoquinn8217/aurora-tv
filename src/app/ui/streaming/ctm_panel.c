@@ -364,6 +364,10 @@ static void ctm_bridge_device(int row) {
      * red flashes and a buzz, which look exactly like a real failure. ⓘ The row
      * is disabled too; this is the belt to that's braces. */
     if (s_ctm_server_known && !s_ctm_server_online) {
+        /* ⓘ And ask again at once: the reading can be up to ten seconds old,
+         * so a listener that has just started is seen a second later, not at
+         * the next probe. */
+        ctm_bridge_agent_recheck();
         ctm_flash_offline();
         return;
     }
@@ -1030,6 +1034,7 @@ static lv_obj_t *ctm_make_dev_row(const device_group_t *g, int idx) {
 static void ctm_act_plugall_cb(lv_event_t *e) {
     LV_UNUSED(e);
     if (s_ctm_server_known && !s_ctm_server_online) {
+        ctm_bridge_agent_recheck();   /* the reading may be stale: see the row's press */
         ctm_flash_offline();
         return;
     }

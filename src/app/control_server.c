@@ -710,7 +710,10 @@ static bool bridge_possible(control_job_t *job)
         return false;
     }
     if (ctm_bridge_agent_probed() && !ctm_bridge_agent_online()) {
-        reply(job, "ERR the listener is offline\n");
+        /* ⓘ The reading can be ten seconds old; ask again, so a retry a second
+         * later meets a listener that has just started. */
+        ctm_bridge_agent_recheck();
+        reply(job, "ERR the listener is offline (checking again now)\n");
         return false;
     }
     return true;

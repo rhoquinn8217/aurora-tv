@@ -937,6 +937,11 @@ void ctm_bridge_agent_recheck(void)
     ctm_agent_probe_soon();
 }
 
+bool ctm_bridge_last_plug_unreachable(void)
+{
+    return g_last_plug_unreachable;
+}
+
 /* ⭐ Has anything actually reached a verdict yet? ⓘ Separate from the verdict
  * itself, so the panel can say "not known" instead of asserting "offline"
  * before a single probe has completed. */

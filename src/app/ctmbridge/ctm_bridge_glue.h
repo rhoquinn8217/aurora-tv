@@ -106,6 +106,10 @@ bool bridge_identity_mac_shaped(const char *s);
  * once; the answer lands on the next refresh. */
 void ctm_bridge_agent_recheck(void);
 
+/* Whether the last failed plug could not REACH the listener (its connect
+ * failed), as against a refusal. The gesture tries once more on this. */
+bool ctm_bridge_last_plug_unreachable(void);
+
 /* True once a probe or a command has reached a verdict about the USB server.
  * ⭐ Until then the answer to ctm_bridge_agent_online() means nothing. */
 bool ctm_bridge_agent_probed(void);

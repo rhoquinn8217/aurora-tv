@@ -136,6 +136,12 @@ typedef struct {
     /* T-120: transport of prep_node, resolved once when it is set.
      * 1 = Bluetooth, 2 = wired. Lets the gates ask without enumerating. */
     uint8_t xport;
+    /* ⭐ ONE MORE TRY when the listener could not be reached (2026-10-04): one
+     * packet lost on a busy Wi-Fi link at a stream's start fails the connect,
+     * and the bridge was refused although nothing was wrong. retry_at is the
+     * SDL tick to try at (0 = none); retry_used keeps it to one per request. */
+    uint32_t retry_at;
+    bool retry_used;
 
     uint8_t buzz_left;   /* half-steps of the refusal rumble still to run */
     uint32_t buzz_next;  /* SDL ticks when the next buzz half-step is due */
@@ -147,6 +153,10 @@ typedef struct {
 } watched_t;
 
 #define PAINTED_NEVER (-100)
+
+/* How long before the one more try: long enough for a stream's start to
+ * settle, short enough to still feel like the same press. */
+#define PLUG_RETRY_MS 2000
 
 #ifndef HIDIOCGFEATURE
 #define HIDIOCGFEATURE(len) _IOC(_IOC_READ | _IOC_WRITE, 'H', 0x07, len)
@@ -1174,6 +1184,21 @@ static bool gesture_poll_one(SDL_GameController *controller, SDL_JoystickID id) 
         }
     }
 
+    /* One more try, its moment come: run the pulse's final step again, which
+     * plugs and then signals the outcome as the first try would have. ⓘ Only
+     * while a stream still runs: one that ended in the wait leaves nothing to
+     * bridge to. */
+    if (w->retry_at != 0 && SDL_GetTicks() >= w->retry_at) {
+        w->retry_at = 0;
+        if (ctm_bridge_active()) {
+            gesture_log("one more try for %s", w->prep_node);
+            w->prep_left = 1;
+            w->prep_next = SDL_GetTicks();
+        } else {
+            gesture_log("one more try for %s dropped: the stream has ended", w->prep_node);
+        }
+    }
+
     /* A pre-plug pulse in progress: one step per pass, no sleeping. The plug
      * itself happens on the final step. */
     if (w->prep_left > 0) {
@@ -1200,6 +1225,16 @@ static bool gesture_poll_one(SDL_GameController *controller, SDL_JoystickID id) 
                 gesture_log("pulse finished on %s : %s (plug call took %llums)",
                             w->prep_node, ok ? "plugged" : "refused",
                             (unsigned long long)plug_ms);
+                /* ⭐ NOT REACHED IS NOT REFUSED. When the connect failed, try
+                 * once more in a moment instead of signalling a refusal; the
+                 * second outcome, whatever it is, is signalled as usual. */
+                if (!ok && !w->retry_used && ctm_bridge_last_plug_unreachable()) {
+                    w->retry_used = true;
+                    w->retry_at = SDL_GetTicks() + PLUG_RETRY_MS;
+                    gesture_log("listener not reached from %s: one more try in %d ms",
+                                w->prep_node, PLUG_RETRY_MS);
+                    return false;
+                }
                 if (ok) {
                     /* Bridged. Say so in the hand holding the controller.
                      *
@@ -1527,6 +1562,8 @@ static bool gesture_poll_one(SDL_GameController *controller, SDL_JoystickID id) 
     w->prep_left = !ctm_bridge_signals_enabled()
                        ? 1 : PREP_STEPS;
     w->prep_next = SDL_GetTicks();
+    w->retry_at = 0;
+    w->retry_used = false;
     gesture_log("fired on %s -> %s : pulsing before handover", dev_path, node);
     return false;
 }
@@ -2016,6 +2053,8 @@ bool ctm_bridge_gesture_request_bridge(const char *node) {
     w->prep_left = !ctm_bridge_signals_enabled()
                        ? 1 : PREP_STEPS;
         w->prep_next = SDL_GetTicks();
+        w->retry_at = 0;
+        w->retry_used = false;
         w->fired = true;
         gesture_log("panel asked to bridge %s : pulsing before handover", node);
         return true;
