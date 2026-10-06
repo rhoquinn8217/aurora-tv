@@ -28,6 +28,8 @@ void bridge_session_started(session_t *session) {
     /* ⓘ Wired only. The Bluetooth setting is greyed out on this branch and
      * the core refuses it regardless -- see app_settings.h. */
     ctm_bridge_set_mic_capture(app_configuration->bridge.mic_wired);
+    /* ⓘ Off, the bridge starts nothing for this stream; see the glue. */
+    ctm_bridge_set_enabled(app_configuration->bridge.enable);
 
     // Keep Moonlight's controllers open (UI nav still works); host sends are
     // gated and the controller-arrival is suppressed, so nothing reaches the

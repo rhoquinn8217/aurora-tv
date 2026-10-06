@@ -153,6 +153,20 @@ void ctm_bridge_set_gesture_enabled(bool enabled)
     ctm_gesture_set_enabled(enabled ? 1 : 0);
 }
 
+/* ⭐⭐ "ENABLE DEVICE BRIDGING", HANDED IN THE SAME WAY (code review,
+ * 2026-10-05). Only Auto Bridge asked it, so every stream started the agent
+ * probe, the hotplug watch and the stopSniff worker, fresh installs included,
+ * where bridging is off by default.
+ * ⓘ Off, ctm_bridge_start() still marks the stream up: the control port is
+ * ungated by design and bridges with the switch off, and a plug brings the
+ * core up itself. */
+static bool s_enabled = true;
+
+void ctm_bridge_set_enabled(bool enabled)
+{
+    s_enabled = enabled;
+}
+
 /* ⭐⭐ HOLD OR RELEASE A BRIDGED CONTROLLER'S INPUT.
  *
  * ⓘ Called as the TV's own overlay opens and closes -- see app_ui_open. The
@@ -192,6 +206,11 @@ void ctm_bridge_set_input_held(bool held)
 bool ctm_bridge_start(void)
 {
     if (s_active) {
+        return true;
+    }
+    if (!s_enabled) {
+        s_active = true;
+        log_append("ctm glue: stream up, bridging off -- nothing started");
         return true;
     }
     ctm_glue_ensure_core();
