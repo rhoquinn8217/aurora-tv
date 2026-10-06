@@ -144,8 +144,10 @@ static void cmd_help(control_job_t *job)
  * survived a restart. It took two throwaway builds to flip two booleans, and
  * the first silently did nothing because the stored value won.
  *
- * In memory only: it does NOT write moonlight.ini, so a restart puts the
- * settings back and no test can leave a set permanently altered. */
+ * ⛔ NOT MEMORY ONLY (code review, 2026-10-05; this said it was). The switches
+ * change the app's live settings, and those are written to moonlight.ini when
+ * Settings is left and on every clean exit, so a test that changes one must
+ * put it back before it ends. ⓘ `settle` alone is not saved: see below. */
 static void cmd_set(control_job_t *job, const char *args)
 {
     char name[32] = "";
@@ -167,7 +169,8 @@ static void cmd_set(control_job_t *job, const char *args)
      * bool: how long to let a pad's link settle after a session ends, before the
      * handback tone goes out. ⓘ Sweeping it from here is what keeps a pad's
      * battery and a room's noise pinned across a comparison; a build per value
-     * does not. Memory only, like everything else in this command. */
+     * does not. Memory only: the gap is not a setting and is never saved,
+     * unlike the switches. */
     if (strcasecmp(name, "settle") == 0) {
         char *end = NULL;
         const long ms = strtol(value, &end, 10);
