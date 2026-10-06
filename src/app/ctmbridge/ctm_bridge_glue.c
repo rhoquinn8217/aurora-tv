@@ -1,5 +1,5 @@
 /* moonlight-facing glue for the embedded CTM bridge core. Replicates the startup
- * the standalone app does in ui_app.c (stopSniff worker -> discover agent ->
+ * the standalone app does in ui_app.c (stopSniff worker -> agent probe ->
  * enumerate -> bridge), minus the LVGL UI. Runs the bridge in-process; the
  * controller threads own the physical HID (hidraw + EVIOCGRAB), so moonlight
  * stops forwarding a controller while it is bridged: one controller at a time,

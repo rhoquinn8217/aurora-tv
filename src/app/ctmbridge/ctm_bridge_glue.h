@@ -1,10 +1,10 @@
 #ifndef CTM_BRIDGE_GLUE_H
 #define CTM_BRIDGE_GLUE_H
 
-/* Thin moonlight-facing facade over the embedded CTM bridge core. moonlight calls
- * only these three functions; everything else (agent discovery, enumeration,
- * controller bridging, stopSniff keep-alive) stays inside the ctmbridge lib so
- * the core's headers don't leak into moonlight-lib. */
+/* Thin moonlight-facing facade over the embedded CTM bridge core. The app calls
+ * only what is declared here; everything else (enumeration, controller
+ * bridging, the stopSniff keep-alive) stays inside the ctmbridge lib so the
+ * core's headers don't leak into moonlight-lib. */
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -13,25 +13,21 @@
 extern "C" {
 #endif
 
-/* Tell the bridge where the Windows CTM agent is, skipping discovery. When: the
- * host app already knows the address because it is streaming from that same
- * machine. Call before ctm_bridge_start(). Passing NULL or "" restores
- * discovery. Port 0 keeps the default agent port.
- *
- * Without this, the agent is found by a UDP broadcast probe, which never leaves
- * the local network -- so a TV streaming from a host elsewhere can never find
- * it. */
+/* Tell the bridge where the Windows CTM agent is: the PC the stream comes
+ * from, by its address or its name. Call before ctm_bridge_start(). NULL or ""
+ * clears it, and nothing can bridge until it is set again; there is no
+ * discovery any more. Port 0 keeps the default agent port. */
 void ctm_bridge_set_host(const char *host, int port);
 
 /* "Enable Device Bridging", handed in. Off, a stream starts nothing of the
- * bridge's own: no agent probe, no hotplug watch, no stopSniff worker. The
+ * bridge's own: no agent probe, no stopSniff worker. The
  * stream still counts as up, and the first plug brings the core up as any plug
  * does. Call before ctm_bridge_start(). */
 void ctm_bridge_set_enabled(bool enabled);
 
 /* Start the bridge for a stream: enumerate controllers, start the agent probe
- * and the stopSniff keep-alive, and watch for hotplug -- or, with bridging off,
- * only mark the stream up. Idempotent (a second call while active is a no-op).
+ * and the stopSniff keep-alive -- or, with bridging off, only mark the stream
+ * up. Idempotent (a second call while active is a no-op).
  * Returns true. */
 bool ctm_bridge_start(void);
 
@@ -103,10 +99,6 @@ bool bridge_identity_usable(const char *s);
 bool bridge_identity_same(const char *a, const char *b);
 bool bridge_identity_mac_shaped(const char *s);
 
-/* Write the discovered Windows agent host (or "offline") into out (NUL-terminated).
- * For the overlay header. */
-/* Is the USB server answering? ⓘ Its address is reported by ctm_bridge_agent()
- * whether or not it is. */
 /* Ask for a fresh reading of whether the USB server is answering. ⭐ Returns at
  * once; the answer lands on the next refresh. */
 void ctm_bridge_agent_recheck(void);
@@ -115,17 +107,22 @@ void ctm_bridge_agent_recheck(void);
  * failed), as against a refusal. The gesture tries once more on this. */
 bool ctm_bridge_last_plug_unreachable(void);
 
-/* How many releases are still running on their own threads. ⓘ The TV's
- * keyboard grab waits for none before it looks again: a keyboard still being
- * released counts as bridged, and would be skipped. */
+/* How many releases are still running on their own threads. ⓘ Asked by the
+ * TV's keyboard grab before it looks again: a keyboard still being
+ * released counts as bridged, and would be skipped, so the grab waits until
+ * none are running. */
 int ctm_bridge_releases_in_flight(void);
 
 /* True once a probe or a command has reached a verdict about the USB server.
  * ⭐ Until then the answer to ctm_bridge_agent_online() means nothing. */
 bool ctm_bridge_agent_probed(void);
 
+/* Is the USB server answering? ⓘ Its address is reported by ctm_bridge_agent()
+ * whether or not it is. */
 bool ctm_bridge_agent_online(void);
 
+/* Write the Windows agent's host (or "offline") into out (NUL-terminated).
+ * For the overlay header. */
 void ctm_bridge_agent(char *out, size_t out_len);
 
 /* Re-enumerate and fill out[0..max-1] with the detected devices; returns the
@@ -190,8 +187,8 @@ int bridge_open_config_ready(void);
 
 void ctm_bridge_unplug_index(int index);
 
-/* TV pointer -> host mouse (synthesizer, kind "hid"): auto-plugged by
- * ctm_bridge_start; the Magic Remote row in the panel toggles it. While
+/* TV pointer -> host mouse (synthesizer, kind "hid"): bridged only when asked,
+ * from the Magic Remote's row in the panel or the control port. While
  * active, the streaming input path feeds pointer state here INSTEAD of the
  * moonlight mouse channel (single input authority on the host). x/y in
  * surface coords of a w x h surface; buttons bit0=left bit1=right
