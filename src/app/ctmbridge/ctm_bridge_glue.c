@@ -547,8 +547,19 @@ bool ctm_bridge_node_signals_itself(const char *node)
      *
      * ⭐ A pad the core cannot signal now falls through to the TV's own pulse,
      * which is what the caller does when this is false. */
+    /* ⛔⛔ THE LAST SCAN FIRST, AND A NEW ONE ONLY FOR A NODE IT DOES NOT HAVE
+     * (rooted monitor, 2026-10-05). The bridge's confirmation asks this on the
+     * interface thread right after a plug, and the plug has just scanned.
+     * Scanning again took 20.7 s and 25.6 s with a Bluetooth DS4 bridged:
+     * the kernel holds ONE lock for every hidraw node across each write, a
+     * write to a bridged DS4 blocks for up to five seconds there, and a scan
+     * opens and asks every node. The interface stalled for that long, and the
+     * bridge's own pop-up came up at the release instead. 🔗
+     * ctm_bridge_node_is_plugged, which learned the same on the U5s. */
     pthread_mutex_lock(&s_dev_mutex);
-    ctm_glue_enumerate();
+    if (item_for_node_locked(node) == NULL) {
+        ctm_glue_enumerate();
+    }
     const bool core_has_one = core_signals_node_locked(node);
     pthread_mutex_unlock(&s_dev_mutex);
     /* ⏱️ ONE ENUMERATION, NOT THREE. This ended in
