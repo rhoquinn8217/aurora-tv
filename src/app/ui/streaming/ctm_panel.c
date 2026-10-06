@@ -1299,8 +1299,27 @@ static void ctm_close_panel(void) {
 /* Close is already deferred internally, so call it directly (synchronous hide). */
 static void ctm_request_close(void) { ctm_close_panel(); }
 
-static void ctm_refresh_async(void *p) { LV_UNUSED(p); ctm_panel_refresh(); }
-static void ctm_request_refresh(void)  { lv_async_call(ctm_refresh_async, NULL); }
+/* ⭐ ONE REFRESH, HOWEVER MANY ASK BEFORE IT RUNS (code review, 2026-10-05).
+ * A refresh scans every device on the interface thread, and each request
+ * queued one of its own: Bridge All on a device of N parts asked N+1 times in
+ * one pass and scanned N+1 times. A request that finds one already queued
+ * now rides on it. ⓘ Cleared before the refresh runs, so a request made
+ * during it still gets one more afterwards. */
+static bool s_ctm_refresh_queued = false;
+static void ctm_refresh_async(void *p) {
+    LV_UNUSED(p);
+    s_ctm_refresh_queued = false;
+    ctm_panel_refresh();
+}
+static void ctm_request_refresh(void) {
+    if (s_ctm_refresh_queued) {
+        return;
+    }
+    s_ctm_refresh_queued = true;
+    if (lv_async_call(ctm_refresh_async, NULL) != LV_RES_OK) {
+        s_ctm_refresh_queued = false;   /* never queued: let the next one try */
+    }
+}
 
 static void open_ctm_panel(lv_event_t *event) {
     /* The CTM button has LV_OBJ_FLAG_EVENT_BUBBLE; stop the CLICKED here so it

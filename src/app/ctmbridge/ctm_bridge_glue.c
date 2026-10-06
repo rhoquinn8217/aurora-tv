@@ -579,7 +579,14 @@ bool ctm_bridge_node_is_bluetooth(const char *node)
         return false;
     }
     pthread_mutex_lock(&s_dev_mutex);
-    ctm_glue_enumerate();
+    /* ⭐ THE LAST SCAN FIRST, as ctm_bridge_node_signals_itself() learned to
+     * (code review, 2026-10-05). Every bridge request asked this on the
+     * interface thread, and it scanned every device each time to fill a field
+     * that only log lines read. A pad's bus does not change while it is in the
+     * list, so a new scan is made only for a node the last one does not have. */
+    if (item_for_node_locked(node) == NULL) {
+        ctm_glue_enumerate();
+    }
     /* ⛔⛔ THE BUS SAYS THIS, NOT A LIST OF TWO KINDS.
      *
      * It tested for "ds5" and "ds5e" and nothing else, from when a
