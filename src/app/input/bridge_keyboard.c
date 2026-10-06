@@ -33,9 +33,14 @@
  * enough for every part of one device to be plugged or let go (they follow each
  * other about 130 ms apart), short enough that nobody waits for a keyboard. */
 #define LOOK_AGAIN_MS 600u
+/* How often a look-again waiting on a release asks again, and the longest it
+ * waits for one before looking anyway. */
+#define RELEASE_POLL_MS 200u
+#define RELEASE_WAIT_MAX_MS 10000u
 
 /* When the look-again is due, in SDL ticks. 0: nothing is due. */
 static Uint32 s_look_again_at = 0;
+static Uint32 s_look_waiting_since = 0;   /* 0 while not waiting on a release */
 
 /* The overlay is open: the reader gives it the keys it understands and sends
  * the host nothing. ⓘ Written by the app's loop, read by the reader thread; a
@@ -729,6 +734,7 @@ void bridge_keyboard_tick(bool overlay_shown) {
          * reader is left to remember a key from the stream before. */
         s_nodes_known = false;
         s_look_again_at = 0;
+        s_look_waiting_since = 0;
         memset(s_fed_down, 0, sizeof(s_fed_down));
         s_reader_in_overlay = false;
         return;
@@ -737,6 +743,27 @@ void bridge_keyboard_tick(bool overlay_shown) {
     if (s_look_again_at == 0 || !SDL_TICKS_PASSED(SDL_GetTicks(), s_look_again_at)) {
         return;
     }
+    /* ⭐ NOT WHILE A RELEASE IS STILL RUNNING (code review, 2026-10-05). A
+     * release finishes on a thread of its own now, and can take longer than
+     * the wait above, a slow link's BRIDGE_STOP alone up to a second. Looked
+     * at then, a keyboard still being released is skipped as bridged, and when
+     * its release ends nothing looks again: held by nobody for the rest of
+     * the stream. So the look waits for every release in flight, ten seconds
+     * at most. */
+    if (ctm_bridge_releases_in_flight() > 0) {
+        const Uint32 now = SDL_GetTicks();
+        if (s_look_waiting_since == 0) {
+            s_look_waiting_since = now ? now : 1;
+        }
+        if (!SDL_TICKS_PASSED(now, s_look_waiting_since + RELEASE_WAIT_MAX_MS)) {
+            s_look_again_at = now + RELEASE_POLL_MS;
+            if (s_look_again_at == 0) {
+                s_look_again_at = 1;
+            }
+            return;
+        }
+    }
+    s_look_waiting_since = 0;
     s_look_again_at = 0;
     /* Let go of everything, then look again: the scan skips what is bridged
      * (bridge_keyboard_node_is_bridged) and takes what has been released or

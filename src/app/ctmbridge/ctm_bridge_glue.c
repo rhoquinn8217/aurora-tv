@@ -675,6 +675,15 @@ static void *release_thread(void *arg)
     return NULL;
 }
 
+/* How many releases are under way: handed to their thread and not finished. */
+int ctm_bridge_releases_in_flight(void)
+{
+    pthread_mutex_lock(&s_releasing_mutex);
+    const int n = s_releasing_count;
+    pthread_mutex_unlock(&s_releasing_mutex);
+    return n;
+}
+
 /* Starts the release of one session, and says whether it started one: false
  * when that key's release is already under way. */
 static bool release_soon(const char *key)
