@@ -121,8 +121,9 @@ bool ctm_bridge_agent_probed(void);
  * whether or not it is. */
 bool ctm_bridge_agent_online(void);
 
-/* Write the Windows agent's host (or "offline") into out (NUL-terminated).
- * For the overlay header. */
+/* Write the Windows agent's host (or "not set") into out (NUL-terminated),
+ * whether or not anything answers there: ctm_bridge_agent_online() says that.
+ * For the overlay header and the control port's status. */
 void ctm_bridge_agent(char *out, size_t out_len);
 
 /* Re-enumerate and fill out[0..max-1] with the detected devices; returns the
