@@ -1705,7 +1705,10 @@ bool ctm_bridge_gesture_light_busy(SDL_GameController *controller) {
     if (!controller) return false;
     SDL_Joystick *js = SDL_GameControllerGetJoystick(controller);
     if (!js) return false;
-    watched_t *w = watched_for(SDL_JoystickInstanceID(js));
+    /* ⓘ Found, never claimed (code review, 2026-10-05): this runs on
+     * moonlight's control thread, and watched_for() claims a slot in the main
+     * loop's unlocked table for a controller it has not seen. */
+    const watched_t *w = watched_find(SDL_JoystickInstanceID(js));
     if (!w) return false;
     bool busy = w->prep_left > 0 || w->flash_left > 0;
 
