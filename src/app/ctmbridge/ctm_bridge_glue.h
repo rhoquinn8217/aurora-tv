@@ -71,7 +71,10 @@ typedef struct {
     char name[128];
     char vid[8];
     char pid[8];
-    char kind[8];   /* "ds5" / "ds4" / "xbox" / "puck" / "hid" */
+    /* "ds5", "ds5_usb", "ds5e", "ds5e_usb", "ds4", "ds4_usb", "xbox", "puck",
+     * "hid". ⓘ Sixteen (code review, 2026-10-05): eight cut "ds5e_usb" to
+     * "ds5e_us" in the control port's `devices`. */
+    char kind[16];
     char bus[8];    /* "USB" / "BT" */
     char mac[24];   /* BT MAC (e.g. "58:10:31:..."), empty for USB */
     /* ⭐ The hidraw node, which is the identity everything else in this project
