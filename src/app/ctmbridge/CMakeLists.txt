@@ -54,20 +54,41 @@ target_include_directories(ctmbridge PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 
 # The commit of the core this build is made from. The app reports it (the
 # control port's `status`, as core=), and a new value changes this target's
-# flags, so every file of the core is compiled again when the recorded commit
-# changes, whatever the files' times say. build-aurora-docker.ps1 passes it in,
-# since inside its container git cannot read this repo; elsewhere it is read
-# from git here, and it is "unknown" where neither works.
+# flags, so every file of the core is compiled again when the commit changes,
+# whatever the files' times say. build-aurora-docker.ps1 passes it in, since
+# inside its container git cannot read this repo; elsewhere it is read from git
+# here, and it is "unknown" where neither works.
+# ⭐ READ FROM THE FOLDER THAT IS COMPILED, not from the commit this tree
+# records: the two differ when the submodule is checked out at another commit
+# or CTM_BRIDGE_DIR names another copy. And a change not committed there is
+# compiled too, so it says "+uncommitted", as the script's -Core does (code
+# review, 2026-10-05: this read the record, so it could say neither).
+# ⚠️ Read when CMake configures. A change made in the core after that is
+# compiled without a new configure, and is not seen here.
 if(DEFINED ENV{BRIDGE_CORE_COMMIT} AND NOT "$ENV{BRIDGE_CORE_COMMIT}" STREQUAL "")
     set(BRIDGE_CORE_COMMIT "$ENV{BRIDGE_CORE_COMMIT}")
 else()
-    execute_process(COMMAND git -C "${CMAKE_SOURCE_DIR}" rev-parse HEAD:third_party/ctm-bridge-webos
-                    OUTPUT_VARIABLE BRIDGE_CORE_COMMIT OUTPUT_STRIP_TRAILING_WHITESPACE
-                    ERROR_QUIET RESULT_VARIABLE BRIDGE_CORE_COMMIT_RC)
-    if(BRIDGE_CORE_COMMIT_RC EQUAL 0 AND BRIDGE_CORE_COMMIT MATCHES "^[0-9a-f]+$")
-        string(SUBSTRING "${BRIDGE_CORE_COMMIT}" 0 12 BRIDGE_CORE_COMMIT)
-    else()
-        set(BRIDGE_CORE_COMMIT "unknown")
+    set(BRIDGE_CORE_COMMIT "unknown")
+    # Only a checkout of its own: in a folder inside another repo, git would
+    # answer for that repo instead.
+    execute_process(COMMAND git -C "${CTM_BRIDGE_DIR}" rev-parse --show-prefix
+                    OUTPUT_VARIABLE BRIDGE_CORE_PREFIX OUTPUT_STRIP_TRAILING_WHITESPACE
+                    ERROR_QUIET RESULT_VARIABLE BRIDGE_CORE_RC)
+    if(BRIDGE_CORE_RC EQUAL 0 AND BRIDGE_CORE_PREFIX STREQUAL "")
+        execute_process(COMMAND git -C "${CTM_BRIDGE_DIR}" rev-parse HEAD
+                        OUTPUT_VARIABLE BRIDGE_CORE_HEAD OUTPUT_STRIP_TRAILING_WHITESPACE
+                        ERROR_QUIET RESULT_VARIABLE BRIDGE_CORE_RC)
+        if(BRIDGE_CORE_RC EQUAL 0 AND BRIDGE_CORE_HEAD MATCHES "^[0-9a-f]+$")
+            string(SUBSTRING "${BRIDGE_CORE_HEAD}" 0 12 BRIDGE_CORE_COMMIT)
+            execute_process(COMMAND git -C "${CTM_BRIDGE_DIR}" status --porcelain --untracked-files=no
+                            OUTPUT_VARIABLE BRIDGE_CORE_DIRTY OUTPUT_STRIP_TRAILING_WHITESPACE
+                            ERROR_QUIET RESULT_VARIABLE BRIDGE_CORE_RC)
+            if(NOT BRIDGE_CORE_RC EQUAL 0)
+                string(APPEND BRIDGE_CORE_COMMIT "+unchecked")
+            elseif(NOT BRIDGE_CORE_DIRTY STREQUAL "")
+                string(APPEND BRIDGE_CORE_COMMIT "+uncommitted")
+            endif()
+        endif()
     endif()
 endif()
 target_compile_definitions(ctmbridge PRIVATE BRIDGE_CORE_COMMIT="${BRIDGE_CORE_COMMIT}")
