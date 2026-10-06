@@ -8,6 +8,7 @@
 #include "ctm_bridge_glue.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 
@@ -625,6 +626,80 @@ bool ctm_bridge_plug_index(int index)
     return ok;
 }
 
+/* ⭐⭐ A RELEASE RUNS ON ITS OWN THREAD (code review, 2026-10-05).
+ *
+ * ⛔ stop_session() is synchronous end to end -- the plug-out, the release
+ * signal, the listener's BRIDGE_STOP -- about 2.5 to 3.5 s for a DualSense,
+ * and the panel's Release, the control port's and the two reapers below ran it
+ * on the app's loop: the whole interface froze that long, once per pad.
+ * ➡️ They hand the key to a thread of its own now and return at once. The
+ * chord's release worker in the core has always run it off the loop, and
+ * stop_session() claims its entry first, so two paths cannot release one pad
+ * twice. ⓘ Nothing waits for the result: once the session is gone the device
+ * reports unplugged, and the gesture's watcher does the app's half, as it
+ * does for the chord.
+ * ⓘ `s_releasing` is the keys handed over and not yet finished, so a reaper
+ * that runs every frame does not start a second thread for a pad whose first
+ * has not yet claimed it. */
+static pthread_mutex_t s_releasing_mutex = PTHREAD_MUTEX_INITIALIZER;
+static char s_releasing[MAX_SESSIONS][96];
+static int s_releasing_count = 0;
+
+static void releasing_forget(const char *key)
+{
+    pthread_mutex_lock(&s_releasing_mutex);
+    for (int i = 0; i < s_releasing_count; ++i) {
+        if (strcmp(s_releasing[i], key) == 0) {
+            memmove(&s_releasing[i], &s_releasing[i + 1],
+                    (size_t)(s_releasing_count - i - 1) * sizeof(s_releasing[0]));
+            s_releasing_count--;
+            break;
+        }
+    }
+    pthread_mutex_unlock(&s_releasing_mutex);
+}
+
+static void *release_thread(void *arg)
+{
+    char *key = (char *)arg;
+    stop_session(key);
+    releasing_forget(key);
+    free(key);
+    return NULL;
+}
+
+/* Starts the release of one session, and says whether it started one: false
+ * when that key's release is already under way. */
+static bool release_soon(const char *key)
+{
+    if (!key || !key[0]) return false;
+    pthread_mutex_lock(&s_releasing_mutex);
+    for (int i = 0; i < s_releasing_count; ++i) {
+        if (strcmp(s_releasing[i], key) == 0) {
+            pthread_mutex_unlock(&s_releasing_mutex);
+            return false;
+        }
+    }
+    if (s_releasing_count < MAX_SESSIONS) {
+        snprintf(s_releasing[s_releasing_count], sizeof(s_releasing[0]), "%s", key);
+        s_releasing_count++;
+    }
+    pthread_mutex_unlock(&s_releasing_mutex);
+    const size_t size = strlen(key) + 1;
+    char *copy = (char *)malloc(size);
+    if (copy) memcpy(copy, key, size);
+    pthread_t thread;
+    if (copy && pthread_create(&thread, NULL, release_thread, copy) == 0) {
+        pthread_detach(thread);
+        return true;
+    }
+    /* No thread to be had: here and now, as before. */
+    free(copy);
+    stop_session(key);
+    releasing_forget(key);
+    return true;
+}
+
 /* ⭐⭐ RELEASE A CONTROLLER WHOSE HOST HAS GONE. T-127, 2026-08-23.
  *
  * ⛔ THE FAULT: close the listener's window and the controller stayed claimed by
@@ -678,8 +753,8 @@ int ctm_bridge_reap_gone_hosts(void)
      * the very table being walked, so stopping inside the loop would skip the
      * entry that shifts down into the current index. */
     for (int i = 0; i < gone_count; ++i) {
+        if (!release_soon(gone[i])) continue;
         log_append("ctm glue: host gone -- releasing '%s'", gone[i]);
-        stop_session(gone[i]);
         ++reaped;
     }
     pthread_mutex_unlock(&s_dev_mutex);
@@ -722,8 +797,8 @@ int ctm_bridge_reap_gone_devices(void)
     pthread_mutex_unlock(&g_sessions_mutex);
     /* Collected first, stopped second, for the reason given above. */
     for (int i = 0; i < gone_count; ++i) {
+        if (!release_soon(gone[i])) continue;
         log_append("ctm glue: device gone -- releasing '%s'", gone[i]);
-        stop_session(gone[i]);
         ++reaped;
     }
     pthread_mutex_unlock(&s_dev_mutex);
@@ -825,16 +900,19 @@ int bridge_open_config_ready(void)
 
 void ctm_bridge_unplug_index(int index)
 {
+    char key[96] = "";
     pthread_mutex_lock(&s_dev_mutex);
     if (index >= 0 && index < g_devices.count) {
         if (item_is_tv_remote(&g_devices.items[index])) {
             ctm_tv_pointer_unplug();
         } else {
-            stop_session(g_devices.items[index].key);
+            snprintf(key, sizeof(key), "%s", g_devices.items[index].key);
         }
         log_append("ctm glue: manual unplug '%s'", g_devices.items[index].name);
     }
     pthread_mutex_unlock(&s_dev_mutex);
+    /* ⓘ Off the app's loop: see release_soon(). */
+    (void) release_soon(key);
 }
 
 bool ctm_bridge_pointer_active(void)
