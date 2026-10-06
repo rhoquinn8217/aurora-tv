@@ -37,7 +37,6 @@ add_library(ctmbridge STATIC
     ${CTM_BRIDGE_DIR}/src/controllers/controller_xpad.c
     ${CTM_BRIDGE_DIR}/src/controllers/controller_steam_puck.c
     ${CTM_BRIDGE_DIR}/src/controllers/controller_generic.c
-    ${CTM_BRIDGE_DIR}/src/monitor/ctm_monitor.c
     enet_stub.c
     ctm_bridge_glue.c
 )

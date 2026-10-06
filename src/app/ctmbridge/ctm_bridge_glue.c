@@ -14,7 +14,6 @@
 
 #include "ctm_state.h"   /* core API + shared globals (g_running, g_scan, ...) */
 #include "ctm_hostmouse.h" /* TV-pointer synthesizer feed (kind "hid") */
-#include "ctm_monitor.h" /* hotplug: connect/disconnect watch thread */
 #include "device_identity.inl" /* the identity rules, shared with the core */
 
 static bool s_active = false;
@@ -56,34 +55,15 @@ static void ctm_glue_enumerate(void)
     }
 }
 
-/* Serialises every g_devices/g_scan access so the hotplug monitor thread can't
- * race the UI thread's panel calls. */
+/* Serialises every g_devices/g_scan access: the scan and the lists built from
+ * it are read and rebuilt from more than one thread. */
 static pthread_mutex_t s_dev_mutex = PTHREAD_MUTEX_INITIALIZER;
-static ctm_monitor_t *s_monitor = NULL;
 
-/* Hotplug callback (monitor thread): on any connect/disconnect, re-sync by
- * plugging newly-present recognised controllers. Serialised with the panel via
- * s_dev_mutex; disconnect cleanup is handled by the controller thread, which
- * exits when its HID read fails. */
-static void glue_hotplug_cb(void *ud, const ctm_controller_dev_t *dev, int present)
-{
-    (void) ud; (void) dev; (void) present;
-    /* ⓘ Until 2026-09-08 this told the core when a node appeared, so a tone
-     * could wait for a fresh cable's audio to "become usable". The core plays
-     * the signal twice on a fresh cable instead and needs no clock. */
-    if (!s_active) {
-        return;
-    }
-    /* Any device appearing or disappearing used to plug EVERYTHING, without
-     * asking whether auto-plug was wanted. Two surprises came from that:
-     * a stream opened with every device on a hub bridged at once, and pulling
-     * an unrelated hub bridged a controller that had been left alone. Bridging
-     * claims a device exclusively, so both took working devices away from the
-     * TV without being asked.
-     *
-     * Noticing a change is still worth doing; acting on it is what the gesture
-     * is for. ⓘ So nothing is plugged from here any more. */
-}
+/* ⓘ NO HOTPLUG MONITOR (code review, 2026-10-05). The core's monitor thread
+ * walked sysfs once a second through every stream and called a callback that
+ * did nothing: what it once did, plugging everything that appeared, was taken
+ * out because bridging claims a device the TV is using. Noticing is left to
+ * the device scans that already run. */
 
 /* Core bring-up shared by ctm_bridge_start(), the two plug calls and the
  * in-stream device list: the stopSniff worker and a scan. Without the worker,
@@ -246,13 +226,6 @@ bool ctm_bridge_start(void)
      * The overlay row still plugs it deliberately for anyone who wants it. */
 
     s_active = true;
-
-    /* Watch for controllers connected/disconnected mid-stream and auto-plug them. */
-    if (s_monitor == NULL) {
-        s_monitor = ctm_monitor_start(glue_hotplug_cb, NULL);
-        log_append(s_monitor ? "ctm glue: hotplug monitor started"
-                             : "ctm glue: hotplug monitor failed to start");
-    }
     return true;
 }
 
@@ -1009,12 +982,6 @@ void ctm_bridge_stop(void)
 {
     if (!s_active && !s_core_up) {
         return;
-    }
-    /* Stop hotplug first: joins the monitor thread (do this WITHOUT holding
-     * s_dev_mutex so an in-flight callback can finish) before tearing down. */
-    if (s_monitor) {
-        ctm_monitor_stop(s_monitor);
-        s_monitor = NULL;
     }
     release_local_sessions_on_exit();
     g_running = false;
