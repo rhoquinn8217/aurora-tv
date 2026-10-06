@@ -245,6 +245,38 @@ in_order "the remote's pointer takes its events before the stream's own input" \
      src/app/stream/session_events.c "bool session_handle_input_event" \
      "bridge_pointer_event(session, event)" "switch (event->type)"
 
+# --- the calls upstream's input and interface files make into files of ours ----
+# ⓘ One line each, in five more of upstream's files, and a merge that takes his
+# side of any of them compiles and runs with the behaviour quietly gone. They
+# were missing from this file until the code review of 2026-10-05.
+# ⛔ The TV's keyboard grab must never take a bridged keyboard: when it did,
+# every key arrived twice (seen on the C1, 2026-09-30). input/bridge_keyboard.h
+# has the whole story.
+in_order "the keyboard grab leaves a bridged keyboard alone, before it grabs" \
+     src/app/platform/webos/keyboard_evdev.c "static int open_keyboards(keyboard_evdev_t *kbd) {" \
+     "if (bridge_keyboard_node_is_bridged(path)) {" "if (ioctl(fd, EVIOCGRAB, 1) < 0) {"
+in_order "the keyboard grab records what it took" \
+     src/app/platform/webos/keyboard_evdev.c "static int open_keyboards(keyboard_evdev_t *kbd) {" \
+     "if (ioctl(fd, EVIOCGRAB, 1) < 0) {" "bridge_keyboard_took(path, held);"
+# ⓘ Aurora's shortcuts and the overlay's turn with the keyboard live in that
+# call: upstream's grab sends the keys straight to the host, around the place
+# they used to be found.
+in_order "a grabbed keyboard's keys are asked about before they go to the host" \
+     src/app/stream/input/session_input.c "static void session_keyboard_evdev_cb" \
+     "if (bridge_keyboard_evdev_key(input, vk, down, modifiers)) {" "stream_input_send_key_event(input, vk, down, modifiers);"
+in_order "the interface drops a key the keyboard grab already fed it" \
+     src/app/lvgl/input/lv_drv_sdl_key.c "static void sdl_input_read(lv_indev_drv_t *drv, lv_indev_data_t *data) {" \
+     "const int fed = bridge_keyboard_sdl_key(&e.key);" "webos_key_input_mode(input, &e.key);"
+# ⓘ Bridge Override changes the stream's live copy of the settings, so it has
+# to come after upstream fills that copy in, or upstream's line puts it back.
+in_order "Bridge Override applies after the stream's settings are copied" \
+     src/app/stream/input/session_input.c "void session_input_init" \
+     "input->touchpad_scroll_scale = config->touchpad_natural_scroll" "bridge_override_apply(input);"
+need "the bridge's question holds the input as the overlay does" \
+     src/app/ui/root.c "streaming_soft_keyboard_shown() || bridge_prompt_shown()"
+need "a removed controller's gesture is forgotten" \
+     src/app/input/input_event.c "ctm_bridge_gesture_reset(event->jdevice.which);"
+
 # --- the branch switch ---------------------------------------------------
 # ⛔ THE ONE LINE THAT SEPARATES THE BRANCHES. On stable it must be absent, so
 # every gated block compiles out. On mic-capture-experimental it must be 1.
