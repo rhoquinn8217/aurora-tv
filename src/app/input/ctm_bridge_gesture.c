@@ -131,6 +131,9 @@ typedef struct {
     uint32_t prep_next;  /* SDL ticks when the next pulse step is due */
     char prep_node[64];  /* the node to plug once the pulse finishes */
     bool ours_plugged;   /* we plugged this one and it is still bridged */
+    /* 1 + the Moonlight slot this side excluded when it bridged the pad, so
+     * the exclusion can be lifted when the pad leaves; 0 = none. */
+    uint8_t excluded_slot1;
     uint32_t plug_check_next;  /* SDL ticks when to look again */
     uint8_t plug_miss;   /* consecutive "not plugged" answers -- see PLUG_MISSES */
     /* T-120: transport of prep_node, resolved once when it is set.
@@ -242,6 +245,7 @@ static watched_t *watched_for(SDL_JoystickID id) {
         free_slot->since = 0;
         free_slot->fired = false;
         free_slot->painted_slot = PAINTED_NEVER;
+        free_slot->excluded_slot1 = 0;
     }
     return free_slot;
 }
@@ -873,7 +877,7 @@ static bool controller_path_is_node(const char *dev_path, const char *node) {
     return access(sibling, F_OK) == 0;
 }
 
-static void gesture_moonlight_forget_leaving(SDL_JoystickID id);
+static void gesture_moonlight_forget_leaving(watched_t *w);
 
 void ctm_bridge_gesture_reset(SDL_JoystickID id) {
     for (int i = 0; i < MAX_WATCHED; ++i) {
@@ -886,7 +890,7 @@ void ctm_bridge_gesture_reset(SDL_JoystickID id) {
             /* ⭐ BEFORE the slot is wiped: the release check that would give
              * the pad's Moonlight slot back needs this slot, and it is about
              * to be gone. */
-            gesture_moonlight_forget_leaving(id);
+            gesture_moonlight_forget_leaving(&s_watched[i]);
             memset(&s_watched[i], 0, sizeof(s_watched[i]));
             return;
         }
@@ -940,7 +944,8 @@ static stream_input_t *s_stream_input;
  * carried a second copy of the check until
  * 2026-10-02 and is upstream's text again; tests/merge-guard.sh checks that
  * the arrive still asks. */
-static void gesture_moonlight_set_excluded(SDL_GameController *controller, bool excluded) {
+static void gesture_moonlight_set_excluded(watched_t *w, SDL_GameController *controller,
+                                           bool excluded) {
     if (!s_stream_input || !controller) {
         return;
     }
@@ -956,9 +961,15 @@ static void gesture_moonlight_set_excluded(SDL_GameController *controller, bool 
     }
     if (excluded) {
         stream_input_exclude_gamepad(s_stream_input, gp);
+        if (w && gp->gs_id >= 0 && gp->gs_id < 16) {
+            w->excluded_slot1 = (uint8_t) (gp->gs_id + 1);
+        }
         gesture_log("moonlight: slot %d handed to the bridge", gp->gs_id);
     } else {
         stream_input_restore_gamepad(s_stream_input, gp);
+        if (w) {
+            w->excluded_slot1 = 0;
+        }
         gesture_log("moonlight: slot %d back from the bridge", gp->gs_id);
     }
 }
@@ -977,20 +988,26 @@ static void gesture_moonlight_set_excluded(SDL_GameController *controller, bool 
  * ⓘ NOT stream_input_restore_gamepad(): that announces the controller to the
  * host, and this one is leaving. The host retired it when it was bridged, so
  * clearing the bit sends nothing; when the controller comes back, the ordinary
- * arrival announces it. */
-static void gesture_moonlight_forget_leaving(SDL_JoystickID id) {
-    if (!s_stream_input) {
+ * arrival announces it.
+ *
+ * ⛔⛔ THE SLOT IS REMEMBERED WHEN THE BRIDGE TAKES IT, NOT LOOKED UP NOW
+ * (rooted monitor, 2026-10-05). The first version asked the app for the pad's
+ * slot by its id here, and found nothing: SDL queues the controller's removal
+ * ahead of the joystick's, the first frees the app's slot
+ * (app_input_close_gamepad in input_event.c), and this runs on the second.
+ * The Edge switched off while bridged came back with no arrival on the PC
+ * (Apollo logged none), and this line was never written. */
+static void gesture_moonlight_forget_leaving(watched_t *w) {
+    if (!s_stream_input || !w || w->excluded_slot1 == 0) {
         return;
     }
-    app_gamepad_state_t *gp = app_input_gamepad_state_by_instance_id(s_stream_input->input, id);
-    if (!gp || gp->gs_id < 0) {
-        return;
-    }
-    const uint16_t bit = (uint16_t) (1u << gp->gs_id);
+    const int slot = (int) w->excluded_slot1 - 1;
+    const uint16_t bit = (uint16_t) (1u << slot);
     if (s_stream_input->moonlightExcludedMask & bit) {
         s_stream_input->moonlightExcludedMask &= (uint16_t) ~bit;
-        gesture_log("moonlight: slot %d freed as its bridged controller left", gp->gs_id);
+        gesture_log("moonlight: slot %d freed as its bridged controller left", slot);
     }
+    w->excluded_slot1 = 0;
 }
 
 /* Returns true if the controller was just handed to the bridge. */
@@ -1075,7 +1092,7 @@ static bool gesture_poll_one(SDL_GameController *controller, SDL_JoystickID id) 
                 }
                 w->plug_miss = 0;
                 w->ours_plugged = false;
-                gesture_moonlight_set_excluded(controller, false);
+                gesture_moonlight_set_excluded(w, controller, false);
                 /* ⭐⭐ THE PLAYER COLOUR AFTER A RELEASE (rhoquinn8217,
                  * 2026-09-15). The core's yellow ends dark, and a pad left dark
                  * read as "not connected". The plug-out, yellow included, has
@@ -1382,7 +1399,7 @@ static bool gesture_poll_one(SDL_GameController *controller, SDL_JoystickID id) 
                      * it left a phantom: the pad is only restored when the
                      * plugged-check notices the bridge has ended, which needs
                      * ours_plugged, which is set here. */
-                    gesture_moonlight_set_excluded(controller, true);
+                    gesture_moonlight_set_excluded(w, controller, true);
                 }
                 if (!ok) {
                     /* A refusal is signalled from here on BOTH transports: the
