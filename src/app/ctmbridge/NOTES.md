@@ -150,9 +150,12 @@ nothing: the send paths consult the mask, so a remove sent after the bit is set
 would be refused, and an arrive sent before the bit is cleared would be refused
 too. Each line carries a short note saying which comes first.
 
-`started` is checked because a controller can be bridged before a stream
-begins. There is nothing to tell the host at that point: the mask is enough,
-and the announce at stream start refuses a controller whose bit is set.
+`started` is checked so that neither path talks to a host before the stream's
+input has started or after it has stopped. Neither happens in use: a bridge
+needs a running stream, and stopping the input clears the mask with it. It is a
+guard, not a case. (This used to say a controller can be bridged before a
+stream begins. It cannot: bridging is stream-only, because the bridge needs the
+stream's host. Code review, 2026-10-05.)
 
 The remove path itself, `stream_input_send_gamepad_remove()` in
 `session_gamepad.c`, deliberately does not consult the mask. Being handed to the
