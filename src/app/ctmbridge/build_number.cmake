@@ -16,7 +16,7 @@
 # !! once to pick the next number and once to name the package. Keep it on one
 # !! line and digits only: a letter inside the value would break both scans, and
 # !! the next build would silently reuse a number.
-set(CTM_BUILD_NUMBER 489)
+set(CTM_BUILD_NUMBER 490)
 
 # A tag after the build number, so a build you can SEE says what it is: EXP on
 # an experimental branch, such as the DualSense Bluetooth microphone capture.
