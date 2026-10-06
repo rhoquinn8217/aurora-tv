@@ -79,8 +79,11 @@ static const nav_key_t k_nav[] = {
 #define NAV_CODE_KP_ENTER 96    /* the keypad's Enter is the same key to the interface */
 
 /* What marks a key event as one the reader fed, in SDL's window field: no
- * window has this number, and nothing in the app reads the field. */
+ * window has this number, and nothing in the app reads the field. ⓘ The
+ * second marks a key read from a BRIDGED keyboard's own nodes, the one source
+ * webOS can also deliver; see bridge_keyboard_sdl_key. */
 #define FED_WINDOW_ID 0x6b626466u
+#define FED_BRIDGED_WINDOW_ID 0x6b626467u
 
 /* How long a key taken from one source waits for the same key from the other
  * before it is forgotten. ⓘ Long, and counted rather than timed: the app's loop
@@ -236,6 +239,7 @@ void bridge_keyboard_changed(void) {
 }
 
 static void feed_overlay(int slot, bool down, char modifiers);
+static void feed_overlay_from(int slot, bool down, char modifiers, bool bridged);
 
 /* The grab lets go of every keyboard, and the host lets go of every key.
  *
@@ -272,18 +276,23 @@ void bridge_keyboard_before_plug(void) {
 }
 
 /* Reader thread: one key for the overlay, as an SDL key event of the kind
- * webOS would have sent. */
-static void feed_overlay(int slot, bool down, char modifiers) {
+ * webOS would have sent. ⓘ `bridged` when it was read from a bridged
+ * keyboard's own nodes. */
+static void feed_overlay_from(int slot, bool down, char modifiers, bool bridged) {
     SDL_Event event;
     SDL_zero(event);
     event.type = down ? SDL_KEYDOWN : SDL_KEYUP;
-    event.key.windowID = FED_WINDOW_ID;
+    event.key.windowID = bridged ? FED_BRIDGED_WINDOW_ID : FED_WINDOW_ID;
     event.key.state = down ? SDL_PRESSED : SDL_RELEASED;
     event.key.keysym.scancode = k_nav[slot].scancode;
     event.key.keysym.sym = k_nav[slot].sym;
     event.key.keysym.mod = (modifiers & MODIFIER_SHIFT) ? KMOD_LSHIFT : KMOD_NONE;
     SDL_PushEvent(&event);
     SDL_AtomicAdd(&s_fed, 1);
+}
+
+static void feed_overlay(int slot, bool down, char modifiers) {
+    feed_overlay_from(slot, down, modifiers, false);
 }
 
 static int nav_slot_for_code(unsigned short code) {
@@ -393,7 +402,7 @@ static void read_bridged_nodes(void) {
                 continue;
             }
             s_bridged_down[slot] = down;
-            feed_overlay(slot, down, 0);
+            feed_overlay_from(slot, down, 0, true);
         }
     }
 }
@@ -458,7 +467,8 @@ bool bridge_keyboard_evdev_key(stream_input_t *input, short vk, bool down, char 
 }
 
 int bridge_keyboard_sdl_key(const struct SDL_KeyboardEvent *event) {
-    const bool ours = event->windowID == FED_WINDOW_ID;
+    const bool fromBridged = event->windowID == FED_BRIDGED_WINDOW_ID;
+    const bool ours = event->windowID == FED_WINDOW_ID || fromBridged;
     if (!ours) {
         s_sdl_keys++;
     }
@@ -470,8 +480,9 @@ int bridge_keyboard_sdl_key(const struct SDL_KeyboardEvent *event) {
     const int source = ours ? 0 : 1;
     const int other = 1 - source;
     const Uint32 now = SDL_GetTicks();
-    /* Is this the twin of a key already taken from the other source? */
-    if (s_owed[other][state][slot] > 0) {
+    /* Is this the twin of a key already taken from the other source? ⓘ A key
+     * the grab fed never is: webOS has no copy of a held keyboard's keys. */
+    if ((!ours || fromBridged) && s_owed[other][state][slot] > 0) {
         if (now - s_owed_at[other][state][slot] < TWIN_MS) {
             s_owed[other][state][slot]--;
             s_echoes++;
@@ -490,7 +501,23 @@ int bridge_keyboard_sdl_key(const struct SDL_KeyboardEvent *event) {
         return BRIDGE_KEYBOARD_KEY_PASS;
     }
     /* Taken, and its twin from the other source is owed, if that source
-     * delivers this keyboard at all. */
+     * delivers this keyboard at all.
+     * ⭐ AND ONLY WHERE A TWIN CAN EXIST (code review, 2026-10-05). Every key
+     * owed one, so the Magic Remote's Down within two seconds of a keyboard's
+     * Down was dropped as its copy, and the other way round: up to four
+     * presses lost. The one keyboard both sources deliver is a BRIDGED one,
+     * read from its own nodes while webOS hands its keys over as well (the C1
+     * does; build 458). A keyboard the grab holds stays held while the overlay
+     * is open, so webOS has no copy of its keys to send. ➡️ So a fed key owes
+     * a twin only when it came from a bridged keyboard's nodes, and a webOS
+     * key only while such nodes are being read. */
+    const bool twinPossible = ours ? fromBridged : s_bridged_n > 0;
+    if (!twinPossible) {
+        if (!ours) {
+            s_sdl_nav++;
+        }
+        return BRIDGE_KEYBOARD_KEY_PASS;
+    }
     if (s_owed[source][state][slot] > 0 && now - s_owed_at[source][state][slot] >= TWIN_MS) {
         s_owed[source][state][slot] = 0;
     }
