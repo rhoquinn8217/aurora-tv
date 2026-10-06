@@ -84,11 +84,19 @@ static void glue_hotplug_cb(void *ud, const ctm_controller_dev_t *dev, int prese
      * is for. ⓘ So nothing is plugged from here any more. */
 }
 
-/* Core bring-up shared by ctm_bridge_start() and the panel entry points:
- * stopSniff worker + agent discovery + enumerate + BT MAC publish. Without
- * this, a controller plugged from the overlay panel alone (no "Use CTM
- * Bridge" setting) attaches over usbip but falls into BT sniff mode --
- * enumerates on the host yet feels dead. Idempotent. */
+/* Core bring-up shared by ctm_bridge_start(), the two plug calls and the
+ * in-stream device list: the stopSniff worker and a scan. Without the worker,
+ * a controller plugged from the overlay panel alone attaches over usbip but
+ * falls into BT sniff mode -- enumerates on the host yet feels dead.
+ * Idempotent.
+ * ⛔ NOTHING THAT IS ASKED OUTSIDE A STREAM CALLS THIS (code review,
+ * 2026-10-05). The questions below -- is this node plugged, is it Bluetooth,
+ * will the core signal it, signal its refusal -- are asked there too: the
+ * gesture checks a pad it bridged until it reads unplugged, which is after the
+ * stream has ended, and a bridge gesture held in the launcher asks about its
+ * refusal. Each one brought the core back up, until the next stream ended.
+ * They scan for themselves. ⓘ Every caller of ctm_bridge_list() runs in a
+ * stream. */
 static bool s_core_up = false;
 
 /* ⭐ Who to tell when a bridged keyboard presses Ctrl+Alt+Shift+S (rhoquinn8217,
@@ -107,7 +115,9 @@ static void ctm_glue_ensure_core(void)
     }
     g_running = true;
 
-    /* Keep every bridged BT controller out of sniff mode for the session. */
+    /* Keep every bridged BT controller out of sniff mode for the session.
+     * ⓘ The worker reads the core's session table itself, so a plug has
+     * nothing to tell it. */
     if (!g_stop_sniff_thread_started) {
         if (pthread_create(&g_stop_sniff_thread, NULL, stop_sniff_worker, NULL) == 0) {
             g_stop_sniff_thread_started = true;
@@ -121,9 +131,6 @@ static void ctm_glue_ensure_core(void)
         log_append("ctm glue: no agent address yet -- a stream sets it");
     }
     ctm_glue_enumerate();
-    // Fill g_bt_macs so the stopSniff worker actually keeps the BT controllers
-    // out of sniff mode (the worker reads this list every 500 ms).
-    publish_bt_macs();
     s_core_up = true;
 }
 
@@ -359,7 +366,6 @@ bool ctm_bridge_node_is_plugged(const char *node)
     if (!node || !node[0]) {
         return false;
     }
-    ctm_glue_ensure_core();
     pthread_mutex_lock(&s_dev_mutex);
     logical_device_t *item = item_for_node_locked(node);
     if (item == NULL) {
@@ -445,7 +451,6 @@ bool ctm_bridge_signal_refused(const char *node)
 {
     if (!ctm_bridge_signals_enabled() || !node || !node[0]) return false;
     char kind[16] = "";
-    ctm_glue_ensure_core();
     pthread_mutex_lock(&s_dev_mutex);
     ctm_glue_enumerate();
     const char *k = kind_for_node_locked(node);
@@ -523,7 +528,6 @@ bool ctm_bridge_node_signals_itself(const char *node)
      *
      * ⭐ A pad the core cannot signal now falls through to the TV's own pulse,
      * which is what the caller does when this is false. */
-    ctm_glue_ensure_core();
     pthread_mutex_lock(&s_dev_mutex);
     ctm_glue_enumerate();
     const bool core_has_one = core_signals_node_locked(node);
@@ -543,7 +547,6 @@ bool ctm_bridge_node_is_bluetooth(const char *node)
     if (!node || !node[0]) {
         return false;
     }
-    ctm_glue_ensure_core();
     pthread_mutex_lock(&s_dev_mutex);
     ctm_glue_enumerate();
     /* ⛔⛔ THE BUS SAYS THIS, NOT A LIST OF TWO KINDS.
@@ -569,14 +572,6 @@ bool ctm_bridge_plug_node(const char *node)
     ctm_glue_ensure_core();
     pthread_mutex_lock(&s_dev_mutex);
     bool ok = plug_in_by_node(node);
-    /* ⭐ THE SAME AS THE DIRECT PLUG BELOW (code review, 2026-10-05). This is
-     * the route for every controller SDL has -- the bridge gesture, a panel
-     * row, Auto Bridge, the control port -- and it never refreshed the list,
-     * so a Bluetooth pad switched on after the core came up was bridged and
-     * then left to sniff mode: on the host, but slow and late. */
-    if (ok) {
-        publish_bt_macs();
-    }
     pthread_mutex_unlock(&s_dev_mutex);
     return ok;
 }
@@ -592,9 +587,6 @@ bool ctm_bridge_plug_index(int index)
             ok = ctm_tv_pointer_plug();
         } else {
             ok = plug_in_item(item);
-            if (ok) {
-                publish_bt_macs();   /* keep the newly-plugged BT controller out of sniff mode */
-            }
         }
         log_append("ctm glue: manual plug '%s' (%s) -> %s", item->name,
                    bridge_kind_for_item(item), ok ? "ok" : "failed");
