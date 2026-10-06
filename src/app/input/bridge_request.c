@@ -36,7 +36,18 @@ bridge_request_result_t bridge_request_device(const ctm_bridge_dev_t *dev)
      * keyboard is refused and every key reaches the host twice. It takes the
      * keyboards that are not bridged back by itself (bridge_keyboard.h). */
     bridge_keyboard_before_plug();
-    return ctm_bridge_plug_index(dev->index) ? BRIDGE_REQUEST_PLUGGED : BRIDGE_REQUEST_FAILED;
+    bool ok = ctm_bridge_plug_index(dev->index);
+    /* ⭐ NOT REACHED IS NOT REFUSED, here as in the gesture (code review,
+     * 2026-10-05). The gesture tries once more when the listener was not
+     * reached, and this did not, so a keyboard, a mouse, the TV pointer and
+     * Auto Bridge's direct parts failed on one packet lost over Wi-Fi.
+     * ⓘ At once, not after the gesture's two seconds: this runs on the app's
+     * loop and has nothing to come back to it from. A PC that does not answer
+     * at all costs a second more. */
+    if (!ok && ctm_bridge_last_plug_unreachable()) {
+        ok = ctm_bridge_plug_index(dev->index);
+    }
+    return ok ? BRIDGE_REQUEST_PLUGGED : BRIDGE_REQUEST_FAILED;
 }
 
 void bridge_release_device(const ctm_bridge_dev_t *dev)
