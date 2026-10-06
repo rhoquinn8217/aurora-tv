@@ -6,7 +6,6 @@
 #include "logging.h"
 #include "util/user_event.h"
 #include "input_gamepad_mapping.h"
-#include "ctm_bridge_glue.h"
 #include "ctm_bridge_gesture.h"
 
 void app_input_handle_event(app_input_t *input, const SDL_Event *event) {

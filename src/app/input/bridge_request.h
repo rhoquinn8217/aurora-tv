@@ -32,9 +32,6 @@ bridge_request_result_t bridge_request_device(const ctm_bridge_dev_t *dev);
 
 void bridge_release_device(const ctm_bridge_dev_t *dev);
 
-/* "asked", "plugged" or "failed", for logs and replies. */
-const char *bridge_request_result_name(bridge_request_result_t result);
-
 #endif /* TARGET_WEBOS */
 
 #endif /* BRIDGE_REQUEST_H */

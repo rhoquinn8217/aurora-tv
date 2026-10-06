@@ -61,10 +61,6 @@ void ctm_bridge_stop(void);
 /* True while the bridge is active. */
 bool ctm_bridge_active(void);
 
-/* Write a short human-readable status (active state, agent, bridged controllers)
- * into out (NUL-terminated). For the on-stream CTM overlay panel. */
-void ctm_bridge_status(char *out, size_t out_len);
-
 /* One detected device, for the overlay's manual plug list. */
 typedef struct {
     int index;      /* opaque device index; pass to ctm_bridge_plug/unplug_index */
@@ -193,25 +189,6 @@ bool ctm_bridge_open_config(char *name, size_t name_len);
 int bridge_open_config_ready(void);
 
 void ctm_bridge_unplug_index(int index);
-
-/* Release every bridged session. */
-void ctm_bridge_unplug_all(void);
-
-/* Flat per-controller settings (mirrors the bridge's tv_bridge_worker_settings_t,
- * so moonlight doesn't need the ctmcore headers). */
-typedef struct {
-    int kind;                     /* 0 = hid, 4 = ds4, 5 = ds5 */
-    int audio_mode;               /* 0 Auto / 1 Off / 2 Speaker / 3 Headset / 4 Both */
-    int latency_ms;
-    int haptics_gain_centi;
-    int headset_volume_percent;
-    int speaker_volume_percent;
-    int ds5_patch_high, ds5_patch_low, ds5_patch2_high, ds5_patch2_low;
-} ctm_bridge_settings_t;
-
-/* Get / apply (live) the per-controller settings for the device at the index. */
-bool ctm_bridge_get_settings(int index, ctm_bridge_settings_t *out);
-void ctm_bridge_set_settings(int index, const ctm_bridge_settings_t *in);
 
 /* TV pointer -> host mouse (synthesizer, kind "hid"): auto-plugged by
  * ctm_bridge_start; the Magic Remote row in the panel toggles it. While

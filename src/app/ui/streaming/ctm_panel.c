@@ -478,11 +478,11 @@ static void ctm_toggle_device(int row) {
 
 /* Release every bridged device, one at a time, the same way a row does.
  *
- * ⛔ NOT ctm_bridge_unplug_all(): that calls release_local_sessions_on_exit(),
- * the APP SHUTDOWN path. It tears down every session at once while holding the
- * device mutex, and with the microphone disarm in the unplug path -- five
- * writes twenty milliseconds apart, per device -- the overlay froze long enough
- * to look like a crash. Measured 2026-08-18.
+ * ⛔ NOT release_local_sessions_on_exit(), the APP SHUTDOWN path. It tears
+ * down every session at once while holding the device mutex, and with the
+ * microphone disarm in the unplug path -- then five writes twenty milliseconds
+ * apart, per device -- the overlay froze long enough to look like a crash.
+ * Measured 2026-08-18.
  *
  * ⚠️ This still runs on the UI thread and still blocks; it just has far less to
  * do, and it does the same thing pressing each row would. Getting these calls

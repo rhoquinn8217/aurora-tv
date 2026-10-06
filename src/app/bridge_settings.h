@@ -10,9 +10,7 @@
  * three calls into this file: the defaults, the save and the read. The keys
  * in the file are the ones they have always had (bridge_enable and the rest,
  * in bridge_settings.c), so a TV keeps what it was set to.
- *
- * ⓘ Not ctm_bridge_settings_t, which is one controller's settings as the
- * listener hands them over. */
+ */
 typedef struct bridge_settings_t {
     /* ⭐ CAN A DEVICE BE HANDED TO THE PC AT ALL? Defaults OFF (since build 307).
      *

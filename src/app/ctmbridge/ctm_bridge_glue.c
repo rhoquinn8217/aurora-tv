@@ -919,65 +919,6 @@ void ctm_bridge_pointer_feed_key(unsigned hid_usage, bool down)
     ctm_hostmouse_feed_key((uint8_t) hid_usage, down);
 }
 
-void ctm_bridge_unplug_all(void)
-{
-    pthread_mutex_lock(&s_dev_mutex);
-    release_local_sessions_on_exit();
-    pthread_mutex_unlock(&s_dev_mutex);
-    log_append("ctm glue: unplugged all");
-}
-
-bool ctm_bridge_get_settings(int index, ctm_bridge_settings_t *out)
-{
-    if (out == NULL) {
-        return false;
-    }
-    pthread_mutex_lock(&s_dev_mutex);
-    bool ok = false;
-    if (index >= 0 && index < g_devices.count) {
-        tv_bridge_worker_settings_t *s = settings_for_item(&g_devices.items[index]);
-        if (s != NULL) {
-            out->kind = (int) s->kind;
-            out->audio_mode = (int) s->audio_mode;
-            out->latency_ms = (int) s->latency_ms;
-            out->haptics_gain_centi = (int) s->haptics_gain_centi;
-            out->headset_volume_percent = (int) s->headset_volume_percent;
-            out->speaker_volume_percent = (int) s->speaker_volume_percent;
-            out->ds5_patch_high = (int) s->ds5_patch_high_nibble;
-            out->ds5_patch_low = (int) s->ds5_patch_low_nibble;
-            out->ds5_patch2_high = (int) s->ds5_patch2_high_nibble;
-            out->ds5_patch2_low = (int) s->ds5_patch2_low_nibble;
-            ok = true;
-        }
-    }
-    pthread_mutex_unlock(&s_dev_mutex);
-    return ok;
-}
-
-void ctm_bridge_set_settings(int index, const ctm_bridge_settings_t *in)
-{
-    if (in == NULL) {
-        return;
-    }
-    pthread_mutex_lock(&s_dev_mutex);
-    if (index >= 0 && index < g_devices.count) {
-        tv_bridge_worker_settings_t *s = settings_for_item(&g_devices.items[index]);
-        if (s != NULL) {
-            s->audio_mode = (tv_bridge_audio_mode_t) in->audio_mode;
-            s->latency_ms = (unsigned int) in->latency_ms;
-            s->haptics_gain_centi = (unsigned int) in->haptics_gain_centi;
-            s->headset_volume_percent = (unsigned int) in->headset_volume_percent;
-            s->speaker_volume_percent = (unsigned int) in->speaker_volume_percent;
-            s->ds5_patch_high_nibble = (unsigned int) in->ds5_patch_high;
-            s->ds5_patch_low_nibble = (unsigned int) in->ds5_patch_low;
-            s->ds5_patch2_high_nibble = (unsigned int) in->ds5_patch2_high;
-            s->ds5_patch2_low_nibble = (unsigned int) in->ds5_patch2_low;
-            apply_settings_to_session(&g_devices.items[index]);
-        }
-    }
-    pthread_mutex_unlock(&s_dev_mutex);
-}
-
 void ctm_bridge_stop(void)
 {
     if (!s_active && !s_core_up) {
@@ -997,26 +938,6 @@ void ctm_bridge_stop(void)
 bool ctm_bridge_active(void)
 {
     return s_active;
-}
-
-void ctm_bridge_status(char *out, size_t out_len)
-{
-    if (out == NULL || out_len == 0) {
-        return;
-    }
-    size_t n = 0;
-    n += (size_t) snprintf(out + n, out_len - n, "Bridge: %s\n", s_active ? "active" : "inactive");
-    if (n >= out_len) return;
-    n += (size_t) snprintf(out + n, out_len - n, "Agent: %s\n",
-                           (g_agent_online && g_agent_host[0]) ? g_agent_host : "not found");
-    if (n >= out_len) return;
-    pthread_mutex_lock(&g_sessions_mutex);
-    n += (size_t) snprintf(out + n, out_len - n, "Bridged controllers: %d\n", g_session_count);
-    for (int i = 0; i < g_session_count && n < out_len; ++i) {
-        n += (size_t) snprintf(out + n, out_len - n, "  - %s [%s]\n",
-                               g_sessions[i].key, g_sessions[i].busid);
-    }
-    pthread_mutex_unlock(&g_sessions_mutex);
 }
 
 /* Is the USB server answering? ⭐ Separate from its address, which is known

@@ -445,7 +445,6 @@ static bool gesture_held(SDL_GameController *controller) {
  * passes are the clock and the plug happens on the last step. */
 #define PREP_STEPS        20
 #define PREP_STEP_MS      50
-#define PREP_STEPS_HALF   (PREP_STEPS / 2)
 
 /* The post-unplug signal: three shorter breaths rather than one long one.
  * Repetition is what makes it unmistakable, and each breath is brief enough
