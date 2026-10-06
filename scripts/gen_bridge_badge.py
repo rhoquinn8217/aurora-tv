@@ -2,13 +2,16 @@
 """Set the bridge badge on the webOS app icons: a black bridge with a white glow.
 
     python3 scripts/gen_bridge_badge.py            writes deploy/webos/icon*.png
-    python3 scripts/gen_bridge_badge.py --check    writes nothing, exit 1 if they differ
+    python3 scripts/gen_bridge_badge.py --check    writes nothing, exit 1 if their pixels differ
 
 ⭐ WHY THIS EXISTS. deploy/webos/icon.png and icon_large.png are GENERATED, and
 for a day they had no generator: they were built by a script that lived in a
 temp folder. A generated file with nothing that can regenerate it is a file
 nobody can adjust, so the script and its three sources live here now, and
---check proves the committed icons are exactly what this produces.
+--check proves the committed icons show exactly the pixels this produces.
+⚠️ The PIXELS, not the file's bytes: those are zlib's output, and a Python
+built with another zlib may compress the same pixels differently, which would
+read as stale icons that are not (code review, 2026-10-05).
 
 ⛔⛔ DO NOT RUN gen_aurora_logo.py AND EXPECT THESE ICONS BACK. That script
 writes icon.png at 130 px and icon_large.png at 512 px, where the files that
@@ -142,7 +145,7 @@ def load(path: Path):
 
 def encode_rgba(w: int, h: int, pix: bytearray) -> bytes:
     """Filter type 0 on every line. Larger than an optimal choice and perfectly
-    valid, and it keeps the output byte-for-byte reproducible."""
+    valid, and with the same zlib the output is byte-for-byte reproducible."""
     stride = w * 4
     raw = bytearray()
     for y in range(h):
@@ -335,8 +338,9 @@ def make_badge(size: int) -> bytearray:
     return rgba_down(out, work, work, size, size)   # 3. antialias only
 
 
-def badge_icon(base_path: Path) -> tuple[int, int, bytes]:
-    """The base icon with the badge set flush in its bottom-right corner."""
+def badge_icon(base_path: Path) -> tuple[int, int, bytearray]:
+    """The base icon with the badge set flush in its bottom-right corner, as
+    RGBA pixels."""
     w, h, bpp, pix = load(base_path)
     pix = to_rgba(w, h, bpp, pix)
     size = int(w * BADGE_SCALE)
@@ -353,7 +357,19 @@ def badge_icon(base_path: Path) -> tuple[int, int, bytes]:
             for c in range(3):
                 pix[di + c] = int(badge[bi + c] * a + pix[di + c] * (1 - a) + 0.5)
             pix[di + 3] = max(pix[di + 3], badge[bi + 3])
-    return w, h, encode_rgba(w, h, pix)
+    return w, h, pix
+
+
+def shows_the_same(target: Path, w: int, h: int, pix: bytearray) -> bool:
+    """Does the committed icon show exactly these pixels? Decoded and compared,
+    so how the file happens to be compressed does not matter."""
+    if not target.is_file():
+        return False
+    try:
+        tw, th, tbpp, tpix = load(target)
+    except (ValueError, zlib.error, struct.error):
+        return False
+    return (tw, th) == (w, h) and to_rgba(tw, th, tbpp, tpix) == pix
 
 
 def main() -> int:
@@ -366,12 +382,13 @@ def main() -> int:
 
     stale = 0
     for base, target in TARGETS:
-        w, h, data = badge_icon(base)
+        w, h, pix = badge_icon(base)
         if check:
-            same = target.is_file() and target.read_bytes() == data
+            same = shows_the_same(target, w, h, pix)
             print(f"{'ok   ' if same else 'STALE'} {target.relative_to(ROOT)}  {w}x{h}")
             stale += 0 if same else 1
         else:
+            data = encode_rgba(w, h, pix)
             target.write_bytes(data)
             print(f"Wrote {target.relative_to(ROOT)}  {w}x{h}  {len(data)} bytes")
     return 1 if stale else 0
