@@ -23,10 +23,16 @@ extern "C" {
  * it. */
 void ctm_bridge_set_host(const char *host, int port);
 
-/* Start the bridge: discover the Windows CTM agent, enumerate controllers,
- * auto-plug the first one we recognise, and run the stopSniff keep-alive.
- * Idempotent (a second call while active is a no-op). Returns true if a
- * controller was bridged. */
+/* "Enable Device Bridging", handed in. Off, a stream starts nothing of the
+ * bridge's own: no agent probe, no hotplug watch, no stopSniff worker. The
+ * stream still counts as up, and the first plug brings the core up as any plug
+ * does. Call before ctm_bridge_start(). */
+void ctm_bridge_set_enabled(bool enabled);
+
+/* Start the bridge for a stream: enumerate controllers, start the agent probe
+ * and the stopSniff keep-alive, and watch for hotplug -- or, with bridging off,
+ * only mark the stream up. Idempotent (a second call while active is a no-op).
+ * Returns true. */
 bool ctm_bridge_start(void);
 
 /* Stop bridging: unplug all sessions and stop the keep-alive thread. Idempotent. */
