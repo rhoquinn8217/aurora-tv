@@ -119,17 +119,30 @@ static void group_shown(device_group_t *g, const char *tag, const char *value)
 static void group_identity(const ctm_bridge_dev_t *devs, device_group_t *g)
 {
     g->identity[0] = '\0';
+    bool playstation_part = false;
     for (int p = 0; p < g->part_count; ++p) {
         const ctm_bridge_dev_t *d = &devs[g->part[p]];
         char mac[64];
         /* ⓘ A DS4 as well since 2026-09-15: auto_bridge_identity() gives its
          * MAC the way it gives a DualSense's. */
         const bool playstation = strncmp(d->kind, "ds5", 3) == 0 || strncmp(d->kind, "ds4", 3) == 0;
+        playstation_part = playstation_part || playstation;
         if (playstation && auto_bridge_identity(d, mac, sizeof mac)) {
             snprintf(g->identity, sizeof g->identity, "%s", mac);
             group_shown(g, "MAC: ", mac);
             return;
         }
+    }
+    /* ⛔ A PLAYSTATION PAD IS KNOWN BY ITS MAC OR BY NOTHING (code review,
+     * 2026-10-05). When SDL has no MAC for it, its USB serial and the scan's
+     * serial name what it is plugged through: on the C1, a DS5Dongle's own.
+     * A mark made from that follows the dongle, and the next pad on it would
+     * bridge itself uninvited, which auto_bridge_identity() already refuses
+     * for a single part. So it is remembered by its name alone until SDL has
+     * its MAC. */
+    if (playstation_part) {
+        group_shown(g, "", "(no MAC yet)");
+        return;
     }
     for (int p = 0; p < g->part_count; ++p) {
         const ctm_bridge_dev_t *d = &devs[g->part[p]];
