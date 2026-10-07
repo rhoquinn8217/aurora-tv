@@ -1829,8 +1829,12 @@ static bool arrival_node_appeared(void) {
  * SDL claims a DualSense, an Edge and a DS4 through its HIDAPI drivers rather
  * than evdev -- `app.c` sets SDL_HINT_JOYSTICK_HIDAPI_PS5 -- and a driver
  * switched off and on again re-examines the devices it could claim.
- * ➡️ So a PlayStation pad can be made to announce itself WITHOUT touching
- * anything else: an Xbox pad on evdev never notices, bridged or not.
+ * ➡️ So a PlayStation pad can be made to announce itself without touching any
+ * other driver's pads: an Xbox pad on evdev never notices, bridged or not.
+ * ⛔ BUT EVERY PAD ON THAT DRIVER IS CLOSED AND OPENED AGAIN (code review,
+ * 2026-10-05). This said it disturbed nothing, and a DualSense in someone's
+ * hands, bridged or not, drops for a moment and comes back. So the cure runs
+ * only when no other pad on the driver is in use (arrival_check).
  *
  * ⓘ Which hint depends on the pad, so a missing DualSense does not disturb a
  * DS4 that is perfectly happy. ⚠️ The core's kind strings are cut to 8 bytes
@@ -1866,7 +1870,8 @@ static const char *arrival_hidapi_hint(const char *kind) {
 static void arrival_rescan_driver(const char *hint) {
     SDL_SetHint(hint, "0");
     SDL_SetHint(hint, "1");
-    gesture_log("arrival watch: asked %s to look again -- nothing else is touched", hint);
+    gesture_log("arrival watch: asked %s to look again -- every pad on that driver "
+                "reconnects, and none other was in use", hint);
 }
 
 
@@ -1940,15 +1945,22 @@ static void arrival_check(struct app_input_t *input) {
                 gesture_log("arrival watch: nothing left to try for %s -- reconnect it", node);
                 return;
             }
-            bool same_driver_bridged = false;
+            /* ⛔ NOT ONLY A BRIDGED PAD (code review, 2026-10-05): the
+             * re-announce drops every pad on the driver for a moment, so one
+             * that is a player here is in someone's hands just the same. */
+            bool same_driver_in_use = false;
             for (int k = 0; k < n; ++k) {
-                if (!devs[k].plugged || !devs[k].controller) continue;
+                if (!devs[k].controller || strcmp(devs[k].node, node) == 0) continue;
                 const char *other = arrival_hidapi_hint(devs[k].kind);
-                if (other != NULL && strcmp(other, hint) == 0) same_driver_bridged = true;
+                if (other == NULL || strcmp(other, hint) != 0) continue;
+                if (devs[k].plugged || ctm_bridge_gesture_player_for_node(devs[k].node) >= 0) {
+                    same_driver_in_use = true;
+                }
             }
-            if (same_driver_bridged) {
-                gesture_log("arrival watch: leaving it alone -- another pad on that driver is "
-                            "bridged and in play. Reconnect the controller to recover it");
+            if (same_driver_in_use) {
+                gesture_log("arrival watch: leaving it alone -- another pad on that driver is in "
+                            "use, bridged or a player here, and the re-announce would drop it. "
+                            "Reconnect the controller to recover it");
                 return;
             }
             snprintf(s_arrival_verify, sizeof s_arrival_verify, "%s", node);
