@@ -127,8 +127,9 @@ bool ctm_bridge_agent_online(void);
 void ctm_bridge_agent(char *out, size_t out_len);
 
 /* Re-enumerate and fill out[0..max-1] with the detected devices; returns the
- * count. Index i is stable for ctm_bridge_plug_index(i)/unplug_index(i) until the
- * next ctm_bridge_list() call. */
+ * count. A row is acted on with ctm_bridge_plug_row()/unplug_row(), which find
+ * its device again by node, so a scan in between cannot move the press onto
+ * another device. */
 int ctm_bridge_list(ctm_bridge_dev_t *out, int max);
 
 /* The same list, but WITHOUT bringing the bridge core up: no stopSniff worker
@@ -161,8 +162,9 @@ bool ctm_bridge_signal_refused(const char *node);
  * separates two otherwise identical controllers. Returns true if it plugged. */
 bool ctm_bridge_plug_node(const char *node);
 
-/* Manually plug / unplug the device at the given list index. */
-bool ctm_bridge_plug_index(int index);
+/* Manually plug / unplug the device a row from ctm_bridge_list() names, found
+ * again by its node (by name for the TV's remote, which has none). */
+bool ctm_bridge_plug_row(const ctm_bridge_dev_t *row);
 /* ⭐ Release any controller whose host has gone (T-127). ⓘ Cheap -- walks the
  * session table, never enumerates. Call it from a tick; it returns how many it
  * released so the caller can log only when it acts. */
@@ -186,7 +188,7 @@ bool ctm_bridge_open_config(char *name, size_t name_len);
  * DS5-USBIP button's look, on the interface thread, which must not wait. */
 int bridge_open_config_ready(void);
 
-void ctm_bridge_unplug_index(int index);
+void ctm_bridge_unplug_row(const ctm_bridge_dev_t *row);
 
 /* TV pointer -> host mouse (synthesizer, kind "hid"): bridged only when asked,
  * from the Magic Remote's row in the panel or the control port. While
