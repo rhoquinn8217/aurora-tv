@@ -35,6 +35,11 @@
 #include <stdio.h>
 #include <string.h>
 
+/* ⓘ The panel is the bridge's, and the desktop build has no bridge: there it
+ * is the two calls the streaming screen makes, doing nothing (code review,
+ * 2026-10-05: it did not compile there). */
+#if defined(TARGET_WEBOS)
+
 /* Which setting a detail row edits. ⚠️ This lived one line above the block that
  * was lifted and was missed on the first pass -- the whole build failed on it. */
 
@@ -1624,3 +1629,15 @@ void ctm_panel_on_owner_deleted(streaming_controller_t *controller) {
     if (s_ctm_dead_panel)  { lv_obj_del(s_ctm_dead_panel);    s_ctm_dead_panel = NULL; }
     if (s_ctm_dead_nav)    { lv_group_del(s_ctm_dead_nav);    s_ctm_dead_nav = NULL; }
 }
+
+#else /* not TARGET_WEBOS */
+
+void ctm_panel_open(lv_event_t *event) {
+    (void) event;
+}
+
+void ctm_panel_on_owner_deleted(streaming_controller_t *controller) {
+    (void) controller;
+}
+
+#endif /* TARGET_WEBOS */

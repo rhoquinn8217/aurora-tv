@@ -99,8 +99,13 @@ bool ctm_bridge_gesture_mac_for_node(const char *node, char *out, size_t out_len
 
 #else
 
-#define ctm_bridge_gesture_tick(input, session) ((void)0)
+/* ⓘ The desktop build has no bridge gesture. Every call that code compiled for
+ * the desktop makes needs a stand-in here, with the same arguments: the tick
+ * took two until it took three, and the desktop build stopped compiling
+ * (code review, 2026-10-05). */
+#define ctm_bridge_gesture_tick(input, session, interface_has_input) ((void)0)
 #define ctm_bridge_gesture_reset(id) ((void)0)
+#define ctm_bridge_gesture_light_busy(controller) ((void)(controller), 0)
 
 #endif
 
