@@ -55,25 +55,12 @@ void bridge_release_device(const ctm_bridge_dev_t *dev)
     if (dev == NULL) {
         return;
     }
-    /* ⛔ One device, never ctm_bridge_unplug_all(): that is the app SHUTDOWN
-     * path, and it tears every session down at once while holding the device
-     * lock. */
+    /* ⛔ One device, never every session at once: that is the app's SHUTDOWN
+     * path (release_local_sessions_on_exit), and it tears them all down while
+     * holding the device lock. */
     ctm_bridge_unplug_index(dev->index);
     /* A released keyboard is the TV's again: its grab looks again shortly. */
     bridge_keyboard_changed();
-}
-
-const char *bridge_request_result_name(bridge_request_result_t result)
-{
-    switch (result) {
-        case BRIDGE_REQUEST_ASKED:
-            return "asked";
-        case BRIDGE_REQUEST_PLUGGED:
-            return "plugged";
-        case BRIDGE_REQUEST_FAILED:
-        default:
-            return "failed";
-    }
 }
 
 #endif /* TARGET_WEBOS */

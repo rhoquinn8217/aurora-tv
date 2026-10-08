@@ -10,9 +10,7 @@
  * three calls into this file: the defaults, the save and the read. The keys
  * in the file are the ones they have always had (bridge_enable and the rest,
  * in bridge_settings.c), so a TV keeps what it was set to.
- *
- * ⓘ Not ctm_bridge_settings_t, which is one controller's settings as the
- * listener hands them over. */
+ */
 typedef struct bridge_settings_t {
     /* ⭐ CAN A DEVICE BE HANDED TO THE PC AT ALL? Defaults OFF (since build 307).
      *
@@ -74,11 +72,14 @@ typedef struct bridge_settings_t {
      * "tidy" it away; that reintroduces the divergence it exists to prevent. */
     bool mic_wired;
     bool mic_bt;
-    /* ⭐ WHICH CONTROLLERS BRIDGE THEMSELVES when a stream starts, by the
-     * controller's own MAC, comma-separated. Chosen in the USB Bridge settings
-     * pane; empty means none.
+    /* ⭐ WHICH DEVICES BRIDGE THEMSELVES when a stream starts, by each one's
+     * mark, comma-separated: its identity and its name, "identity|name". The
+     * identity is a DualSense's MAC and any other device's serial. Chosen in
+     * the Auto Bridge window; empty means none. ⓘ The name is "auto_macs" from
+     * when every mark was a MAC (code review, 2026-10-05: this said so still).
      *
-     * ⛔ MACs, NOT the core's `uniq`, and the difference is the whole feature.
+     * ⛔ A DUALSENSE BY ITS MAC, NOT the core's `uniq`, and the difference is
+     * the whole feature.
      * Measured on the C1 2026-09-08: `uniq` is EMPTY for a directly cabled
      * DualSense Edge and is the DS5DONGLE'S OWN SERIAL through a dongle -- it
      * follows the dongle, so keying on it would mark the dongle rather than the

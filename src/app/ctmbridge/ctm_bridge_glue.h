@@ -1,10 +1,10 @@
 #ifndef CTM_BRIDGE_GLUE_H
 #define CTM_BRIDGE_GLUE_H
 
-/* Thin moonlight-facing facade over the embedded CTM bridge core. moonlight calls
- * only these three functions; everything else (agent discovery, enumeration,
- * controller bridging, stopSniff keep-alive) stays inside the ctmbridge lib so
- * the core's headers don't leak into moonlight-lib. */
+/* Thin moonlight-facing facade over the embedded CTM bridge core. The app calls
+ * only what is declared here; everything else (enumeration, controller
+ * bridging, the stopSniff keep-alive) stays inside the ctmbridge lib so the
+ * core's headers don't leak into moonlight-lib. */
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -13,25 +13,21 @@
 extern "C" {
 #endif
 
-/* Tell the bridge where the Windows CTM agent is, skipping discovery. When: the
- * host app already knows the address because it is streaming from that same
- * machine. Call before ctm_bridge_start(). Passing NULL or "" restores
- * discovery. Port 0 keeps the default agent port.
- *
- * Without this, the agent is found by a UDP broadcast probe, which never leaves
- * the local network -- so a TV streaming from a host elsewhere can never find
- * it. */
+/* Tell the bridge where the Windows CTM agent is: the PC the stream comes
+ * from, by its address or its name. Call before ctm_bridge_start(). NULL or ""
+ * clears it, and nothing can bridge until it is set again; there is no
+ * discovery any more. Port 0 keeps the default agent port. */
 void ctm_bridge_set_host(const char *host, int port);
 
 /* "Enable Device Bridging", handed in. Off, a stream starts nothing of the
- * bridge's own: no agent probe, no hotplug watch, no stopSniff worker. The
+ * bridge's own: no agent probe, no stopSniff worker. The
  * stream still counts as up, and the first plug brings the core up as any plug
  * does. Call before ctm_bridge_start(). */
 void ctm_bridge_set_enabled(bool enabled);
 
 /* Start the bridge for a stream: enumerate controllers, start the agent probe
- * and the stopSniff keep-alive, and watch for hotplug -- or, with bridging off,
- * only mark the stream up. Idempotent (a second call while active is a no-op).
+ * and the stopSniff keep-alive -- or, with bridging off, only mark the stream
+ * up. Idempotent (a second call while active is a no-op).
  * Returns true. */
 bool ctm_bridge_start(void);
 
@@ -61,17 +57,16 @@ void ctm_bridge_stop(void);
 /* True while the bridge is active. */
 bool ctm_bridge_active(void);
 
-/* Write a short human-readable status (active state, agent, bridged controllers)
- * into out (NUL-terminated). For the on-stream CTM overlay panel. */
-void ctm_bridge_status(char *out, size_t out_len);
-
 /* One detected device, for the overlay's manual plug list. */
 typedef struct {
     int index;      /* opaque device index; pass to ctm_bridge_plug/unplug_index */
     char name[128];
     char vid[8];
     char pid[8];
-    char kind[8];   /* "ds5" / "ds4" / "xbox" / "puck" / "hid" */
+    /* "ds5", "ds5_usb", "ds5e", "ds5e_usb", "ds4", "ds4_usb", "xbox", "puck",
+     * "hid". ⓘ Sixteen (code review, 2026-10-05): eight cut "ds5e_usb" to
+     * "ds5e_us" in the control port's `devices`. */
+    char kind[16];
     char bus[8];    /* "USB" / "BT" */
     char mac[24];   /* BT MAC (e.g. "58:10:31:..."), empty for USB */
     /* ⭐ The hidraw node, which is the identity everything else in this project
@@ -104,10 +99,6 @@ bool bridge_identity_usable(const char *s);
 bool bridge_identity_same(const char *a, const char *b);
 bool bridge_identity_mac_shaped(const char *s);
 
-/* Write the discovered Windows agent host (or "offline") into out (NUL-terminated).
- * For the overlay header. */
-/* Is the USB server answering? ⓘ Its address is reported by ctm_bridge_agent()
- * whether or not it is. */
 /* Ask for a fresh reading of whether the USB server is answering. ⭐ Returns at
  * once; the answer lands on the next refresh. */
 void ctm_bridge_agent_recheck(void);
@@ -116,17 +107,23 @@ void ctm_bridge_agent_recheck(void);
  * failed), as against a refusal. The gesture tries once more on this. */
 bool ctm_bridge_last_plug_unreachable(void);
 
-/* How many releases are still running on their own threads. ⓘ The TV's
- * keyboard grab waits for none before it looks again: a keyboard still being
- * released counts as bridged, and would be skipped. */
+/* How many releases are still running on their own threads. ⓘ Asked by the
+ * TV's keyboard grab before it looks again: a keyboard still being
+ * released counts as bridged, and would be skipped, so the grab waits until
+ * none are running. */
 int ctm_bridge_releases_in_flight(void);
 
 /* True once a probe or a command has reached a verdict about the USB server.
  * ⭐ Until then the answer to ctm_bridge_agent_online() means nothing. */
 bool ctm_bridge_agent_probed(void);
 
+/* Is the USB server answering? ⓘ Its address is reported by ctm_bridge_agent()
+ * whether or not it is. */
 bool ctm_bridge_agent_online(void);
 
+/* Write the Windows agent's host (or "not set") into out (NUL-terminated),
+ * whether or not anything answers there: ctm_bridge_agent_online() says that.
+ * For the overlay header and the control port's status. */
 void ctm_bridge_agent(char *out, size_t out_len);
 
 /* Re-enumerate and fill out[0..max-1] with the detected devices; returns the
@@ -191,27 +188,8 @@ int bridge_open_config_ready(void);
 
 void ctm_bridge_unplug_index(int index);
 
-/* Release every bridged session. */
-void ctm_bridge_unplug_all(void);
-
-/* Flat per-controller settings (mirrors the bridge's tv_bridge_worker_settings_t,
- * so moonlight doesn't need the ctmcore headers). */
-typedef struct {
-    int kind;                     /* 0 = hid, 4 = ds4, 5 = ds5 */
-    int audio_mode;               /* 0 Auto / 1 Off / 2 Speaker / 3 Headset / 4 Both */
-    int latency_ms;
-    int haptics_gain_centi;
-    int headset_volume_percent;
-    int speaker_volume_percent;
-    int ds5_patch_high, ds5_patch_low, ds5_patch2_high, ds5_patch2_low;
-} ctm_bridge_settings_t;
-
-/* Get / apply (live) the per-controller settings for the device at the index. */
-bool ctm_bridge_get_settings(int index, ctm_bridge_settings_t *out);
-void ctm_bridge_set_settings(int index, const ctm_bridge_settings_t *in);
-
-/* TV pointer -> host mouse (synthesizer, kind "hid"): auto-plugged by
- * ctm_bridge_start; the Magic Remote row in the panel toggles it. While
+/* TV pointer -> host mouse (synthesizer, kind "hid"): bridged only when asked,
+ * from the Magic Remote's row in the panel or the control port. While
  * active, the streaming input path feeds pointer state here INSTEAD of the
  * moonlight mouse channel (single input authority on the host). x/y in
  * surface coords of a w x h surface; buttons bit0=left bit1=right

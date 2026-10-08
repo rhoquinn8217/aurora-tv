@@ -405,32 +405,12 @@ static bool gesture_held(SDL_GameController *controller) {
     return down >= 2;
 }
 
-/* Tell the user, on the controller itself, that a bridge attempt was refused.
- *
- * Three short YELLOW flashes. Two reasons it is not red. Red is the DualSense's
- * PLAYER TWO colour -- blue, red, green, purple in order -- so a red lightbar
- * already means something specific to anyone who has played a multiplayer game.
- * And a refused plug is a warning rather than a fault: it almost always means
- * the listener is not running, which is something to go and start, not
- * something broken. Amber says that everywhere else, and it leaves red free in
- * case something genuinely bad ever needs saying.
- *
- * Three flashes is clearly deliberate rather than a glitch.
- *
- * This is the one signal with nothing to compete against. A SUCCESSFUL bridge
- * is announced by the controller's own connect behaviour -- it lights up by
- * itself, and an attempt to say the same thing over the top was abandoned on
- * 2026-08-06 after it lost every fight with the host, and turned out to be
- * killing Bluetooth sessions by writing a wired report over a Bluetooth link.
- * A REFUSAL has no such signal: nothing connected, so nothing lit up, and
- * nothing else is writing to the controller.
- *
- * Written straight to the device, the same way the full-report request is: the
- * refusal happens here, and the bridge cannot say anything about a controller
- * it never took.
- *
- * WIRED ONLY, for the reason the light show learned the hard way: this is the
- * wired output report, and Bluetooth expects its own format with a checksum. */
+/* A refused bridge shows RED, three flashes: red refuses, yellow hands back,
+ * green bridges. On Bluetooth the core's own signal lights it along with its
+ * tone; on a cable the core can only sound it, so the flashes come from here
+ * (the refusal branch in gesture_poll_one, drawn by the flash in the tick).
+ * ⓘ This note used to argue for yellow, from before yellow meant the handback
+ * (code review, 2026-10-05: it described a colour no longer used). */
 /* The pre-plug pulse: magenta, ramping up and back down over about a second,
  * immediately before the controller is handed to the host.
  *
@@ -445,7 +425,6 @@ static bool gesture_held(SDL_GameController *controller) {
  * passes are the clock and the plug happens on the last step. */
 #define PREP_STEPS        20
 #define PREP_STEP_MS      50
-#define PREP_STEPS_HALF   (PREP_STEPS / 2)
 
 /* The post-unplug signal: three shorter breaths rather than one long one.
  * Repetition is what makes it unmistakable, and each breath is brief enough
@@ -468,8 +447,8 @@ static bool gesture_held(SDL_GameController *controller) {
  * 2026-08-19: "it's just going really fast now." ⓘ The log had been saying so
  * all along: `bridge pulse finished, 9 steps in 453ms`.
  *
- * ⚠️ The pre-plug pulse keeps the shorter step deliberately: it runs DURING the
- * two-second hold and has to fill it, so it is a different job.
+ * ⚠️ The pre-plug pulse keeps the shorter step deliberately: it fills the
+ * second between the one-second hold and the plug, so it is a different job.
  *
  * ⭐ 90 ms gives a breath just under a second, which is about the rate a person
  * breathes and is what makes it read as calm rather than urgent. */
@@ -1155,6 +1134,13 @@ static bool gesture_poll_one(SDL_GameController *controller, SDL_JoystickID id) 
                                     ? "the core claims the signal here"
                                     : "the bridge rumble switch is off");
                 }
+                /* ⓘ THE NOTES FROM HERE TO THE LOG LINE ARE HISTORY, in the
+                 * order the decisions were made, each overruling the one
+                 * before (code review, 2026-10-05: they read as current and
+                 * contradicted the code above). ⭐ WHAT HOLDS NOW is that code:
+                 * the core signals a pad it can, the light, the tone and the
+                 * feel together; for a pad it cannot, the yellow (or the
+                 * player colour) and the pulse come from here. */
                 /* ⛔⛔ ON BLUETOOTH THE CORE ALWAYS CLAIMS THE SIGNAL, AND
                  * WITH BT_LAYER_CORE_SIGNAL OFF IT THEN DOES NOTHING.
                  *
@@ -1204,12 +1190,11 @@ static bool gesture_poll_one(SDL_GameController *controller, SDL_JoystickID id) 
                  * that signal runs after the bridge completes and lands on top
                  * of our green. Both directions were got wrong before this was
                  * settled. */
-                /* ⭐ THE LIGHT IS THE CORE'S ON BOTH TRANSPORTS. It detects
-                 * the unbridge chord -- a bridged controller's touchpad reports
-                 * come through it -- so it knows first and paints yellow with
-                 * the tone. This side does nothing at all now: it learns of the
-                 * unplug a second later from its plugged-check, and the player
-                 * colour is no longer restored after a pattern. */
+                /* ⭐ THE LIGHT IS THE CORE'S ON BOTH TRANSPORTS, FOR A PAD IT
+                 * SIGNALS. It detects the unbridge chord -- a bridged
+                 * controller's touchpad reports come through it -- so it knows
+                 * first and paints yellow with the tone. This side learns of
+                 * the unplug a second later from its plugged-check. */
                 /* NOTHING FROM HERE ON THE WAY BACK. The core signals an
                  * unplug BEFORE it tears the session down, so the felt pulse
                  * has already played by the time this runs -- on both
@@ -1373,7 +1358,8 @@ static bool gesture_poll_one(SDL_GameController *controller, SDL_JoystickID id) 
                      * ⭐ The unplug path has done this all along; the plug path
                      * never did, because on a cable the core's own signal
                      * repainted it and hid the gap. */
-                    /* ⛔⛔ NO GREEN FROM THIS SIDE. Changed 2026-08-19.
+                    /* ⛔⛔ NO GREEN FROM THIS SIDE FOR A PAD THE CORE SIGNALS.
+                     * Changed 2026-08-19.
                      *
                      * ⚠️ It used to be drawn here, the moment the plug call
                      * returned -- about a SECOND before the core plays the
@@ -1382,11 +1368,13 @@ static bool gesture_poll_one(SDL_GameController *controller, SDL_JoystickID id) 
                      * that, because they were triggered by different events.
                      *
                      * ⭐ The core paints it now, in the same code that plays the
-                     * tone, so they are simultaneous by construction. That
-                     * makes every signal one rule: green, yellow and red all
-                     * come from the core, each with its own sound, on both
-                     * transports -- and this side only ever puts the player
-                     * colour back.
+                     * tone, so they are simultaneous by construction.
+                     * ⓘ It went on to say green, yellow and red ALL come from
+                     * the core on both transports, and this side only puts the
+                     * player colour back. Not so since: the green above is drawn
+                     * here for a pad the core does not signal, and a wired
+                     * refusal's red flashes are drawn here too (code review,
+                     * 2026-10-05).
                      *
                      * ⓘ The green WILL stutter, because a bridge completing is
                      * the moment the emulated pad retires and the real
@@ -1687,8 +1675,8 @@ void ctm_bridge_gesture_restore_player_colours(void) {
  * Asked on every lightbar, trigger and LED packet the host sends, so it must
  * be cheap. It reads the gesture's own state and nothing else: ours_plugged is
  * kept current by the debounced poll in the tick, precisely because
- * ctm_bridge_node_is_plugged() re-enumerates devices and cannot sit on a
- * per-packet path.
+ * ctm_bridge_node_is_plugged() takes the device lock and can enumerate, so it
+ * cannot sit on a per-packet path.
  *
  * Deliberately not light_busy(): that one counts every true as a dropped host
  * COLOUR, which is only right on the lightbar path. */
@@ -1705,7 +1693,10 @@ bool ctm_bridge_gesture_light_busy(SDL_GameController *controller) {
     if (!controller) return false;
     SDL_Joystick *js = SDL_GameControllerGetJoystick(controller);
     if (!js) return false;
-    watched_t *w = watched_for(SDL_JoystickInstanceID(js));
+    /* ⓘ Found, never claimed (code review, 2026-10-05): this runs on
+     * moonlight's control thread, and watched_for() claims a slot in the main
+     * loop's unlocked table for a controller it has not seen. */
+    const watched_t *w = watched_find(SDL_JoystickInstanceID(js));
     if (!w) return false;
     bool busy = w->prep_left > 0 || w->flash_left > 0;
 
@@ -2080,9 +2071,10 @@ bool ctm_bridge_gesture_request_bridge(const char *node) {
         }
         /* ⛔ NO "is it already plugged" CHECK HERE, deliberately.
          *
-         * ctm_bridge_node_is_plugged() RE-ENUMERATES every device on every
-         * call. The chord can afford that -- it runs once, after a two-second
-         * hold, off the back of an input poll. On a button press it runs on the
+         * ctm_bridge_node_is_plugged() re-enumerated every device on every
+         * call when this was written; it reads the last scan first now. The
+         * chord could afford that -- it runs once, after a one-second hold,
+         * off the back of an input poll. On a button press it runs on the
          * LVGL thread and the overlay froze hard enough that the TV pointer
          * stalled with it. Measured 2026-08-18.
          *

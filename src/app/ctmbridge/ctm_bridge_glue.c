@@ -1,5 +1,5 @@
 /* moonlight-facing glue for the embedded CTM bridge core. Replicates the startup
- * the standalone app does in ui_app.c (stopSniff worker -> discover agent ->
+ * the standalone app does in ui_app.c (stopSniff worker -> agent probe ->
  * enumerate -> bridge), minus the LVGL UI. Runs the bridge in-process; the
  * controller threads own the physical HID (hidraw + EVIOCGRAB), so moonlight
  * stops forwarding a controller while it is bridged: one controller at a time,
@@ -14,7 +14,6 @@
 
 #include "ctm_state.h"   /* core API + shared globals (g_running, g_scan, ...) */
 #include "ctm_hostmouse.h" /* TV-pointer synthesizer feed (kind "hid") */
-#include "ctm_monitor.h" /* hotplug: connect/disconnect watch thread */
 #include "device_identity.inl" /* the identity rules, shared with the core */
 
 static bool s_active = false;
@@ -56,34 +55,15 @@ static void ctm_glue_enumerate(void)
     }
 }
 
-/* Serialises every g_devices/g_scan access so the hotplug monitor thread can't
- * race the UI thread's panel calls. */
+/* Serialises every g_devices/g_scan access: the scan and the lists built from
+ * it are read and rebuilt from more than one thread. */
 static pthread_mutex_t s_dev_mutex = PTHREAD_MUTEX_INITIALIZER;
-static ctm_monitor_t *s_monitor = NULL;
 
-/* Hotplug callback (monitor thread): on any connect/disconnect, re-sync by
- * plugging newly-present recognised controllers. Serialised with the panel via
- * s_dev_mutex; disconnect cleanup is handled by the controller thread, which
- * exits when its HID read fails. */
-static void glue_hotplug_cb(void *ud, const ctm_controller_dev_t *dev, int present)
-{
-    (void) ud; (void) dev; (void) present;
-    /* ⓘ Until 2026-09-08 this told the core when a node appeared, so a tone
-     * could wait for a fresh cable's audio to "become usable". The core plays
-     * the signal twice on a fresh cable instead and needs no clock. */
-    if (!s_active) {
-        return;
-    }
-    /* Any device appearing or disappearing used to plug EVERYTHING, without
-     * asking whether auto-plug was wanted. Two surprises came from that:
-     * a stream opened with every device on a hub bridged at once, and pulling
-     * an unrelated hub bridged a controller that had been left alone. Bridging
-     * claims a device exclusively, so both took working devices away from the
-     * TV without being asked.
-     *
-     * Noticing a change is still worth doing; acting on it is what the gesture
-     * is for. ⓘ So nothing is plugged from here any more. */
-}
+/* ⓘ NO HOTPLUG MONITOR (code review, 2026-10-05). The core's monitor thread
+ * walked sysfs once a second through every stream and called a callback that
+ * did nothing: what it once did, plugging everything that appeared, was taken
+ * out because bridging claims a device the TV is using. Noticing is left to
+ * the device scans that already run. */
 
 /* Core bring-up shared by ctm_bridge_start(), the two plug calls and the
  * in-stream device list: the stopSniff worker and a scan. Without the worker,
@@ -246,13 +226,6 @@ bool ctm_bridge_start(void)
      * The overlay row still plugs it deliberately for anyone who wants it. */
 
     s_active = true;
-
-    /* Watch for controllers connected/disconnected mid-stream and auto-plug them. */
-    if (s_monitor == NULL) {
-        s_monitor = ctm_monitor_start(glue_hotplug_cb, NULL);
-        log_append(s_monitor ? "ctm glue: hotplug monitor started"
-                             : "ctm glue: hotplug monitor failed to start");
-    }
     return true;
 }
 
@@ -946,75 +919,10 @@ void ctm_bridge_pointer_feed_key(unsigned hid_usage, bool down)
     ctm_hostmouse_feed_key((uint8_t) hid_usage, down);
 }
 
-void ctm_bridge_unplug_all(void)
-{
-    pthread_mutex_lock(&s_dev_mutex);
-    release_local_sessions_on_exit();
-    pthread_mutex_unlock(&s_dev_mutex);
-    log_append("ctm glue: unplugged all");
-}
-
-bool ctm_bridge_get_settings(int index, ctm_bridge_settings_t *out)
-{
-    if (out == NULL) {
-        return false;
-    }
-    pthread_mutex_lock(&s_dev_mutex);
-    bool ok = false;
-    if (index >= 0 && index < g_devices.count) {
-        tv_bridge_worker_settings_t *s = settings_for_item(&g_devices.items[index]);
-        if (s != NULL) {
-            out->kind = (int) s->kind;
-            out->audio_mode = (int) s->audio_mode;
-            out->latency_ms = (int) s->latency_ms;
-            out->haptics_gain_centi = (int) s->haptics_gain_centi;
-            out->headset_volume_percent = (int) s->headset_volume_percent;
-            out->speaker_volume_percent = (int) s->speaker_volume_percent;
-            out->ds5_patch_high = (int) s->ds5_patch_high_nibble;
-            out->ds5_patch_low = (int) s->ds5_patch_low_nibble;
-            out->ds5_patch2_high = (int) s->ds5_patch2_high_nibble;
-            out->ds5_patch2_low = (int) s->ds5_patch2_low_nibble;
-            ok = true;
-        }
-    }
-    pthread_mutex_unlock(&s_dev_mutex);
-    return ok;
-}
-
-void ctm_bridge_set_settings(int index, const ctm_bridge_settings_t *in)
-{
-    if (in == NULL) {
-        return;
-    }
-    pthread_mutex_lock(&s_dev_mutex);
-    if (index >= 0 && index < g_devices.count) {
-        tv_bridge_worker_settings_t *s = settings_for_item(&g_devices.items[index]);
-        if (s != NULL) {
-            s->audio_mode = (tv_bridge_audio_mode_t) in->audio_mode;
-            s->latency_ms = (unsigned int) in->latency_ms;
-            s->haptics_gain_centi = (unsigned int) in->haptics_gain_centi;
-            s->headset_volume_percent = (unsigned int) in->headset_volume_percent;
-            s->speaker_volume_percent = (unsigned int) in->speaker_volume_percent;
-            s->ds5_patch_high_nibble = (unsigned int) in->ds5_patch_high;
-            s->ds5_patch_low_nibble = (unsigned int) in->ds5_patch_low;
-            s->ds5_patch2_high_nibble = (unsigned int) in->ds5_patch2_high;
-            s->ds5_patch2_low_nibble = (unsigned int) in->ds5_patch2_low;
-            apply_settings_to_session(&g_devices.items[index]);
-        }
-    }
-    pthread_mutex_unlock(&s_dev_mutex);
-}
-
 void ctm_bridge_stop(void)
 {
     if (!s_active && !s_core_up) {
         return;
-    }
-    /* Stop hotplug first: joins the monitor thread (do this WITHOUT holding
-     * s_dev_mutex so an in-flight callback can finish) before tearing down. */
-    if (s_monitor) {
-        ctm_monitor_stop(s_monitor);
-        s_monitor = NULL;
     }
     release_local_sessions_on_exit();
     g_running = false;
@@ -1030,26 +938,6 @@ void ctm_bridge_stop(void)
 bool ctm_bridge_active(void)
 {
     return s_active;
-}
-
-void ctm_bridge_status(char *out, size_t out_len)
-{
-    if (out == NULL || out_len == 0) {
-        return;
-    }
-    size_t n = 0;
-    n += (size_t) snprintf(out + n, out_len - n, "Bridge: %s\n", s_active ? "active" : "inactive");
-    if (n >= out_len) return;
-    n += (size_t) snprintf(out + n, out_len - n, "Agent: %s\n",
-                           (g_agent_online && g_agent_host[0]) ? g_agent_host : "not found");
-    if (n >= out_len) return;
-    pthread_mutex_lock(&g_sessions_mutex);
-    n += (size_t) snprintf(out + n, out_len - n, "Bridged controllers: %d\n", g_session_count);
-    for (int i = 0; i < g_session_count && n < out_len; ++i) {
-        n += (size_t) snprintf(out + n, out_len - n, "  - %s [%s]\n",
-                               g_sessions[i].key, g_sessions[i].busid);
-    }
-    pthread_mutex_unlock(&g_sessions_mutex);
 }
 
 /* Is the USB server answering? ⭐ Separate from its address, which is known
