@@ -989,6 +989,58 @@ static void gesture_moonlight_forget_leaving(watched_t *w) {
     w->excluded_slot1 = 0;
 }
 
+/* ⭐ START A BRIDGE REQUEST. The chord and the panel both arm the pulse that
+ * hands a pad over, and this is the one place it is armed (code review,
+ * 2026-10-05: it was written out twice).
+ *
+ * ⛔ AND IT ENDS A REFUSAL STILL RUNNING FROM THE LAST TRY. A refusal's red
+ * flash waits while a pulse runs and then carries on, so it landed on a pad
+ * that had just bridged, and its buzz stopped for nothing. A new request is
+ * a new answer: the old one is cut here and the light put back first. */
+static void request_arm(watched_t *w, SDL_GameController *controller, const char *node) {
+    if (w->flash_left > 0 || w->buzz_left > 0) {
+        gesture_log("a new request on %s ends the last one's flash and buzz", node);
+        if (w->buzz_left > 0 && controller) {
+            SDL_GameControllerRumble(controller, 0, 0, 0);
+        }
+        w->buzz_left = 0;
+        if (w->flash_left > 0) {
+            w->flash_left = 0;
+            paint_player_colour_for(w, controller);
+        }
+    }
+    snprintf(w->prep_node, sizeof(w->prep_node), "%s", node);
+    w->xport = ctm_bridge_node_is_bluetooth(node) ? 1 : 2;
+    /* ⚠️ LOGGED, because the gates depend on it and a wrong answer makes them
+     * silently do nothing. ctm_bridge_node_is_bluetooth() matches the node by
+     * exact string compare against the scan's own list -- if the two spell it
+     * differently it returns false and a Bluetooth controller is treated as
+     * wired. */
+    gesture_log("%s transport=%s", node, w->xport == 1 ? "bluetooth" : "wired");
+    /* The pre-plug pulse runs on BOTH transports: it happens before anything
+     * knows whether the plug will succeed, and it is the only thing marking
+     * the gap between the gesture and the outcome. The core's signal follows
+     * and says which outcome it was.
+     *
+     * Silenced only by the one switch, like everything else. */
+    /* ⛔ ONE STEP, NOT ZERO, when the light is gated off.
+     *
+     * The plug happens on the pulse's FINAL step, so a pulse of zero steps
+     * never plugs at all -- pressing a row in the panel did nothing. Rather
+     * than restructure that coupling mid-rebuild, a gated pulse is one step
+     * long: the plug still fires, and one step is imperceptible. ⚠️ The
+     * coupling itself is worth removing later. */
+    /* ⭐ The light switch is the gate the note above means (code review,
+     * 2026-10-05): with only the build's master switch asked, a pulse with the
+     * light signal off drew nothing and still held the bridge back a second. */
+    w->prep_left = (!ctm_bridge_signals_enabled() ||
+                    !(app_configuration && app_configuration->bridge.signal_light))
+                       ? 1 : PREP_STEPS;
+    w->prep_next = SDL_GetTicks();
+    w->retry_at = 0;
+    w->retry_used = false;
+}
+
 /* Returns true if the controller was just handed to the bridge. */
 static bool gesture_poll_one(SDL_GameController *controller, SDL_JoystickID id) {
     const bool was_known = (watched_slot_exists(id));
@@ -1579,36 +1631,7 @@ static bool gesture_poll_one(SDL_GameController *controller, SDL_JoystickID id) 
 
     /* Start the pulse and hand over when it ends. The node is kept because it
      * is resolved now and used a second later. */
-    snprintf(w->prep_node, sizeof(w->prep_node), "%s", node);
-    w->xport = ctm_bridge_node_is_bluetooth(node) ? 1 : 2;   /* T-120 */
-    /* ⚠️ LOGGED, because the gates depend on it and a wrong answer makes them
-     * silently do nothing. ctm_bridge_node_is_bluetooth() matches the node by
-     * exact string compare against the scan's own list -- if the two spell it
-     * differently it returns false and a Bluetooth controller is treated as
-     * wired. */
-    gesture_log("T-120: %s transport=%s", node, w->xport == 1 ? "bluetooth" : "wired");
-    /* The pre-plug pulse runs on BOTH transports: it happens before anything
-     * knows whether the plug will succeed, and it is the only thing marking
-     * the gap between the gesture and the outcome. The core's signal follows
-     * and says which outcome it was.
-     *
-     * Silenced only by the one switch, like everything else. */
-    /* ⛔ ONE STEP, NOT ZERO, when the light is gated off.
-     *
-     * The plug happens on the pulse's FINAL step, so a pulse of zero steps
-     * never plugs at all -- pressing a row in the panel did nothing. Rather
-     * than restructure that coupling mid-rebuild, a gated pulse is one step
-     * long: the plug still fires, and one step is imperceptible. ⚠️ The
-     * coupling itself is worth removing later; it is recorded in T-120. */
-    /* ⭐ The light switch is the gate the note above means (code review,
-     * 2026-10-05): with only the build's master switch asked, a pulse with the
-     * light signal off drew nothing and still held the bridge back a second. */
-    w->prep_left = (!ctm_bridge_signals_enabled() ||
-                    !(app_configuration && app_configuration->bridge.signal_light))
-                       ? 1 : PREP_STEPS;
-    w->prep_next = SDL_GetTicks();
-    w->retry_at = 0;
-    w->retry_used = false;
+    request_arm(w, controller, node);
     gesture_log("fired on %s -> %s : pulsing before handover", dev_path, node);
     return false;
 }
@@ -2096,30 +2119,7 @@ bool ctm_bridge_gesture_request_bridge(const char *node) {
         /* ⭐ EXACTLY WHAT A COMPLETED CHORD SETS, and nothing more. Everything
          * that makes a bridge a bridge happens on the following ticks, in the
          * one place it is written. */
-        snprintf(w->prep_node, sizeof(w->prep_node), "%s", node);
-    w->xport = ctm_bridge_node_is_bluetooth(node) ? 1 : 2;   /* T-120 */
-    /* ⚠️ LOGGED, because the gates depend on it and a wrong answer makes them
-     * silently do nothing. ctm_bridge_node_is_bluetooth() matches the node by
-     * exact string compare against the scan's own list -- if the two spell it
-     * differently it returns false and a Bluetooth controller is treated as
-     * wired. */
-    gesture_log("T-120: %s transport=%s", node, w->xport == 1 ? "bluetooth" : "wired");
-        /* ⛔ ONE STEP, NOT ZERO, when the light is gated off.
-     *
-     * The plug happens on the pulse's FINAL step, so a pulse of zero steps
-     * never plugs at all -- pressing a row in the panel did nothing. Rather
-     * than restructure that coupling mid-rebuild, a gated pulse is one step
-     * long: the plug still fires, and one step is imperceptible. ⚠️ The
-     * coupling itself is worth removing later; it is recorded in T-120. */
-    /* ⭐ The light switch is the gate the note above means (code review,
-     * 2026-10-05): with only the build's master switch asked, a pulse with the
-     * light signal off drew nothing and still held the bridge back a second. */
-    w->prep_left = (!ctm_bridge_signals_enabled() ||
-                    !(app_configuration && app_configuration->bridge.signal_light))
-                       ? 1 : PREP_STEPS;
-        w->prep_next = SDL_GetTicks();
-        w->retry_at = 0;
-        w->retry_used = false;
+        request_arm(w, gc, node);
         w->fired = true;
         gesture_log("panel asked to bridge %s : pulsing before handover", node);
         return true;
