@@ -1,6 +1,6 @@
 /* moonlight-facing glue for the embedded CTM bridge core. Replicates the startup
- * the standalone app does in ui_app.c (stopSniff worker -> agent probe ->
- * enumerate -> bridge), minus the LVGL UI. Runs the bridge in-process; the
+ * the core's standalone app did (stopSniff worker -> agent probe -> enumerate
+ * -> bridge; that app left the core's repo on 2026-10-07), minus the LVGL UI. Runs the bridge in-process; the
  * controller threads own the physical HID (hidraw + EVIOCGRAB), so moonlight
  * stops forwarding a controller while it is bridged: one controller at a time,
  * by the app (gesture_moonlight_set_excluded in input/ctm_bridge_gesture.c). */
@@ -37,7 +37,7 @@ void ctm_bridge_set_host(const char *host, int port)
 
 /* Enumerate + build the logical model + Stage-1 puck enumeration capture. The
  * Steam puck only exposes its full composite if g_puck_enum is cached BEFORE the
- * plug; the standalone app does this in refresh_devices(), so the glue must too. */
+ * plug; the standalone app did this in its refresh_devices(), so the glue must too. */
 static void ctm_glue_enumerate(void)
 {
     enumerate_devices(&g_scan);
