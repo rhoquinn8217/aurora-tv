@@ -1,6 +1,6 @@
 /* moonlight-facing glue for the embedded CTM bridge core. Replicates the startup
- * the standalone app does in ui_app.c (stopSniff worker -> agent probe ->
- * enumerate -> bridge), minus the LVGL UI. Runs the bridge in-process; the
+ * the core's standalone app did (stopSniff worker -> agent probe -> enumerate
+ * -> bridge; that app left the core's repo on 2026-10-07), minus the LVGL UI. Runs the bridge in-process; the
  * controller threads own the physical HID (hidraw + EVIOCGRAB), so moonlight
  * stops forwarding a controller while it is bridged: one controller at a time,
  * by the app (gesture_moonlight_set_excluded in input/ctm_bridge_gesture.c). */
@@ -37,7 +37,7 @@ void ctm_bridge_set_host(const char *host, int port)
 
 /* Enumerate + build the logical model + Stage-1 puck enumeration capture. The
  * Steam puck only exposes its full composite if g_puck_enum is cached BEFORE the
- * plug; the standalone app does this in refresh_devices(), so the glue must too. */
+ * plug; the standalone app did this in its refresh_devices(), so the glue must too. */
 static void ctm_glue_enumerate(void)
 {
     enumerate_devices(&g_scan);
@@ -579,6 +579,9 @@ bool ctm_bridge_node_is_bluetooth(const char *node)
 
 bool ctm_bridge_plug_node(const char *node)
 {
+    /* ⓘ Said before any way out, as in the core's own entry points (code
+     * review, 2026-10-05): a stale "not reached" schedules a retry. */
+    g_last_plug_unreachable = false;
     if (!s_active) return false;
     ctm_glue_ensure_core();
     pthread_mutex_lock(&s_dev_mutex);
@@ -587,13 +590,47 @@ bool ctm_bridge_plug_node(const char *node)
     return ok;
 }
 
-bool ctm_bridge_plug_index(int index)
+/* ⭐⭐ THE DEVICE A ROW NAMES, AS THE LIST STANDS NOW (code review,
+ * 2026-10-05). A row's index is a place in the list as it was when the row
+ * was made, and any scan since -- a plug, the panel's refresh, the control
+ * port, Auto Bridge -- can rebuild that list, so a press could act on whatever
+ * had moved into the place. A device's node does not move: the index is
+ * trusted only while it still names the row's node, and otherwise the node is
+ * looked for. The TV's remote has no node and is found by its name.
+ * Returns NULL when the device is no longer listed. Under s_dev_mutex. */
+static logical_device_t *item_for_row_locked(const ctm_bridge_dev_t *row)
 {
+    if (row == NULL) {
+        return NULL;
+    }
+    if (row->node[0] == '\0') {
+        for (int i = 0; i < g_devices.count; ++i) {
+            if (item_is_tv_remote(&g_devices.items[i]) &&
+                strcmp(g_devices.items[i].name, row->name) == 0) {
+                return &g_devices.items[i];
+            }
+        }
+        return NULL;
+    }
+    if (row->index >= 0 && row->index < g_devices.count) {
+        logical_device_t *at = &g_devices.items[row->index];
+        if (item_for_node_locked(row->node) == at) {
+            return at;
+        }
+    }
+    return item_for_node_locked(row->node);
+}
+
+bool ctm_bridge_plug_row(const ctm_bridge_dev_t *row)
+{
+    /* ⓘ As above: a row that names nothing must not answer with the last
+     * plug's "not reached". */
+    g_last_plug_unreachable = false;
     ctm_glue_ensure_core();
     pthread_mutex_lock(&s_dev_mutex);
     bool ok = false;
-    if (index >= 0 && index < g_devices.count) {
-        logical_device_t *item = &g_devices.items[index];
+    logical_device_t *item = item_for_row_locked(row);
+    if (item != NULL) {
         if (item_is_tv_remote(item)) {
             ok = ctm_tv_pointer_plug();
         } else {
@@ -601,6 +638,8 @@ bool ctm_bridge_plug_index(int index)
         }
         log_append("ctm glue: manual plug '%s' (%s) -> %s", item->name,
                    bridge_kind_for_item(item), ok ? "ok" : "failed");
+    } else if (row != NULL) {
+        log_append("ctm glue: manual plug '%s' -- no longer listed, nothing done", row->name);
     }
     pthread_mutex_unlock(&s_dev_mutex);
     return ok;
@@ -887,17 +926,22 @@ int bridge_open_config_ready(void)
     return ready;
 }
 
-void ctm_bridge_unplug_index(int index)
+void ctm_bridge_unplug_row(const ctm_bridge_dev_t *row)
 {
     char key[96] = "";
     pthread_mutex_lock(&s_dev_mutex);
-    if (index >= 0 && index < g_devices.count) {
-        if (item_is_tv_remote(&g_devices.items[index])) {
+    /* ⓘ The device the row names now, not the place it had: see
+     * item_for_row_locked(). */
+    logical_device_t *item = item_for_row_locked(row);
+    if (item != NULL) {
+        if (item_is_tv_remote(item)) {
             ctm_tv_pointer_unplug();
         } else {
-            snprintf(key, sizeof(key), "%s", g_devices.items[index].key);
+            snprintf(key, sizeof(key), "%s", item->key);
         }
-        log_append("ctm glue: manual unplug '%s'", g_devices.items[index].name);
+        log_append("ctm glue: manual unplug '%s'", item->name);
+    } else if (row != NULL) {
+        log_append("ctm glue: manual unplug '%s' -- no longer listed, nothing done", row->name);
     }
     pthread_mutex_unlock(&s_dev_mutex);
     /* ⓘ Off the app's loop: see release_soon(). */

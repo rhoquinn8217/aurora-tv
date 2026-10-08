@@ -1,11 +1,10 @@
 # CTM bridge core, embedded into moonlight-tv as a headless static lib.
 #
 # Compiles the bridge's headless core from the ctm-bridge-webos repo (this
-# fork's own, forked from github.com/CTM-Bridge/ctm-bridge-webos; the
-# stand-alone TV app and this embeddable core are the same sources), MINUS
-# enet_transport.c: moonlight has its own bundled ENet, so we exclude the
-# bridge's ENet and satisfy the enet_client_* references with enet_stub.c
-# (TCP-only at runtime). No LVGL/SDL.
+# fork's own, forked from github.com/CTM-Bridge/ctm-bridge-webos, whose
+# stand-alone TV app this fork removed from it on 2026-10-07). The core carries
+# no ENet client: moonlight has its own bundled ENet, and enet_stub.c satisfies
+# the enet_client_* references (TCP-only at runtime). No LVGL/SDL.
 #
 # The core is a SUBMODULE of this repo, at third_party/ctm-bridge-webos, as the
 # app's other dependencies are. It used to be read from a folder beside this
@@ -48,7 +47,6 @@ target_include_directories(ctmbridge PRIVATE
     ${CTM_BRIDGE_DIR}/src/app
     ${CTM_BRIDGE_DIR}/src/shared
     ${CTM_BRIDGE_DIR}/src/controllers
-    ${CTM_BRIDGE_DIR}/src/monitor
 )
 target_include_directories(ctmbridge PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 

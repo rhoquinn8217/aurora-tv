@@ -5,8 +5,10 @@
 #include "control_server.h"
 #include "ui/streaming/streaming.controller.h"   /* streaming_overlay_shown */
 #include "ui/streaming/bridge_prompt.h"
-#if defined(TARGET_WEBOS)
+/* ⓘ On every target: it has the desktop's stand-ins for the gesture, and the
+ * microphone guard below is the core's, which every target builds. */
 #include "input/ctm_bridge_gesture.h"
+#if defined(TARGET_WEBOS)
 #include "input/bridge_keyboard.h"
 #endif
 
@@ -72,8 +74,12 @@ void bridge_app_events(app_t *app) {
      * either. */
     const bool interface_has_input = streaming_overlay_shown() || bridge_prompt_shown();
     ctm_bridge_gesture_tick(&app->input, app->session, interface_has_input);
+#if defined(TARGET_WEBOS)
     /* The TV's keyboard grab looking again after a bridge or a release. */
     bridge_keyboard_tick(interface_has_input);
+#else
+    (void) interface_has_input;
+#endif
     /* ⓘ Upstream v1.2.9's touchpad tap-hold, for its touchpad mouse mode, runs
      * in app.c right after this. It reads the same SDL touchpad state the
      * gesture polls here; neither consumes events, so the two coexist.

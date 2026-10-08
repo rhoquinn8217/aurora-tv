@@ -51,6 +51,7 @@ void bridge_session_started(session_t *session) {
      * stay saved for when it is switched back on, and this ran on them
      * regardless: every device bridged at stream start while bridging
      * was switched off. */
+#if defined(TARGET_WEBOS)
     if (app_configuration->bridge.enable) {
         const int n = auto_bridge_run(app_configuration->bridge.auto_macs,
                                       app_configuration->bridge.auto_all);
@@ -59,6 +60,7 @@ void bridge_session_started(session_t *session) {
                              app_configuration->bridge.auto_all ? "connected" : "marked");
         }
     }
+#endif
 }
 
 void bridge_session_stopped(void) {
