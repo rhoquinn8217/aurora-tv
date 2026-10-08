@@ -628,15 +628,15 @@ static bool gesture_held(SDL_GameController *controller) {
  * flashes", so a pad the TV paints for says exactly what a DualSense says.
  * Three is also clearly deliberate rather than a glitch. */
 #define HANDBACK_FLASHES  3
-/* ⭐ Two green flashes on a successful bridge, against three red on a refusal.
- * Green for done, red for refused -- the light says which without anyone
- * learning a vocabulary. Fewer than the refusal because success is the ordinary
- * case and does not need insisting on. */
-/* One breath of green on a successful bridge, against three hard red flashes on
- * a refusal. Shorter than the yellow handback, which is two breaths -- a bridge
- * is the start of something and does not need dwelling on. */
-#define REFUSED_ON_MS     240
-#define REFUSED_OFF_MS    240
+/* ⭐⭐ QUICK: 125 ms ON AND 125 OFF, THREE TIMES (rhoquinn8217, 2026-10-08),
+ * the flashes the core draws on every pad it signals (signal_shape.inl in the
+ * core): yellow for a release, red for a refusal.
+ * ⓘ They were 240 ms, doubled on 2026-08-12 because the red had passed by the
+ * time the rumble made you look down. What outlasted them was three bursts of
+ * rumble, which a pad with a light no longer gets (see the refusal), so the
+ * flashes now outlast its one buzz instead. */
+#define REFUSED_ON_MS     125
+#define REFUSED_OFF_MS    125
 
 /* One step of the flash.
  *
@@ -1352,9 +1352,14 @@ static bool gesture_poll_one(SDL_GameController *controller, SDL_JoystickID id) 
                     gesture_log("confirmation pulse on %s: bridged (signal check %llums)",
                                 w->prep_node, (unsigned long long) sig_ms);
                     if (!core_signals_ok) {
-                        gesture_rumble_logged(controller, "confirmation pulse",
-                                              w->prep_node, OK_PULSE_STRENGTH,
-                                              OK_PULSE_MS);
+                        /* ⓘ The rumble switch, which this alone did not ask
+                         * (code review, 2026-10-05): the release's pulse and
+                         * the refusal's buzz both do. */
+                        if (app_configuration && app_configuration->bridge.signal_rumble) {
+                            gesture_rumble_logged(controller, "confirmation pulse",
+                                                  w->prep_node, OK_PULSE_STRENGTH,
+                                                  OK_PULSE_MS);
+                        }
                     } else {
                         /* ⛔ NOT a pulse. The core is expected to signal this pad
                          * instead -- and whether it does for a Bluetooth XBOX pad
@@ -1484,8 +1489,15 @@ static bool gesture_poll_one(SDL_GameController *controller, SDL_JoystickID id) 
                                 flash_arm(w, 0xff, 0x00, 0x00, REFUSED_FLASHES);
                         }
                         if (!sounded) {
+                            /* ⭐ THREE BUZZES ONLY FOR A PAD WITH NO LIGHT
+                             * (rhoquinn8217, 2026-09-23): "non DS5 and non
+                             * DS4 don't have 3 because they don't have
+                             * lightbar or audio feedback." A pad with a light
+                             * says it in red, with the one buzz every other
+                             * signal has; a cabled DS4 was getting three. */
+                            const int bursts = SDL_GameControllerHasLED(controller) ? 1 : BUZZ_BURSTS;
                             if (app_configuration->bridge.signal_rumble)
-                                w->buzz_left = BUZZ_BURSTS * 2;   /* on and off per burst */
+                                w->buzz_left = (uint8_t)(bursts * 2);   /* on and off per burst */
                             w->buzz_next = SDL_GetTicks();
                         }
                         gesture_log("refused on %s: core sounded=%d lit=%d",
