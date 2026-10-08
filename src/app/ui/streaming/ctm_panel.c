@@ -210,6 +210,7 @@ static void ctm_flash_tick(lv_timer_t *t) {
     if (!s_ctm_state_lbl) {
         lv_timer_del(t);
         s_ctm_flash_timer = NULL;
+        s_ctm_flash_left = 0;   /* the count goes with the flash: see ctm_close_panel */
         return;
     }
     const bool on = (s_ctm_flash_left % 2) == 1;
@@ -1309,6 +1310,17 @@ static void ctm_close_panel(void) {
     /* ⓘ Nothing to watch for once the rows are gone; the watcher checks the
      * panel too, but stopping here means it never runs a refresh nobody sees. */
     ctm_pending_watch_stop();
+    /* ⛔ THE FLASH ENDS WITH THE PANEL (code review, 2026-10-05). Closed in
+     * the middle of the OFFLINE flash, the flash's timer found no label and
+     * stopped, and its count stayed above zero. The online tick reads that
+     * as "mid-flash" and leaves the label alone, so every later panel's
+     * ONLINE and OFFLINE stopped changing, in this stream and the next: the
+     * reset on the owner's teardown never ran, as this clears the owner. */
+    if (s_ctm_flash_timer) {
+        lv_timer_del(s_ctm_flash_timer);
+        s_ctm_flash_timer = NULL;
+    }
+    s_ctm_flash_left = 0;
     /* Hide NOW (same-frame UI change) and move input back to the overlay; the old
      * group stays alive until the async teardown, so the in-flight keypad event
      * that triggered this close keeps a valid group pointer. */
