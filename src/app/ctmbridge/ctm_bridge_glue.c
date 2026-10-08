@@ -22,6 +22,11 @@ void ctm_bridge_set_host(const char *host, int port)
 {
     ctm_bridge_set_agent_host(host, port);
 }
+
+void ctm_bridge_use_pairing_signer(ctm_bridge_signer_fn signer)
+{
+    ctm_bridge_set_proof_signer(signer);
+}
 /* ⓘ AUTO-PLUG IS GONE, and so is the switch that kept it off. It plugged ALL
  * recognised controllers on stream start. On a TV with one controller that is a
  * convenience; on a hub carrying a keyboard, a mouse and a controller it takes

@@ -6,6 +6,7 @@
 #include "logging.h"
 #include "stream/input/session_virt_mouse.h"
 #include "ctm_bridge_glue.h"
+#include "bridge_proof.h"
 #include "input/bridge_override.h"
 #include "input/bridge_keyboard.h"
 #if defined(TARGET_WEBOS)
@@ -39,6 +40,10 @@ void bridge_session_started(session_t *session) {
     // bridge that address rather than letting it broadcast for one: a
     // broadcast probe never leaves the local network, so a host reached
     // over the internet is never found.
+    /* ⭐ The pairing proof's signer, before anything can bridge: the
+     * listener asks a TV calling from the internet to prove it is paired
+     * with the PC, with the key it paired with (bridge_proof.c). */
+    bridge_proof_register(app_configuration->key_dir);
     ctm_bridge_set_host(session->server->serverInfo.address, 0);
     ctm_bridge_start();
     /* ⭐ The controllers the user marked bridge themselves now, and only
