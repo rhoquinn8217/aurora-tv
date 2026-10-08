@@ -770,7 +770,9 @@ static void cmd_release(control_job_t *job, const char *sel)
         return;
     }
     bridge_release_device(&devs[i]);
-    reply(job, "OK released: %d (%s)\n", devs[i].index, devs[i].name);
+    /* ⓘ "releasing": a release finishes on its own thread, after this reply
+     * (code review, 2026-10-05); `groups` says when it has. */
+    reply(job, "OK releasing: %d (%s)\n", devs[i].index, devs[i].name);
 }
 
 static void cmd_bridge_all(control_job_t *job)
@@ -805,7 +807,7 @@ static void cmd_release_all(control_job_t *job)
             ++released;
         }
     }
-    reply(job, "OK released %d device(s)\n", released);
+    reply(job, "OK releasing %d device(s)\n", released);
 }
 
 /* The overlay's DS5-USBIP button, without a hand on it: the same call, so a
@@ -926,7 +928,7 @@ static void cmd_release_group(control_job_t *job, const char *sel)
             ++released;
         }
     }
-    reply(job, "OK released %d part(s) of device %d (%s)\n", released, k, g->name);
+    reply(job, "OK releasing %d part(s) of device %d (%s)\n", released, k, g->name);
 }
 
 #endif /* TARGET_WEBOS */

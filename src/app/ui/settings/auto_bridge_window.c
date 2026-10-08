@@ -451,8 +451,8 @@ void auto_bridge_window_open(void) {
      * leaving it to be discovered (rhoquinn8217, 2026-09-14). */
     abw_make_text(card, locstr(
             "Selected devices bridge automatically when the stream starts. If you select a "
-            "device that doesn't have a serial or if it is all zeros, all devices that share "
-            "that device's name will also be auto bridged."),
+            "device that doesn't have a serial or if it is all zeros, every other device with "
+            "the same name and no serial will also be auto bridged."),
             ABW_COL_SUB, lv_theme_get_font_small(card), true);
     /* ⭐ BOLD, on a line of its own (rhoquinn8217, 2026-09-14): the one condition
      * that makes every selection above do nothing. */

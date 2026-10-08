@@ -333,9 +333,37 @@ static void ctm_set_pending(const device_group_t *g, bool want) {
     }
 }
 
+/* Has the change asked for on the pending row landed, by the session table?
+ * ⓘ Cheap: whether a node is bridged is answered from the last scan, so this
+ * scans nothing for a device still in it. A part with no node (the TV remote's
+ * row) cannot be asked this way, and is answered "yes", which refreshes as
+ * before. */
+static bool ctm_pending_landed(void) {
+    bool any = false;
+    for (int i = 0; i < s_ctm_ndev; ++i) {
+        const ctm_bridge_dev_t *d = &s_ctm_devs[i];
+        if (strcmp(d->group, s_ctm_pending_group) != 0) {
+            continue;
+        }
+        if (d->node[0] == '\0') {
+            return true;
+        }
+        any = true;
+        if (ctm_bridge_node_is_plugged(d->node) != s_ctm_pending_want) {
+            return false;
+        }
+    }
+    return any;
+}
+
 /* ⓘ Cheap on purpose: a refresh re-enumerates, which costs about a quarter of a
  * second with fourteen parts attached (T-182), so this asks every 400 ms while
- * something is in flight and never otherwise. */
+ * something is in flight and never otherwise.
+ * ⭐ AND IT SCANS ONLY WHEN THERE IS SOMETHING NEW TO DRAW (code review,
+ * 2026-10-05). It refreshed on every look, so a bridge in flight scanned every
+ * device on the interface thread every 400 ms for up to six seconds. It asks
+ * the session table first now, and refreshes once the row has landed, once
+ * more to draw the last state, and at the deadline. */
 static void ctm_pending_watch_cb(lv_timer_t *t) {
     LV_UNUSED(t);
     if (s_ctm_panel == NULL) {
@@ -344,7 +372,9 @@ static void ctm_pending_watch_cb(lv_timer_t *t) {
     }
     const bool done = s_ctm_pending_group[0] == '\0' ||
                       lv_tick_get() > s_ctm_pending_until;
-    ctm_request_refresh();      /* ⭐ Always one more, so the last state is drawn. */
+    if (done || ctm_pending_landed()) {
+        ctm_request_refresh();  /* ⭐ Always one more at the end, so the last state is drawn. */
+    }
     if (done) {
         ctm_pending_watch_stop();
     }
@@ -1299,8 +1329,27 @@ static void ctm_close_panel(void) {
 /* Close is already deferred internally, so call it directly (synchronous hide). */
 static void ctm_request_close(void) { ctm_close_panel(); }
 
-static void ctm_refresh_async(void *p) { LV_UNUSED(p); ctm_panel_refresh(); }
-static void ctm_request_refresh(void)  { lv_async_call(ctm_refresh_async, NULL); }
+/* ⭐ ONE REFRESH, HOWEVER MANY ASK BEFORE IT RUNS (code review, 2026-10-05).
+ * A refresh scans every device on the interface thread, and each request
+ * queued one of its own: Bridge All on a device of N parts asked N+1 times in
+ * one pass and scanned N+1 times. A request that finds one already queued
+ * now rides on it. ⓘ Cleared before the refresh runs, so a request made
+ * during it still gets one more afterwards. */
+static bool s_ctm_refresh_queued = false;
+static void ctm_refresh_async(void *p) {
+    LV_UNUSED(p);
+    s_ctm_refresh_queued = false;
+    ctm_panel_refresh();
+}
+static void ctm_request_refresh(void) {
+    if (s_ctm_refresh_queued) {
+        return;
+    }
+    s_ctm_refresh_queued = true;
+    if (lv_async_call(ctm_refresh_async, NULL) != LV_RES_OK) {
+        s_ctm_refresh_queued = false;   /* never queued: let the next one try */
+    }
+}
 
 static void open_ctm_panel(lv_event_t *event) {
     /* The CTM button has LV_OBJ_FLAG_EVENT_BUBBLE; stop the CLICKED here so it

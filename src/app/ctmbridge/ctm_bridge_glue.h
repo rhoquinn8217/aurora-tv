@@ -116,6 +116,11 @@ void ctm_bridge_agent_recheck(void);
  * failed), as against a refusal. The gesture tries once more on this. */
 bool ctm_bridge_last_plug_unreachable(void);
 
+/* How many releases are still running on their own threads. ⓘ The TV's
+ * keyboard grab waits for none before it looks again: a keyboard still being
+ * released counts as bridged, and would be skipped. */
+int ctm_bridge_releases_in_flight(void);
+
 /* True once a probe or a command has reached a verdict about the USB server.
  * ⭐ Until then the answer to ctm_bridge_agent_online() means nothing. */
 bool ctm_bridge_agent_probed(void);

@@ -1612,7 +1612,11 @@ static bool gesture_poll_one(SDL_GameController *controller, SDL_JoystickID id) 
      * than restructure that coupling mid-rebuild, a gated pulse is one step
      * long: the plug still fires, and one step is imperceptible. ⚠️ The
      * coupling itself is worth removing later; it is recorded in T-120. */
-    w->prep_left = !ctm_bridge_signals_enabled()
+    /* ⭐ The light switch is the gate the note above means (code review,
+     * 2026-10-05): with only the build's master switch asked, a pulse with the
+     * light signal off drew nothing and still held the bridge back a second. */
+    w->prep_left = (!ctm_bridge_signals_enabled() ||
+                    !(app_configuration && app_configuration->bridge.signal_light))
                        ? 1 : PREP_STEPS;
     w->prep_next = SDL_GetTicks();
     w->retry_at = 0;
@@ -2103,7 +2107,11 @@ bool ctm_bridge_gesture_request_bridge(const char *node) {
      * than restructure that coupling mid-rebuild, a gated pulse is one step
      * long: the plug still fires, and one step is imperceptible. ⚠️ The
      * coupling itself is worth removing later; it is recorded in T-120. */
-    w->prep_left = !ctm_bridge_signals_enabled()
+    /* ⭐ The light switch is the gate the note above means (code review,
+     * 2026-10-05): with only the build's master switch asked, a pulse with the
+     * light signal off drew nothing and still held the bridge back a second. */
+    w->prep_left = (!ctm_bridge_signals_enabled() ||
+                    !(app_configuration && app_configuration->bridge.signal_light))
                        ? 1 : PREP_STEPS;
         w->prep_next = SDL_GetTicks();
         w->retry_at = 0;
