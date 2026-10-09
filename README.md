@@ -1,4 +1,4 @@
-# Aurora - Remote DualSense Bridge Support for webOS
+# Aurora - with Remote DualSense Bridge Support for webOS
 
 ![platform](https://img.shields.io/badge/platform-LG%20webOS-A50034?logo=lg&logoColor=white)
 ![language](https://img.shields.io/badge/C-11-00599C?logo=c&logoColor=white)
