@@ -153,6 +153,19 @@ typedef struct {
      * number that arrives or changes later is painted too. PAINTED_NEVER until
      * the first paint. */
     int painted_slot;
+    /* ⭐ A DUALSENSE'S LIGHT, TAKEN OVER PAST SDL (rhoquinn8217's C3,
+     * 2026-10-09). Over Bluetooth the pad ignores every colour until a host
+     * sends it one "reset LED state" after its connection animation, and SDL
+     * holds its own colours back until it has -- which, for a pad that
+     * reconnected mid-stream, it never did: the player colour, the pulse and
+     * the flashes were all "accepted by SDL" and none showed. So once the
+     * animation is surely over, this side writes its colours itself
+     * (flash_write), with the takeover the first time. ds5_since is when the
+     * pad was first seen (SDL ticks, 0 = not a DualSense). */
+    uint32_t ds5_since;
+    bool ds5_bt_checked; /* the transport has been asked: once, when it matters */
+    bool ds5_bt;         /* and it is Bluetooth */
+    bool ds5_took_light; /* the takeover has gone out for this connection */
 } watched_t;
 
 #define PAINTED_NEVER (-100)
@@ -160,6 +173,11 @@ typedef struct {
 /* How long before the one more try: long enough for a stream's start to
  * settle, short enough to still feel like the same press. */
 #define PLUG_RETRY_MS 2000
+
+/* How long after a DualSense is first seen before this side takes its light
+ * over: past the 10.2 s connection animation the pad counts on its own clock
+ * (SDL's figure), which started before the app saw the pad. */
+#define DS5_LIGHT_SETTLE_MS 11000
 
 #ifndef HIDIOCGFEATURE
 #define HIDIOCGFEATURE(len) _IOC(_IOC_READ | _IOC_WRITE, 'H', 0x07, len)
@@ -223,6 +241,14 @@ static bool watched_slot_exists(SDL_JoystickID id) {
  * watched_for(), asking here cannot make a controller look known. For callers
  * outside the gesture's own tick, which only ever want to read. */
 static const watched_t *watched_find(SDL_JoystickID id) {
+    for (int i = 0; i < MAX_WATCHED; ++i) {
+        if (s_watched[i].in_use && s_watched[i].id == id) return &s_watched[i];
+    }
+    return NULL;
+}
+
+/* The same, for the one caller that writes: flash_write's own light. */
+static watched_t *watched_find_mut(SDL_JoystickID id) {
     for (int i = 0; i < MAX_WATCHED; ++i) {
         if (s_watched[i].in_use && s_watched[i].id == id) return &s_watched[i];
     }
@@ -659,9 +685,34 @@ static bool gesture_held(SDL_GameController *controller) {
 /* ⓘ Returns what SDL said: 0 accepted, -1 refused or no light. Almost every
  * caller is an animation step and ignores it; the handback paint reads it, so a
  * colour that never lands is a line in the log. */
+/* ⭐ THE SAME COLOUR, PAST SDL, ON A BLUETOOTH DUALSENSE (watched_t's
+ * ds5_since says why). Not while the pad is bridged: its light is the PC's
+ * then. Not before the animation is surely over: the pad would ignore it. */
+static void flash_write_past_sdl(SDL_GameController *controller, uint8_t r, uint8_t g, uint8_t b) {
+    watched_t *w = watched_find_mut(SDL_JoystickInstanceID(SDL_GameControllerGetJoystick(controller)));
+    if (!w || w->ds5_since == 0 || w->ours_plugged) return;
+    if (SDL_GetTicks() - w->ds5_since < DS5_LIGHT_SETTLE_MS) return;
+    const char *path = SDL_GameControllerPath(controller);
+    if (!path) return;
+    if (!w->ds5_bt_checked) {
+        w->ds5_bt_checked = true;
+        w->ds5_bt = ctm_bridge_node_is_bluetooth(path);
+    }
+    if (!w->ds5_bt) return;
+    const bool take = !w->ds5_took_light;
+    const bool ok = ctm_bridge_ds5_bt_paint(path, r, g, b, take);
+    if (take) {
+        w->ds5_took_light = true;   /* once a connection, whatever the answer */
+        gesture_log("lightbar: took %s over past SDL, %u ms after it was seen: %s",
+                    path, (unsigned) (SDL_GetTicks() - w->ds5_since), ok ? "sent" : "FAILED");
+    }
+}
+
 static int flash_write(SDL_GameController *controller, uint8_t r, uint8_t g, uint8_t b) {
     if (controller) {
-        return SDL_GameControllerSetLED(controller, r, g, b);
+        const int rc = SDL_GameControllerSetLED(controller, r, g, b);
+        flash_write_past_sdl(controller, r, g, b);
+        return rc;
     }
     return -1;
 }
@@ -1573,11 +1624,22 @@ static bool gesture_poll_one(SDL_GameController *controller, SDL_JoystickID id) 
         const char *path = SDL_GameControllerPath(controller);
         if (controller_is_dualsense(controller)) {
             request_full_report(path);
+            /* The clock for its light's takeover (flash_write_past_sdl). */
+            w->ds5_since = SDL_GetTicks() ? SDL_GetTicks() : 1;
         } else {
             gesture_log("full-report request skipped on %s: not a DualSense (%04x:%04x)",
                         path ? path : "-", SDL_GameControllerGetVendor(controller),
                         SDL_GameControllerGetProduct(controller));
         }
+    }
+
+    /* ⭐ ITS OWN COLOUR ONCE THE ANIMATION IS OVER, written past SDL with the
+     * takeover first (flash_write_past_sdl), so a pad that SDL left on its
+     * connection colour shows its player colour. Once a connection. */
+    if (w->ds5_since != 0 && !w->ds5_took_light && !w->ours_plugged &&
+        (!w->ds5_bt_checked || w->ds5_bt) &&
+        SDL_GetTicks() - w->ds5_since >= DS5_LIGHT_SETTLE_MS) {
+        paint_player_colour_for(w, controller);
     }
 
     /* ⭐⭐ THE GESTURE SWITCH BELONGS HERE, NOT AT THE TOP OF THE TICK.

@@ -8,6 +8,7 @@
 
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -169,6 +170,11 @@ bool ctm_bridge_node_is_plugged(const char *node);
 
 /* True for a Bluetooth DualSense. */
 bool ctm_bridge_node_is_bluetooth(const char *node);
+
+/* A colour on a Bluetooth DualSense, written past SDL, with the light's
+ * takeover first when take_over is set: the core's ds5_light.inl says why.
+ * True when it went out. */
+bool ctm_bridge_ds5_bt_paint(const char *node, uint8_t r, uint8_t g, uint8_t b, bool take_over);
 
 /* Confirmation signals, all or nothing -- tone, pulse, lightbar and fallback,
  * on every transport. */
