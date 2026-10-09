@@ -557,6 +557,11 @@ bool ctm_bridge_ds5_bt_paint(const char *node, uint8_t r, uint8_t g, uint8_t b, 
     return ctm_ds5_bt_paint(node, r, g, b, take_over ? 1 : 0) == 0;
 }
 
+int ctm_bridge_ds5_animation_over(int fd)
+{
+    return ctm_ds5_animation_over(fd);
+}
+
 bool ctm_bridge_node_is_bluetooth(const char *node)
 {
     if (!node || !node[0]) {
