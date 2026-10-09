@@ -57,6 +57,21 @@ speaker audio (microphone on USB only).**
 
 *Note: DS5-USBIP can be set up, stopped and started through the same stream.*
 
+## USB Bridge Settings
+
+Located at **Settings (⚙️) → USB Bridge**.
+
+| Setting | &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; What it does |
+|:---|:---|
+| **Enable Device Bridging** | The master switch, off by default. All USB Bridge settings are disabled until it is turned on. Turn it on before streaming to use the USB Bridge panel in the streaming overlay |
+| **Auto Bridge** | A list of the currently connected devices, where specific devices or all devices can be marked to bridge on stream start. The selection is kept between sessions |
+| **Enable Gesture Bridging** | Enable DualSense bridging gestures. A two finger hold on the touchpad: one second bridges, four seconds releases |
+| **Enable Wired Microphone** | Enables the microphone on a DualSense connected to a USB port. The controller draws on its battery while the microphone is on, whether or not anything is listening |
+| **Enable BT Microphone (Unavailable)** | Disabled. A bug in webOS makes a Bluetooth DualSense's microphone unusable |
+| **Disable Lightbar Bridge/Release/Refusal Signals** | Turns off the lightbar on a bridge, a release and a refusal |
+| **Disable Rumble Bridge/Release/Refusal Signals** | Turns off the rumble on a bridge, a release and a refusal |
+| **Disable Audio Tone Bridge/Release/Refusal Signals** | Turns off the tone on a bridge, a release and a refusal |
+
 ## Why this exists
 
 A DualSense connected to a webOS TV over Bluetooth already reached a PC with its
@@ -85,21 +100,6 @@ time make bridging easy and robust.
 | **Auto bridge control** | New setting allows you to select specific devices or all devices to auto bridge on stream start. |
 | **DualSense bridge gesture** | DualSense only: a two finger press and hold on the touchpad. One second for quick bridging, four seconds for releasing, without opening the USB Bridge panel. |
 | **DualSense confirmation signals** | DualSense only: bridging, releasing and refusal events are accompanied by controller lightbar, rumble and speaker confirmation signals. |
-
-## USB Bridge Settings
-
-Located at **Settings (⚙️) → USB Bridge**.
-
-| Setting | &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; What it does |
-|:---|:---|
-| **Enable Device Bridging** | The master switch, off by default. All USB Bridge settings are disabled until it is turned on. Turn it on before streaming to use the USB Bridge panel in the streaming overlay |
-| **Auto Bridge** | A list of the currently connected devices, where specific devices or all devices can be marked to bridge on stream start. The selection is kept between sessions |
-| **Enable Gesture Bridging** | Enable DualSense bridging gestures. A two finger hold on the touchpad: one second bridges, four seconds releases |
-| **Enable Wired Microphone** | Enables the microphone on a DualSense connected to a USB port. The controller draws on its battery while the microphone is on, whether or not anything is listening |
-| **Enable BT Microphone (Unavailable)** | Disabled. A bug in webOS makes a Bluetooth DualSense's microphone unusable |
-| **Disable Lightbar Bridge/Release/Refusal Signals** | Turns off the lightbar on a bridge, a release and a refusal |
-| **Disable Rumble Bridge/Release/Refusal Signals** | Turns off the rumble on a bridge, a release and a refusal |
-| **Disable Audio Tone Bridge/Release/Refusal Signals** | Turns off the tone on a bridge, a release and a refusal |
 
 ## Build
 
