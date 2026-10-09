@@ -741,8 +741,9 @@ static bool release_soon(const char *key)
  * nothing on screen saying why. **The only way out was knowing to press
  * Release.**
  *
- * ⓘ THE CORE ALREADY GIVES UP. After fifteen seconds of a host that will not
- * answer it stops retrying and reports `host_gone` in its status. ⛔ But it
+ * ⓘ THE CORE ALREADY GIVES UP. After three seconds of a host that will not
+ * answer (fifteen until 2026-10-08) it stops retrying and reports `host_gone`
+ * in its status. ⛔ But it
  * CANNOT release itself: retiring the emulated pad, restoring moonlight's input,
  * updating the panel row and pulsing the light are all app-side, and
  * `stop_session()` joins the session thread -- **which that thread cannot do to

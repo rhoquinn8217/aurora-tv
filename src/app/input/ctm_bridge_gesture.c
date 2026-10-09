@@ -2163,7 +2163,7 @@ void ctm_bridge_gesture_tick(struct app_input_t *input, struct session_t *sessio
     /* ⭐⭐ RELEASE ANYTHING WHOSE HOST HAS GONE. T-127, 2026-08-23.
      *
      * ⛔ Close the listener's window and the controller used to stay claimed by
-     * a host that no longer exists. The core gives up after fifteen seconds and
+     * a host that no longer exists. The core gives up after three seconds and
      * raises a flag; this is the safe thread that acts on it, because the core
      * cannot release itself -- stopping a session joins the session thread.
      *
