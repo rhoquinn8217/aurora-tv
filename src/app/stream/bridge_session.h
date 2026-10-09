@@ -22,6 +22,12 @@ void bridge_session_started(session_t *session);
  * every controller shows its player colour again. */
 void bridge_session_stopped(void);
 
+/* ⛔ Those two only record the request: they are called inside SDL's event
+ * filter, with its queue lock held (bridge_session.c says why that matters).
+ * This does the work. When: bridge_app_events, straight after the filter, and
+ * once more as the app stops. */
+void bridge_session_run_pending(void);
+
 /* At the top of session_toggle_vmouse(): a press of Virtual Mouse with Bridge
  * Override on switches the override off and the virtual mouse on, and is not a
  * toggle. True when that is what it did. */

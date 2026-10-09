@@ -5,6 +5,7 @@
 #include "control_server.h"
 #include "ui/streaming/streaming.controller.h"   /* streaming_overlay_shown */
 #include "ui/streaming/bridge_prompt.h"
+#include "stream/bridge_session.h"         /* bridge_session_run_pending */
 /* ⓘ On every target: it has the desktop's stand-ins for the gesture, and the
  * microphone guard below is the core's, which every target builds. */
 #include "input/ctm_bridge_gesture.h"
@@ -51,10 +52,16 @@ void bridge_app_started(app_t *app) {
 }
 
 void bridge_app_stopping(void) {
+    /* ⓘ A stop asked in the last pass of the loop still runs. */
+    bridge_session_run_pending();
     control_server_stop();
 }
 
 void bridge_app_events(app_t *app) {
+    /* ⭐ First: the bridge's start or stop that the stream asked for inside
+     * SDL's event filter, now that the filter has let go of the event lock
+     * (bridge_session.c). The tick below then sees the bridge as it is. */
+    bridge_session_run_pending();
     /* ⛔⛔ streaming_overlay_shown(), NOT app_ui_is_opened(). Third attempt, and
      * this one has evidence rather than reasoning behind it.
      *
