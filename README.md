@@ -48,10 +48,9 @@ to bridge controllers.
 3. Turn on **Enable Device Bridging** in **Settings (⚙️) → USB Bridge**.
 4. Start the stream to the host.
 5. Press and hold the touchpad with two fingers for a second.
-6. DS5-USBIP will open showing that the DualSense is natively connected.
-
-*Optional (Recommended): Create and set a new "DS5-DS4-touchpad-to-mouse"
-pre-set and try it out.*
+6. DS5-USBIP will open showing that the DualSense is natively connected.<br>
+   *Optional (Recommended): Create and set a new "DS5-DS4-touchpad-to-mouse"
+   pre-set and try it out.*
 
 **Start using the DualSense with gyro, touchpad, audio-based rumble and
 speaker audio (microphone on USB only).**
