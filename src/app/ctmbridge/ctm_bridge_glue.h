@@ -131,6 +131,21 @@ bool ctm_bridge_agent_probed(void);
  * whether or not it is. */
 bool ctm_bridge_agent_online(void);
 
+/* ⭐ Can this TV app and DS5-USBIP on the PC work together (rhoquinn8217,
+ * 2026-10-08)? Read from the listener's answers by the core
+ * (protocol_level.inl); not known until one has come, nor while it is offline.
+ * When they cannot, the TV refuses to bridge and says which side to update. */
+typedef enum {
+    CTM_BRIDGE_COMPAT_UNKNOWN = 0,
+    CTM_BRIDGE_COMPAT_OK,
+    CTM_BRIDGE_COMPAT_UPDATE_PC,   /* DS5-USBIP on the PC is too old for this app */
+    CTM_BRIDGE_COMPAT_UPDATE_TV    /* this app is too old for DS5-USBIP on the PC */
+} ctm_bridge_compat_t;
+ctm_bridge_compat_t ctm_bridge_agent_compat(void);
+
+/* Which side to update and why, in a sentence, or "" when neither needs it. */
+const char *ctm_bridge_agent_update_advice(void);
+
 /* Write the Windows agent's host (or "not set") into out (NUL-terminated),
  * whether or not anything answers there: ctm_bridge_agent_online() says that.
  * For the overlay header and the control port's status. */

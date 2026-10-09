@@ -15,6 +15,7 @@
 #include "ctm_state.h"   /* core API + shared globals (g_running, g_scan, ...) */
 #include "ctm_hostmouse.h" /* TV-pointer synthesizer feed (kind "hid") */
 #include "device_identity.inl" /* the identity rules, shared with the core */
+#include "protocol_level.inl"   /* whether this app and the listener can work together */
 
 static bool s_active = false;
 
@@ -1014,6 +1015,24 @@ bool ctm_bridge_agent_probed(void)
 bool ctm_bridge_agent_online(void)
 {
     return g_agent_online != 0;
+}
+
+/* ⓘ The core's four answers, in the same order. */
+_Static_assert((int) CTM_BRIDGE_COMPAT_OK == (int) PROTOCOL_OK &&
+               (int) CTM_BRIDGE_COMPAT_UPDATE_PC == (int) PROTOCOL_UPDATE_PC &&
+               (int) CTM_BRIDGE_COMPAT_UPDATE_TV == (int) PROTOCOL_UPDATE_TV,
+               "ctm_bridge_compat_t follows protocol_compat_t");
+
+ctm_bridge_compat_t ctm_bridge_agent_compat(void)
+{
+    const int compat = g_agent_compat;
+    return (compat >= PROTOCOL_OK && compat <= PROTOCOL_UPDATE_TV) ? (ctm_bridge_compat_t) compat
+                                                                  : CTM_BRIDGE_COMPAT_UNKNOWN;
+}
+
+const char *ctm_bridge_agent_update_advice(void)
+{
+    return protocol_advice((protocol_compat_t) ctm_bridge_agent_compat());
 }
 
 void ctm_bridge_agent(char *out, size_t out_len)
