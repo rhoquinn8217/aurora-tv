@@ -18,6 +18,9 @@
 #ifndef TV_CURSOR_H
 #define TV_CURSOR_H
 
+#include <stdbool.h>
+#include <stddef.h>
+
 #include <SDL.h>
 
 /* Once the window is up: its size against the panel's says how much the TV
@@ -26,5 +29,15 @@ void tv_cursor_init(SDL_Window *window);
 
 /* Before SDL's video goes. */
 void tv_cursor_deinit(void);
+
+/* Live, from the control port, and not saved: shift the pointer this many
+ * of the app's pixels down and to the right of its tip, and take this many
+ * of the picture's pixels off the outline's inner side (below 0: keep what
+ * stands). False when there is
+ * no cursor of Aurora's to change. */
+bool tv_cursor_adjust(int shift_x, int shift_y, int thin);
+
+/* One line on the cursor that stands now. */
+void tv_cursor_describe(char *out, size_t len);
 
 #endif /* TV_CURSOR_H */

@@ -31,6 +31,7 @@
 #include "ui/streaming/bridge_prompt.h"
 #include "input/bridge_override.h"
 #include "input/bridge_keyboard.h"
+#include "input/tv_cursor.h"
 
 #if defined(TARGET_WEBOS)
 #include "ctm_bridge_glue.h"
@@ -132,6 +133,8 @@ static void cmd_help(control_job_t *job)
                "keys                    key events counted since the app started: the TV's keyboard grab, and webOS\n"
                "set settle <ms>         how long to let the link settle before a DS4 handback tone\n"
                "signal refuse <n>       play a device's refusal signal; no plug has to fail\n"
+               "cursor [<right> <down> [<thin>]]  Aurora's TV pointer: what stands, or a shift and a\n"
+               "                        thinner outline to try live, in the app's pixels; not saved\n"
                "<device> is its number, its node, its vid:pid, or part of its name; <n> is from groups\n");
 }
 
@@ -323,6 +326,28 @@ static void cmd_input(control_job_t *job)
 /* Where key events have come from since the app started: the TV's keyboard
  * grab, and webOS through SDL. Works with no stream too, which is how to see
  * whether webOS hands a keyboard's keys to the app at all. */
+/* Aurora's TV pointer (input/tv_cursor.h): what stands now, or a shift and a
+ * thinning to try live, not saved (rhoquinn8217, 2026-10-11: "move it
+ * slightly down and to the right"), so a test needs no build per try. */
+static void cmd_cursor(control_job_t *job, const char *args)
+{
+    if (*args != '\0') {
+        int right = 0, down = 0, thin = -1;
+        const int got = sscanf(args, "%d %d %d", &right, &down, &thin);
+        if (got < 2) {
+            reply(job, "ERR usage: cursor [<right> <down> [<thin>]], in the app's pixels\n");
+            return;
+        }
+        if (!tv_cursor_adjust(right, down, got >= 3 ? thin : -1)) {
+            reply(job, "ERR Aurora has no pointer of its own to change: see logs/tv-cursor.log\n");
+            return;
+        }
+    }
+    char line[160];
+    tv_cursor_describe(line, sizeof line);
+    reply(job, "OK %s\n", line);
+}
+
 static void cmd_keys(control_job_t *job)
 {
     char counts[160];
@@ -985,6 +1010,8 @@ static void run_command(control_job_t *job)
         cmd_input(job);
     } else if (strcasecmp(verb, "keys") == 0) {
         cmd_keys(job);
+    } else if (strcasecmp(verb, "cursor") == 0) {
+        cmd_cursor(job, args);
     } else if (strcasecmp(verb, "prompt") == 0) {
         cmd_prompt(job, args);
 #if defined(TARGET_WEBOS)
