@@ -594,9 +594,21 @@ static void ctm_dev_focus_cb(lv_event_t *e) {
     }
 }
 
-/* A row was activated -> bridge or release it. */
+/* A row was activated -> bridge or release it.
+ *
+ * ⭐ BUT A POINTER'S CLICK ONLY FOCUSES THE ROW (rhoquinn8217, 2026-10-11:
+ * "clicking the row should not bridge or release. It should just focus on the
+ * row. Click the "Basic" or "Full" button is what bridges or releases the
+ * device."). The badges are a pointer's switch. ⓘ Select on a focused row,
+ * from a keyboard, a pad or the remote's OK without its pointer, still
+ * bridges or releases it. */
 static void ctm_dev_click_cb(lv_event_t *e) {
     int row = (int) (intptr_t) lv_event_get_user_data(e);
+    lv_indev_t *indev = lv_indev_get_act();
+    if (indev != NULL && lv_indev_get_type(indev) == LV_INDEV_TYPE_POINTER) {
+        lv_group_focus_obj(lv_event_get_current_target(e));
+        return;
+    }
     s_ctm_sel = row;
     ctm_toggle_device(row);
 }
@@ -800,6 +812,12 @@ static lv_obj_t *ctm_make_dev_row(const device_group_t *g, int idx) {
     lv_obj_set_style_bg_opa(row, LV_OPA_COVER, 0);
     lv_obj_set_style_bg_color(row, CTM_COL_FOCUS, LV_STATE_FOCUS_KEY);
     lv_obj_set_style_bg_opa(row, LV_OPA_COVER, LV_STATE_FOCUS_KEY);
+    /* ⭐ A row a pointer focused lights up as one the keys focused
+     * (2026-10-11): a click on a row only focuses it now, so the light is
+     * all the click shows. ⓘ LVGL adds FOCUS_KEY only for a key's focus. */
+    lv_obj_set_style_border_color(row, CTM_COL_FOCUS, LV_STATE_FOCUSED);
+    lv_obj_set_style_bg_color(row, CTM_COL_FOCUS, LV_STATE_FOCUSED);
+    lv_obj_set_style_bg_opa(row, LV_OPA_COVER, LV_STATE_FOCUSED);
     /* Persistent selection: stays lit while focus is in the detail pane. */
     lv_obj_set_style_bg_color(row, lv_color_hex(0x223046), LV_STATE_CHECKED);
     lv_obj_set_style_bg_opa(row, LV_OPA_COVER, LV_STATE_CHECKED);
