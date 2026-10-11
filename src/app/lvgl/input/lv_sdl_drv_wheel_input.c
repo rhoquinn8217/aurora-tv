@@ -98,9 +98,13 @@ static void sdl_input_read(lv_indev_drv_t *drv, lv_indev_data_t *data) {
         } else if (e.wheel.y != 0) {
             /* Encoder scroll only: never set PRESSED — that triggers LVGL "encoder button" clicks. */
             /* Fallback for lists that fit without overflow (wheel_handle_scrollable above only
-             * fires when there's actual scroll room). Match wheel_handle_gridview's convention:
-             * wheel down (y > 0) should move focus forward/down (positive enc_diff). */
-            data->enc_diff = (e.wheel.y > 0) ? 1 : -1;
+             * fires when there's actual scroll room), and the streaming overlay.
+             * ⛔ This sign was backwards (rhoquinn8217 on the C1, 2026-10-11: "mouse wheel
+             * scroll and remote scroll move in the opposite direction than expected in the
+             * overlay"). SDL's y is positive for the wheel turned away, up, as the stream sends
+             * it to the host and as both handlers above read it: up pages the grid back and
+             * scrolls toward the top. So up moves the focus back, and down moves it on. */
+            data->enc_diff = (e.wheel.y > 0) ? -1 : 1;
         }
     }
     data->continue_reading = false;
