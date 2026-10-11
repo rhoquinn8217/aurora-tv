@@ -431,6 +431,12 @@ in_order "what a pad holds is noted before it is announced again" \
 need "the overlay's focus moves the way the wheel turns" \
      src/app/lvgl/input/lv_sdl_drv_wheel_input.c "data->enc_diff = (e.wheel.y > 0) ? -1 : 1;"
 
+# --- the TV's cursor in the stream (rhoquinn8217, 2026-10-11) ---------------
+# ⓘ Upstream's file: the stream hid the TV's cursor below webOS 9. Taking
+# upstream's function back compiles, and the C1 hides it again.
+need "the TV's cursor stays beside the host's in an absolute-mouse stream" \
+     src/app/input/app_input.c "if (grab && app_configuration->absmouse && !app_configuration->hardware_mouse) {"
+
 echo
 if [ "$fail" -eq 0 ]; then
     echo "⭐ merge guard: $pass checks, nothing lost"

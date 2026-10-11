@@ -54,6 +54,16 @@ void app_set_mouse_grab(app_input_t *input, bool grab) {
     if (input->app->os_info.version.major >= 9) {
         return;
     }
+    /* ⭐ THE TV'S CURSOR STAYS IN AN ABSOLUTE-MOUSE STREAM, ON EVERY webOS
+     * (rhoquinn8217, 2026-10-11: "When the mouse is released, I like when the
+     * tv cursor is visible with the windows cursor"). The webOS 9 sets above
+     * already never hide it. In absolute mode the two cursors sit together,
+     * since the host's follows wherever the TV's points; relative mode and
+     * "Use mouse hardware" keep hiding it, as there they would drift apart. */
+    if (grab && app_configuration->absmouse && !app_configuration->hardware_mouse) {
+        SDL_ShowCursor(SDL_TRUE);
+        return;
+    }
 #endif
     SDL_ShowCursor(grab ? SDL_FALSE : SDL_TRUE);
 }
