@@ -424,6 +424,13 @@ in_order "what a pad holds is noted before it is announced again" \
      src/app/stream/input/session_input.c "void stream_input_restore_gamepad" \
      "bridge_switch_hold_begin(gamepad);" "stream_input_send_gamepad_arrive(input, gamepad)"
 
+# --- the wheel in the overlay (rhoquinn8217, 2026-10-11) --------------------
+# ⓘ Upstream's file: the encoder fallback moved the focus against the wheel.
+# Taking upstream's line back compiles, and the wheel runs backwards again in
+# the streaming overlay.
+need "the overlay's focus moves the way the wheel turns" \
+     src/app/lvgl/input/lv_sdl_drv_wheel_input.c "data->enc_diff = (e.wheel.y > 0) ? -1 : 1;"
+
 echo
 if [ "$fail" -eq 0 ]; then
     echo "⭐ merge guard: $pass checks, nothing lost"
