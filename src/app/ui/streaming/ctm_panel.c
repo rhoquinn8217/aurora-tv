@@ -1085,6 +1085,19 @@ static lv_obj_t *ctm_make_dev_row(const device_group_t *g, int idx) {
         }
     }
 
+    /* ⭐⭐ A CLICK ANYWHERE ON THE ROW IS THE ROW'S (rhoquinn8217, 2026-10-11:
+     * "I can click the buttons but I can't select the row by click it"). An
+     * lv_obj is clickable from birth, so the boxes the row is built from took
+     * a pointer's click themselves and did nothing with it: only the row's
+     * thin edge, and the badges with their own, ever acted, for a mouse and
+     * the remote's pointer alike. Not clickable, they let a click fall through
+     * to the row. ⓘ The badges stay clickable: they act on their own. */
+    lv_obj_clear_flag(textcol, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_clear_flag(namecol, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_clear_flag(statecol, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_clear_flag(badgerow, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_clear_flag(act, LV_OBJ_FLAG_CLICKABLE);
+
     lv_group_add_obj(s_ctm_nav_group, row);
     lv_obj_add_event_cb(row, ctm_nav_key_cb, LV_EVENT_KEY, (void *) (intptr_t) idx);
     lv_obj_add_event_cb(row, ctm_nav_cancel_cb, LV_EVENT_CANCEL, NULL);
