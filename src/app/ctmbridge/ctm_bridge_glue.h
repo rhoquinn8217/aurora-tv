@@ -19,6 +19,16 @@ extern "C" {
  * discovery any more. Port 0 keeps the default agent port. */
 void ctm_bridge_set_host(const char *host, int port);
 
+/* The app's signer for the pairing proof a bridge command carries (the
+ * core's shared/agent_proof.inl): signs `message` with the key this TV paired
+ * with the PC's streaming host, filling `fingerprint` (32 hex and a NUL) and
+ * `signature` (base64, NUL-ended); false when it cannot. NULL: bridge
+ * commands go plainly. src/app/stream/bridge_proof.c is the one handed in.
+ * Call before ctm_bridge_start(). */
+typedef bool (*ctm_bridge_signer_fn)(const unsigned char *message, size_t len,
+                                     char *fingerprint, char *signature, size_t signature_len);
+void ctm_bridge_use_pairing_signer(ctm_bridge_signer_fn signer);
+
 /* "Enable Device Bridging", handed in. Off, a stream starts nothing of the
  * bridge's own: no agent probe, no stopSniff worker. The
  * stream still counts as up, and the first plug brings the core up as any plug
