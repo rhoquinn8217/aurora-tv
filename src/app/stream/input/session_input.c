@@ -17,6 +17,7 @@
  */
 
 #include "session_input.h"
+#include "stream/input/bridge_switch_hold.h"
 #include "session_pointer_gesture.h"
 #include "stream/session.h"
 #include "stream/session_priv.h"
@@ -220,6 +221,8 @@ void stream_input_restore_gamepad(stream_input_t *input, app_gamepad_state_t *ga
         return;
     }
     input->moonlightExcludedMask &= (uint16_t) ~(1u << gamepad->gs_id);   /* BEFORE the arrive */
+    /* This fork: what it holds now reaches the stream released until let go (bridge_switch_hold.c). */
+    bridge_switch_hold_begin(gamepad);
     if (input->started) {
         stream_input_send_gamepad_arrive(input, gamepad);
     }

@@ -405,6 +405,25 @@ in_order "the USB Bridge panel goes before the screen's focus group" \
      src/app/ui/streaming/streaming.controller.c "static void on_delete_obj" \
      "ctm_panel_on_owner_deleted(controller);" "lv_group_del(controller->group);"
 
+# --- nothing held at a switch (rhoquinn8217, 2026-10-09) -------------------
+# ⓘ A release switches controllers: what is held as a pad comes back from a
+# bridge reaches the stream released until it is let go (bridge_switch_hold.c).
+# Losing any of these compiles, and a button held at the release is held on
+# the stream's controller.
+need "the switch's file is built" \
+     src/app/stream/input/CMakeLists.txt "bridge_switch_hold.c"
+need_count "what the stream is sent leaves out what was held at the switch" \
+     src/app/stream/input/session_gamepad.c "bridge_switch_hold_send(gamepad, input->input->activeGamepadMask" 2
+need "a button held at the switch works again once let go" \
+     src/app/stream/input/session_gamepad.c "bridge_switch_hold_note_button(gamepad, button"
+need "a stick or trigger held at the switch works again once at rest" \
+     src/app/stream/input/session_gamepad.c "bridge_switch_hold_note_axes(gamepad);"
+need "a finger down at the switch stays off the stream until lifted" \
+     src/app/stream/input/session_gamepad.c "bridge_switch_hold_skips_finger(gamepad, event->finger"
+in_order "what a pad holds is noted before it is announced again" \
+     src/app/stream/input/session_input.c "void stream_input_restore_gamepad" \
+     "bridge_switch_hold_begin(gamepad);" "stream_input_send_gamepad_arrive(input, gamepad)"
+
 echo
 if [ "$fail" -eq 0 ]; then
     echo "⭐ merge guard: $pass checks, nothing lost"

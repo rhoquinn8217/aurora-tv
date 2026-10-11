@@ -10,6 +10,7 @@
 #include "input/input_gamepad.h"
 #include "stream/session.h"
 #include "stream/input/session_virt_mouse.h"
+#include "stream/input/bridge_switch_hold.h"
 #include "logging.h"
 
 #include <SDL.h>
@@ -285,6 +286,8 @@ void stream_input_handle_cbutton(stream_input_t *input, const SDL_ControllerButt
     } else {
         gamepad->buttons &= ~button;
     }
+    /* This fork: a button held as the pad came back from a bridge works again once let go (bridge_switch_hold.c). */
+    bridge_switch_hold_note_button(gamepad, button, event->type == SDL_CONTROLLERBUTTONDOWN);
 
     /* Quit overlay combo still uses chord + release. */
     if (gamepad_combo_check(gamepad->buttons, QUIT_BUTTONS)) {
@@ -361,26 +364,21 @@ void stream_input_handle_caxis(stream_input_t *input, const SDL_ControllerAxisEv
     }
     filter_deadzone_2axis(input, &gamepad->leftStickX, &gamepad->leftStickY);
     filter_deadzone_2axis(input, &gamepad->rightStickX, &gamepad->rightStickY);
+    /* This fork: a stick or trigger held as the pad came back from a bridge stays at rest until let go (bridge_switch_hold.c). */
+    bridge_switch_hold_note_axes(gamepad);
+    const bridge_switch_axes_t held_axes = bridge_switch_hold_axes(gamepad);
 
     if (vmouse_intercepted(input, gamepad)) {
-        vmouse_set_vector(&input->vmouse, gamepad->rightStickX, gamepad->rightStickY);
-        vmouse_set_scroll(&input->vmouse, gamepad->leftStickX, gamepad->leftStickY);
-        vmouse_set_trigger(&input->vmouse, gamepad->leftTrigger, gamepad->rightTrigger);
+        vmouse_set_vector(&input->vmouse, held_axes.rx, held_axes.ry);
+        vmouse_set_scroll(&input->vmouse, held_axes.lx, held_axes.ly);
+        vmouse_set_trigger(&input->vmouse, (char) held_axes.lt, (char) held_axes.rt);
     }
 
     if (!stream_input_gamepad_sends_moonlight(input, gamepad)) {
         return;
     }
 
-    if (vmouse_intercepted(input, gamepad)) {
-        LiSendMultiControllerEvent(gamepad->gs_id, input->input->activeGamepadMask, gamepad->buttons, 0, 0,
-                                   0, 0, 0, 0);
-    } else {
-        LiSendMultiControllerEvent(gamepad->gs_id, input->input->activeGamepadMask, gamepad->buttons,
-                                   gamepad->leftTrigger,
-                                   gamepad->rightTrigger, gamepad->leftStickX, gamepad->leftStickY,
-                                   gamepad->rightStickX, gamepad->rightStickY);
-    }
+    bridge_switch_hold_send(gamepad, input->input->activeGamepadMask, vmouse_intercepted(input, gamepad));
 }
 
 void stream_input_handle_csensor(stream_input_t *input, const SDL_ControllerSensorEvent *event) {
@@ -429,6 +427,10 @@ void stream_input_handle_ctouchpad(stream_input_t *input, const SDL_ControllerTo
         return;
     }
     if (!stream_input_gamepad_sends_moonlight(input, gamepad)) {
+        return;
+    }
+    /* This fork: a finger already down as the pad came back from a bridge stays off the stream until lifted (bridge_switch_hold.c). */
+    if (bridge_switch_hold_skips_finger(gamepad, event->finger, event->type == SDL_CONTROLLERTOUCHPADUP)) {
         return;
     }
 
@@ -869,9 +871,8 @@ static void stream_input_send_buttons(stream_input_t *input, app_gamepad_state_t
     if (!stream_input_gamepad_sends_moonlight(input, gamepad)) {
         return;
     }
-    LiSendMultiControllerEvent(gamepad->gs_id, input->input->activeGamepadMask, gamepad->buttons, gamepad->leftTrigger,
-                               gamepad->rightTrigger, gamepad->leftStickX, gamepad->leftStickY, gamepad->rightStickX,
-                               gamepad->rightStickY);
+    /* This fork: what was held as the pad came back from a bridge is left out (bridge_switch_hold.c). */
+    bridge_switch_hold_send(gamepad, input->input->activeGamepadMask, false);
     stream_input_send_gamepad_battery(input, gamepad, false);
 }
 

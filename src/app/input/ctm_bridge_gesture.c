@@ -153,6 +153,26 @@ typedef struct {
      * number that arrives or changes later is painted too. PAINTED_NEVER until
      * the first paint. */
     int painted_slot;
+    /* ⭐ A DUALSENSE'S LIGHT, TAKEN OVER PAST SDL (rhoquinn8217's C3,
+     * 2026-10-09). Over Bluetooth the pad ignores every colour until a host
+     * sends it one "reset LED state" after its connection animation, and SDL
+     * holds its own colours back until it has -- which, for a pad that
+     * reconnected mid-stream, it never did: the player colour, the pulse and
+     * the flashes were all "accepted by SDL" and none showed. So once the
+     * animation is over (ds5_light_ready), this side writes its colours itself
+     * (flash_write), with the takeover the first time. ds5_since is when the
+     * pad was first seen (SDL ticks, 0 = not a DualSense). */
+    uint32_t ds5_since;
+    bool ds5_bt_checked; /* the transport has been asked: once, when it matters */
+    bool ds5_bt;         /* and it is Bluetooth */
+    bool ds5_took_light; /* the takeover has gone out for this connection */
+    /* ⭐ WHEN IT WILL TAKE A COLOUR, from its own clock (rhoquinn8217,
+     * 2026-10-09: "the expected behavior for a user would be to immediately
+     * bridge after it has connected to the TV"). Its hidraw node is read past
+     * SDL until the connection animation is over; 1 + that fd, 0 = none. */
+    int ds5_clock_fd1;
+    bool ds5_ready;       /* the animation is over: for the rest of the connection */
+    bool ds5_hold_logged; /* a bridge held for it has been logged */
 } watched_t;
 
 #define PAINTED_NEVER (-100)
@@ -160,6 +180,14 @@ typedef struct {
 /* How long before the one more try: long enough for a stream's start to
  * settle, short enough to still feel like the same press. */
 #define PLUG_RETRY_MS 2000
+
+/* ⭐ WHEN A DUALSENSE'S CONNECTION ANIMATION IS OVER, at the latest. Its own
+ * clock says (ds5_light_ready); without an answer from it, this long after the
+ * pad was first seen is surely past it: the animation ends 3.4 s after the pad
+ * switches on (the core's ds5_light.inl), and the pad was on before the app
+ * saw it. ⛔ It was 11 s, from reading that clock as 1 MHz when it runs at 3:
+ * a pad bridged as it connected showed no magenta (the C3, 2026-10-09). */
+#define DS5_LIGHT_LATEST_MS 4000
 
 #ifndef HIDIOCGFEATURE
 #define HIDIOCGFEATURE(len) _IOC(_IOC_READ | _IOC_WRITE, 'H', 0x07, len)
@@ -223,6 +251,14 @@ static bool watched_slot_exists(SDL_JoystickID id) {
  * watched_for(), asking here cannot make a controller look known. For callers
  * outside the gesture's own tick, which only ever want to read. */
 static const watched_t *watched_find(SDL_JoystickID id) {
+    for (int i = 0; i < MAX_WATCHED; ++i) {
+        if (s_watched[i].in_use && s_watched[i].id == id) return &s_watched[i];
+    }
+    return NULL;
+}
+
+/* The same, for the one caller that writes: flash_write's own light. */
+static watched_t *watched_find_mut(SDL_JoystickID id) {
     for (int i = 0; i < MAX_WATCHED; ++i) {
         if (s_watched[i].in_use && s_watched[i].id == id) return &s_watched[i];
     }
@@ -659,9 +695,87 @@ static bool gesture_held(SDL_GameController *controller) {
 /* ⓘ Returns what SDL said: 0 accepted, -1 refused or no light. Almost every
  * caller is an animation step and ignores it; the handback paint reads it, so a
  * colour that never lands is a line in the log. */
+/* Stop reading a DualSense's clock: its animation is over, or it has gone. */
+static void ds5_clock_close(watched_t *w) {
+    if (w->ds5_clock_fd1 != 0) {
+        close(w->ds5_clock_fd1 - 1);
+        w->ds5_clock_fd1 = 0;
+    }
+}
+
+/* ⭐ WILL THIS DUALSENSE TAKE A COLOUR YET? Its own clock answers, read past
+ * SDL (watched_t's ds5_clock_fd1); without an answer, DS5_LIGHT_LATEST_MS after
+ * it was first seen. Once yes, yes for the connection, and the clock is no
+ * longer read. */
+static bool ds5_light_ready(watched_t *w) {
+    if (w->ds5_ready) return true;
+    if (w->ds5_since == 0) return false;
+    const uint32_t seen_ms = SDL_GetTicks() - w->ds5_since;
+    const int over = w->ds5_clock_fd1 != 0 ? ctm_bridge_ds5_animation_over(w->ds5_clock_fd1 - 1) : -1;
+    if (over == 1 || seen_ms >= DS5_LIGHT_LATEST_MS) {
+        w->ds5_ready = true;
+        gesture_log("lightbar: the pad's connection animation is over, %u ms after it was seen (%s)",
+                    (unsigned) seen_ms, over == 1 ? "its clock says" : "nothing from its clock: by the time");
+        ds5_clock_close(w);
+    }
+    return w->ds5_ready;
+}
+
+/* ⭐ A BRIDGE HELD UNTIL THE PAD WILL SHOW ITS COLOURS (rhoquinn8217,
+ * 2026-10-09: a pad is bridged the moment it connects). A Bluetooth DualSense
+ * still playing its connection animation would show none of the magenta, the
+ * green or the PC's first colour, so the pulse waits for ds5_light_ready: at
+ * most a second or two after the pad is seen, and usually nothing, since the
+ * gesture's own hold takes a second. Only while this side draws the pulse. */
+static bool ds5_bridge_held(watched_t *w) {
+    if (w->ds5_since == 0 || !w->ds5_bt || w->ds5_took_light) return false;
+    if (!ctm_bridge_signals_enabled() ||
+        !(app_configuration && app_configuration->bridge.signal_light)) {
+        return false;
+    }
+    if (ds5_light_ready(w)) {
+        if (w->ds5_hold_logged) {
+            gesture_log("bridge on %s no longer held: the pad will show its colours, %u ms after it was seen",
+                        w->prep_node, (unsigned) (SDL_GetTicks() - w->ds5_since));
+        }
+        return false;
+    }
+    if (!w->ds5_hold_logged) {
+        w->ds5_hold_logged = true;
+        gesture_log("bridge on %s held until the pad will show its colours (%u ms after it was seen)",
+                    w->prep_node, (unsigned) (SDL_GetTicks() - w->ds5_since));
+    }
+    return true;
+}
+
+/* ⭐ THE SAME COLOUR, PAST SDL, ON A BLUETOOTH DUALSENSE (watched_t's
+ * ds5_since says why). Not while the pad is bridged: its light is the PC's
+ * then. Not before the animation is surely over: the pad would ignore it. */
+static void flash_write_past_sdl(SDL_GameController *controller, uint8_t r, uint8_t g, uint8_t b) {
+    watched_t *w = watched_find_mut(SDL_JoystickInstanceID(SDL_GameControllerGetJoystick(controller)));
+    if (!w || w->ds5_since == 0 || w->ours_plugged) return;
+    if (!ds5_light_ready(w)) return;
+    const char *path = SDL_GameControllerPath(controller);
+    if (!path) return;
+    if (!w->ds5_bt_checked) {
+        w->ds5_bt_checked = true;
+        w->ds5_bt = ctm_bridge_node_is_bluetooth(path);
+    }
+    if (!w->ds5_bt) return;
+    const bool take = !w->ds5_took_light;
+    const bool ok = ctm_bridge_ds5_bt_paint(path, r, g, b, take);
+    if (take) {
+        w->ds5_took_light = true;   /* once a connection, whatever the answer */
+        gesture_log("lightbar: took %s over past SDL, %u ms after it was seen: %s",
+                    path, (unsigned) (SDL_GetTicks() - w->ds5_since), ok ? "sent" : "FAILED");
+    }
+}
+
 static int flash_write(SDL_GameController *controller, uint8_t r, uint8_t g, uint8_t b) {
     if (controller) {
-        return SDL_GameControllerSetLED(controller, r, g, b);
+        const int rc = SDL_GameControllerSetLED(controller, r, g, b);
+        flash_write_past_sdl(controller, r, g, b);
+        return rc;
     }
     return -1;
 }
@@ -870,6 +984,7 @@ void ctm_bridge_gesture_reset(SDL_JoystickID id) {
              * the pad's Moonlight slot back needs this slot, and it is about
              * to be gone. */
             gesture_moonlight_forget_leaving(&s_watched[i]);
+            ds5_clock_close(&s_watched[i]);
             memset(&s_watched[i], 0, sizeof(s_watched[i]));
             return;
         }
@@ -1294,6 +1409,11 @@ static bool gesture_poll_one(SDL_GameController *controller, SDL_JoystickID id) 
     if (w->prep_left > 0) {
         uint32_t now_ticks = SDL_GetTicks();
         if (now_ticks >= w->prep_next) {
+            /* Not before the pad will show it (ds5_bridge_held): asked again
+             * every pass until then. */
+            if (ds5_bridge_held(w)) {
+                return false;
+            }
             --w->prep_left;
             if (w->prep_left == 0) {
                 /* TIMED, because this is the suspect.
@@ -1573,11 +1693,35 @@ static bool gesture_poll_one(SDL_GameController *controller, SDL_JoystickID id) 
         const char *path = SDL_GameControllerPath(controller);
         if (controller_is_dualsense(controller)) {
             request_full_report(path);
+            /* The clock for its light's takeover (flash_write_past_sdl). */
+            w->ds5_since = SDL_GetTicks() ? SDL_GetTicks() : 1;
+            /* Its bus, asked now (one scan, for a pad the last scan missed)
+             * because a bridge may be held for it from the first moment
+             * (ds5_bridge_held); and its own clock, read past SDL until its
+             * animation is over (ds5_light_ready). */
+            w->ds5_bt_checked = true;
+            w->ds5_bt = path && ctm_bridge_node_is_bluetooth(path);
+            if (w->ds5_bt && strncmp(path, "/dev/hidraw", 11) == 0) {
+                const int fd = open(path, O_RDONLY | O_NONBLOCK);
+                if (fd >= 0) {
+                    w->ds5_clock_fd1 = fd + 1;
+                } else {
+                    gesture_log("lightbar: cannot read the clock on %s: %s", path, strerror(errno));
+                }
+            }
         } else {
             gesture_log("full-report request skipped on %s: not a DualSense (%04x:%04x)",
                         path ? path : "-", SDL_GameControllerGetVendor(controller),
                         SDL_GameControllerGetProduct(controller));
         }
+    }
+
+    /* ⭐ ITS OWN COLOUR ONCE THE ANIMATION IS OVER, written past SDL with the
+     * takeover first (flash_write_past_sdl), so a pad that SDL left on its
+     * connection colour shows its player colour. Once a connection. */
+    if (w->ds5_since != 0 && !w->ds5_took_light && !w->ours_plugged &&
+        (!w->ds5_bt_checked || w->ds5_bt) && ds5_light_ready(w)) {
+        paint_player_colour_for(w, controller);
     }
 
     /* ⭐⭐ THE GESTURE SWITCH BELONGS HERE, NOT AT THE TOP OF THE TICK.
