@@ -1390,6 +1390,19 @@ static void ctm_request_refresh(void) {
     }
 }
 
+/* ⭐ A CLICK OUTSIDE THE STRIP CLOSES THE PANEL (rhoquinn8217, 2026-10-11:
+ * "When the USB Bridge Panel is open, clicking anywhere outside of the USB
+ * Bridge Panel causes it to close"), as its X does, and the overlay stays.
+ * Only a click on the backdrop itself: one on the strip or a row lands on
+ * them, and reaches here only by bubbling. ⓘ CLICKED comes with the release,
+ * as every press in the panel acts on its release. */
+static void ctm_backdrop_clicked(lv_event_t *event) {
+    if (lv_event_get_target(event) != lv_event_get_current_target(event)) {
+        return;
+    }
+    ctm_request_close();
+}
+
 static void open_ctm_panel(lv_event_t *event) {
     /* The CTM button has LV_OBJ_FLAG_EVENT_BUBBLE; stop the CLICKED here so it
      * never reaches the overlay root's hide_overlay handler. hide_overlay calls
@@ -1406,8 +1419,9 @@ static void open_ctm_panel(lv_event_t *event) {
     s_ctm_nav_group = lv_group_create();
     lv_group_set_wrap(s_ctm_nav_group, false);
 
-    /* A full-screen backdrop, clickable so stray clicks don't dismiss the
-     * streaming overlay, and deliberately NOT a modal: a modal flips the UI into
+    /* A full-screen backdrop, clickable so a click outside the strip closes the
+     * panel (ctm_backdrop_clicked) and never reaches the streaming overlay
+     * underneath, and deliberately NOT a modal: a modal flips the UI into
      * key/gamepad mode, which hid the webOS cursor.
      *
      * ⛔ ON THE TOP LAYER, NOT THE STREAM SCREEN (rhoquinn8217, 2026-09-14): the
@@ -1427,6 +1441,7 @@ static void open_ctm_panel(lv_event_t *event) {
     lv_obj_set_style_bg_opa(panel, LV_OPA_TRANSP, 0);
     lv_obj_clear_flag(panel, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_flag(panel, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(panel, ctm_backdrop_clicked, LV_EVENT_CLICKED, NULL);
     lv_obj_move_foreground(panel);
 
     lv_obj_t *card = lv_obj_create(panel);
