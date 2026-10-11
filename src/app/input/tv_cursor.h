@@ -31,7 +31,7 @@ void tv_cursor_init(SDL_Window *window);
 void tv_cursor_deinit(void);
 
 /* Live, from the control port, and not saved: shift the pointer this many
- * of the app's pixels down and to the right of its tip, and take this many
+ * of the TV's own pixels to the right and down of its tip, and take this many
  * of the picture's pixels off the outline's inner side (below 0: keep what
  * stands). False when there is
  * no cursor of Aurora's to change. */

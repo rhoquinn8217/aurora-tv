@@ -134,7 +134,7 @@ static void cmd_help(control_job_t *job)
                "set settle <ms>         how long to let the link settle before a DS4 handback tone\n"
                "signal refuse <n>       play a device's refusal signal; no plug has to fail\n"
                "cursor [<right> <down> [<thin>]]  Aurora's TV pointer: what stands, or a shift and a\n"
-               "                        thinner outline to try live, in the app's pixels; not saved\n"
+               "                        thinner outline to try live, in the TV's own pixels; not saved\n"
                "<device> is its number, its node, its vid:pid, or part of its name; <n> is from groups\n");
 }
 
@@ -335,7 +335,7 @@ static void cmd_cursor(control_job_t *job, const char *args)
         int right = 0, down = 0, thin = -1;
         const int got = sscanf(args, "%d %d %d", &right, &down, &thin);
         if (got < 2) {
-            reply(job, "ERR usage: cursor [<right> <down> [<thin>]], in the app's pixels\n");
+            reply(job, "ERR usage: cursor [<right> <down> [<thin>]], in the TV's own pixels\n");
             return;
         }
         if (!tv_cursor_adjust(right, down, got >= 3 ? thin : -1)) {

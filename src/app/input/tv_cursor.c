@@ -30,16 +30,22 @@ FILE *ctm_log_open(const char *name, const char *mode);
 /* ⭐ WHERE THE TIP GOES, AND HOW THIN THE OUTLINE IS (rhoquinn8217,
  * 2026-10-11, on the second try: "Still slightly off. Make the outline
  * thinner and move it slightly down and to the right. Also the area inside
- * the tear drop need to be completely transparent"). The shift is in the
- * app's pixels, down and to the right; the thinning is in the picture's own
- * pixels, taken off the outline's inner side. ⓘ Both can be tried live from
- * the control port (`cursor`), and are not saved there. */
-#define TV_CURSOR_SHIFT_X 1
-#define TV_CURSOR_SHIFT_Y 1
+ * the tear drop need to be completely transparent"). The thinning is in the
+ * picture's own pixels, taken off the outline's inner side.
+ * ⭐ THE SHIFT IS IN THE TV'S OWN PIXELS, down and to the right, so a step
+ * can be one of them: in the app's it was two, and the right place fell
+ * between two tries (rhoquinn8217: "over jumped"). The picture is placed
+ * that far over before the shrink, whose averaging draws the half step.
+ * Found on the C1 by eye, 2026-10-11: between 4 and 6 to the right, and
+ * between 0 and 2 up. ⓘ Both can be tried live from the control port
+ * (`cursor`), and are not saved there. */
+#define TV_CURSOR_SHIFT_X 5
+#define TV_CURSOR_SHIFT_Y (-1)
 #define TV_CURSOR_THIN 1
 
-/* Clear room around the picture, so the hot spot can move past its edge. */
-#define TV_CURSOR_PAD 8
+/* Clear room around the picture, in its own pixels, for the shift and the
+ * hot spot. */
+#define TV_CURSOR_MARGIN 16
 
 static SDL_Surface *s_full = NULL;     /* webOS's picture, as read */
 static int s_tip_x = 0, s_tip_y = 0;   /* its tip, in its own pixels */
@@ -251,15 +257,32 @@ static bool build(void) {
         return false;
     }
     hollow(work, s_thin);
-    const double scale = s_scale > 1.0 ? s_scale : 1.0;
-    SDL_Surface *image = shrink(work, scale, TV_CURSOR_PAD);
+    /* The picture placed the shift over in a clear canvas, the hot spot where
+     * its tip was before the shift. */
+    const int m = TV_CURSOR_MARGIN;
+    const int dx = s_shift_x < -m ? -m : (s_shift_x > m ? m : s_shift_x);
+    const int dy = s_shift_y < -m ? -m : (s_shift_y > m ? m : s_shift_y);
+    SDL_Surface *canvas = SDL_CreateRGBSurfaceWithFormat(0, work->w + 2 * m, work->h + 2 * m, 32,
+                                                         SDL_PIXELFORMAT_RGBA32);
+    if (canvas == NULL) {
+        cursor_log("the canvas could not be made (%s)", SDL_GetError());
+        SDL_FreeSurface(work);
+        return false;
+    }
+    SDL_FillRect(canvas, NULL, 0);
+    SDL_SetSurfaceBlendMode(work, SDL_BLENDMODE_NONE);
+    SDL_Rect at = {m + dx, m + dy, work->w, work->h};
+    SDL_BlitSurface(work, NULL, canvas, &at);
     SDL_FreeSurface(work);
+    const double scale = s_scale > 1.0 ? s_scale : 1.0;
+    SDL_Surface *image = shrink(canvas, scale, 0);
+    SDL_FreeSurface(canvas);
     if (image == NULL) {
         cursor_log("the shrink failed (%s)", SDL_GetError());
         return false;
     }
-    int hot_x = (int) floor(s_tip_x / scale) + TV_CURSOR_PAD - s_shift_x;
-    int hot_y = (int) floor(s_tip_y / scale) + TV_CURSOR_PAD - s_shift_y;
+    int hot_x = (int) floor((s_tip_x + m) / scale);
+    int hot_y = (int) floor((s_tip_y + m) / scale);
     if (hot_x < 0) hot_x = 0;
     if (hot_y < 0) hot_y = 0;
     if (hot_x >= image->w) hot_x = image->w - 1;
@@ -281,7 +304,7 @@ static bool build(void) {
     s_image = image;
     s_hot_x = hot_x;
     s_hot_y = hot_y;
-    cursor_log("cursor made: %dx%d, hot spot %d,%d, shifted %d,%d (down and right), outline thinned %d",
+    cursor_log("cursor made: %dx%d, hot spot %d,%d, shifted %d,%d of the TV's pixels (right, down), outline thinned %d",
                image->w, image->h, hot_x, hot_y, s_shift_x, s_shift_y, s_thin);
     return true;
 }
