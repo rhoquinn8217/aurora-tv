@@ -52,7 +52,7 @@ void bridge_app_started(app_t *app) {
     control_server_start(app);
     /* ⓘ Once the window is up: the TV's pointer with its tip on the point the
      * host is told (input/tv_cursor.h). */
-    tv_cursor_init();
+    tv_cursor_init(app->ui.window);
 }
 
 void bridge_app_stopping(void) {

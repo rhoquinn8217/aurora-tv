@@ -18,8 +18,11 @@
 #ifndef TV_CURSOR_H
 #define TV_CURSOR_H
 
-/* Once the window is up. */
-void tv_cursor_init(void);
+#include <SDL.h>
+
+/* Once the window is up: its size against the panel's says how much the TV
+ * enlarges the app, and the pointer is shrunk by as much. */
+void tv_cursor_init(SDL_Window *window);
 
 /* Before SDL's video goes. */
 void tv_cursor_deinit(void);
