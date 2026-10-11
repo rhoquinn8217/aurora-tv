@@ -117,6 +117,39 @@ static bool        s_ctm_server_online = true;
  * a refusal we KNOW is coming; when nobody knows, finding out is the honest
  * answer and the refusal is real information. */
 static bool        s_ctm_server_known = false;
+/* ⭐⭐ AND WHETHER THE TWO CAN WORK TOGETHER (rhoquinn8217, 2026-10-08). An
+ * online server whose DS5-USBIP is too old for this app, or this app too old
+ * for it, can no more bridge than an offline one. The label says which side to
+ * update, and a press is refused as an offline server's is, by flashing it. */
+static ctm_bridge_compat_t s_ctm_server_compat = CTM_BRIDGE_COMPAT_UNKNOWN;
+
+/* Nothing can be bridged: the server is known to be offline, or to need an
+ * update on one side. */
+static bool ctm_server_refuses(void) {
+    return s_ctm_server_known &&
+           (!s_ctm_server_online || s_ctm_server_compat == CTM_BRIDGE_COMPAT_UPDATE_PC ||
+            s_ctm_server_compat == CTM_BRIDGE_COMPAT_UPDATE_TV);
+}
+
+/* The coloured half of the status line: not known, online, offline, or which
+ * side to update. */
+static void ctm_paint_state(void) {
+    if (!s_ctm_state_lbl) {
+        return;
+    }
+    if (!s_ctm_server_known) {
+        lv_label_set_text(s_ctm_state_lbl, "- N/A");
+        lv_obj_set_style_text_color(s_ctm_state_lbl, CTM_COL_SUB, 0);
+        return;
+    }
+    const char *state = !s_ctm_server_online ? "- OFFLINE"
+                      : s_ctm_server_compat == CTM_BRIDGE_COMPAT_UPDATE_PC ? "- Update DS5-USBIP on the PC"
+                      : s_ctm_server_compat == CTM_BRIDGE_COMPAT_UPDATE_TV ? "- Update the TV app"
+                      : "- ONLINE";
+    lv_label_set_text(s_ctm_state_lbl, state);
+    lv_obj_set_style_text_color(s_ctm_state_lbl,
+                                ctm_server_refuses() ? lv_palette_main(LV_PALETTE_RED) : CTM_COL_OK, 0);
+}
 
 /* ⭐⭐ FLASH THE OFFLINE TAG WHEN SOMEONE TRIES TO BRIDGE ANYWAY.
  *
@@ -187,20 +220,14 @@ static void ctm_online_tick(lv_timer_t *t) {
     }
     const bool known = ctm_bridge_agent_probed();
     const bool now = ctm_bridge_agent_online();
-    if (known == s_ctm_server_known && now == s_ctm_server_online) {
+    const ctm_bridge_compat_t compat = ctm_bridge_agent_compat();
+    if (known == s_ctm_server_known && now == s_ctm_server_online && compat == s_ctm_server_compat) {
         return;
     }
     s_ctm_server_known = known;
     s_ctm_server_online = now;
-    if (!known) {
-        lv_label_set_text(s_ctm_state_lbl, "- N/A");
-        lv_obj_set_style_text_color(s_ctm_state_lbl, CTM_COL_SUB, 0);
-        ctm_request_refresh();
-        return;
-    }
-    lv_label_set_text(s_ctm_state_lbl, now ? "- ONLINE" : "- OFFLINE");
-    lv_obj_set_style_text_color(s_ctm_state_lbl,
-                                now ? CTM_COL_OK : lv_palette_main(LV_PALETTE_RED), 0);
+    s_ctm_server_compat = compat;
+    ctm_paint_state();
     /* ⓘ The rows and Bridge All are drawn from this state, so a change has to
      * rebuild them -- but only on a CHANGE, which is rare. */
     ctm_request_refresh();
@@ -398,8 +425,9 @@ static void ctm_bridge_device(int row) {
     /* ⭐ Refuse the press rather than letting it fail. ⛔ With the server
      * offline a bridge cannot work, and attempting it answers with a refusal --
      * red flashes and a buzz, which look exactly like a real failure. ⓘ The row
-     * is disabled too; this is the belt to that's braces. */
-    if (s_ctm_server_known && !s_ctm_server_online) {
+     * is disabled too; this is the belt to that's braces. ⓘ The same for a
+     * server that needs an update on one side: the label says which. */
+    if (ctm_server_refuses()) {
         /* ⓘ And ask again at once: the reading can be up to ten seconds old,
          * so a listener that has just started is seen a second later, not at
          * the next probe. */
@@ -1043,7 +1071,7 @@ static lv_obj_t *ctm_make_dev_row(const device_group_t *g, int idx) {
      * bridged, and a light touch of grey was invisible on a television. ⓘ A
      * BRIDGED row is left alone: releasing it is a teardown on this side and
      * needs no host, so it is still worth pressing. */
-    if (s_ctm_server_known && !s_ctm_server_online && g->plugged == 0) {
+    if (ctm_server_refuses() && g->plugged == 0) {
         lv_obj_set_style_opa(row, LV_OPA_30, 0);
     }
 
@@ -1069,7 +1097,7 @@ static lv_obj_t *ctm_make_dev_row(const device_group_t *g, int idx) {
  * does not reliably stop it being activated. ⭐ And it flashes the reason. */
 static void ctm_act_plugall_cb(lv_event_t *e) {
     LV_UNUSED(e);
-    if (s_ctm_server_known && !s_ctm_server_online) {
+    if (ctm_server_refuses()) {
         ctm_bridge_agent_recheck();   /* the reading may be stale: see the row's press */
         ctm_flash_offline();
         return;
@@ -1182,16 +1210,9 @@ static void ctm_panel_refresh(void) {
          * there, not that the address has gone. ⓘ rhoquinn8217, 2026-08-20. */
         s_ctm_server_known = ctm_bridge_agent_probed();
         s_ctm_server_online = ctm_bridge_agent_online();
+        s_ctm_server_compat = ctm_bridge_agent_compat();
         lv_label_set_text_fmt(s_ctm_status_lbl, "USB Server: %s", listener);
-        if (!s_ctm_server_known) {
-            lv_label_set_text(s_ctm_state_lbl, "- N/A");
-            lv_obj_set_style_text_color(s_ctm_state_lbl, CTM_COL_SUB, 0);
-        } else {
-            lv_label_set_text(s_ctm_state_lbl, s_ctm_server_online ? "- ONLINE" : "- OFFLINE");
-            lv_obj_set_style_text_color(s_ctm_state_lbl,
-                                        s_ctm_server_online ? CTM_COL_OK
-                                                            : lv_palette_main(LV_PALETTE_RED), 0);
-        }
+        ctm_paint_state();
     }
 
     /* ⭐⭐ ONE ROW PER DEVICE (rhoquinn8217, 2026-09-14), every part inside it.
@@ -1230,7 +1251,8 @@ static void ctm_panel_refresh(void) {
      * after the rows to keep the walking order. */
     const uint32_t actions_sig = (s_ctm_ngroup > 0 ? 1u : 0u) |
                                  (s_ctm_server_known ? 2u : 0u) |
-                                 (s_ctm_server_online ? 4u : 0u);
+                                 (s_ctm_server_online ? 4u : 0u) |
+                                 (ctm_server_refuses() ? 8u : 0u);
     const bool actions_stale = actions_sig != s_ctm_actions_sig ||
                                (s_ctm_ngroup > 0 && s_ctm_btn_plugall == NULL);
     if (actions_stale) {
@@ -1253,7 +1275,7 @@ static void ctm_panel_refresh(void) {
              * until then this is the way out. */
             s_ctm_btn_plugall =
                     ctm_make_action("Bridge All", ctm_act_plugall_cb, CTM_COL_FULL);
-            if (s_ctm_btn_plugall && s_ctm_server_known && !s_ctm_server_online) {
+            if (s_ctm_btn_plugall && ctm_server_refuses()) {
                 /* ⛔ LV_STATE_DISABLED alone was barely visible -- it only shifts
                  * the theme's own opacity a little. ⭐ Paint it grey and fade it. */
                 lv_obj_add_state(s_ctm_btn_plugall, LV_STATE_DISABLED);
@@ -1520,7 +1542,8 @@ static void open_ctm_panel(lv_event_t *event) {
     lv_obj_t *statusrow = lv_obj_create(header);
     lv_obj_remove_style_all(statusrow);
     lv_obj_set_size(statusrow, LV_PCT(100), LV_SIZE_CONTENT);
-    lv_obj_set_flex_flow(statusrow, LV_FLEX_FLOW_ROW);
+    /* ⓘ Wrapping: "Update DS5-USBIP on the PC" is long beside an address. */
+    lv_obj_set_flex_flow(statusrow, LV_FLEX_FLOW_ROW_WRAP);
     lv_obj_set_flex_align(statusrow, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_gap(statusrow, LV_DPX(6), 0);
     lv_obj_clear_flag(statusrow, LV_OBJ_FLAG_SCROLLABLE);
