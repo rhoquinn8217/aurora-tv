@@ -17,6 +17,7 @@ target_sources(moonlight-lib PRIVATE
         ${CMAKE_SOURCE_DIR}/src/app/input/bridge_request.c
         ${CMAKE_SOURCE_DIR}/src/app/input/ctm_bridge_gesture.c
         ${CMAKE_SOURCE_DIR}/src/app/input/device_groups.c
+        ${CMAKE_SOURCE_DIR}/src/app/input/tv_cursor.c
         ${CMAKE_SOURCE_DIR}/src/app/stream/bridge_pointer.c
         ${CMAKE_SOURCE_DIR}/src/app/stream/bridge_proof.c
         ${CMAKE_SOURCE_DIR}/src/app/stream/bridge_session.c

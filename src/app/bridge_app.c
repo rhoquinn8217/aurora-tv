@@ -12,6 +12,7 @@
 #if defined(TARGET_WEBOS)
 #include "input/bridge_keyboard.h"
 #endif
+#include "input/tv_cursor.h"
 
 void bridge_app_before_sdl(void) {
     /* ⛔⛔ BEFORE SDL TOUCHES ANY CONTROLLER.
@@ -49,12 +50,16 @@ void bridge_app_started(app_t *app) {
     /* ⓘ Once the UI and the bus are up, because every command runs through
      * them. A no-op unless built with AURORA_TERMINAL_CONTROL. */
     control_server_start(app);
+    /* ⓘ Once the window is up: the TV's pointer with its tip on the point the
+     * host is told (input/tv_cursor.h). */
+    tv_cursor_init();
 }
 
 void bridge_app_stopping(void) {
     /* ⓘ A stop asked in the last pass of the loop still runs. */
     bridge_session_run_pending();
     control_server_stop();
+    tv_cursor_deinit();
 }
 
 void bridge_app_events(app_t *app) {
