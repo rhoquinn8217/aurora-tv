@@ -64,7 +64,7 @@ void ctm_bridge_set_input_held(bool held);
 void bridge_set_overlay_request(void (*cb)(void));
 
 /* Who to tell when a bridged keyboard presses one of the app's other
- * shortcuts, Ctrl+Alt+Shift and 'A', 'M' or 'N', and when a bridged mouse is
+ * shortcuts, Ctrl+Alt+Shift and 'A', 'C', 'M' or 'N', and when a bridged mouse is
  * first used after its bridge. ⚠️ Both are called on the device's input
  * thread. */
 void bridge_set_shortcut_request(void (*cb)(char letter));

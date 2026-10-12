@@ -138,6 +138,7 @@ static void cmd_help(control_job_t *job)
                "                        thinner outline to try live, in the TV's own pixels; not saved\n"
                "cursor on|off           the TV cursor on or off, and saved, as Ctrl+Alt+Shift+M does\n"
                "cursor align            open the bar that aligns the TV cursor, as Ctrl+Alt+Shift+A does\n"
+               "cursor sharp|regular    the drop or webOS's own pointer, and saved, as Ctrl+Alt+Shift+C does\n"
                "<device> is its number, its node, its vid:pid, or part of its name; <n> is from groups\n");
 }
 
@@ -332,8 +333,9 @@ static void cmd_input(control_job_t *job)
 /* Aurora's TV pointer (input/tv_cursor.h): what stands now, or a shift and a
  * thinning to try live, not saved (rhoquinn8217, 2026-10-11: "move it
  * slightly down and to the right"), so a test needs no build per try. And
- * the TV cursor on or off, saved, as Ctrl+Alt+Shift+M switches it; and the
- * align bar, as Ctrl+Alt+Shift+A opens it. */
+ * the TV cursor on or off, saved, as Ctrl+Alt+Shift+M switches it; the align
+ * bar, as Ctrl+Alt+Shift+A opens it; and which cursor, saved, as
+ * Ctrl+Alt+Shift+C switches it. */
 static void cmd_cursor(control_job_t *job, const char *args)
 {
     if (strcasecmp(args, "align") == 0) {
@@ -341,6 +343,12 @@ static void cmd_cursor(control_job_t *job, const char *args)
         reply(job, "OK the align bar is asked for: it opens on the interface's next pass, or says why not\n");
         return;
     }
+    if (strcasecmp(args, "sharp") == 0 || strcasecmp(args, "regular") == 0) {
+        if (!tv_cursor_set_look(strcasecmp(args, "regular") == 0)) {
+            reply(job, "ERR that cursor could not be made: see logs/tv-cursor.log\n");
+            return;
+        }
+    } else if (strcasecmp(args, "on") == 0 || strcasecmp(args, "off") == 0) {
     if (strcasecmp(args, "on") == 0 || strcasecmp(args, "off") == 0) {
         if (!tv_cursor_set_mode(strcasecmp(args, "on") == 0)) {
             reply(job, "%s", tv_cursor_mode_switchable()

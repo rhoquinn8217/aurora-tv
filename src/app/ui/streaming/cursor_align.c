@@ -132,7 +132,11 @@ static void bar_refresh(void) {
     }
     int x = 0, y = 0;
     tv_cursor_get_shift(&x, &y);
-    lv_label_set_text_fmt(s_title, locstr("Align the TV cursor with the PC's   |   right %d, down %d"), x, y);
+    /* ⓘ Which cursor, as each keeps its own place (input/tv_cursor.h). */
+    lv_label_set_text_fmt(s_title, tv_cursor_regular()
+                                   ? locstr("Align the regular TV cursor with the PC's   |   right %d, down %d")
+                                   : locstr("Align the sharp TV cursor with the PC's   |   right %d, down %d"),
+                          x, y);
 }
 
 /* Enter or A keeps it, Esc or B puts back what was there. */

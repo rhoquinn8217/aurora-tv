@@ -70,11 +70,11 @@ void bridge_app_started(app_t *app) {
      * them. A no-op unless built with AURORA_TERMINAL_CONTROL. */
     control_server_start(app);
     /* ⓘ Once the window is up: the TV's pointer with its tip on the point the
-     * host is told, where this TV keeps it (input/tv_cursor.h). */
-    tv_cursor_init(app->ui.window, app->settings.bridge.tv_cursor_x, app->settings.bridge.tv_cursor_y);
+     * host is told, the cursor and the place this TV keeps (input/tv_cursor.h). */
+    tv_cursor_init(app->ui.window);
 #if defined(TARGET_WEBOS)
     /* ⓘ What the bridge core finds in a bridged keyboard's reports, beside
-     * its S: Ctrl+Alt+Shift and A, M or N; and a bridged mouse's first use. */
+     * its S: Ctrl+Alt+Shift and A, C, M or N; and a bridged mouse's first use. */
     bridge_set_shortcut_request(bridge_keyboard_bridged_shortcut);
     bridge_set_pointer_used_request(pointer_used);
 #endif

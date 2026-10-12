@@ -170,6 +170,7 @@ void performPendingSpecialKeyCombo(stream_input_t *input) {
         case KeyComboToggleCursorHide:
             SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                         "Detected show mouse combo");
+            tv_cursor_toggle_look();   /* This fork: the sharp TV cursor or the regular one; see input/tv_cursor.h. */
             break;
         case KeyComboToggleMinimize:
             SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,

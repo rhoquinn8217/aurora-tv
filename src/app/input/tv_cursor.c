@@ -12,6 +12,7 @@
 
 #if defined(TARGET_WEBOS)
 
+#include <limits.h>
 #include <math.h>
 #include <stdarg.h>
 #include <stdbool.h>
@@ -21,6 +22,9 @@
 #include <time.h>
 
 #include <SDL.h>
+#include <SDL_image.h>   /* the regular cursor: webOS's own picture */
+#include <pbnjson.h>
+#include "lunasynccall.h"   /* the TV's Pointer Size */
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -65,14 +69,35 @@ FILE *ctm_log_open(const char *name, const char *mode);
  * not saved there. */
 #define TV_CURSOR_THIN 1
 
-/* Clear room around the drop, in its own pixels, for the shift and the hot
- * spot. */
+/* ⭐ THE REGULAR CURSOR (rhoquinn8217, 2026-10-12: "toggles between my small
+ * sharp tv cursor and the regular cursor"): webOS's own pointer, read from the
+ * TV as webOS draws it, and nothing of LG's copied into the app. The normal
+ * state of the size the TV's Pointer Size setting names, small, medium or
+ * large ("use whatever is set for the TV"), asked of the settings service as
+ * the TV's own Quick Settings ask it (category option, key pointerSize), and
+ * medium when it does not say. Its tip, the hot spot, is found in the picture.
+ * ⓘ Asked again when the window has the screen back, as the setting is
+ * changed in the TV's own menus. */
+#define REGULAR_IMAGE "/usr/share/im/cursorTypeAsz%cstN.png"   /* S, M or L */
+
+/* Clear room around the picture, in its own pixels, for the shift and the
+ * hot spot. */
 #define TV_CURSOR_MARGIN TV_CURSOR_SHIFT_MAX
+
+enum { LOOK_DROP = 0, LOOK_REGULAR = 1 };
+
+typedef struct {
+    int x, y;
+} shift_t;
 
 static bool s_ready = false;           /* the cursor is Aurora's */
 static double s_scale = 1.0;           /* how much the TV enlarges the app */
-static int s_shift_x = 0, s_shift_y = 0;
+static int s_look = LOOK_DROP;         /* which cursor shows */
+static shift_t s_shift[2];             /* each cursor's shift that stands, right and down */
 static int s_thin = TV_CURSOR_THIN;
+static SDL_Surface *s_regular = NULL;  /* webOS's picture, as read */
+static char s_regular_size = 0;        /* which: 'S', 'M' or 'L'; 0 for none read */
+static int s_tip_x = 0, s_tip_y = 0;   /* its tip, in its own pixels */
 static SDL_Surface *s_image = NULL;    /* the cursor's picture */
 static SDL_Cursor *s_cursor = NULL;
 static int s_hot_x = 0, s_hot_y = 0;
@@ -238,33 +263,155 @@ static SDL_Surface *shrink(SDL_Surface *src, double scale) {
     return dst;
 }
 
-/* The cursor with the shift and the line that stand now. False, and the
- * cursor that was there stays, when it cannot be made. */
-static bool build(void) {
-    double width = 3.0 - s_thin;
-    if (width < 1.0) width = 1.0;
-    SDL_Surface *drop = draw_drop(width);
-    if (drop == NULL) {
-        tv_cursor_log("the drop could not be drawn (%s)", SDL_GetError());
+/* The tip of webOS's picture: of the pixels at least half opaque, the one
+ * furthest up and to the left (the smallest x + y; on a tie, the one nearer
+ * the diagonal). The teardrop points up and to the left. */
+static bool find_tip(SDL_Surface *rgba, int *tip_x, int *tip_y) {
+    bool found = false;
+    int best_sum = INT_MAX, best_off = INT_MAX;
+    if (SDL_LockSurface(rgba) == 0) {
+        for (int y = 0; y < rgba->h; ++y) {
+            const Uint8 *row = (const Uint8 *) rgba->pixels + (size_t) y * (size_t) rgba->pitch;
+            for (int x = 0; x < rgba->w; ++x) {
+                if (row[x * 4 + 3] < 128) {
+                    continue;
+                }
+                const int sum = x + y;
+                const int off = abs(x - y);
+                if (sum < best_sum || (sum == best_sum && off < best_off)) {
+                    best_sum = sum;
+                    best_off = off;
+                    *tip_x = x;
+                    *tip_y = y;
+                    found = true;
+                }
+            }
+        }
+        SDL_UnlockSurface(rgba);
+    }
+    return found;
+}
+
+/* The TV's Pointer Size as 'S', 'M' or 'L', and the word it gave; 0 and
+ * "nothing" when the settings service does not say. */
+static char pointer_size(const char **said) {
+    char size = 0;
+    *said = "nothing";
+    char *reply = NULL;
+    if (HLunaServiceCallSync("luna://com.webos.settingsservice/getSystemSettings",
+                             "{\"category\":\"option\",\"keys\":[\"pointerSize\"]}", true, &reply) &&
+        reply != NULL) {
+        JSchemaInfo schema;
+        jschema_info_init(&schema, jschema_all(), NULL, NULL);
+        jdomparser_ref parser = jdomparser_create(&schema, 0);
+        if (parser && jdomparser_feed(parser, reply, (int) strlen(reply)) && jdomparser_end(parser)) {
+            jvalue_ref settings = jobject_get(jdomparser_get_result(parser), J_CSTR_TO_BUF("settings"));
+            jvalue_ref value = jis_object(settings) ? jobject_get(settings, J_CSTR_TO_BUF("pointerSize")) : NULL;
+            if (value != NULL && jis_string(value)) {
+                raw_buffer buf = jstring_get(value);
+                if (buf.m_len == 5 && strncmp(buf.m_str, "small", 5) == 0) {
+                    size = 'S';
+                    *said = "small";
+                } else if (buf.m_len == 6 && strncmp(buf.m_str, "medium", 6) == 0) {
+                    size = 'M';
+                    *said = "medium";
+                } else if (buf.m_len == 5 && strncmp(buf.m_str, "large", 5) == 0) {
+                    size = 'L';
+                    *said = "large";
+                } else {
+                    *said = "a size this app does not know";
+                }
+            }
+        }
+        if (parser) {
+            jdomparser_release(&parser);
+        }
+    }
+    free(reply);
+    return size;
+}
+
+/* webOS's picture for the size the TV is set to, read unless it is the one
+ * read already, with its tip found. False when there is none to use. ⓘ A size
+ * the service does not say keeps the picture read before, or reads medium. */
+static bool load_regular(void) {
+    const char *said = "nothing";
+    char size = pointer_size(&said);
+    if (size == 0) {
+        size = s_regular_size != 0 ? s_regular_size : 'M';
+    }
+    if (s_regular != NULL && size == s_regular_size) {
+        return true;
+    }
+    char path[64];
+    snprintf(path, sizeof(path), REGULAR_IMAGE, size);
+    SDL_Surface *loaded = IMG_Load(path);
+    if (loaded == NULL) {
+        tv_cursor_log("%s could not be read (%s)", path, IMG_GetError());
         return false;
     }
-    /* The drop placed the shift over in a clear canvas, the hot spot where
+    SDL_Surface *rgba = SDL_ConvertSurfaceFormat(loaded, SDL_PIXELFORMAT_RGBA32, 0);
+    SDL_FreeSurface(loaded);
+    if (rgba == NULL) {
+        tv_cursor_log("%s could not be converted (%s)", path, SDL_GetError());
+        return false;
+    }
+    int tip_x = 0, tip_y = 0;
+    if (!find_tip(rgba, &tip_x, &tip_y)) {
+        tv_cursor_log("%s (%dx%d): no tip found", path, rgba->w, rgba->h);
+        SDL_FreeSurface(rgba);
+        return false;
+    }
+    if (s_regular != NULL) {
+        SDL_FreeSurface(s_regular);
+    }
+    s_regular = rgba;
+    s_regular_size = size;
+    s_tip_x = tip_x;
+    s_tip_y = tip_y;
+    tv_cursor_log("webOS's pointer for the TV's Pointer Size (it said %s): %s, %dx%d, tip %d,%d", said, path,
+                  rgba->w, rgba->h, tip_x, tip_y);
+    return true;
+}
+
+/* The cursor showing, with its shift and the drop's line as they stand now.
+ * False, and the cursor that was there stays, when it cannot be made. */
+static bool build(void) {
+    const bool regular = s_look == LOOK_REGULAR;
+    double width = 3.0 - s_thin;
+    if (width < 1.0) width = 1.0;
+    SDL_Surface *picture = NULL;
+    if (regular) {
+        picture = s_regular != NULL ? SDL_ConvertSurfaceFormat(s_regular, SDL_PIXELFORMAT_RGBA32, 0) : NULL;
+        if (picture == NULL) {
+            tv_cursor_log("webOS's picture could not be copied (%s)", SDL_GetError());
+            return false;
+        }
+    } else {
+        picture = draw_drop(width);
+        if (picture == NULL) {
+            tv_cursor_log("the drop could not be drawn (%s)", SDL_GetError());
+            return false;
+        }
+    }
+    /* The picture placed the shift over in a clear canvas, the hot spot where
      * its tip was before the shift. */
     const int m = TV_CURSOR_MARGIN;
-    const int dx = s_shift_x < -m ? -m : (s_shift_x > m ? m : s_shift_x);
-    const int dy = s_shift_y < -m ? -m : (s_shift_y > m ? m : s_shift_y);
-    SDL_Surface *canvas = SDL_CreateRGBSurfaceWithFormat(0, drop->w + 2 * m, drop->h + 2 * m, 32,
+    const shift_t shift = s_shift[s_look];
+    const int dx = shift.x < -m ? -m : (shift.x > m ? m : shift.x);
+    const int dy = shift.y < -m ? -m : (shift.y > m ? m : shift.y);
+    SDL_Surface *canvas = SDL_CreateRGBSurfaceWithFormat(0, picture->w + 2 * m, picture->h + 2 * m, 32,
                                                          SDL_PIXELFORMAT_RGBA32);
     if (canvas == NULL) {
         tv_cursor_log("the canvas could not be made (%s)", SDL_GetError());
-        SDL_FreeSurface(drop);
+        SDL_FreeSurface(picture);
         return false;
     }
     SDL_FillRect(canvas, NULL, 0);
-    SDL_SetSurfaceBlendMode(drop, SDL_BLENDMODE_NONE);
-    SDL_Rect at = {m + dx, m + dy, drop->w, drop->h};
-    SDL_BlitSurface(drop, NULL, canvas, &at);
-    SDL_FreeSurface(drop);
+    SDL_SetSurfaceBlendMode(picture, SDL_BLENDMODE_NONE);
+    SDL_Rect at = {m + dx, m + dy, picture->w, picture->h};
+    SDL_BlitSurface(picture, NULL, canvas, &at);
+    SDL_FreeSurface(picture);
     const double scale = s_scale > 1.0 ? s_scale : 1.0;
     SDL_Surface *image = shrink(canvas, scale);
     SDL_FreeSurface(canvas);
@@ -272,8 +419,10 @@ static bool build(void) {
         tv_cursor_log("the shrink failed (%s)", SDL_GetError());
         return false;
     }
-    int hot_x = (int) floor((DROP_TIP_X + m) / scale);
-    int hot_y = (int) floor((DROP_TIP_Y + m) / scale);
+    const double tip_x = regular ? s_tip_x : DROP_TIP_X;
+    const double tip_y = regular ? s_tip_y : DROP_TIP_Y;
+    int hot_x = (int) floor((tip_x + m) / scale);
+    int hot_y = (int) floor((tip_y + m) / scale);
     if (hot_x >= image->w) hot_x = image->w - 1;
     if (hot_y >= image->h) hot_y = image->h - 1;
     SDL_Cursor *cursor = SDL_CreateColorCursor(image, hot_x, hot_y);
@@ -294,8 +443,13 @@ static bool build(void) {
     s_hot_x = hot_x;
     s_hot_y = hot_y;
     s_ready = true;
-    tv_cursor_log("cursor made: %dx%d, hot spot %d,%d, shifted %d,%d of the TV's pixels (right, down), line %.1f",
-               image->w, image->h, hot_x, hot_y, s_shift_x, s_shift_y, width);
+    if (regular) {
+        tv_cursor_log("cursor made, the regular one: %dx%d, hot spot %d,%d, shifted %d,%d of the TV's pixels"
+                      " (right, down)", image->w, image->h, hot_x, hot_y, shift.x, shift.y);
+    } else {
+        tv_cursor_log("cursor made: %dx%d, hot spot %d,%d, shifted %d,%d of the TV's pixels (right, down), line %.1f",
+                      image->w, image->h, hot_x, hot_y, shift.x, shift.y, width);
+    }
     return true;
 }
 
@@ -335,13 +489,19 @@ static const char *window_event_name(int event) {
     }
 }
 
-void tv_cursor_init(SDL_Window *window, int shift_x, int shift_y) {
+void tv_cursor_init(SDL_Window *window) {
     FILE *f = ctm_log_open(TV_CURSOR_LOG, "w");   /* a few lines a start: begun again each time */
     if (f != NULL) {
         fclose(f);
     }
-    s_shift_x = clamp_shift(shift_x);
-    s_shift_y = clamp_shift(shift_y);
+    if (app_configuration != NULL) {
+        const bridge_settings_t *saved = &app_configuration->bridge;
+        s_shift[LOOK_DROP].x = clamp_shift(saved->tv_cursor_x);
+        s_shift[LOOK_DROP].y = clamp_shift(saved->tv_cursor_y);
+        s_shift[LOOK_REGULAR].x = clamp_shift(saved->tv_cursor_regular_x);
+        s_shift[LOOK_REGULAR].y = clamp_shift(saved->tv_cursor_regular_y);
+        s_look = saved->tv_cursor_regular ? LOOK_REGULAR : LOOK_DROP;
+    }
     /* How much the TV enlarges Aurora: the panel against the window. */
     int win_w = 0, win_h = 0, panel_w = 0, panel_h = 0;
     if (window != NULL) {
@@ -350,8 +510,12 @@ void tv_cursor_init(SDL_Window *window, int shift_x, int shift_y) {
     if (win_w > 0 && SDL_webOSGetPanelResolution(&panel_w, &panel_h) && panel_w > win_w) {
         s_scale = (double) panel_w / (double) win_w;
     }
-    tv_cursor_log("the drop for a window %dx%d on a %dx%d panel, shrunk %.2f times",
-               win_w, win_h, panel_w, panel_h, s_scale);
+    tv_cursor_log("the %s for a window %dx%d on a %dx%d panel, shrunk %.2f times",
+                  s_look == LOOK_REGULAR ? "regular cursor" : "drop", win_w, win_h, panel_w, panel_h, s_scale);
+    if (s_look == LOOK_REGULAR && !load_regular()) {
+        tv_cursor_log("the regular cursor cannot be shown: the drop instead, this run");
+        s_look = LOOK_DROP;
+    }
     if (!build()) {
         tv_cursor_log("webOS's own pointer stays");
         return;
@@ -371,6 +535,11 @@ void tv_cursor_deinit(void) {
         SDL_FreeSurface(s_image);
         s_image = NULL;
     }
+    if (s_regular != NULL) {
+        SDL_FreeSurface(s_regular);
+        s_regular = NULL;
+        s_regular_size = 0;
+    }
     s_ready = false;
 }
 
@@ -378,6 +547,15 @@ void tv_cursor_tick(void) {
     const int why = SDL_AtomicSet(&s_reapply, 0);
     if (why == 0 || !s_ready || s_cursor == NULL) {
         return;
+    }
+    /* ⓘ The regular cursor follows the TV's Pointer Size, which is changed in
+     * the TV's own menus: asked again as the window comes back from them, not
+     * each time the pointer comes in. */
+    if (s_look == LOOK_REGULAR && why != SDL_WINDOWEVENT_ENTER) {
+        const char before = s_regular_size;
+        if (load_regular() && s_regular_size != before && build()) {
+            return;   /* made again, and set */
+        }
     }
     /* ⓘ Ours again if something else was set; if it is still ours, NULL is
      * SDL's own way to have the cursor that stands drawn again. Either way SDL
@@ -398,8 +576,8 @@ bool tv_cursor_adjust(int shift_x, int shift_y, int thin) {
     if (!s_ready) {
         return false;
     }
-    s_shift_x = clamp_shift(shift_x);
-    s_shift_y = clamp_shift(shift_y);
+    s_shift[s_look].x = clamp_shift(shift_x);
+    s_shift[s_look].y = clamp_shift(shift_y);
     if (thin >= 0) {
         s_thin = thin > 2 ? 2 : thin;   /* below 0: keep the line that stands */
     }
@@ -407,18 +585,25 @@ bool tv_cursor_adjust(int shift_x, int shift_y, int thin) {
 }
 
 void tv_cursor_get_shift(int *shift_x, int *shift_y) {
-    if (shift_x != NULL) *shift_x = s_shift_x;
-    if (shift_y != NULL) *shift_y = s_shift_y;
+    if (shift_x != NULL) *shift_x = s_shift[s_look].x;
+    if (shift_y != NULL) *shift_y = s_shift[s_look].y;
 }
 
 bool tv_cursor_keep(void) {
     if (!s_ready || app_configuration == NULL) {
         return false;
     }
-    app_configuration->bridge.tv_cursor_x = s_shift_x;
-    app_configuration->bridge.tv_cursor_y = s_shift_y;
+    const shift_t shift = s_shift[s_look];
+    if (s_look == LOOK_REGULAR) {
+        app_configuration->bridge.tv_cursor_regular_x = shift.x;
+        app_configuration->bridge.tv_cursor_regular_y = shift.y;
+    } else {
+        app_configuration->bridge.tv_cursor_x = shift.x;
+        app_configuration->bridge.tv_cursor_y = shift.y;
+    }
     settings_save(app_configuration);
-    tv_cursor_log("kept as this TV's: shifted %d,%d of the TV's pixels (right, down)", s_shift_x, s_shift_y);
+    tv_cursor_log("kept as this TV's for the %s: shifted %d,%d of the TV's pixels (right, down)",
+                  s_look == LOOK_REGULAR ? "regular cursor" : "drop", shift.x, shift.y);
     return true;
 }
 
@@ -426,18 +611,55 @@ bool tv_cursor_drawn(void) {
     return s_ready;
 }
 
+bool tv_cursor_regular(void) {
+    return s_look == LOOK_REGULAR;
+}
+
+bool tv_cursor_set_look(bool regular) {
+    if (regular && !load_regular()) {
+        tv_cursor_log("the regular cursor cannot be shown: the %s stays",
+                      s_look == LOOK_REGULAR ? "regular one" : "drop");
+        return false;
+    }
+    const int was = s_look;
+    s_look = regular ? LOOK_REGULAR : LOOK_DROP;
+    if (!build()) {
+        s_look = was;
+        return false;
+    }
+    if (app_configuration != NULL && app_configuration->bridge.tv_cursor_regular != regular) {
+        app_configuration->bridge.tv_cursor_regular = regular;
+        settings_save(app_configuration);
+    }
+    tv_cursor_log("the %s cursor shows, shifted %d,%d of the TV's pixels (right, down)",
+                  regular ? "regular" : "sharp", s_shift[s_look].x, s_shift[s_look].y);
+    return true;
+}
+
+bool tv_cursor_toggle_look(void) {
+    return tv_cursor_set_look(s_look != LOOK_REGULAR);
+}
+
 void tv_cursor_describe(char *out, size_t len) {
     const char *mode = tv_cursor_mode_on() ? "on" : (tv_cursor_mode_switchable() ? "off" : "off(hardware-mouse)");
-    const int saved_x = app_configuration != NULL ? app_configuration->bridge.tv_cursor_x : 0;
-    const int saved_y = app_configuration != NULL ? app_configuration->bridge.tv_cursor_y : 0;
+    const bool regular = s_look == LOOK_REGULAR;
+    int saved_x = 0, saved_y = 0;
+    if (app_configuration != NULL) {
+        saved_x = regular ? app_configuration->bridge.tv_cursor_regular_x : app_configuration->bridge.tv_cursor_x;
+        saved_y = regular ? app_configuration->bridge.tv_cursor_regular_y : app_configuration->bridge.tv_cursor_y;
+    }
     if (!s_ready || s_image == NULL) {
         snprintf(out, len, "tv_cursor=%s, webOS's own pointer (Aurora's could not be made: see logs/tv-cursor.log)",
                  mode);
         return;
     }
-    snprintf(out, len, "tv_cursor=%s shift=%d,%d saved=%d,%d thin=%d hot=%d,%d image=%dx%d scale=%.2f reapplied=%d",
-             mode, s_shift_x, s_shift_y, saved_x, saved_y, s_thin, s_hot_x, s_hot_y, s_image->w, s_image->h,
-             s_scale, s_reapplied);
+    const char *look = !regular ? "sharp"
+                                : (s_regular_size == 'S' ? "regular(small)"
+                                                         : (s_regular_size == 'L' ? "regular(large)" : "regular(medium)"));
+    snprintf(out, len,
+             "tv_cursor=%s look=%s shift=%d,%d saved=%d,%d thin=%d hot=%d,%d image=%dx%d scale=%.2f reapplied=%d",
+             mode, look, s_shift[s_look].x, s_shift[s_look].y, saved_x, saved_y, s_thin, s_hot_x, s_hot_y,
+             s_image->w, s_image->h, s_scale, s_reapplied);
 }
 
 #else
@@ -448,10 +670,8 @@ void tv_cursor_log(const char *fmt, ...) {
     (void) fmt;
 }
 
-void tv_cursor_init(SDL_Window *window, int shift_x, int shift_y) {
+void tv_cursor_init(SDL_Window *window) {
     (void) window;
-    (void) shift_x;
-    (void) shift_y;
 }
 
 void tv_cursor_deinit(void) {
@@ -477,6 +697,19 @@ bool tv_cursor_keep(void) {
 }
 
 bool tv_cursor_drawn(void) {
+    return false;
+}
+
+bool tv_cursor_regular(void) {
+    return false;
+}
+
+bool tv_cursor_set_look(bool regular) {
+    (void) regular;
+    return false;
+}
+
+bool tv_cursor_toggle_look(void) {
     return false;
 }
 

@@ -441,9 +441,9 @@ need "the TV's cursor stays beside the host's in an absolute-mouse stream" \
 # ⓘ Lines of ours in upstream's files. Taking upstream's back compiles, and:
 # root.c's, the bar that aligns the TV cursor no longer takes the keys, so the
 # arrows go to the PC and the bar never sees one; session_keyboard.c's,
-# Ctrl+Alt+Shift+M and Ctrl+Alt+Shift+A do nothing again on a keyboard webOS
-# hands to the app (one the TV holds is input/bridge_keyboard.c's, a bridged
-# one the bridge core's).
+# Ctrl+Alt+Shift+M, Ctrl+Alt+Shift+A and Ctrl+Alt+Shift+C do nothing again on
+# a keyboard webOS hands to the app (one the TV holds is
+# input/bridge_keyboard.c's, a bridged one the bridge core's).
 need "the bar that aligns the TV cursor takes the input as the overlay does" \
      src/app/ui/root.c "|| cursor_align_shown();"
 need "Ctrl+Alt+Shift+M switches the TV cursor on a keyboard webOS hands over" \
@@ -453,6 +453,9 @@ need "Ctrl+Alt+Shift+A is one of the stream's shortcuts" \
 in_order "Ctrl+Alt+Shift+A opens the align bar" \
      src/app/stream/input/session_keyboard.c "void performPendingSpecialKeyCombo" \
      "case KeyComboAlignCursor:" "cursor_align_request();"
+in_order "Ctrl+Alt+Shift+C, upstream's show-the-mouse, switches the sharp and regular TV cursors" \
+     src/app/stream/input/session_keyboard.c "void performPendingSpecialKeyCombo" \
+     "case KeyComboToggleCursorHide:" "tv_cursor_toggle_look();"
 
 echo
 if [ "$fail" -eq 0 ]; then

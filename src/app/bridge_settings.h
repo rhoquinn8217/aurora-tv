@@ -103,14 +103,24 @@ typedef struct bridge_settings_t {
      * input/bridge_override.h. */
     bool override;
     /* ⭐ WHERE THIS TV DRAWS THE TIP OF ITS CURSOR, in the TV's own pixels,
-     * right and down (input/tv_cursor.h). Set by Align TV cursor in the
-     * overlay's Mouse menu, and so kept per TV, since this file is the TV's.
+     * right and down (input/tv_cursor.h): the drop's. Set by the align bar
+     * (Ctrl+Alt+Shift+A), and so kept per TV, since this file is the TV's.
      * ⓘ The TV cursor is not the bridge's, but it is this fork's, and this is
      * where this fork's settings are saved. -1, 3 until a TV is aligned: where
      * rhoquinn8217 put it on the C1 by eye, and it looked right on the B4 as
      * well (2026-10-11). */
     int tv_cursor_x;
     int tv_cursor_y;
+    /* ⭐ WHICH TV CURSOR SHOWS: false, the drop Aurora draws; true, the regular
+     * one, webOS's own picture (rhoquinn8217, 2026-10-12). Switched by
+     * Ctrl+Alt+Shift+C and kept, as the TV cursor's on and off are. */
+    bool tv_cursor_regular;
+    /* Where the regular one draws its tip, kept apart from the drop's ("The
+     * regular cursor should be adjustable as well", and one alignment per
+     * cursor: "yes"). 5, -1 until aligned: where the first builds, which
+     * showed this picture, found its tip on the C1 by eye (2026-10-11). */
+    int tv_cursor_regular_x;
+    int tv_cursor_regular_y;
 } bridge_settings_t;
 
 /* The values a fresh install starts with. settings_initialize calls it after

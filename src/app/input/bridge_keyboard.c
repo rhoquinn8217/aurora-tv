@@ -59,6 +59,7 @@ enum {
     SHORTCUT_MOUSE,     /* Ctrl+Alt+Shift+M, Moonlight's mouse mode: the TV cursor on or off */
     SHORTCUT_ALIGN,     /* Ctrl+Alt+Shift+A: the bar that aligns the TV cursor */
     SHORTCUT_HOST_CURSOR, /* a BRIDGED keyboard's Ctrl+Alt+Shift+N, for the host: see send_host_shortcut */
+    SHORTCUT_LOOK,      /* Ctrl+Alt+Shift+C, Moonlight's "show the mouse": the sharp TV cursor or the regular one */
 };
 static SDL_atomic_t s_shortcut;
 /* 1 when the shortcut waiting came from a bridged keyboard, by the bridge core
@@ -528,8 +529,11 @@ bool bridge_keyboard_evdev_key(stream_input_t *input, short vk, bool down, char 
         case VK_A:
             shortcut = SHORTCUT_ALIGN;
             break;
+        case VK_C:
+            shortcut = SHORTCUT_LOOK;
+            break;
         default:
-            /* ⓘ Moonlight's Z, X, C and D only write a log line in this app
+            /* ⓘ Moonlight's Z, X and D only write a log line in this app
              * (performPendingSpecialKeyCombo), so they stay the host's. O is
              * a letter like any other again. ⓘ So does N, which the host
              * itself answers: it shows or hides its cursor in the stream. */
@@ -677,6 +681,16 @@ static void act_on_shortcut(int shortcut, bool bridged) {
             keyboard_log("shortcut Ctrl+Alt+Shift+A on %s: the bar that aligns the TV cursor", which);
             cursor_align_request();
             break;
+        case SHORTCUT_LOOK:
+            commons_log_info("Input", "Keyboard: Ctrl+Alt+Shift+C, the sharp TV cursor or the regular one");
+            if (tv_cursor_toggle_look()) {
+                keyboard_log("shortcut Ctrl+Alt+Shift+C on %s: the %s TV cursor", which,
+                             tv_cursor_regular() ? "regular" : "sharp");
+            } else {
+                keyboard_log("shortcut Ctrl+Alt+Shift+C on %s: the TV cursor could not be switched"
+                             " (logs/tv-cursor.log says why)", which);
+            }
+            break;
         case SHORTCUT_HOST_CURSOR:
             commons_log_info("Input", "Keyboard: a bridged keyboard's Ctrl+Alt+Shift+N, sent to the host");
             keyboard_log("shortcut Ctrl+Alt+Shift+N on %s: sent to the host as the stream's own keys,"
@@ -699,6 +713,9 @@ void bridge_keyboard_bridged_shortcut(char letter) {
             break;
         case 'N':
             shortcut = SHORTCUT_HOST_CURSOR;
+            break;
+        case 'C':
+            shortcut = SHORTCUT_LOOK;
             break;
         default:
             return;

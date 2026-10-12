@@ -26,6 +26,15 @@
  * is. ⓘ The two go together: the cursors meet only while the host is told the
  * point, and that is exactly what stops at the edge.
  *
+ * ⭐ TWO CURSORS, SWITCHED BY Ctrl+Alt+Shift+C (rhoquinn8217, 2026-10-12: "I
+ * want a chord that toggles between my small sharp tv cursor and the regular
+ * cursor. The regular cursor should be adjustable as well"): the drop Aurora
+ * draws, and the regular one, webOS's own picture read from the TV as webOS
+ * draws it, at the size the TV's Pointer Size setting names ("use whatever is
+ * set for the TV"). Each keeps its own alignment ("yes"), and which one shows
+ * is kept as the on and off are. ⓘ C is upstream's "show the mouse", which
+ * does nothing else in this app, and the host answers only N and F1 to F13.
+ *
  * ⓘ An SDL that refuses the cursor keeps webOS's own pointer, and
  * logs/tv-cursor.log says so. */
 
@@ -37,13 +46,14 @@
 
 #include <SDL.h>
 
-/* The furthest the drop can be shifted either way, in the TV's own pixels. */
+/* The furthest either cursor can be shifted either way, in the TV's own
+ * pixels. */
 #define TV_CURSOR_SHIFT_MAX 16
 
 /* Once the window is up: its size against the panel's says how much the TV
- * enlarges the app, and the pointer is shrunk by as much. The shift is this
- * TV's, from its settings (bridge_settings.h). */
-void tv_cursor_init(SDL_Window *window, int shift_x, int shift_y);
+ * enlarges the app, and the pointer is shrunk by as much. Which cursor, and
+ * each one's shift, are this TV's, from its settings (bridge_settings.h). */
+void tv_cursor_init(SDL_Window *window);
 
 /* Before SDL's video goes. */
 void tv_cursor_deinit(void);
@@ -52,19 +62,31 @@ void tv_cursor_deinit(void);
  * has the screen again, in case webOS reset it while it did not. */
 void tv_cursor_tick(void);
 
-/* Live, and not saved: shift the pointer this many of the TV's own pixels to
- * the right and down of its tip, up to TV_CURSOR_SHIFT_MAX either way, and draw
- * the line 3 less `thin` of them wide (below 0: keep what stands). False when
- * there is no cursor of Aurora's to change. From the control port (`cursor`)
- * and from the Align bar, which saves it itself. */
+/* Live, and not saved: shift the cursor showing this many of the TV's own
+ * pixels to the right and down of its tip, up to TV_CURSOR_SHIFT_MAX either
+ * way, and draw the drop's line 3 less `thin` of them wide (below 0: keep what
+ * stands). False when there is no cursor of Aurora's to change. From the
+ * control port (`cursor`) and from the Align bar, which saves it itself. */
 bool tv_cursor_adjust(int shift_x, int shift_y, int thin);
 
-/* The shift that stands now, in the TV's own pixels, right and down. */
+/* The shift that stands now for the cursor showing, in the TV's own pixels,
+ * right and down. */
 void tv_cursor_get_shift(int *shift_x, int *shift_y);
 
-/* Saves the shift that stands now as this TV's, at once. From the align bar's
- * Enter or A. */
+/* Saves the shift that stands now as this TV's for the cursor showing, at
+ * once. From the align bar's Enter or A. */
 bool tv_cursor_keep(void);
+
+/* Which cursor shows: true for the regular one, webOS's own picture; false for
+ * the drop Aurora draws. */
+bool tv_cursor_regular(void);
+
+/* Show the regular cursor or the drop, with its own shift, and keep the choice
+ * at once. False when that cursor cannot be made, and the one that stood
+ * stays. ⓘ From Ctrl+Alt+Shift+C on every keyboard, and from the control port
+ * (`cursor regular`, `cursor sharp`). */
+bool tv_cursor_set_look(bool regular);
+bool tv_cursor_toggle_look(void);
 
 /* Is the cursor Aurora's own? False where SDL refused it and webOS's own
  * pointer stays: there is nothing to shift. */
