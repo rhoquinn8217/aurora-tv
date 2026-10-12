@@ -398,7 +398,7 @@ in_order "a bridged controller raises the pop-up" \
 in_order "the overlay sends the pop-up away as it opens" \
      src/app/ui/streaming/streaming.controller.c "bool show_overlay" \
      "bridge_prompt_dismiss();" "overlay_showing = true;"
-in_order "the pop-up and its message go with the stream" \
+in_order "the pop-up, its message and the TV cursor's align bar go with the stream" \
      src/app/ui/streaming/streaming.controller.c "static void controller_dtor" \
      "bridge_prompt_stream_ended();" "fragment->soft_kbd = NULL;"
 in_order "the USB Bridge panel goes before the screen's focus group" \
@@ -430,6 +430,32 @@ in_order "what a pad holds is noted before it is announced again" \
 # the streaming overlay.
 need "the overlay's focus moves the way the wheel turns" \
      src/app/lvgl/input/lv_sdl_drv_wheel_input.c "data->enc_diff = (e.wheel.y > 0) ? -1 : 1;"
+
+# --- the TV's cursor in the stream (rhoquinn8217, 2026-10-11) ---------------
+# ⓘ Upstream's file: the stream hid the TV's cursor below webOS 9. Taking
+# upstream's function back compiles, and the C1 hides it again.
+need "the TV's cursor stays beside the host's in an absolute-mouse stream" \
+     src/app/input/app_input.c "if (grab && app_configuration->absmouse && !app_configuration->hardware_mouse) {"
+
+# --- the TV cursor's shortcuts and align bar (rhoquinn8217, 2026-10-11) -----
+# ⓘ Lines of ours in upstream's files. Taking upstream's back compiles, and:
+# root.c's, the bar that aligns the TV cursor no longer takes the keys, so the
+# arrows go to the PC and the bar never sees one; session_keyboard.c's,
+# Ctrl+Alt+Shift+M, Ctrl+Alt+Shift+A and Ctrl+Alt+Shift+C do nothing again on
+# a keyboard webOS hands to the app (one the TV holds is
+# input/bridge_keyboard.c's, a bridged one the bridge core's).
+need "the bar that aligns the TV cursor takes the input as the overlay does" \
+     src/app/ui/root.c "|| cursor_align_shown();"
+need "Ctrl+Alt+Shift+M switches the TV cursor on a keyboard webOS hands over" \
+     src/app/stream/input/session_keyboard.c "tv_cursor_toggle_mode();"
+need "Ctrl+Alt+Shift+A is one of the stream's shortcuts" \
+     src/app/stream/input/session_keyboard.c "{KeyComboAlignCursor,        SDLK_a, SDL_SCANCODE_A, true},"
+in_order "Ctrl+Alt+Shift+A opens the align bar" \
+     src/app/stream/input/session_keyboard.c "void performPendingSpecialKeyCombo" \
+     "case KeyComboAlignCursor:" "cursor_align_request();"
+in_order "Ctrl+Alt+Shift+C, upstream's show-the-mouse, switches the sharp and regular TV cursors" \
+     src/app/stream/input/session_keyboard.c "void performPendingSpecialKeyCombo" \
+     "case KeyComboToggleCursorHide:" "tv_cursor_toggle_look();"
 
 echo
 if [ "$fail" -eq 0 ]; then

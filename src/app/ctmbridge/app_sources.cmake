@@ -17,6 +17,8 @@ target_sources(moonlight-lib PRIVATE
         ${CMAKE_SOURCE_DIR}/src/app/input/bridge_request.c
         ${CMAKE_SOURCE_DIR}/src/app/input/ctm_bridge_gesture.c
         ${CMAKE_SOURCE_DIR}/src/app/input/device_groups.c
+        ${CMAKE_SOURCE_DIR}/src/app/input/mouse_seen.c
+        ${CMAKE_SOURCE_DIR}/src/app/input/tv_cursor.c
         ${CMAKE_SOURCE_DIR}/src/app/stream/bridge_pointer.c
         ${CMAKE_SOURCE_DIR}/src/app/stream/bridge_proof.c
         ${CMAKE_SOURCE_DIR}/src/app/stream/bridge_session.c
@@ -24,7 +26,8 @@ target_sources(moonlight-lib PRIVATE
         ${CMAKE_SOURCE_DIR}/src/app/ui/settings/panes/usbbridge.pane.c
         ${CMAKE_SOURCE_DIR}/src/app/ui/streaming/bridge_overlay.c
         ${CMAKE_SOURCE_DIR}/src/app/ui/streaming/bridge_prompt.c
-        ${CMAKE_SOURCE_DIR}/src/app/ui/streaming/ctm_panel.c)
+        ${CMAKE_SOURCE_DIR}/src/app/ui/streaming/ctm_panel.c
+        ${CMAKE_SOURCE_DIR}/src/app/ui/streaming/cursor_align.c)
 
 # The pairing proof's signer (src/app/stream/bridge_proof.c) reads this TV's
 # paired key with mbedtls, which libgamestream links for itself, privately.

@@ -11,6 +11,26 @@
 #include "input/ctm_bridge_gesture.h"
 #if defined(TARGET_WEBOS)
 #include "input/bridge_keyboard.h"
+#include "ctm_bridge_glue.h"   /* bridge_set_shortcut_request, bridge_set_pointer_used_request */
+#endif
+#include "input/tv_cursor.h"
+#include "input/mouse_seen.h"
+#include "ui/streaming/cursor_align.h"   /* cursor_align_shown */
+
+#if defined(TARGET_WEBOS)
+/* ⭐ The pop-up that asks to turn the TV cursor off (ui/streaming/bridge_prompt.h)
+ * comes as soon as a mouse the TV saw move is bridged (rhoquinn8217,
+ * 2026-10-11: "The message should appear immediately after a mouse is
+ * bridged"), and is raised here, on the app's loop. A mouse part the TV never
+ * saw move (input/mouse_seen.h) asks instead at its first use, which the
+ * bridge core tells on the mouse's own thread. ⓘ Not both for one bridge: a
+ * pop-up raised at the bridge takes the first use that follows it. */
+static SDL_atomic_t s_pointer_used;
+static int s_asked_at_bridge = 0;
+
+static void pointer_used(void) {
+    SDL_AtomicSet(&s_pointer_used, 1);
+}
 #endif
 
 void bridge_app_before_sdl(void) {
@@ -49,12 +69,22 @@ void bridge_app_started(app_t *app) {
     /* ⓘ Once the UI and the bus are up, because every command runs through
      * them. A no-op unless built with AURORA_TERMINAL_CONTROL. */
     control_server_start(app);
+    /* ⓘ Once the window is up: the TV's pointer with its tip on the point the
+     * host is told, the cursor and the place this TV keeps (input/tv_cursor.h). */
+    tv_cursor_init(app->ui.window);
+#if defined(TARGET_WEBOS)
+    /* ⓘ What the bridge core finds in a bridged keyboard's reports, beside
+     * its S: Ctrl+Alt+Shift and A, C, M or N; and a bridged mouse's first use. */
+    bridge_set_shortcut_request(bridge_keyboard_bridged_shortcut);
+    bridge_set_pointer_used_request(pointer_used);
+#endif
 }
 
 void bridge_app_stopping(void) {
     /* ⓘ A stop asked in the last pass of the loop still runs. */
     bridge_session_run_pending();
     control_server_stop();
+    tv_cursor_deinit();
 }
 
 void bridge_app_events(app_t *app) {
@@ -76,17 +106,39 @@ void bridge_app_events(app_t *app) {
      * and the gyro is exactly what it deliberately leaves alone. Output is
      * unaffected either way. Nothing else could produce that pattern. */
     /* ⓘ The question a bridge raises takes the input the same way the
-     * overlay does (ui/streaming/bridge_prompt.h), so both count here: a
-     * bridged controller is held while either is up, and a keyboard works
-     * either. */
-    const bool interface_has_input = streaming_overlay_shown() || bridge_prompt_shown();
+     * overlay does (ui/streaming/bridge_prompt.h), and so does the bar that
+     * aligns the TV cursor (ui/streaming/cursor_align.h), so all three count
+     * here: a bridged controller is held while any is up, and a keyboard
+     * works any. */
+    const bool interface_has_input = streaming_overlay_shown() || bridge_prompt_shown() || cursor_align_shown();
     ctm_bridge_gesture_tick(&app->input, app->session, interface_has_input);
 #if defined(TARGET_WEBOS)
     /* The TV's keyboard grab looking again after a bridge or a release. */
     bridge_keyboard_tick(interface_has_input);
+    /* The pointers the TV has seen move, and the pop-up that asks about the TV
+     * cursor: at the bridge for a mouse seen moving, at its first use for one
+     * never seen. */
+    mouse_seen_tick();
+    if (app->session == NULL) {
+        s_asked_at_bridge = 0;
+    }
+    if (mouse_seen_take_bridged()) {
+        s_asked_at_bridge++;
+        bridge_prompt_request_tv_cursor();
+    }
+    if (SDL_AtomicSet(&s_pointer_used, 0) != 0) {
+        if (s_asked_at_bridge > 0) {
+            s_asked_at_bridge--;
+            tv_cursor_log("the bridged mouse's first use: asked already, at its bridge");
+        } else {
+            bridge_prompt_request_tv_cursor();
+        }
+    }
 #else
     (void) interface_has_input;
 #endif
+    /* The TV's cursor, put back if the window has the screen again. */
+    tv_cursor_tick();
     /* ⓘ Upstream v1.2.9's touchpad tap-hold, for its touchpad mouse mode, runs
      * in app.c right after this. It reads the same SDL touchpad state the
      * gesture polls here; neither consumes events, so the two coexist.

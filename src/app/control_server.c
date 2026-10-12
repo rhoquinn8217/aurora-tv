@@ -31,6 +31,8 @@
 #include "ui/streaming/bridge_prompt.h"
 #include "input/bridge_override.h"
 #include "input/bridge_keyboard.h"
+#include "input/tv_cursor.h"
+#include "ui/streaming/cursor_align.h"
 
 #if defined(TARGET_WEBOS)
 #include "ctm_bridge_glue.h"
@@ -132,6 +134,11 @@ static void cmd_help(control_job_t *job)
                "keys                    key events counted since the app started: the TV's keyboard grab, and webOS\n"
                "set settle <ms>         how long to let the link settle before a DS4 handback tone\n"
                "signal refuse <n>       play a device's refusal signal; no plug has to fail\n"
+               "cursor [<right> <down> [<thin>]]  Aurora's TV pointer: what stands, or a shift and a\n"
+               "                        thinner outline to try live, in the TV's own pixels; not saved\n"
+               "cursor on|off           the TV cursor on or off, and saved, as Ctrl+Alt+Shift+M does\n"
+               "cursor align            open the bar that aligns the TV cursor, as Ctrl+Alt+Shift+A does\n"
+               "cursor sharp|regular    the drop or webOS's own pointer, and saved, as Ctrl+Alt+Shift+C does\n"
                "<device> is its number, its node, its vid:pid, or part of its name; <n> is from groups\n");
 }
 
@@ -323,6 +330,48 @@ static void cmd_input(control_job_t *job)
 /* Where key events have come from since the app started: the TV's keyboard
  * grab, and webOS through SDL. Works with no stream too, which is how to see
  * whether webOS hands a keyboard's keys to the app at all. */
+/* Aurora's TV pointer (input/tv_cursor.h): what stands now, or a shift and a
+ * thinning to try live, not saved (rhoquinn8217, 2026-10-11: "move it
+ * slightly down and to the right"), so a test needs no build per try. And
+ * the TV cursor on or off, saved, as Ctrl+Alt+Shift+M switches it; the align
+ * bar, as Ctrl+Alt+Shift+A opens it; and which cursor, saved, as
+ * Ctrl+Alt+Shift+C switches it. */
+static void cmd_cursor(control_job_t *job, const char *args)
+{
+    if (strcasecmp(args, "align") == 0) {
+        cursor_align_request();
+        reply(job, "OK the align bar is asked for: it opens on the interface's next pass, or says why not\n");
+        return;
+    }
+    if (strcasecmp(args, "sharp") == 0 || strcasecmp(args, "regular") == 0) {
+        if (!tv_cursor_set_look(strcasecmp(args, "regular") == 0)) {
+            reply(job, "ERR that cursor could not be made: see logs/tv-cursor.log\n");
+            return;
+        }
+    } else if (strcasecmp(args, "on") == 0 || strcasecmp(args, "off") == 0) {
+        if (!tv_cursor_set_mode(strcasecmp(args, "on") == 0)) {
+            reply(job, "%s", tv_cursor_mode_switchable()
+                                 ? "ERR the TV cursor stays off while a mouse is bridged, as the TV now says\n"
+                                 : "ERR the TV cursor cannot be switched while \"Use mouse hardware\" is on\n");
+            return;
+        }
+    } else if (*args != '\0') {
+        int right = 0, down = 0, thin = -1;
+        const int got = sscanf(args, "%d %d %d", &right, &down, &thin);
+        if (got < 2) {
+            reply(job, "ERR usage: cursor [<right> <down> [<thin>]], in the TV's own pixels\n");
+            return;
+        }
+        if (!tv_cursor_adjust(right, down, got >= 3 ? thin : -1)) {
+            reply(job, "ERR Aurora has no pointer of its own to change: see logs/tv-cursor.log\n");
+            return;
+        }
+    }
+    char line[224];
+    tv_cursor_describe(line, sizeof line);
+    reply(job, "OK %s\n", line);
+}
+
 static void cmd_keys(control_job_t *job)
 {
     char counts[160];
@@ -985,6 +1034,8 @@ static void run_command(control_job_t *job)
         cmd_input(job);
     } else if (strcasecmp(verb, "keys") == 0) {
         cmd_keys(job);
+    } else if (strcasecmp(verb, "cursor") == 0) {
+        cmd_cursor(job, args);
     } else if (strcasecmp(verb, "prompt") == 0) {
         cmd_prompt(job, args);
 #if defined(TARGET_WEBOS)

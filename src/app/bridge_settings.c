@@ -31,6 +31,11 @@ void bridge_settings_defaults(bridge_settings_t *settings) {
     set_string(&settings->auto_macs, "");
     settings->auto_all = false;
     settings->override = false;
+    settings->tv_cursor_x = -1;
+    settings->tv_cursor_y = 3;
+    settings->tv_cursor_regular = false;
+    settings->tv_cursor_regular_x = 5;
+    settings->tv_cursor_regular_y = -1;
 }
 
 void bridge_settings_write(FILE *fp, const bridge_settings_t *settings) {
@@ -61,6 +66,11 @@ void bridge_settings_write(FILE *fp, const bridge_settings_t *settings) {
     }
     ini_write_bool(fp, "bridge_auto_all", settings->auto_all);
     ini_write_bool(fp, "bridge_override", settings->override);
+    ini_write_int(fp, "tv_cursor_shift_x", settings->tv_cursor_x);
+    ini_write_int(fp, "tv_cursor_shift_y", settings->tv_cursor_y);
+    ini_write_string(fp, "tv_cursor_look", settings->tv_cursor_regular ? "regular" : "sharp");
+    ini_write_int(fp, "tv_cursor_regular_shift_x", settings->tv_cursor_regular_x);
+    ini_write_int(fp, "tv_cursor_regular_shift_y", settings->tv_cursor_regular_y);
 }
 
 bool bridge_settings_parse(bridge_settings_t *settings, const char *name, const char *value) {
@@ -86,6 +96,16 @@ bool bridge_settings_parse(bridge_settings_t *settings, const char *name, const 
         settings->auto_all = INI_IS_TRUE(value);
     } else if (INI_NAME_MATCH("bridge_override")) {
         settings->override = INI_IS_TRUE(value);
+    } else if (INI_NAME_MATCH("tv_cursor_shift_x")) {
+        settings->tv_cursor_x = atoi(value);
+    } else if (INI_NAME_MATCH("tv_cursor_shift_y")) {
+        settings->tv_cursor_y = atoi(value);
+    } else if (INI_NAME_MATCH("tv_cursor_look")) {
+        settings->tv_cursor_regular = strcmp(value, "regular") == 0;
+    } else if (INI_NAME_MATCH("tv_cursor_regular_shift_x")) {
+        settings->tv_cursor_regular_x = atoi(value);
+    } else if (INI_NAME_MATCH("tv_cursor_regular_shift_y")) {
+        settings->tv_cursor_regular_y = atoi(value);
     } else {
         return false;
     }

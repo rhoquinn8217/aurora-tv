@@ -937,6 +937,16 @@ bool ctm_bridge_gesture_event_is_bridged(const char *dev_path) {
     return ctm_bridge_node_is_plugged(node);
 }
 
+/* The same walk, asked of one HID node: is dev_path that part? */
+bool ctm_bridge_gesture_event_on_node(const char *dev_path, const char *node) {
+    char found[64];
+    if (dev_path == NULL || node == NULL || node[0] == '\0' ||
+        !hidraw_node_for_event(dev_path, found, sizeof(found))) {
+        return false;
+    }
+    return strcmp(found, node) == 0;
+}
+
 /* ⭐⭐ IS THE SDL CONTROLLER AT dev_path THE DEVICE BEHIND THE ROW node?
  *
  * The one join, used by the bridge request, the player lookup and the MAC

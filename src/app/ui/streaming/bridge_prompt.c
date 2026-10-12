@@ -16,6 +16,8 @@
 #include "stream/session_priv.h"
 #include "stream/bridge_session.h"
 #include "streaming.controller.h"
+#include "cursor_align.h"
+#include "input/tv_cursor.h"
 #include "util/i18n.h"
 
 /* How long it waits for an answer. ⓘ Three more than the notice it replaces,
@@ -93,7 +95,18 @@ typedef struct {
     const char *done;
 } prompt_words_t;
 
+/* ⭐ WHAT IT ASKS ABOUT. The TV's mouse controls when a controller is bridged,
+ * since 2026-10-01; and since 2026-10-11 the TV's cursor, the first time a
+ * bridged mouse is used (rhoquinn8217: "If a mouse is bridge, show a message
+ * asking to turn off TV cursor with a timer"). One pop-up at a time, in one
+ * place, with one count. */
+enum {
+    PROMPT_ABOUT_MOUSE_CONTROLS = 0,
+    PROMPT_ABOUT_TV_CURSOR,
+};
+
 static lv_obj_t *s_mbox = NULL;
+static int s_about = PROMPT_ABOUT_MOUSE_CONTROLS;
 static lv_timer_t *s_timer = NULL;
 static int s_seconds = 0;
 /* Why it is closing, for the log: set by whoever closes it, and "dismissed"
@@ -145,6 +158,22 @@ static prompt_words_t prompt_words(bool vmouse, bool touchpad_mouse) {
             locstr("Leave it on"),
             locstr("The touchpad's mouse mode has turned off. "
                    "Toggle Virtual Mouse on in the streaming overlay to bring it back.")};
+}
+
+/* ⭐ The TV cursor's (rhoquinn8217's wording, 2026-10-11: "Warning: Turn off TV
+ * cursor. It is inactive while the mouse is bridged."). ⓘ Its way back is
+ * Moonlight's own shortcut for that switch, which works on every keyboard. */
+static prompt_words_t tv_cursor_words(void) {
+    return (prompt_words_t) {
+            locstr("Warning: Turn off TV cursor. It is inactive while the mouse is bridged."),
+            locstr("Turn off TV cursor"),
+            locstr("Leave it on"),
+            locstr("TV cursor has turned off. Press Ctrl+Alt+Shift+M to turn it back on.")};
+}
+
+/* The message after the TV cursor's button stays while the cursor is off. */
+static bool tv_cursor_off(void) {
+    return !tv_cursor_mode_on();
 }
 
 /* The top of the overlay's row of buttons, in pixels down the picture, read
@@ -373,6 +402,9 @@ static void on_deleted(lv_event_t *event) {
         return;
     }
     commons_log_info("Streaming", "bridge prompt: closed, %s", s_outcome != NULL ? s_outcome : "dismissed");
+    if (s_about == PROMPT_ABOUT_TV_CURSOR) {
+        tv_cursor_log("the bridged mouse's pop-up: closed, %s", s_outcome != NULL ? s_outcome : "dismissed");
+    }
     s_mbox = NULL;
     s_outcome = NULL;
     s_seconds = 0;
@@ -394,6 +426,15 @@ static void on_deleted(lv_event_t *event) {
 /* The button was pressed. ⚠️ Call it while the pop-up still stands: the message
  * that follows takes its look from the pop-up and its backdrop. */
 static void switch_off(const char *by) {
+    if (s_about == PROMPT_ABOUT_TV_CURSOR) {
+        commons_log_info("Streaming", "bridge prompt: accepted, %s -- the TV cursor goes off", by);
+        tv_cursor_log("the bridged mouse's pop-up: accepted, %s -- the TV cursor goes off", by);
+        if (!tv_cursor_set_mode(false) || s_mbox == NULL) {
+            return;
+        }
+        note_show(s_done, "the message after the TV cursor's button", tv_cursor_off, lv_obj_get_parent(s_mbox));
+        return;
+    }
     commons_log_info("Streaming", "bridge prompt: accepted, %s -- the TV's mouse controls go off", by);
     bridge_override_set(global != NULL ? global->session : NULL, true);
     /* ⓘ Said only if it is so: the switch does not act with device bridging
@@ -437,9 +478,53 @@ static void on_second(lv_timer_t *timer) {
     show_count();
 }
 
+/* Up it comes, with these words, about this, and the count at its start. */
+static void prompt_raise(const prompt_words_t *words, int about) {
+    /* ⓘ The message a button left behind is in this same place, and what it
+     * says stopped being true when the controls came back on. */
+    note_remove();
+    s_about = about;
+    /* ⓘ Both buttons have their words before the box is made: the library
+     * counts the buttons by their words, and an empty one ends the row. */
+    s_btn_map[PROMPT_BUTTON_TURN_OFF] = words->action;
+    s_leave = words->leave;
+    show_count();
+    s_outcome = NULL;
+    s_mbox = lv_msgbox_create(NULL, NULL, words->warning, s_btn_map, false);
+    lv_obj_add_event_cb(s_mbox, on_button, LV_EVENT_VALUE_CHANGED, NULL);
+    lv_obj_add_event_cb(s_mbox, on_deleted, LV_EVENT_DELETE, NULL);
+    make_compact(s_mbox);
+    set_words(s_mbox, words);
+    /* Bottom left, off the middle of the picture, and above the overlay's row
+     * of buttons (rhoquinn8217, 2026-10-01). */
+    lv_obj_align(s_mbox, LV_ALIGN_BOTTOM_LEFT, PROMPT_MARGIN, -prompt_lift());
+    /* The first button is what the warning advises, so it is the one selected
+     * from the start: a press of Cross, OK or Enter takes it without an arrow
+     * first. ⭐ And it is SHOWN as selected. The highlight is the row's
+     * focus-key state, which is set here outright rather than left to how the
+     * row came by its focus: with two buttons, a row with no highlight gives
+     * no way to know which one Cross is about to press. */
+    lv_obj_t *btns = lv_msgbox_get_btns(s_mbox);
+    if (btns != NULL) {
+        lv_btnmatrix_set_selected_btn(btns, PROMPT_BUTTON_TURN_OFF);
+        lv_obj_add_state(btns, LV_STATE_FOCUS_KEY);
+    }
+    s_timer = lv_timer_create(on_second, 1000, NULL);
+    /* A pointer has to be able to press it. The overlay and the on-screen
+     * keyboard let the grab go themselves, so only take it from the stream. */
+    if (!streaming_overlay_shown() && !streaming_soft_keyboard_shown()) {
+        app_set_mouse_grab(&global->input, false);
+        s_released_grab = true;
+    }
+}
+
 void bridge_prompt_request(void) {
     if (global == NULL || global->session == NULL) {
         commons_log_info("Streaming", "bridge prompt: no stream");
+        return;
+    }
+    if (s_mbox != NULL && s_about != PROMPT_ABOUT_MOUSE_CONTROLS) {
+        commons_log_info("Streaming", "bridge prompt: the TV cursor's is up, this one is not raised");
         return;
     }
     if (bridge_override_active()) {
@@ -467,41 +552,35 @@ void bridge_prompt_request(void) {
     }
     commons_log_info("Streaming", "bridge prompt: asking for %d s (virtual mouse %s, touchpad mouse %s)",
                      PROMPT_SECONDS, vmouse ? "on" : "off", touchpad_mouse ? "on" : "off");
-    /* ⓘ The message a button left behind is in this same place, and what it
-     * says stopped being true when the controls came back on. */
-    note_remove();
-    /* ⓘ Both buttons have their words before the box is made: the library
-     * counts the buttons by their words, and an empty one ends the row. */
-    s_btn_map[PROMPT_BUTTON_TURN_OFF] = words.action;
-    s_leave = words.leave;
-    show_count();
-    s_outcome = NULL;
-    s_mbox = lv_msgbox_create(NULL, NULL, words.warning, s_btn_map, false);
-    lv_obj_add_event_cb(s_mbox, on_button, LV_EVENT_VALUE_CHANGED, NULL);
-    lv_obj_add_event_cb(s_mbox, on_deleted, LV_EVENT_DELETE, NULL);
-    make_compact(s_mbox);
-    set_words(s_mbox, &words);
-    /* Bottom left, off the middle of the picture, and above the overlay's row
-     * of buttons (rhoquinn8217, 2026-10-01). */
-    lv_obj_align(s_mbox, LV_ALIGN_BOTTOM_LEFT, PROMPT_MARGIN, -prompt_lift());
-    /* The first button is what the warning advises, so it is the one selected
-     * from the start: a press of Cross, OK or Enter takes it without an arrow
-     * first. ⭐ And it is SHOWN as selected. The highlight is the row's
-     * focus-key state, which is set here outright rather than left to how the
-     * row came by its focus: with two buttons, a row with no highlight gives
-     * no way to know which one Cross is about to press. */
-    lv_obj_t *btns = lv_msgbox_get_btns(s_mbox);
-    if (btns != NULL) {
-        lv_btnmatrix_set_selected_btn(btns, PROMPT_BUTTON_TURN_OFF);
-        lv_obj_add_state(btns, LV_STATE_FOCUS_KEY);
+    prompt_raise(&words, PROMPT_ABOUT_MOUSE_CONTROLS);
+}
+
+void bridge_prompt_request_tv_cursor(void) {
+    if (global == NULL || global->session == NULL) {
+        commons_log_info("Streaming", "bridge prompt: no stream");
+        return;
     }
-    s_timer = lv_timer_create(on_second, 1000, NULL);
-    /* A pointer has to be able to press it. The overlay and the on-screen
-     * keyboard let the grab go themselves, so only take it from the stream. */
-    if (!streaming_overlay_shown() && !streaming_soft_keyboard_shown()) {
-        app_set_mouse_grab(&global->input, false);
-        s_released_grab = true;
+    if (!tv_cursor_mode_on()) {
+        tv_cursor_log("the bridged mouse's pop-up: the TV cursor is off already, nothing to ask");
+        return;
     }
+    if (s_mbox != NULL) {
+        if (s_about == PROMPT_ABOUT_TV_CURSOR && s_outcome == NULL) {
+            s_seconds = PROMPT_SECONDS;
+            show_count();
+            tv_cursor_log("the bridged mouse's pop-up: already up, the count starts again");
+        } else {
+            tv_cursor_log("the bridged mouse's pop-up: another is up, this one is not raised");
+        }
+        return;
+    }
+    const prompt_words_t words = tv_cursor_words();
+    s_seconds = PROMPT_SECONDS;
+    commons_log_info("Streaming", "bridge prompt: asking for %d s (a bridged mouse was used, the TV cursor on)",
+                     PROMPT_SECONDS);
+    tv_cursor_log("the bridged mouse's pop-up: a bridged mouse was used with the TV cursor on, asking for %d s",
+                  PROMPT_SECONDS);
+    prompt_raise(&words, PROMPT_ABOUT_TV_CURSOR);
 }
 
 bool bridge_prompt_shown(void) {
@@ -533,6 +612,10 @@ bool bridge_prompt_accept(void) {
 void bridge_prompt_stream_ended(void) {
     bridge_prompt_dismiss();
     note_remove();
+    /* ⓘ And the bar that aligns the TV cursor, which also sits above the
+     * stream's screen and outlives it (cursor_align.h): the screen's teardown
+     * calls here for this fork's pieces. */
+    cursor_align_stream_ended();
 }
 
 void bridge_prompt_note(const char *text) {
@@ -540,7 +623,7 @@ void bridge_prompt_note(const char *text) {
     if (s_mbox != NULL) {
         return;
     }
-    note_show(text, "the DS5-USBIP message", NULL, NULL);
+    note_show(text, "a message in its place", NULL, NULL);
 }
 
 static void measure(const lv_obj_t *box, const lv_obj_t *label, bridge_prompt_measure_t *out) {

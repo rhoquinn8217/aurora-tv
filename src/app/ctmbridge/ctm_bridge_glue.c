@@ -95,6 +95,19 @@ void bridge_set_overlay_request(void (*cb)(void))
     controller_set_overlay_cb(cb);
 }
 
+/* ⭐ The same for the app's other shortcuts, A, M and N, and for a bridged
+ * mouse's first use (rhoquinn8217, 2026-10-11): the core's kbd_chord.inl and
+ * pointer_layout.inl say what each is. */
+void bridge_set_shortcut_request(void (*cb)(char letter))
+{
+    controller_set_shortcut_cb(cb);
+}
+
+void bridge_set_pointer_used_request(void (*cb)(void))
+{
+    controller_set_pointer_used_cb(cb);
+}
+
 static void ctm_glue_ensure_core(void)
 {
     if (s_core_up) {
@@ -848,6 +861,31 @@ int ctm_bridge_reap_gone_devices(void)
     }
     pthread_mutex_unlock(&s_dev_mutex);
     return reaped;
+}
+
+/* ⓘ Cheap for the same reason as the reapers above: a walk of the session
+ * table, no enumeration. */
+int ctm_bridge_bridged_pointers(ctm_bridge_pointer_t *out, int max)
+{
+    int count = 0;
+    if (out == NULL || max <= 0) {
+        return 0;
+    }
+    pthread_mutex_lock(&s_dev_mutex);
+    pthread_mutex_lock(&g_sessions_mutex);
+    for (int i = 0; i < g_session_count && count < max; ++i) {
+        ctm_controller_t *c = g_sessions[i].controller;
+        if (!c || g_sessions[i].stopping) continue;
+        ctm_controller_status_t st;
+        ctm_controller_get_status(c, &st);
+        if (!st.pointer) continue;
+        snprintf(out[count].node, sizeof(out[count].node), "%s", g_sessions[i].node);
+        out[count].used = st.pointer_used;
+        ++count;
+    }
+    pthread_mutex_unlock(&g_sessions_mutex);
+    pthread_mutex_unlock(&s_dev_mutex);
+    return count;
 }
 
 /* ⭐ THE DS5-USBIP BUTTON'S REQUEST (rhoquinn8217, 2026-09-28: "a bridge opens

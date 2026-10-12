@@ -4,6 +4,7 @@
 
 #include "ctm_bridge_gesture.h"
 #include "bridge_keyboard.h"
+#include "mouse_seen.h"
 
 bridge_request_result_t bridge_request_device(const ctm_bridge_dev_t *dev)
 {
@@ -46,6 +47,11 @@ bridge_request_result_t bridge_request_device(const ctm_bridge_dev_t *dev)
      * at all costs a second more. */
     if (!ok && ctm_bridge_last_plug_unreachable()) {
         ok = ctm_bridge_plug_row(dev);
+    }
+    /* ⭐ A mouse the TV saw move asks at once about the TV cursor
+     * (input/mouse_seen.h), as a controller asks about Virtual Mouse. */
+    if (ok) {
+        mouse_seen_plugged(dev);
     }
     return ok ? BRIDGE_REQUEST_PLUGGED : BRIDGE_REQUEST_FAILED;
 }

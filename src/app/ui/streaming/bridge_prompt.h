@@ -79,6 +79,26 @@
  * Does nothing outside a stream. */
 void bridge_prompt_request(void);
 
+/* ⭐ A mouse has just been bridged (rhoquinn8217, 2026-10-11: "If a mouse is
+ * bridge, show a message asking to turn off TV cursor with a timer", and "The
+ * message should appear immediately after a mouse is bridged just like the
+ * message when a controller is bridge and virtual mouse is on"). The same
+ * pop-up in the same place, with its own words, if the TV cursor is on:
+ *
+ *     Warning: Turn off TV cursor. It is inactive while the mouse is bridged.
+ *                       [ Turn off TV cursor ]  [ Leave it on (10) ]
+ *
+ * (their wording.) The first button turns the TV cursor off, and says so:
+ * "TV cursor has turned off. Press Ctrl+Alt+Shift+M to turn it back on." The
+ * rest changes nothing, as here.
+ * ⓘ At the bridge for a mouse the TV has seen move; at its first use, which
+ * the bridge core tells (its pointer_layout.inl), for one it never saw. A
+ * keyboard's receiver can have a mouse part with no mouse behind it (the
+ * RONGYUAN's has), and its keyboard bridged must not ask about a mouse that is
+ * not there: input/mouse_seen.h. One pop-up at a time: another up already,
+ * and this one is not raised. */
+void bridge_prompt_request_tv_cursor(void);
+
 /* Is it up? While it is, the interface has the input. */
 bool bridge_prompt_shown(void);
 

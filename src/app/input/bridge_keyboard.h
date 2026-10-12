@@ -39,8 +39,17 @@
  *   core in its reports;
  * - Ctrl+Alt+Shift+Q ends the stream (Moonlight's quit), as the overlay's
  *   Disconnect does;
- * - Moonlight's other five (Z, X, M, C, D) do nothing in this app beyond a log
- *   line, so they are left for the host.
+ * - Ctrl+Alt+Shift+M switches the TV cursor on or off (input/tv_cursor.h),
+ *   which is Moonlight's mouse-mode switch (rhoquinn8217, 2026-10-11, asked
+ *   whether it should: "yes");
+ * - Ctrl+Alt+Shift+A opens the bar that aligns the TV cursor
+ *   (ui/streaming/cursor_align.h), the same day;
+ * - a bridged keyboard's A and M are found by the bridge core, as its S is,
+ *   and so is its N, which is the host's own (it shows or hides the PC's
+ *   cursor) and is sent on as the stream's keys: bridge_keyboard_bridged_shortcut;
+ * - Moonlight's other four (Z, X, C, D) do nothing in this app beyond a log
+ *   line, so they are left for the host, and so is N from a keyboard the TV
+ *   holds, which reaches the host as it is.
  *
  * ⭐ THE READER GIVES THE OVERLAY ITS KEYS, FROM EVERY KEYBOARD (rhoquinn8217 on
  * the C3, 2026-10-01: "escape or any key doesn't work in the overlay screen",
@@ -120,6 +129,19 @@ void bridge_keyboard_changed(void);
  * does the look-again when it is due, tells the reader whether the overlay is
  * open, and acts on a shortcut the reader thread found. */
 void bridge_keyboard_tick(bool overlay_shown);
+
+/* A BRIDGED keyboard's Ctrl+Alt+Shift and 'A', 'M' or 'N', which the bridge
+ * core found in its reports (the core's kbd_chord.inl), on that keyboard's
+ * thread: A and M do what they do on a keyboard the TV has, and N is sent on
+ * to the host as the stream's own keys, as the host answers it only from
+ * there. Acted on in the app's loop, as the reader's shortcuts are. */
+void bridge_keyboard_bridged_shortcut(char letter);
+
+/* The align bar is up (take) or closing (not): a bridged keyboard's nodes, which
+ * the app reads while the interface has the input, are taken from webOS for it,
+ * as webOS hides its pointer at every key it reads. ⛔ Called with false BEFORE
+ * the bar's hold ends, so the core can take the keyboard back. */
+void bridge_keyboard_take_bridged(bool take);
 
 /* A key from the TV's own keyboard reader, on its thread, before it is sent to
  * the host. True when it is not to be sent: it completed one of Aurora's
