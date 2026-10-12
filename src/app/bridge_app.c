@@ -14,14 +14,19 @@
 #include "ctm_bridge_glue.h"   /* bridge_set_shortcut_request, bridge_set_pointer_used_request */
 #endif
 #include "input/tv_cursor.h"
+#include "input/mouse_seen.h"
 #include "ui/streaming/cursor_align.h"   /* cursor_align_shown */
 
 #if defined(TARGET_WEBOS)
-/* ⭐ A bridged mouse was used for the first time since its bridge: told by the
- * bridge core on the mouse's own thread, and acted on in the app's loop, where
- * the pop-up that asks to turn the TV cursor off is raised
- * (ui/streaming/bridge_prompt.h). */
+/* ⭐ The pop-up that asks to turn the TV cursor off (ui/streaming/bridge_prompt.h)
+ * comes as soon as a mouse the TV saw move is bridged (rhoquinn8217,
+ * 2026-10-11: "The message should appear immediately after a mouse is
+ * bridged"), and is raised here, on the app's loop. A mouse part the TV never
+ * saw move (input/mouse_seen.h) asks instead at its first use, which the
+ * bridge core tells on the mouse's own thread. ⓘ Not both for one bridge: a
+ * pop-up raised at the bridge takes the first use that follows it. */
 static SDL_atomic_t s_pointer_used;
+static int s_asked_at_bridge = 0;
 
 static void pointer_used(void) {
     SDL_AtomicSet(&s_pointer_used, 1);
@@ -110,9 +115,24 @@ void bridge_app_events(app_t *app) {
 #if defined(TARGET_WEBOS)
     /* The TV's keyboard grab looking again after a bridge or a release. */
     bridge_keyboard_tick(interface_has_input);
-    /* A bridged mouse's first use: the pop-up that asks about the TV cursor. */
-    if (SDL_AtomicSet(&s_pointer_used, 0) != 0) {
+    /* The pointers the TV has seen move, and the pop-up that asks about the TV
+     * cursor: at the bridge for a mouse seen moving, at its first use for one
+     * never seen. */
+    mouse_seen_tick();
+    if (app->session == NULL) {
+        s_asked_at_bridge = 0;
+    }
+    if (mouse_seen_take_bridged()) {
+        s_asked_at_bridge++;
         bridge_prompt_request_tv_cursor();
+    }
+    if (SDL_AtomicSet(&s_pointer_used, 0) != 0) {
+        if (s_asked_at_bridge > 0) {
+            s_asked_at_bridge--;
+            tv_cursor_log("the bridged mouse's first use: asked already, at its bridge");
+        } else {
+            bridge_prompt_request_tv_cursor();
+        }
     }
 #else
     (void) interface_has_input;

@@ -60,6 +60,10 @@ bool ctm_bridge_gesture_request_bridge(const char *node);
  * bridged right now? For the TV's keyboard grab: see bridge_keyboard.h. */
 bool ctm_bridge_gesture_event_is_bridged(const char *dev_path);
 
+/* Is the input node dev_path (/dev/input/eventN) the same device part as the
+ * hidraw node `node`? For the mice the TV saw move: see mouse_seen.h. */
+bool ctm_bridge_gesture_event_on_node(const char *dev_path, const char *node);
+
 /* Repaint the player colour on every watched controller.
  *
  * ⭐ For the two moments a controller returns to the TV's own world: a stream
