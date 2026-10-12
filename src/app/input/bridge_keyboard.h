@@ -137,6 +137,12 @@ void bridge_keyboard_tick(bool overlay_shown);
  * there. Acted on in the app's loop, as the reader's shortcuts are. */
 void bridge_keyboard_bridged_shortcut(char letter);
 
+/* The align bar is up (take) or closing (not): a bridged keyboard's nodes, which
+ * the app reads while the interface has the input, are taken from webOS for it,
+ * as webOS hides its pointer at every key it reads. ⛔ Called with false BEFORE
+ * the bar's hold ends, so the core can take the keyboard back. */
+void bridge_keyboard_take_bridged(bool take);
+
 /* A key from the TV's own keyboard reader, on its thread, before it is sent to
  * the host. True when it is not to be sent: it completed one of Aurora's
  * shortcuts, the overlay is open and the key is the overlay's, or it came from

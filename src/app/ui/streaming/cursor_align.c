@@ -11,6 +11,7 @@
 #include "stream/input/session_input.h"
 #include "streaming.controller.h"
 #include "bridge_prompt.h"
+#include "input/bridge_keyboard.h"
 #include "input/tv_cursor.h"
 
 /* The USB Bridge panel's colours (ctm_panel.c), so the two read as one family. */
@@ -131,6 +132,10 @@ static void bar_close(bool keep) {
     if (!s_aligning) {
         return;
     }
+    /* ⛔ First, while the bar still holds the input: a bridged keyboard taken
+     * from webOS is let go, so the core can take it back as the hold ends
+     * (input/bridge_keyboard.h). */
+    bridge_keyboard_take_bridged(false);
     s_aligning = false;
     SDL_DelEventWatch(align_motion_watch, NULL);
     if (s_wake != NULL) {
@@ -240,6 +245,11 @@ static void bar_open(void) {
     bar_refresh();
 
     s_aligning = true;
+    /* ⭐ A bridged keyboard's keys for the bar alone: webOS hides its pointer at
+     * every key it reads (rhoquinn8217: "the cursor disappears whenever I
+     * click an arrow key"), and the core lets the keyboard go while the bar
+     * holds the input. */
+    bridge_keyboard_take_bridged(true);
     s_prev_group = app_input_get_group(&global->ui.input);
     app_input_set_group(&global->ui.input, s_group);
     lv_group_focus_obj(layer);
@@ -297,6 +307,7 @@ void cursor_align_stream_ended(void) {
         s_open_queued = false;
     }
     if (s_aligning) {
+        bridge_keyboard_take_bridged(false);
         s_aligning = false;
         SDL_DelEventWatch(align_motion_watch, NULL);
         tv_cursor_adjust(s_was_x, s_was_y, -1);   /* never kept, so not kept now */

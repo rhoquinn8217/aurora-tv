@@ -121,6 +121,24 @@ static int s_bridged_fds[BRIDGED_NODES_MAX];
 static int s_bridged_n = 0;
 static bool s_bridged_down[NAV_KEYS];
 
+/* ⭐ WHILE THE ALIGN BAR IS UP, A BRIDGED KEYBOARD IS THE APP'S ALONE
+ * (rhoquinn8217, 2026-10-11: "align is unusable because the cursor disappears
+ * whenever I click an arrow key. I want the cursor to persist during the
+ * alignment adjustment"). The bridge core lets a bridged keyboard go while the
+ * interface has the input, so the app can read it here, and webOS reads it as
+ * well: it handed the bar each arrow a second time, and webOS hides its
+ * pointer at every key it reads, as it does for the remote's arrows. The
+ * overlay does not mind that; the bar does, as the pointer is what it is for.
+ * So while the bar is up the nodes read here are taken (EVIOCGRAB), and webOS
+ * hears none of their keys. ⓘ A keyboard the TV holds needs nothing: the TV's
+ * own grab keeps webOS out already.
+ * ⛔ Let go before the core takes them back: a node the app still holds
+ * refuses the core's grab, and the core does not ask twice, so the keyboard
+ * would reach the TV and the PC both. The bar lets go as it closes, before its
+ * hold ends (ui/streaming/cursor_align.c). */
+static bool s_take_bridged = false;
+static bool s_bridged_taken[BRIDGED_NODES_MAX];
+
 /* The kernel's input event as it is laid out for a program, and its type for a
  * key. ⓘ Written out rather than taken from linux/input.h: that header's KEY_
  * and BTN_ names have no business meeting the rest of what this file includes. */
@@ -138,6 +156,8 @@ struct evdev_event {
  * EVIOCGNAME and EVIOCGBIT(EV_KEY). */
 #define EVDEV_GET_NAME(len) _IOC(_IOC_READ, 'E', 0x06, len)
 #define EVDEV_GET_KEYS(len) _IOC(_IOC_READ, 'E', 0x20 + EVDEV_TYPE_KEY, len)
+/* linux/input.h's EVIOCGRAB: take a node, or let it go. */
+#define EVDEV_GRAB _IOW('E', 0x90, int)
 #define NAV_CODE_MAX 111    /* the highest of the numbers in k_nav */
 /* Left Ctrl (29) and A (30) in the lowest word of a device's key list: what the
  * grab's own test asks of a keyboard first (is_usb_keyboard in
@@ -339,7 +359,8 @@ static void close_bridged_nodes(void) {
         }
     }
     for (int i = 0; i < s_bridged_n; i++) {
-        close(s_bridged_fds[i]);
+        close(s_bridged_fds[i]);   /* ⓘ which lets go of one the bar took */
+        s_bridged_taken[i] = false;
     }
     s_bridged_n = 0;
 }
@@ -385,6 +406,7 @@ static void open_bridged_nodes(void) {
         }
         char name[96] = "";
         (void) ioctl(fd, EVDEV_GET_NAME(sizeof(name) - 1), name);
+        s_bridged_taken[s_bridged_n] = false;
         s_bridged_fds[s_bridged_n++] = fd;
         keyboard_log("the overlay reads %s (%s) itself: it is bridged", path, name[0] != '\0' ? name : "no name");
     }
@@ -402,6 +424,7 @@ static void read_bridged_nodes(void) {
                     /* The device went: its place is taken by the last one. */
                     close(s_bridged_fds[i]);
                     s_bridged_fds[i] = s_bridged_fds[--s_bridged_n];
+                    s_bridged_taken[i] = s_bridged_taken[s_bridged_n];
                     i--;
                 }
                 break;
@@ -417,6 +440,41 @@ static void read_bridged_nodes(void) {
             s_bridged_down[slot] = down;
             feed_overlay_from(slot, down, 0, true);
         }
+    }
+}
+
+/* While the align bar wants them: each node read here taken, once the core
+ * has let it go (until then the kernel refuses, and the next pass asks again). */
+static void take_bridged_nodes(void) {
+    for (int i = 0; i < s_bridged_n; i++) {
+        if (s_bridged_taken[i]) {
+            continue;
+        }
+        if (ioctl(s_bridged_fds[i], EVDEV_GRAB, 1) == 0) {
+            s_bridged_taken[i] = true;
+            char name[96] = "";
+            (void) ioctl(s_bridged_fds[i], EVDEV_GET_NAME(sizeof(name) - 1), name);
+            keyboard_log("the align bar takes a bridged keyboard's node (%s): webOS hears none of its keys",
+                         name[0] != '\0' ? name : "no name");
+        }
+    }
+}
+
+void bridge_keyboard_take_bridged(bool take) {
+    s_take_bridged = take;
+    if (take) {
+        return;
+    }
+    int let_go_n = 0;
+    for (int i = 0; i < s_bridged_n; i++) {
+        if (s_bridged_taken[i]) {
+            (void) ioctl(s_bridged_fds[i], EVDEV_GRAB, 0);
+            s_bridged_taken[i] = false;
+            let_go_n++;
+        }
+    }
+    if (let_go_n > 0) {
+        keyboard_log("the align bar lets go of %d bridged keyboard node(s), for the core to take back", let_go_n);
     }
 }
 
@@ -809,6 +867,9 @@ void bridge_keyboard_tick(bool overlay_shown) {
         }
     }
     if (s_overlay_open) {
+        if (s_take_bridged) {
+            take_bridged_nodes();
+        }
         read_bridged_nodes();
     }
     if (input == NULL) {
@@ -907,6 +968,10 @@ void bridge_keyboard_counts(char *buf, size_t len) {
 
 void bridge_keyboard_bridged_shortcut(char letter) {
     (void) letter;
+}
+
+void bridge_keyboard_take_bridged(bool take) {
+    (void) take;
 }
 
 #endif /* TARGET_WEBOS */

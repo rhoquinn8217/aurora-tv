@@ -16,7 +16,10 @@
  *   or B puts back what was there.
  * - **While it is up it has the input**, as the overlay does (ui/root.c), and
  *   a bridged device is held (bridge_app.c), so a bridged keyboard's arrows
- *   reach it.
+ *   reach it. ⭐ And a bridged keyboard is taken from webOS for as long, which
+ *   the overlay does not need: webOS hides its pointer at every key it reads
+ *   (rhoquinn8217: "align is unusable because the cursor disappears whenever
+ *   I click an arrow key"). input/bridge_keyboard.h says how it is given back.
  * - ⭐ **THE TV CURSOR STAYS UP WHILE IT IS** (rhoquinn8217: "When calibrating,
  *   the tv mouse cursor disappears after sometime"). webOS puts its pointer to
  *   sleep after 5 seconds without the mouse moving (the app asks for that, in
