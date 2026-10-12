@@ -7,13 +7,14 @@
  * cursor just shift it up and to the left"*, and *"only for the aurora-tv app
  * and not for anything else on the TV"*.
  *
- * ➡️ So Aurora sets a cursor of its own: webOS's own teardrop, read from the
- * TV as the app starts (nothing of LG's is copied into this app), with its tip
- * as the cursor's hot spot. SDL draws that pixel on the point, which is the
- * point the host's cursor goes to. Every other app keeps webOS's pointer.
+ * ➡️ So Aurora sets a cursor of its own: webOS's teardrop, drawn by Aurora in
+ * the same shape with a sharp tip, a thinner line and nothing inside (the
+ * later asks, in tv_cursor.c), with its tip as the cursor's hot spot. SDL
+ * draws that pixel on the point, which is the point the host's cursor goes
+ * to. Every other app keeps webOS's pointer.
  *
- * ⓘ A set without the file, or an SDL that refuses the cursor, keeps webOS's
- * own pointer, and logs/tv-cursor.log says which. */
+ * ⓘ An SDL that refuses the cursor keeps webOS's own pointer, and
+ * logs/tv-cursor.log says so. */
 
 #ifndef TV_CURSOR_H
 #define TV_CURSOR_H
@@ -31,9 +32,8 @@ void tv_cursor_init(SDL_Window *window);
 void tv_cursor_deinit(void);
 
 /* Live, from the control port, and not saved: shift the pointer this many
- * of the TV's own pixels to the right and down of its tip, and take this many
- * of the picture's pixels off the outline's inner side (below 0: keep what
- * stands). False when there is
+ * of the TV's own pixels to the right and down of its tip, and draw the line
+ * 3 less `thin` of them wide (below 0: keep what stands). False when there is
  * no cursor of Aurora's to change. */
 bool tv_cursor_adjust(int shift_x, int shift_y, int thin);
 
