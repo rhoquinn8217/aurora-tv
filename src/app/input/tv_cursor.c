@@ -6,7 +6,6 @@
 #include "app.h"   /* the app, its settings and the mouse grab */
 #include "stream/session.h"   /* whether the stream has the input */
 
-static void cursor_log(const char *fmt, ...);
 
 #if defined(TARGET_WEBOS)
 
@@ -85,7 +84,7 @@ static SDL_atomic_t s_reapply;         /* the window event that asked, 0 for non
 static int s_reapplied = 0;            /* how many times, for the log, which stops saying so after a few */
 #define TV_CURSOR_REAPPLY_LOGGED 20
 
-static void cursor_log(const char *fmt, ...) {
+void tv_cursor_log(const char *fmt, ...) {
     FILE *f = ctm_log_open(TV_CURSOR_LOG, "a");
     if (f == NULL) {
         return;
@@ -243,7 +242,7 @@ static bool build(void) {
     if (width < 1.0) width = 1.0;
     SDL_Surface *drop = draw_drop(width);
     if (drop == NULL) {
-        cursor_log("the drop could not be drawn (%s)", SDL_GetError());
+        tv_cursor_log("the drop could not be drawn (%s)", SDL_GetError());
         return false;
     }
     /* The drop placed the shift over in a clear canvas, the hot spot where
@@ -254,7 +253,7 @@ static bool build(void) {
     SDL_Surface *canvas = SDL_CreateRGBSurfaceWithFormat(0, drop->w + 2 * m, drop->h + 2 * m, 32,
                                                          SDL_PIXELFORMAT_RGBA32);
     if (canvas == NULL) {
-        cursor_log("the canvas could not be made (%s)", SDL_GetError());
+        tv_cursor_log("the canvas could not be made (%s)", SDL_GetError());
         SDL_FreeSurface(drop);
         return false;
     }
@@ -267,7 +266,7 @@ static bool build(void) {
     SDL_Surface *image = shrink(canvas, scale);
     SDL_FreeSurface(canvas);
     if (image == NULL) {
-        cursor_log("the shrink failed (%s)", SDL_GetError());
+        tv_cursor_log("the shrink failed (%s)", SDL_GetError());
         return false;
     }
     int hot_x = (int) floor((DROP_TIP_X + m) / scale);
@@ -276,7 +275,7 @@ static bool build(void) {
     if (hot_y >= image->h) hot_y = image->h - 1;
     SDL_Cursor *cursor = SDL_CreateColorCursor(image, hot_x, hot_y);
     if (cursor == NULL) {
-        cursor_log("SDL refused the cursor (%s)", SDL_GetError());
+        tv_cursor_log("SDL refused the cursor (%s)", SDL_GetError());
         SDL_FreeSurface(image);
         return false;
     }
@@ -292,7 +291,7 @@ static bool build(void) {
     s_hot_x = hot_x;
     s_hot_y = hot_y;
     s_ready = true;
-    cursor_log("cursor made: %dx%d, hot spot %d,%d, shifted %d,%d of the TV's pixels (right, down), line %.1f",
+    tv_cursor_log("cursor made: %dx%d, hot spot %d,%d, shifted %d,%d of the TV's pixels (right, down), line %.1f",
                image->w, image->h, hot_x, hot_y, s_shift_x, s_shift_y, width);
     return true;
 }
@@ -348,10 +347,10 @@ void tv_cursor_init(SDL_Window *window, int shift_x, int shift_y) {
     if (win_w > 0 && SDL_webOSGetPanelResolution(&panel_w, &panel_h) && panel_w > win_w) {
         s_scale = (double) panel_w / (double) win_w;
     }
-    cursor_log("the drop for a window %dx%d on a %dx%d panel, shrunk %.2f times",
+    tv_cursor_log("the drop for a window %dx%d on a %dx%d panel, shrunk %.2f times",
                win_w, win_h, panel_w, panel_h, s_scale);
     if (!build()) {
-        cursor_log("webOS's own pointer stays");
+        tv_cursor_log("webOS's own pointer stays");
         return;
     }
     SDL_AtomicSet(&s_reapply, 0);
@@ -386,7 +385,7 @@ void tv_cursor_tick(void) {
         SDL_SetCursor(NULL);
     }
     if (s_reapplied < TV_CURSOR_REAPPLY_LOGGED) {
-        cursor_log("cursor set again: the window %s%s", window_event_name(why),
+        tv_cursor_log("cursor set again: the window %s%s", window_event_name(why),
                    s_reapplied + 1 == TV_CURSOR_REAPPLY_LOGGED ? " (no more of these lines this run)" : "");
     }
     s_reapplied++;
@@ -416,7 +415,7 @@ bool tv_cursor_keep(void) {
     app_configuration->bridge.tv_cursor_x = s_shift_x;
     app_configuration->bridge.tv_cursor_y = s_shift_y;
     settings_save(app_configuration);
-    cursor_log("kept as this TV's: shifted %d,%d of the TV's pixels (right, down)", s_shift_x, s_shift_y);
+    tv_cursor_log("kept as this TV's: shifted %d,%d of the TV's pixels (right, down)", s_shift_x, s_shift_y);
     return true;
 }
 
@@ -442,7 +441,7 @@ void tv_cursor_describe(char *out, size_t len) {
 
 #include <stdio.h>
 
-static void cursor_log(const char *fmt, ...) {
+void tv_cursor_log(const char *fmt, ...) {
     (void) fmt;
 }
 
@@ -500,7 +499,7 @@ bool tv_cursor_mode_switchable(void) {
 
 bool tv_cursor_set_mode(bool on) {
     if (!tv_cursor_mode_switchable()) {
-        cursor_log("the TV cursor cannot be switched while Use mouse hardware is on");
+        tv_cursor_log("the TV cursor cannot be switched while Use mouse hardware is on");
         return false;
     }
     if (app_configuration->absmouse != on) {
@@ -514,7 +513,7 @@ bool tv_cursor_set_mode(bool on) {
     if (global != NULL && global->session != NULL && session_accepting_input(global->session)) {
         app_set_mouse_grab(&global->input, true);
     }
-    cursor_log("TV cursor %s: the host is told %s", on ? "on" : "off",
+    tv_cursor_log("TV cursor %s: the host is told %s", on ? "on" : "off",
                on ? "where the cursor is" : "only how the mouse moved, and nothing stops at the screen's edge");
     return true;
 }

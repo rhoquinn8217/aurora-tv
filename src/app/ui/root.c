@@ -12,7 +12,7 @@
 
 #include "streaming/streaming.controller.h"
 #include "streaming/bridge_prompt.h"
-#include "streaming/mouse_menu.h"
+#include "streaming/cursor_align.h"
 #include "launcher/launcher.controller.h"
 
 #include "logging.h"
@@ -240,7 +240,7 @@ bool ui_should_block_input() {
     /* ⓘ And the question a bridge raises, which takes the input the same
      * way for as long as it is up (streaming/bridge_prompt.h). */
     return streaming_overlay_shown() || streaming_soft_keyboard_shown() || bridge_prompt_shown()
-           || mouse_menu_aligning();   /* This fork: the bar that aligns the TV cursor; see streaming/mouse_menu.h. */
+           || cursor_align_shown();   /* This fork: the bar that aligns the TV cursor; see streaming/cursor_align.h. */
 }
 
 void ui_display_size(app_ui_t *ui, int width, int height) {

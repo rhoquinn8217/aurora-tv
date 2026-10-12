@@ -95,6 +95,19 @@ void bridge_set_overlay_request(void (*cb)(void))
     controller_set_overlay_cb(cb);
 }
 
+/* ⭐ The same for the app's other shortcuts, A, M and N, and for a bridged
+ * mouse's first use (rhoquinn8217, 2026-10-11): the core's kbd_chord.inl and
+ * pointer_layout.inl say what each is. */
+void bridge_set_shortcut_request(void (*cb)(char letter))
+{
+    controller_set_shortcut_cb(cb);
+}
+
+void bridge_set_pointer_used_request(void (*cb)(void))
+{
+    controller_set_pointer_used_cb(cb);
+}
+
 static void ctm_glue_ensure_core(void)
 {
     if (s_core_up) {

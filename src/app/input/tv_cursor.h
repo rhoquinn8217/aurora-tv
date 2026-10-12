@@ -13,9 +13,9 @@
  * draws that pixel on the point, which is the point the host's cursor goes
  * to. Every other app keeps webOS's pointer.
  *
- * ⭐ WHERE THE TIP SITS IS KEPT PER TV. Align TV cursor, in the overlay's Mouse
- * menu (ui/streaming/mouse_menu.h), moves it a TV pixel at a time and saves it
- * in the TV's own settings; a TV that was never aligned uses -1, 3, which
+ * ⭐ WHERE THE TIP SITS IS KEPT PER TV. The bar Ctrl+Alt+Shift+A opens
+ * (ui/streaming/cursor_align.h) moves it a TV pixel at a time and saves it in
+ * the TV's own settings; a TV that was never aligned uses -1, 3, which
  * rhoquinn8217 found by eye on the C1 and which looked right on the B4 too.
  *
  * ⭐ AND IT CAN BE SWITCHED OFF, for games (rhoquinn8217, 2026-10-11: "have the
@@ -62,7 +62,7 @@ bool tv_cursor_adjust(int shift_x, int shift_y, int thin);
 /* The shift that stands now, in the TV's own pixels, right and down. */
 void tv_cursor_get_shift(int *shift_x, int *shift_y);
 
-/* Saves the shift that stands now as this TV's, at once. From the Align bar's
+/* Saves the shift that stands now as this TV's, at once. From the align bar's
  * Enter or A. */
 bool tv_cursor_keep(void);
 
@@ -80,12 +80,17 @@ bool tv_cursor_mode_switchable(void);
 
 /* Switch the TV cursor on or off, save it, and if the stream has the mouse
  * right now, give it the new mode at once. False when it cannot be switched.
- * ⓘ From the Mouse menu, the control port and Ctrl+Alt+Shift+M, Moonlight's
- * own shortcut for this switch, on either keyboard path. */
+ * ⓘ From Ctrl+Alt+Shift+M, Moonlight's own shortcut for this switch, on every
+ * keyboard; from the pop-up a bridged mouse raises (bridge_prompt.h); and from
+ * the control port. */
 bool tv_cursor_set_mode(bool on);
 bool tv_cursor_toggle_mode(void);
 
 /* One line on the cursor that stands now. */
 void tv_cursor_describe(char *out, size_t len);
+
+/* A line in logs/tv-cursor.log, where a set's developer account can read it:
+ * the cursor's own, and the align bar's. */
+void tv_cursor_log(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
 
 #endif /* TV_CURSOR_H */

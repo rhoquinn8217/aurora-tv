@@ -23,6 +23,7 @@
 #include "ctm_bridge_glue.h"
 #include "ctm_bridge_gesture.h"
 #include "tv_cursor.h"
+#include "ui/streaming/cursor_align.h"
 #include "stream/session.h"
 #include "stream/session_priv.h"
 #include "stream/input/session_input.h"
@@ -56,8 +57,13 @@ enum {
     SHORTCUT_OVERLAY,   /* Ctrl+Alt+Shift+S, Moonlight's stats shortcut: here it opens the overlay */
     SHORTCUT_QUIT,      /* Ctrl+Alt+Shift+Q, Moonlight's: ends the stream */
     SHORTCUT_MOUSE,     /* Ctrl+Alt+Shift+M, Moonlight's mouse mode: the TV cursor on or off */
+    SHORTCUT_ALIGN,     /* Ctrl+Alt+Shift+A: the bar that aligns the TV cursor */
+    SHORTCUT_HOST_CURSOR, /* a BRIDGED keyboard's Ctrl+Alt+Shift+N, for the host: see send_host_shortcut */
 };
 static SDL_atomic_t s_shortcut;
+/* 1 when the shortcut waiting came from a bridged keyboard, by the bridge core
+ * (bridge_keyboard_bridged_shortcut), for the record. */
+static SDL_atomic_t s_shortcut_bridged;
 
 /* The keys the interface understands from a keyboard (read_keyboard() in
  * lvgl/input/lv_drv_sdl_key.c), as the grab's reader names them and as SDL
@@ -461,10 +467,14 @@ bool bridge_keyboard_evdev_key(stream_input_t *input, short vk, bool down, char 
         case VK_M:
             shortcut = SHORTCUT_MOUSE;
             break;
+        case VK_A:
+            shortcut = SHORTCUT_ALIGN;
+            break;
         default:
             /* ⓘ Moonlight's Z, X, C and D only write a log line in this app
              * (performPendingSpecialKeyCombo), so they stay the host's. O is
-             * a letter like any other again. */
+             * a letter like any other again. ⓘ So does N, which the host
+             * itself answers: it shows or hides its cursor in the stream. */
             return false;
     }
     /* The host saw Ctrl, Alt and Shift go down and will not see them come up
@@ -472,6 +482,7 @@ bool bridge_keyboard_evdev_key(stream_input_t *input, short vk, bool down, char 
      * not on the app's loop, because this thread is the one that keeps the
      * list of keys the host holds. */
     stream_input_flush_pressed_keys(input);
+    SDL_AtomicSet(&s_shortcut_bridged, 0);
     SDL_AtomicSet(&s_shortcut, shortcut);
     return true;
 }
@@ -549,34 +560,90 @@ void bridge_keyboard_counts(char *buf, size_t len) {
              SDL_AtomicGet(&s_evdev_keys), SDL_AtomicGet(&s_fed), s_sdl_keys, s_sdl_nav, s_echoes);
 }
 
+/* ⭐ A BRIDGED KEYBOARD'S Ctrl+Alt+Shift+N, SENT TO THE HOST AS THE STREAM'S
+ * OWN KEYS (rhoquinn8217, 2026-10-11, of hiding the PC's cursor so only the
+ * TV's shows: "begin work on hid windows cursor with chord"). Apollo and
+ * Sunshine show or hide the PC's cursor in the stream on that shortcut, but
+ * only from the stream's keyboard: a bridged keyboard reaches Windows as a USB
+ * keyboard and passes them by, and the bridge sends Windows its keys with
+ * nothing pressed while the shortcut is held. A keyboard the TV holds needs
+ * none of this: its N goes to the host as it is.
+ * ⓘ The modifiers as keys of their own, down and up around it, as the host
+ * reads its shortcuts off the keys it has seen go down; everything is up
+ * again at the end. Not through stream_input_send_key_event, whose list of
+ * held keys is the reader thread's alone. */
+static void send_host_shortcut(short vk) {
+    const char all = MODIFIER_CTRL | MODIFIER_ALT | MODIFIER_SHIFT;
+    LiSendKeyboardEvent((short) (0x8000 | VK_LCONTROL), KEY_ACTION_DOWN, MODIFIER_CTRL);
+    LiSendKeyboardEvent((short) (0x8000 | VK_LMENU), KEY_ACTION_DOWN, MODIFIER_CTRL | MODIFIER_ALT);
+    LiSendKeyboardEvent((short) (0x8000 | VK_LSHIFT), KEY_ACTION_DOWN, all);
+    LiSendKeyboardEvent((short) (0x8000 | vk), KEY_ACTION_DOWN, all);
+    LiSendKeyboardEvent((short) (0x8000 | vk), KEY_ACTION_UP, all);
+    LiSendKeyboardEvent((short) (0x8000 | VK_LSHIFT), KEY_ACTION_UP, MODIFIER_CTRL | MODIFIER_ALT);
+    LiSendKeyboardEvent((short) (0x8000 | VK_LMENU), KEY_ACTION_UP, MODIFIER_CTRL);
+    LiSendKeyboardEvent((short) (0x8000 | VK_LCONTROL), KEY_ACTION_UP, 0);
+}
+
 /* What a shortcut does, the same as on the keyboard path SDL feeds
- * (performPendingSpecialKeyCombo in session_keyboard.c). */
-static void act_on_shortcut(int shortcut) {
+ * (performPendingSpecialKeyCombo in session_keyboard.c). `bridged`: it came
+ * from a bridged keyboard, through the bridge core, for the record. */
+static void act_on_shortcut(int shortcut, bool bridged) {
+    const char *which = bridged ? "a bridged keyboard" : "a keyboard the TV has";
     switch (shortcut) {
         case SHORTCUT_OVERLAY:
             commons_log_info("Input", "Keyboard evdev: Ctrl+Alt+Shift+S, opening the overlay");
-            keyboard_log("shortcut Ctrl+Alt+Shift+S on a keyboard the TV has: opening the overlay");
+            keyboard_log("shortcut Ctrl+Alt+Shift+S on %s: opening the overlay", which);
             bus_pushevent(USER_OPEN_OVERLAY, NULL, NULL);
             break;
         case SHORTCUT_QUIT:
             commons_log_info("Input", "Keyboard evdev: Ctrl+Alt+Shift+Q, ending the stream");
-            keyboard_log("shortcut Ctrl+Alt+Shift+Q on a keyboard the TV has: ending the stream");
+            keyboard_log("shortcut Ctrl+Alt+Shift+Q on %s: ending the stream", which);
             /* The overlay's own Disconnect: the host keeps the game running. */
             session_interrupt(global->session, false, STREAMING_INTERRUPT_USER);
             break;
         case SHORTCUT_MOUSE:
-            commons_log_info("Input", "Keyboard evdev: Ctrl+Alt+Shift+M, the TV cursor on or off");
+            commons_log_info("Input", "Keyboard: Ctrl+Alt+Shift+M, the TV cursor on or off");
             if (tv_cursor_toggle_mode()) {
-                keyboard_log("shortcut Ctrl+Alt+Shift+M on a keyboard the TV has: the TV cursor %s",
+                keyboard_log("shortcut Ctrl+Alt+Shift+M on %s: the TV cursor %s", which,
                              tv_cursor_mode_on() ? "on" : "off");
             } else {
-                keyboard_log("shortcut Ctrl+Alt+Shift+M on a keyboard the TV has: the TV cursor cannot be"
-                             " switched while Use mouse hardware is on");
+                keyboard_log("shortcut Ctrl+Alt+Shift+M on %s: the TV cursor cannot be"
+                             " switched while Use mouse hardware is on", which);
             }
+            break;
+        case SHORTCUT_ALIGN:
+            commons_log_info("Input", "Keyboard: Ctrl+Alt+Shift+A, the bar that aligns the TV cursor");
+            keyboard_log("shortcut Ctrl+Alt+Shift+A on %s: the bar that aligns the TV cursor", which);
+            cursor_align_request();
+            break;
+        case SHORTCUT_HOST_CURSOR:
+            commons_log_info("Input", "Keyboard: a bridged keyboard's Ctrl+Alt+Shift+N, sent to the host");
+            keyboard_log("shortcut Ctrl+Alt+Shift+N on %s: sent to the host as the stream's own keys,"
+                         " for its cursor", which);
+            send_host_shortcut(VK_N);
             break;
         default:
             break;
     }
+}
+
+void bridge_keyboard_bridged_shortcut(char letter) {
+    int shortcut;
+    switch (letter) {
+        case 'A':
+            shortcut = SHORTCUT_ALIGN;
+            break;
+        case 'M':
+            shortcut = SHORTCUT_MOUSE;
+            break;
+        case 'N':
+            shortcut = SHORTCUT_HOST_CURSOR;
+            break;
+        default:
+            return;
+    }
+    SDL_AtomicSet(&s_shortcut_bridged, 1);
+    SDL_AtomicSet(&s_shortcut, shortcut);
 }
 
 /* Every input device the kernel has, as one number that changes when one
@@ -738,7 +805,7 @@ void bridge_keyboard_tick(bool overlay_shown) {
         SDL_AtomicSet(&s_shortcut, SHORTCUT_NONE);
         /* ⓘ Not once the stream it was pressed in has gone. */
         if (input != NULL) {
-            act_on_shortcut(shortcut);
+            act_on_shortcut(shortcut, SDL_AtomicGet(&s_shortcut_bridged) != 0);
         }
     }
     if (s_overlay_open) {
@@ -836,6 +903,10 @@ void bridge_keyboard_counts(char *buf, size_t len) {
     if (buf != NULL && len != 0) {
         snprintf(buf, len, "n/a");
     }
+}
+
+void bridge_keyboard_bridged_shortcut(char letter) {
+    (void) letter;
 }
 
 #endif /* TARGET_WEBOS */

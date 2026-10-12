@@ -11,9 +11,22 @@
 #include "input/ctm_bridge_gesture.h"
 #if defined(TARGET_WEBOS)
 #include "input/bridge_keyboard.h"
+#include "ctm_bridge_glue.h"   /* bridge_set_shortcut_request, bridge_set_pointer_used_request */
 #endif
 #include "input/tv_cursor.h"
-#include "ui/streaming/mouse_menu.h"   /* mouse_menu_aligning */
+#include "ui/streaming/cursor_align.h"   /* cursor_align_shown */
+
+#if defined(TARGET_WEBOS)
+/* ⭐ A bridged mouse was used for the first time since its bridge: told by the
+ * bridge core on the mouse's own thread, and acted on in the app's loop, where
+ * the pop-up that asks to turn the TV cursor off is raised
+ * (ui/streaming/bridge_prompt.h). */
+static SDL_atomic_t s_pointer_used;
+
+static void pointer_used(void) {
+    SDL_AtomicSet(&s_pointer_used, 1);
+}
+#endif
 
 void bridge_app_before_sdl(void) {
     /* ⛔⛔ BEFORE SDL TOUCHES ANY CONTROLLER.
@@ -54,6 +67,12 @@ void bridge_app_started(app_t *app) {
     /* ⓘ Once the window is up: the TV's pointer with its tip on the point the
      * host is told, where this TV keeps it (input/tv_cursor.h). */
     tv_cursor_init(app->ui.window, app->settings.bridge.tv_cursor_x, app->settings.bridge.tv_cursor_y);
+#if defined(TARGET_WEBOS)
+    /* ⓘ What the bridge core finds in a bridged keyboard's reports, beside
+     * its S: Ctrl+Alt+Shift and A, M or N; and a bridged mouse's first use. */
+    bridge_set_shortcut_request(bridge_keyboard_bridged_shortcut);
+    bridge_set_pointer_used_request(pointer_used);
+#endif
 }
 
 void bridge_app_stopping(void) {
@@ -83,14 +102,18 @@ void bridge_app_events(app_t *app) {
      * unaffected either way. Nothing else could produce that pattern. */
     /* ⓘ The question a bridge raises takes the input the same way the
      * overlay does (ui/streaming/bridge_prompt.h), and so does the bar that
-     * aligns the TV cursor (ui/streaming/mouse_menu.h), so all three count
+     * aligns the TV cursor (ui/streaming/cursor_align.h), so all three count
      * here: a bridged controller is held while any is up, and a keyboard
      * works any. */
-    const bool interface_has_input = streaming_overlay_shown() || bridge_prompt_shown() || mouse_menu_aligning();
+    const bool interface_has_input = streaming_overlay_shown() || bridge_prompt_shown() || cursor_align_shown();
     ctm_bridge_gesture_tick(&app->input, app->session, interface_has_input);
 #if defined(TARGET_WEBOS)
     /* The TV's keyboard grab looking again after a bridge or a release. */
     bridge_keyboard_tick(interface_has_input);
+    /* A bridged mouse's first use: the pop-up that asks about the TV cursor. */
+    if (SDL_AtomicSet(&s_pointer_used, 0) != 0) {
+        bridge_prompt_request_tv_cursor();
+    }
 #else
     (void) interface_has_input;
 #endif

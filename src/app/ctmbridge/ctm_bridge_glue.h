@@ -63,6 +63,13 @@ void ctm_bridge_set_input_held(bool held);
  * Ctrl+Alt+Shift+S. ⚠️ Called on the keyboard's input thread. */
 void bridge_set_overlay_request(void (*cb)(void));
 
+/* Who to tell when a bridged keyboard presses one of the app's other
+ * shortcuts, Ctrl+Alt+Shift and 'A', 'M' or 'N', and when a bridged mouse is
+ * first used after its bridge. ⚠️ Both are called on the device's input
+ * thread. */
+void bridge_set_shortcut_request(void (*cb)(char letter));
+void bridge_set_pointer_used_request(void (*cb)(void));
+
 void ctm_bridge_stop(void);
 
 /* True while the bridge is active. */

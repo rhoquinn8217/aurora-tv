@@ -11,6 +11,7 @@
 
 #include "vk.h"
 #include "input/tv_cursor.h"
+#include "ui/streaming/cursor_align.h"
 
 #if TARGET_WEBOS
 #include "platform/webos/keyboard_evdev.h"
@@ -24,6 +25,7 @@ enum KeyCombo {
     KeyComboToggleMouseMode,
     KeyComboToggleCursorHide,
     KeyComboToggleMinimize,
+    KeyComboAlignCursor,   /* This fork: the bar that aligns the TV cursor; see ui/streaming/cursor_align.h. */
     KeyComboMax
 };
 
@@ -42,6 +44,7 @@ static struct SpecialKeyCombo m_SpecialKeyCombos[KeyComboMax] = {
         {KeyComboToggleMouseMode,    SDLK_m, SDL_SCANCODE_M, true},
         {KeyComboToggleCursorHide,   SDLK_c, SDL_SCANCODE_C, true},
         {KeyComboToggleMinimize,     SDLK_d, SDL_SCANCODE_D, true},
+        {KeyComboAlignCursor,        SDLK_a, SDL_SCANCODE_A, true},   /* This fork */
 };
 
 enum KeyCombo _pending_key_combo = KeyComboMax;
@@ -171,6 +174,9 @@ void performPendingSpecialKeyCombo(stream_input_t *input) {
         case KeyComboToggleMinimize:
             SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                         "Detected minimize combo");
+            break;
+        case KeyComboAlignCursor:
+            cursor_align_request();   /* This fork: Ctrl+Alt+Shift+A; see ui/streaming/cursor_align.h. */
             break;
         default:
             break;

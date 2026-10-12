@@ -377,10 +377,10 @@ fi
 # --- the panel -----------------------------------------------------------
 need "USB Bridge panel present" \
      src/app/ui/streaming/ctm_panel.c "ctm_panel_open"
-# ⓘ The overlay's Mouse, USB Bridge and DS5-USBIP buttons are made by
+# ⓘ The overlay's USB Bridge and DS5-USBIP buttons are made by
 # src/app/ui/streaming/bridge_overlay.c, called from upstream's view. Right
-# after Virtual Mouse and before the spacer is what puts them third, fourth and
-# fifth in the row and in the focus order.
+# after Virtual Mouse and before the spacer is what puts them third and fourth
+# in the row and in the focus order.
 in_order "the overlay's bridge buttons come after Virtual Mouse" \
      src/app/ui/streaming/streaming.view.c "lv_obj_t *streaming_scene_create" \
      'lv_label_set_text(vmouse_label, locstr("Virtual Mouse"));' "bridge_overlay_buttons_create(controller, actions);"
@@ -398,7 +398,7 @@ in_order "a bridged controller raises the pop-up" \
 in_order "the overlay sends the pop-up away as it opens" \
      src/app/ui/streaming/streaming.controller.c "bool show_overlay" \
      "bridge_prompt_dismiss();" "overlay_showing = true;"
-in_order "the pop-up and its message go with the stream" \
+in_order "the pop-up, its message and the TV cursor's align bar go with the stream" \
      src/app/ui/streaming/streaming.controller.c "static void controller_dtor" \
      "bridge_prompt_stream_ended();" "fragment->soft_kbd = NULL;"
 in_order "the USB Bridge panel goes before the screen's focus group" \
@@ -437,20 +437,22 @@ need "the overlay's focus moves the way the wheel turns" \
 need "the TV's cursor stays beside the host's in an absolute-mouse stream" \
      src/app/input/app_input.c "if (grab && app_configuration->absmouse && !app_configuration->hardware_mouse) {"
 
-# --- the overlay's Mouse menu (rhoquinn8217, 2026-10-11) --------------------
-# ⓘ One line each in upstream's files. Taking upstream's back compiles, and:
+# --- the TV cursor's shortcuts and align bar (rhoquinn8217, 2026-10-11) -----
+# ⓘ Lines of ours in upstream's files. Taking upstream's back compiles, and:
 # root.c's, the bar that aligns the TV cursor no longer takes the keys, so the
 # arrows go to the PC and the bar never sees one; session_keyboard.c's,
-# Ctrl+Alt+Shift+M does nothing again on a keyboard webOS hands to the app (one
-# the TV holds is input/bridge_keyboard.c's); streaming.controller.c's is
-# upstream's own, and the menu's Align closes the overlay through it, by the
-# click that reaches the overlay's root, as the overlay's own buttons do.
+# Ctrl+Alt+Shift+M and Ctrl+Alt+Shift+A do nothing again on a keyboard webOS
+# hands to the app (one the TV holds is input/bridge_keyboard.c's, a bridged
+# one the bridge core's).
 need "the bar that aligns the TV cursor takes the input as the overlay does" \
-     src/app/ui/root.c "|| mouse_menu_aligning();"
+     src/app/ui/root.c "|| cursor_align_shown();"
 need "Ctrl+Alt+Shift+M switches the TV cursor on a keyboard webOS hands over" \
      src/app/stream/input/session_keyboard.c "tv_cursor_toggle_mode();"
-need "the overlay closes on a click that reaches its root (Align closes it so)" \
-     src/app/ui/streaming/streaming.controller.c "lv_obj_add_event_cb(controller->base.obj, hide_overlay, LV_EVENT_CLICKED, self);"
+need "Ctrl+Alt+Shift+A is one of the stream's shortcuts" \
+     src/app/stream/input/session_keyboard.c "{KeyComboAlignCursor,        SDLK_a, SDL_SCANCODE_A, true},"
+in_order "Ctrl+Alt+Shift+A opens the align bar" \
+     src/app/stream/input/session_keyboard.c "void performPendingSpecialKeyCombo" \
+     "case KeyComboAlignCursor:" "cursor_align_request();"
 
 echo
 if [ "$fail" -eq 0 ]; then
