@@ -13,6 +13,7 @@
 #include "input/bridge_keyboard.h"
 #endif
 #include "input/tv_cursor.h"
+#include "ui/streaming/mouse_menu.h"   /* mouse_menu_aligning */
 
 void bridge_app_before_sdl(void) {
     /* ⛔⛔ BEFORE SDL TOUCHES ANY CONTROLLER.
@@ -51,8 +52,8 @@ void bridge_app_started(app_t *app) {
      * them. A no-op unless built with AURORA_TERMINAL_CONTROL. */
     control_server_start(app);
     /* ⓘ Once the window is up: the TV's pointer with its tip on the point the
-     * host is told (input/tv_cursor.h). */
-    tv_cursor_init(app->ui.window);
+     * host is told, where this TV keeps it (input/tv_cursor.h). */
+    tv_cursor_init(app->ui.window, app->settings.bridge.tv_cursor_x, app->settings.bridge.tv_cursor_y);
 }
 
 void bridge_app_stopping(void) {
@@ -81,10 +82,11 @@ void bridge_app_events(app_t *app) {
      * and the gyro is exactly what it deliberately leaves alone. Output is
      * unaffected either way. Nothing else could produce that pattern. */
     /* ⓘ The question a bridge raises takes the input the same way the
-     * overlay does (ui/streaming/bridge_prompt.h), so both count here: a
-     * bridged controller is held while either is up, and a keyboard works
-     * either. */
-    const bool interface_has_input = streaming_overlay_shown() || bridge_prompt_shown();
+     * overlay does (ui/streaming/bridge_prompt.h), and so does the bar that
+     * aligns the TV cursor (ui/streaming/mouse_menu.h), so all three count
+     * here: a bridged controller is held while any is up, and a keyboard
+     * works any. */
+    const bool interface_has_input = streaming_overlay_shown() || bridge_prompt_shown() || mouse_menu_aligning();
     ctm_bridge_gesture_tick(&app->input, app->session, interface_has_input);
 #if defined(TARGET_WEBOS)
     /* The TV's keyboard grab looking again after a bridge or a release. */
@@ -92,6 +94,8 @@ void bridge_app_events(app_t *app) {
 #else
     (void) interface_has_input;
 #endif
+    /* The TV's cursor, put back if the window has the screen again. */
+    tv_cursor_tick();
     /* ⓘ Upstream v1.2.9's touchpad tap-hold, for its touchpad mouse mode, runs
      * in app.c right after this. It reads the same SDL touchpad state the
      * gesture polls here; neither consumes events, so the two coexist.

@@ -1,4 +1,4 @@
-/* The streaming overlay's two buttons of this fork's. The why is in the header. */
+/* The streaming overlay's three buttons of this fork's. The why is in the header. */
 
 #include "bridge_overlay.h"
 
@@ -9,6 +9,7 @@
 #include "ctm_bridge_glue.h"
 #include "ctm_panel.h"
 #include "bridge_prompt.h"
+#include "mouse_menu.h"
 
 static void open_listener_config(lv_event_t *event);
 
@@ -71,9 +72,10 @@ static void ds5usbip_deleted(lv_event_t *event) {
     s_ds5usbip_greyed = -1;
 }
 
-/* One button in the overlay's row, styled as the overlay's own are. */
+/* One button in the overlay's row, styled as the overlay's own are, and hidden
+ * with device bridging off when it is the bridge's. */
 static lv_obj_t *overlay_button(streaming_controller_t *controller, lv_obj_t *actions, const char *text,
-                                lv_palette_t colour) {
+                                lv_palette_t colour, bool bridge_only) {
     lv_obj_t *btn = lv_btn_create(actions);
     lv_obj_add_flag(btn, LV_OBJ_FLAG_EVENT_BUBBLE);
     lv_obj_add_style(btn, &controller->overlay_button_style, 0);
@@ -82,23 +84,29 @@ static lv_obj_t *overlay_button(streaming_controller_t *controller, lv_obj_t *ac
     lv_obj_t *label = lv_label_create(btn);
     lv_obj_add_style(label, &controller->overlay_button_label_style, 0);
     lv_label_set_text(label, text);
-    if (app_configuration && !app_configuration->bridge.enable) {
+    if (bridge_only && app_configuration && !app_configuration->bridge.enable) {
         lv_obj_add_flag(btn, LV_OBJ_FLAG_HIDDEN);
     }
     return btn;
 }
 
 void bridge_overlay_buttons_create(streaming_controller_t *controller, lv_obj_t *actions) {
+    /* ⭐ Mouse first, right after Virtual Mouse, in teal (rhoquinn8217,
+     * 2026-10-11, shown the layout: "yes"), and never hidden: the TV cursor
+     * and Virtual Mouse are not the bridge's. Its menu is mouse_menu.h's. */
+    lv_obj_t *mouse = overlay_button(controller, actions, locstr("Mouse"), LV_PALETTE_TEAL, false);
+    mouse_menu_attach(mouse, controller);
+
     /* ⓘ The panel takes the streaming screen from the click, to know whose
      * overlay it opens over. */
-    lv_obj_t *usb_bridge = overlay_button(controller, actions, locstr("USB Bridge"), LV_PALETTE_PURPLE);
+    lv_obj_t *usb_bridge = overlay_button(controller, actions, locstr("USB Bridge"), LV_PALETTE_PURPLE, true);
     lv_obj_add_event_cb(usb_bridge, ctm_panel_open, LV_EVENT_CLICKED, controller);
 
     /* ⭐ DS5-USBIP, beside the USB Bridge button and hidden with it, for the
      * same focus-order reason. ⓘ It stands where Bridge Override stood until
      * 2026-10-01, at rhoquinn8217's word. That switch has no button now: the
      * question a bridge raises turns it on (bridge_prompt.h). */
-    lv_obj_t *ds5usbip = overlay_button(controller, actions, locstr("DS5-USBIP"), LV_PALETTE_DEEP_PURPLE);
+    lv_obj_t *ds5usbip = overlay_button(controller, actions, locstr("DS5-USBIP"), LV_PALETTE_DEEP_PURPLE, true);
     lv_obj_add_event_cb(ds5usbip, open_listener_config, LV_EVENT_CLICKED, NULL);
 
     /* Its look follows whether anything is bridged. ⓘ A timer left by a screen

@@ -22,6 +22,7 @@
 #include "logging.h"
 #include "ctm_bridge_glue.h"
 #include "ctm_bridge_gesture.h"
+#include "tv_cursor.h"
 #include "stream/session.h"
 #include "stream/session_priv.h"
 #include "stream/input/session_input.h"
@@ -54,6 +55,7 @@ enum {
     SHORTCUT_NONE = 0,
     SHORTCUT_OVERLAY,   /* Ctrl+Alt+Shift+S, Moonlight's stats shortcut: here it opens the overlay */
     SHORTCUT_QUIT,      /* Ctrl+Alt+Shift+Q, Moonlight's: ends the stream */
+    SHORTCUT_MOUSE,     /* Ctrl+Alt+Shift+M, Moonlight's mouse mode: the TV cursor on or off */
 };
 static SDL_atomic_t s_shortcut;
 
@@ -456,8 +458,11 @@ bool bridge_keyboard_evdev_key(stream_input_t *input, short vk, bool down, char 
         case VK_Q:
             shortcut = SHORTCUT_QUIT;
             break;
+        case VK_M:
+            shortcut = SHORTCUT_MOUSE;
+            break;
         default:
-            /* ⓘ Moonlight's Z, X, M, C and D only write a log line in this app
+            /* ⓘ Moonlight's Z, X, C and D only write a log line in this app
              * (performPendingSpecialKeyCombo), so they stay the host's. O is
              * a letter like any other again. */
             return false;
@@ -558,6 +563,16 @@ static void act_on_shortcut(int shortcut) {
             keyboard_log("shortcut Ctrl+Alt+Shift+Q on a keyboard the TV has: ending the stream");
             /* The overlay's own Disconnect: the host keeps the game running. */
             session_interrupt(global->session, false, STREAMING_INTERRUPT_USER);
+            break;
+        case SHORTCUT_MOUSE:
+            commons_log_info("Input", "Keyboard evdev: Ctrl+Alt+Shift+M, the TV cursor on or off");
+            if (tv_cursor_toggle_mode()) {
+                keyboard_log("shortcut Ctrl+Alt+Shift+M on a keyboard the TV has: the TV cursor %s",
+                             tv_cursor_mode_on() ? "on" : "off");
+            } else {
+                keyboard_log("shortcut Ctrl+Alt+Shift+M on a keyboard the TV has: the TV cursor cannot be"
+                             " switched while Use mouse hardware is on");
+            }
             break;
         default:
             break;

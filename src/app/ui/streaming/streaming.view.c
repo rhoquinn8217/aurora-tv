@@ -109,7 +109,7 @@ lv_obj_t *streaming_scene_create(lv_fragment_t *self, lv_obj_t *parent) {
     lv_obj_t *vmouse_label = lv_label_create(vmouse_btn);
     lv_obj_add_style(vmouse_label, &controller->overlay_button_label_style, 0);
     lv_label_set_text(vmouse_label, locstr("Virtual Mouse"));
-    bridge_overlay_buttons_create(controller, actions);   /* This fork: USB Bridge and DS5-USBIP; see bridge_overlay.h. */
+    bridge_overlay_buttons_create(controller, actions);   /* This fork: Mouse, USB Bridge and DS5-USBIP; see bridge_overlay.h. */
 
     lv_obj_t *actions_spacing = lv_obj_create(actions);
     lv_obj_remove_style_all(actions_spacing);

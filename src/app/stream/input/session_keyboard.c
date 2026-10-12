@@ -10,6 +10,7 @@
 #include "util/user_event.h"
 
 #include "vk.h"
+#include "input/tv_cursor.h"
 
 #if TARGET_WEBOS
 #include "platform/webos/keyboard_evdev.h"
@@ -161,6 +162,7 @@ void performPendingSpecialKeyCombo(stream_input_t *input) {
         case KeyComboToggleMouseMode:
             SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                         "Detected mouse mode toggle combo");
+            tv_cursor_toggle_mode();   /* This fork: the TV cursor on or off; see input/tv_cursor.h. */
             break;
         case KeyComboToggleCursorHide:
             SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,

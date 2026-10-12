@@ -3,6 +3,11 @@
 
 #include "tv_cursor.h"
 
+#include "app.h"   /* the app, its settings and the mouse grab */
+#include "stream/session.h"   /* whether the stream has the input */
+
+static void cursor_log(const char *fmt, ...);
+
 #if defined(TARGET_WEBOS)
 
 #include <math.h>
@@ -52,23 +57,33 @@ FILE *ctm_log_open(const char *name, const char *mode);
  * tries (rhoquinn8217: "over jumped"). The drop is placed that far over before
  * the shrink, whose averaging draws the half step. With the tip on a pixel
  * corner, 0,0 puts it on the point the host is told: where it was found by eye
- * on the C1, 2026-10-11, with webOS's rounded tip. ⓘ Both can be tried live
- * from the control port (`cursor`), and are not saved there. */
-#define TV_CURSOR_SHIFT_X 0
-#define TV_CURSOR_SHIFT_Y 0
+ * on the C1, 2026-10-11, with webOS's rounded tip. ⭐ The shift a TV uses is
+ * its own, saved by Align TV cursor (the header says where), and -1, 3 until
+ * then. ⓘ Both can be tried live from the control port (`cursor`), and are
+ * not saved there. */
 #define TV_CURSOR_THIN 1
 
 /* Clear room around the drop, in its own pixels, for the shift and the hot
  * spot. */
-#define TV_CURSOR_MARGIN 16
+#define TV_CURSOR_MARGIN TV_CURSOR_SHIFT_MAX
 
 static bool s_ready = false;           /* the cursor is Aurora's */
 static double s_scale = 1.0;           /* how much the TV enlarges the app */
-static int s_shift_x = TV_CURSOR_SHIFT_X, s_shift_y = TV_CURSOR_SHIFT_Y;
+static int s_shift_x = 0, s_shift_y = 0;
 static int s_thin = TV_CURSOR_THIN;
 static SDL_Surface *s_image = NULL;    /* the cursor's picture */
 static SDL_Cursor *s_cursor = NULL;
 static int s_hot_x = 0, s_hot_y = 0;
+
+/* ⭐ PUT BACK WHEN THE WINDOW HAS THE SCREEN AGAIN (rhoquinn8217, 2026-10-11:
+ * "I suspect that something may reset the orientation of the cursor"). webOS
+ * draws the pointer, and an app's cursor is only a request to it; a window
+ * shown again, given the focus again or entered again by the pointer asks for
+ * it once more. ⓘ Noticed in SDL's event watch, wherever SDL is when it sends
+ * the event, and done on the app's loop (tv_cursor_tick). */
+static SDL_atomic_t s_reapply;         /* the window event that asked, 0 for none */
+static int s_reapplied = 0;            /* how many times, for the log, which stops saying so after a few */
+#define TV_CURSOR_REAPPLY_LOGGED 20
 
 static void cursor_log(const char *fmt, ...) {
     FILE *f = ctm_log_open(TV_CURSOR_LOG, "a");
@@ -282,11 +297,49 @@ static bool build(void) {
     return true;
 }
 
-void tv_cursor_init(SDL_Window *window) {
+static int clamp_shift(int v) {
+    return v < -TV_CURSOR_SHIFT_MAX ? -TV_CURSOR_SHIFT_MAX : (v > TV_CURSOR_SHIFT_MAX ? TV_CURSOR_SHIFT_MAX : v);
+}
+
+static int SDLCALL window_watch(void *userdata, SDL_Event *event) {
+    (void) userdata;
+    if (event->type == SDL_WINDOWEVENT) {
+        switch (event->window.event) {
+            case SDL_WINDOWEVENT_SHOWN:
+            case SDL_WINDOWEVENT_RESTORED:
+            case SDL_WINDOWEVENT_FOCUS_GAINED:
+            case SDL_WINDOWEVENT_ENTER:
+                SDL_AtomicSet(&s_reapply, event->window.event);
+                break;
+            default:
+                break;
+        }
+    }
+    return 1;
+}
+
+static const char *window_event_name(int event) {
+    switch (event) {
+        case SDL_WINDOWEVENT_SHOWN:
+            return "was shown again";
+        case SDL_WINDOWEVENT_RESTORED:
+            return "was restored";
+        case SDL_WINDOWEVENT_FOCUS_GAINED:
+            return "has the focus again";
+        case SDL_WINDOWEVENT_ENTER:
+            return "has the pointer again";
+        default:
+            return "asked";
+    }
+}
+
+void tv_cursor_init(SDL_Window *window, int shift_x, int shift_y) {
     FILE *f = ctm_log_open(TV_CURSOR_LOG, "w");   /* a few lines a start: begun again each time */
     if (f != NULL) {
         fclose(f);
     }
+    s_shift_x = clamp_shift(shift_x);
+    s_shift_y = clamp_shift(shift_y);
     /* How much the TV enlarges Aurora: the panel against the window. */
     int win_w = 0, win_h = 0, panel_w = 0, panel_h = 0;
     if (window != NULL) {
@@ -299,10 +352,14 @@ void tv_cursor_init(SDL_Window *window) {
                win_w, win_h, panel_w, panel_h, s_scale);
     if (!build()) {
         cursor_log("webOS's own pointer stays");
+        return;
     }
+    SDL_AtomicSet(&s_reapply, 0);
+    SDL_AddEventWatch(window_watch, NULL);
 }
 
 void tv_cursor_deinit(void) {
+    SDL_DelEventWatch(window_watch, NULL);
     if (s_cursor != NULL) {
         SDL_SetCursor(SDL_GetDefaultCursor());
         SDL_FreeCursor(s_cursor);
@@ -315,36 +372,90 @@ void tv_cursor_deinit(void) {
     s_ready = false;
 }
 
+void tv_cursor_tick(void) {
+    const int why = SDL_AtomicSet(&s_reapply, 0);
+    if (why == 0 || !s_ready || s_cursor == NULL) {
+        return;
+    }
+    /* ⓘ Ours again if something else was set; if it is still ours, NULL is
+     * SDL's own way to have the cursor that stands drawn again. Either way SDL
+     * leaves it hidden where it is hidden: relative mode, or the stream's. */
+    if (SDL_GetCursor() != s_cursor) {
+        SDL_SetCursor(s_cursor);
+    } else {
+        SDL_SetCursor(NULL);
+    }
+    if (s_reapplied < TV_CURSOR_REAPPLY_LOGGED) {
+        cursor_log("cursor set again: the window %s%s", window_event_name(why),
+                   s_reapplied + 1 == TV_CURSOR_REAPPLY_LOGGED ? " (no more of these lines this run)" : "");
+    }
+    s_reapplied++;
+}
+
 bool tv_cursor_adjust(int shift_x, int shift_y, int thin) {
     if (!s_ready) {
         return false;
     }
-    s_shift_x = shift_x;
-    s_shift_y = shift_y;
+    s_shift_x = clamp_shift(shift_x);
+    s_shift_y = clamp_shift(shift_y);
     if (thin >= 0) {
         s_thin = thin > 2 ? 2 : thin;   /* below 0: keep the line that stands */
     }
     return build();
 }
 
+void tv_cursor_get_shift(int *shift_x, int *shift_y) {
+    if (shift_x != NULL) *shift_x = s_shift_x;
+    if (shift_y != NULL) *shift_y = s_shift_y;
+}
+
+bool tv_cursor_keep(void) {
+    if (!s_ready || app_configuration == NULL) {
+        return false;
+    }
+    app_configuration->bridge.tv_cursor_x = s_shift_x;
+    app_configuration->bridge.tv_cursor_y = s_shift_y;
+    settings_save(app_configuration);
+    cursor_log("kept as this TV's: shifted %d,%d of the TV's pixels (right, down)", s_shift_x, s_shift_y);
+    return true;
+}
+
+bool tv_cursor_drawn(void) {
+    return s_ready;
+}
+
 void tv_cursor_describe(char *out, size_t len) {
+    const char *mode = tv_cursor_mode_on() ? "on" : (tv_cursor_mode_switchable() ? "off" : "off(hardware-mouse)");
+    const int saved_x = app_configuration != NULL ? app_configuration->bridge.tv_cursor_x : 0;
+    const int saved_y = app_configuration != NULL ? app_configuration->bridge.tv_cursor_y : 0;
     if (!s_ready || s_image == NULL) {
-        snprintf(out, len, "webOS's own pointer (Aurora's could not be made: see logs/tv-cursor.log)");
+        snprintf(out, len, "tv_cursor=%s, webOS's own pointer (Aurora's could not be made: see logs/tv-cursor.log)",
+                 mode);
         return;
     }
-    snprintf(out, len, "shift=%d,%d thin=%d hot=%d,%d image=%dx%d scale=%.2f",
-             s_shift_x, s_shift_y, s_thin, s_hot_x, s_hot_y, s_image->w, s_image->h, s_scale);
+    snprintf(out, len, "tv_cursor=%s shift=%d,%d saved=%d,%d thin=%d hot=%d,%d image=%dx%d scale=%.2f reapplied=%d",
+             mode, s_shift_x, s_shift_y, saved_x, saved_y, s_thin, s_hot_x, s_hot_y, s_image->w, s_image->h,
+             s_scale, s_reapplied);
 }
 
 #else
 
 #include <stdio.h>
 
-void tv_cursor_init(SDL_Window *window) {
+static void cursor_log(const char *fmt, ...) {
+    (void) fmt;
+}
+
+void tv_cursor_init(SDL_Window *window, int shift_x, int shift_y) {
     (void) window;
+    (void) shift_x;
+    (void) shift_y;
 }
 
 void tv_cursor_deinit(void) {
+}
+
+void tv_cursor_tick(void) {
 }
 
 bool tv_cursor_adjust(int shift_x, int shift_y, int thin) {
@@ -354,8 +465,60 @@ bool tv_cursor_adjust(int shift_x, int shift_y, int thin) {
     return false;
 }
 
+void tv_cursor_get_shift(int *shift_x, int *shift_y) {
+    if (shift_x != NULL) *shift_x = 0;
+    if (shift_y != NULL) *shift_y = 0;
+}
+
+bool tv_cursor_keep(void) {
+    return false;
+}
+
+bool tv_cursor_drawn(void) {
+    return false;
+}
+
 void tv_cursor_describe(char *out, size_t len) {
-    snprintf(out, len, "not on webOS");
+    snprintf(out, len, "tv_cursor=%s, not on webOS", tv_cursor_mode_on() ? "on" : "off");
 }
 
 #endif
+
+/* ⭐ THE SWITCH ITSELF IS UPSTREAM'S, "Absolute mouse mode" (Settings, Input),
+ * so the menu, the shortcut and Settings all show the same thing, and it is
+ * saved as that: the next stream starts the way this one was left
+ * (rhoquinn8217, 2026-10-11, asked whether it should: "yes"). ⓘ Saved at once
+ * rather than when the app leaves Settings or closes, as the others are: an
+ * install or a crash would lose it otherwise. */
+bool tv_cursor_mode_on(void) {
+    return app_configuration != NULL && app_configuration->absmouse && !app_configuration->hardware_mouse;
+}
+
+bool tv_cursor_mode_switchable(void) {
+    return app_configuration != NULL && !app_configuration->hardware_mouse;
+}
+
+bool tv_cursor_set_mode(bool on) {
+    if (!tv_cursor_mode_switchable()) {
+        cursor_log("the TV cursor cannot be switched while Use mouse hardware is on");
+        return false;
+    }
+    if (app_configuration->absmouse != on) {
+        app_configuration->absmouse = on;
+        settings_save(app_configuration);
+    }
+    /* ⓘ The stream holds the mouse while nothing of the interface is up, and
+     * is given the new mode at once. Otherwise the interface has it, and gives
+     * it back in the new mode as it closes (app_set_mouse_grab, in the
+     * overlay's close). */
+    if (global != NULL && global->session != NULL && session_accepting_input(global->session)) {
+        app_set_mouse_grab(&global->input, true);
+    }
+    cursor_log("TV cursor %s: the host is told %s", on ? "on" : "off",
+               on ? "where the cursor is" : "only how the mouse moved, and nothing stops at the screen's edge");
+    return true;
+}
+
+bool tv_cursor_toggle_mode(void) {
+    return tv_cursor_set_mode(!tv_cursor_mode_on());
+}

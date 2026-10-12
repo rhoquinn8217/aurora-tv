@@ -377,10 +377,10 @@ fi
 # --- the panel -----------------------------------------------------------
 need "USB Bridge panel present" \
      src/app/ui/streaming/ctm_panel.c "ctm_panel_open"
-# ⓘ The overlay's USB Bridge and DS5-USBIP buttons are made by
+# ⓘ The overlay's Mouse, USB Bridge and DS5-USBIP buttons are made by
 # src/app/ui/streaming/bridge_overlay.c, called from upstream's view. Right
-# after Virtual Mouse and before the spacer is what puts them third and fourth
-# in the row and in the focus order.
+# after Virtual Mouse and before the spacer is what puts them third, fourth and
+# fifth in the row and in the focus order.
 in_order "the overlay's bridge buttons come after Virtual Mouse" \
      src/app/ui/streaming/streaming.view.c "lv_obj_t *streaming_scene_create" \
      'lv_label_set_text(vmouse_label, locstr("Virtual Mouse"));' "bridge_overlay_buttons_create(controller, actions);"
@@ -436,6 +436,21 @@ need "the overlay's focus moves the way the wheel turns" \
 # upstream's function back compiles, and the C1 hides it again.
 need "the TV's cursor stays beside the host's in an absolute-mouse stream" \
      src/app/input/app_input.c "if (grab && app_configuration->absmouse && !app_configuration->hardware_mouse) {"
+
+# --- the overlay's Mouse menu (rhoquinn8217, 2026-10-11) --------------------
+# ⓘ One line each in upstream's files. Taking upstream's back compiles, and:
+# root.c's, the bar that aligns the TV cursor no longer takes the keys, so the
+# arrows go to the PC and the bar never sees one; session_keyboard.c's,
+# Ctrl+Alt+Shift+M does nothing again on a keyboard webOS hands to the app (one
+# the TV holds is input/bridge_keyboard.c's); streaming.controller.c's is
+# upstream's own, and the menu's Align closes the overlay through it, by the
+# click that reaches the overlay's root, as the overlay's own buttons do.
+need "the bar that aligns the TV cursor takes the input as the overlay does" \
+     src/app/ui/root.c "|| mouse_menu_aligning();"
+need "Ctrl+Alt+Shift+M switches the TV cursor on a keyboard webOS hands over" \
+     src/app/stream/input/session_keyboard.c "tv_cursor_toggle_mode();"
+need "the overlay closes on a click that reaches its root (Align closes it so)" \
+     src/app/ui/streaming/streaming.controller.c "lv_obj_add_event_cb(controller->base.obj, hide_overlay, LV_EVENT_CLICKED, self);"
 
 echo
 if [ "$fail" -eq 0 ]; then

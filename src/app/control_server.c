@@ -135,6 +135,7 @@ static void cmd_help(control_job_t *job)
                "signal refuse <n>       play a device's refusal signal; no plug has to fail\n"
                "cursor [<right> <down> [<thin>]]  Aurora's TV pointer: what stands, or a shift and a\n"
                "                        thinner outline to try live, in the TV's own pixels; not saved\n"
+               "cursor on|off           the TV cursor on or off, and saved, as the overlay's Mouse menu does\n"
                "<device> is its number, its node, its vid:pid, or part of its name; <n> is from groups\n");
 }
 
@@ -328,10 +329,16 @@ static void cmd_input(control_job_t *job)
  * whether webOS hands a keyboard's keys to the app at all. */
 /* Aurora's TV pointer (input/tv_cursor.h): what stands now, or a shift and a
  * thinning to try live, not saved (rhoquinn8217, 2026-10-11: "move it
- * slightly down and to the right"), so a test needs no build per try. */
+ * slightly down and to the right"), so a test needs no build per try. And
+ * the TV cursor on or off, saved, as the overlay's Mouse menu switches it. */
 static void cmd_cursor(control_job_t *job, const char *args)
 {
-    if (*args != '\0') {
+    if (strcasecmp(args, "on") == 0 || strcasecmp(args, "off") == 0) {
+        if (!tv_cursor_set_mode(strcasecmp(args, "on") == 0)) {
+            reply(job, "ERR the TV cursor cannot be switched while \"Use mouse hardware\" is on\n");
+            return;
+        }
+    } else if (*args != '\0') {
         int right = 0, down = 0, thin = -1;
         const int got = sscanf(args, "%d %d %d", &right, &down, &thin);
         if (got < 2) {
@@ -343,7 +350,7 @@ static void cmd_cursor(control_job_t *job, const char *args)
             return;
         }
     }
-    char line[160];
+    char line[224];
     tv_cursor_describe(line, sizeof line);
     reply(job, "OK %s\n", line);
 }

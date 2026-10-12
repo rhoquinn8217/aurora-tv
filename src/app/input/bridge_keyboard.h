@@ -39,7 +39,10 @@
  *   core in its reports;
  * - Ctrl+Alt+Shift+Q ends the stream (Moonlight's quit), as the overlay's
  *   Disconnect does;
- * - Moonlight's other five (Z, X, M, C, D) do nothing in this app beyond a log
+ * - Ctrl+Alt+Shift+M switches the TV cursor on or off (input/tv_cursor.h),
+ *   which is Moonlight's mouse-mode switch (rhoquinn8217, 2026-10-11, asked
+ *   whether it should: "yes"). A bridged keyboard's M goes to the host;
+ * - Moonlight's other four (Z, X, C, D) do nothing in this app beyond a log
  *   line, so they are left for the host.
  *
  * ⭐ THE READER GIVES THE OVERLAY ITS KEYS, FROM EVERY KEYBOARD (rhoquinn8217 on
