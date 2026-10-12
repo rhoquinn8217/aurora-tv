@@ -20,21 +20,15 @@
 #define ALIGN_COL_TXT     lv_color_hex(0xf5f8fa)
 #define ALIGN_COL_SUB     lv_color_hex(0x95a3b0)
 
-/* How often the pointer is put where it is while the bar is up: well inside the
- * 5 seconds webOS gives it (app.c). */
-#define ALIGN_WAKE_MS 1000
-
 /* The bar: a clear layer over the whole screen, which takes the keys and every
  * click, with the bar at its top. */
 static lv_obj_t *s_bar = NULL;
 static lv_group_t *s_group = NULL;
 static lv_group_t *s_prev_group = NULL;   /* where the keys went before, and go back to */
 static lv_obj_t *s_title = NULL;
-static lv_timer_t *s_wake = NULL;
 static bool s_aligning = false;
 static bool s_open_queued = false;
 static int s_was_x = 0, s_was_y = 0;      /* the shift before aligning, which Esc puts back */
-static int s_wakes = 0;
 
 /* ⓘ A close hides at once and deletes on the next pass, as the USB Bridge
  * panel's does (ctm_panel.c): the key event that closed it is still being
@@ -67,27 +61,6 @@ static void bury(lv_obj_t *obj, lv_group_t *group) {
     b->group = group;
     if (lv_async_call(bury_now, b) != LV_RES_OK) {
         lv_mem_free(b);   /* the same */
-    }
-}
-
-/* The pointer put where it already is, which webOS takes as the mouse moving:
- * it stays up, and nothing moves. The header says why not the direct call. */
-static void wake_pointer(void) {
-    if (global == NULL || global->ui.window == NULL) {
-        return;
-    }
-    int x = 0, y = 0;
-    SDL_GetMouseState(&x, &y);
-    SDL_WarpMouseInWindow(global->ui.window, x, y);
-    if (s_wakes++ == 0) {
-        tv_cursor_log("align bar: the pointer kept up, put where it is (%d,%d) once a second", x, y);
-    }
-}
-
-static void wake_cb(lv_timer_t *timer) {
-    LV_UNUSED(timer);
-    if (s_aligning) {
-        wake_pointer();
     }
 }
 
@@ -138,10 +111,6 @@ static void bar_close(bool keep) {
     bridge_keyboard_take_bridged(false);
     s_aligning = false;
     SDL_DelEventWatch(align_motion_watch, NULL);
-    if (s_wake != NULL) {
-        lv_timer_del(s_wake);
-        s_wake = NULL;
-    }
     if (keep) {
         tv_cursor_keep();
     } else {
@@ -187,7 +156,6 @@ static void bar_key_cb(lv_event_t *event) {
     }
     tv_cursor_adjust(x, y, -1);
     bar_refresh();
-    wake_pointer();
 }
 
 /* ⓘ Enter and A come as a click when they come UP, as everywhere in this
@@ -255,9 +223,6 @@ static void bar_open(void) {
     lv_group_focus_obj(layer);
     SDL_AddEventWatch(align_motion_watch, NULL);
     host_cursor_to_tip();
-    s_wakes = 0;
-    wake_pointer();
-    s_wake = lv_timer_create(wake_cb, ALIGN_WAKE_MS, NULL);
     tv_cursor_log("align bar: open at right %d, down %d", s_was_x, s_was_y);
 }
 
@@ -312,10 +277,6 @@ void cursor_align_stream_ended(void) {
         SDL_DelEventWatch(align_motion_watch, NULL);
         tv_cursor_adjust(s_was_x, s_was_y, -1);   /* never kept, so not kept now */
         tv_cursor_log("align bar: closed with the stream, nothing kept");
-    }
-    if (s_wake != NULL) {
-        lv_timer_del(s_wake);
-        s_wake = NULL;
     }
     /* ⓘ The streaming screen takes its keys away before its objects go
      * (upstream's on_delete_obj); asked again here in case, and the group the
