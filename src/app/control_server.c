@@ -349,7 +349,6 @@ static void cmd_cursor(control_job_t *job, const char *args)
             return;
         }
     } else if (strcasecmp(args, "on") == 0 || strcasecmp(args, "off") == 0) {
-    if (strcasecmp(args, "on") == 0 || strcasecmp(args, "off") == 0) {
         if (!tv_cursor_set_mode(strcasecmp(args, "on") == 0)) {
             reply(job, "%s", tv_cursor_mode_switchable()
                                  ? "ERR the TV cursor stays off while a mouse is bridged, as the TV now says\n"
