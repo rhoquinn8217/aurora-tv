@@ -664,6 +664,9 @@ static void act_on_shortcut(int shortcut, bool bridged) {
             if (tv_cursor_toggle_mode()) {
                 keyboard_log("shortcut Ctrl+Alt+Shift+M on %s: the TV cursor %s", which,
                              tv_cursor_mode_on() ? "on" : "off");
+            } else if (tv_cursor_mode_switchable()) {
+                keyboard_log("shortcut Ctrl+Alt+Shift+M on %s: the TV cursor stays off while a mouse"
+                             " is bridged", which);
             } else {
                 keyboard_log("shortcut Ctrl+Alt+Shift+M on %s: the TV cursor cannot be"
                              " switched while Use mouse hardware is on", which);

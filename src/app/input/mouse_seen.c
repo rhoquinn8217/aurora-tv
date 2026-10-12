@@ -231,6 +231,25 @@ int mouse_seen_wake(void) {
     return woken;
 }
 
+bool mouse_seen_mouse_bridged(char *which, size_t len) {
+    ctm_bridge_pointer_t parts[MOUSE_NODES_MAX];
+    const int n = ctm_bridge_bridged_pointers(parts, MOUSE_NODES_MAX);
+    for (int i = 0; i < n; i++) {
+        bool seen_moving = false;
+        for (int j = 0; j < s_seen_n && !seen_moving; j++) {
+            seen_moving = ctm_bridge_gesture_event_on_node(s_seen[j], parts[i].node);
+        }
+        if (parts[i].used || seen_moving) {
+            if (which != NULL && len > 0) {
+                snprintf(which, len, "%s, %s", parts[i].node,
+                         parts[i].used ? "used since its bridge" : "seen moving before it");
+            }
+            return true;
+        }
+    }
+    return false;
+}
+
 #else
 
 void mouse_seen_tick(void) {
@@ -246,6 +265,12 @@ bool mouse_seen_take_bridged(void) {
 
 int mouse_seen_wake(void) {
     return 0;
+}
+
+bool mouse_seen_mouse_bridged(char *which, size_t len) {
+    (void) which;
+    (void) len;
+    return false;
 }
 
 #endif

@@ -343,7 +343,9 @@ static void cmd_cursor(control_job_t *job, const char *args)
     }
     if (strcasecmp(args, "on") == 0 || strcasecmp(args, "off") == 0) {
         if (!tv_cursor_set_mode(strcasecmp(args, "on") == 0)) {
-            reply(job, "ERR the TV cursor cannot be switched while \"Use mouse hardware\" is on\n");
+            reply(job, "%s", tv_cursor_mode_switchable()
+                                 ? "ERR the TV cursor stays off while a mouse is bridged, as the TV now says\n"
+                                 : "ERR the TV cursor cannot be switched while \"Use mouse hardware\" is on\n");
             return;
         }
     } else if (*args != '\0') {

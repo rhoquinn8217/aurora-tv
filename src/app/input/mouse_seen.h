@@ -46,4 +46,12 @@ bool mouse_seen_take_bridged(void);
  * for its own and ask about the TV cursor when bridged. How many were woken. */
 int mouse_seen_wake(void);
 
+/* ⭐ IS A MOUSE BRIDGED? For the TV cursor, which does not come on while one
+ * is (input/tv_cursor.h). A bridged mouse part counts when the bridge core
+ * says it has been used since its bridge, or when the TV saw it move before:
+ * a receiver's mouse part with nothing behind it does neither, so a keyboard
+ * bridged with one does not count. `which` gets the part and why, for the
+ * log. */
+bool mouse_seen_mouse_bridged(char *which, size_t len);
+
 #endif /* MOUSE_SEEN_H */

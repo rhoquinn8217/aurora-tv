@@ -175,6 +175,16 @@ int ctm_bridge_list_quiet(ctm_bridge_dev_t *out, int max);
  * genuinely refused. */
 bool ctm_bridge_node_is_plugged(const char *node);
 
+/* Every bridged mouse part: its hidraw node, and whether a report of it has
+ * said something since its bridge. ⓘ A receiver's mouse part with nothing
+ * behind it is one too, and is never used. Fills out[0..max-1], returns the
+ * count; a walk of the session table, no enumeration. */
+typedef struct {
+    char node[64];
+    bool used;
+} ctm_bridge_pointer_t;
+int ctm_bridge_bridged_pointers(ctm_bridge_pointer_t *out, int max);
+
 /* True for a Bluetooth DualSense. */
 bool ctm_bridge_node_is_bluetooth(const char *node);
 

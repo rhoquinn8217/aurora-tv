@@ -79,7 +79,9 @@ bool tv_cursor_mode_on(void);
 bool tv_cursor_mode_switchable(void);
 
 /* Switch the TV cursor on or off, save it, and if the stream has the mouse
- * right now, give it the new mode at once. False when it cannot be switched.
+ * right now, give it the new mode at once. False when it cannot be switched:
+ * with "Use mouse hardware" on (tv_cursor_mode_switchable), or on while a
+ * mouse is bridged (input/mouse_seen.h), which a message on the stream says.
  * ⓘ From Ctrl+Alt+Shift+M, Moonlight's own shortcut for this switch, on every
  * keyboard; from the pop-up a bridged mouse raises (bridge_prompt.h); and from
  * the control port. */
