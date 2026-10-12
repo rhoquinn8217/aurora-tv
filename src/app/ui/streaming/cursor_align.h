@@ -21,15 +21,14 @@
  *   (rhoquinn8217: "align is unusable because the cursor disappears whenever
  *   I click an arrow key"). input/bridge_keyboard.h says how it is given back.
  * - ⭐ **THE TV CURSOR STAYS UP WHILE IT IS** (rhoquinn8217: "When calibrating,
- *   the tv mouse cursor disappears after sometime"). webOS put its pointer to
- *   sleep after 5 seconds without the mouse moving (upstream asks for that, in
- *   app.c), and keys never count; this fork asks for five minutes instead
- *   (bridge_app_sdl_hints). ⛔ Two things that did not do it: putting the
- *   pointer where it already is once a second (SDL_WarpMouseInWindow, builds
- *   519 to 521: webOS slept it all the same); and SDL_webOSCursorVisibility,
- *   never tried, as upstream took it out on 2026-08-25 after it ended the app
- *   on a set, and the SDL this app carries is the build without the fix for
- *   webOS versions whose pointer protocol differs.
+ *   the tv mouse cursor disappears after sometime"). webOS hides a mouse's
+ *   pointer after 5 seconds without movement, and keys never count. So while
+ *   the bar is up, webOS is asked to show it, once a second and after every
+ *   step (tv_cursor_keep_shown, which says how that is made safe).
+ *   ⛔ Two things that did not do it: putting the pointer where it already is
+ *   once a second (SDL_WarpMouseInWindow, builds 519 to 521); and asking for
+ *   a longer sleep (SDL_HINT_WEBOS_CURSOR_SLEEP_TIME, build 522): that is the
+ *   remote's pointer, webOS's "MRCU standby timer", not a mouse's.
  * - **With the TV cursor off** the chord does not open it, and says how to turn
  *   the cursor on, in the place of the bridge's pop-up (bridge_prompt.h).
  */

@@ -62,18 +62,6 @@ void bridge_app_sdl_hints(void) {
      * Measured 2026-08-06 on the rooted monitor. */
     SDL_SetHint(SDL_HINT_JOYSTICK_HIDAPI_PS5, "1");
     SDL_SetHint(SDL_HINT_JOYSTICK_HIDAPI_PS5_RUMBLE, "1");
-    /* ⭐ THE TV CURSOR STAYS UP FIVE MINUTES WITHOUT MOVING, NOT FIVE SECONDS
-     * (rhoquinn8217, 2026-10-11, aligning it: "tv cursor still disappears in
-     * 5 seconds while adjusting"). Upstream asks webOS to put the pointer to
-     * sleep after 5 s without the mouse moving (app.c, just before this call),
-     * and keys never count, so the align bar, which is all keys, lost the very
-     * cursor it aligns. webOS reads this once, as the window is made, and gives
-     * the app nothing else to wake it with: putting the pointer where it
-     * already is, once a second, did not (build 521). ⓘ Five minutes is SDL's
-     * own default, so a still cursor does go in the end; and the TV cursor now
-     * rests beside the PC's as it was first asked for: "How do we show it all
-     * the time?". */
-    SDL_SetHint(SDL_HINT_WEBOS_CURSOR_SLEEP_TIME, "300000");
 #endif
 }
 

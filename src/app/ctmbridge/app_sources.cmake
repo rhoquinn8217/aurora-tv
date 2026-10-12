@@ -29,6 +29,13 @@ target_sources(moonlight-lib PRIVATE
         ${CMAKE_SOURCE_DIR}/src/app/ui/streaming/ctm_panel.c
         ${CMAKE_SOURCE_DIR}/src/app/ui/streaming/cursor_align.c)
 
+# The TV cursor asks the compositor, on a connection of its own, whether it
+# shows the pointer on request (src/app/input/tv_cursor.c). The TV has the
+# library; SDL loads it for itself.
+if (TARGET_WEBOS)
+    target_link_libraries(moonlight-lib PRIVATE wayland-client)
+endif ()
+
 # The pairing proof's signer (src/app/stream/bridge_proof.c) reads this TV's
 # paired key with mbedtls, which libgamestream links for itself, privately.
 target_include_directories(moonlight-lib SYSTEM PRIVATE ${MBEDTLS_INCLUDE_DIRS})

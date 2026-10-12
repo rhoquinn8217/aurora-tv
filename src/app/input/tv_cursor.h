@@ -70,6 +70,12 @@ bool tv_cursor_keep(void);
  * pointer stays: there is nothing to shift. */
 bool tv_cursor_drawn(void);
 
+/* Asks webOS to show the pointer now, as webOS hides a mouse's pointer after
+ * 5 seconds without movement and keys never count; for the align bar, which
+ * calls it once a second. False where webOS does not offer the app that
+ * request: it is then not made, as made it would end the app. */
+bool tv_cursor_keep_shown(void);
+
 /* Is the TV cursor on: upstream's "Absolute mouse mode", and not "Use mouse
  * hardware", which takes the mouse past SDL and has no cursor to show. */
 bool tv_cursor_mode_on(void);

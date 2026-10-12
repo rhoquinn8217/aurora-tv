@@ -436,13 +436,6 @@ need "the overlay's focus moves the way the wheel turns" \
 # upstream's function back compiles, and the C1 hides it again.
 need "the TV's cursor stays beside the host's in an absolute-mouse stream" \
      src/app/input/app_input.c "if (grab && app_configuration->absmouse && !app_configuration->hardware_mouse) {"
-# ⓘ The pointer's sleep is upstream's 5 s, set in app.c; this fork's five
-# minutes are set after it, in bridge_app_sdl_hints(), and the later one wins.
-# Upstream moving its line below ours compiles, and the TV cursor goes after
-# 5 s again, in the align bar too.
-in_order "the TV cursor's five-minute sleep comes after upstream's five seconds" \
-     src/app/app.c "int app_init" \
-     "SDL_HINT_WEBOS_CURSOR_SLEEP_TIME" "bridge_app_sdl_hints();"
 
 # --- the TV cursor's shortcuts and align bar (rhoquinn8217, 2026-10-11) -----
 # ⓘ Lines of ours in upstream's files. Taking upstream's back compiles, and:
