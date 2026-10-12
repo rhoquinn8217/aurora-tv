@@ -23,12 +23,9 @@
  * - ⭐ **THE TV CURSOR STAYS UP WHILE IT IS** (rhoquinn8217: "When calibrating,
  *   the tv mouse cursor disappears after sometime"). webOS hides a mouse's
  *   pointer after 5 seconds without movement, and keys never count. So while
- *   the bar is up, webOS is asked to show it, once a second and after every
- *   step (tv_cursor_keep_shown, which says how that is made safe).
- *   ⛔ Two things that did not do it: putting the pointer where it already is
- *   once a second (SDL_WarpMouseInWindow, builds 519 to 521); and asking for
- *   a longer sleep (SDL_HINT_WEBOS_CURSOR_SLEEP_TIME, build 522): that is the
- *   remote's pointer, webOS's "MRCU standby timer", not a mouse's.
+ *   the bar is up, each mouse the TV has seen move is moved one pixel and
+ *   back, once a second and after every step, through its own input node
+ *   (mouse_seen_wake, input/mouse_seen.h, which says what failed first).
  * - **With the TV cursor off** the chord does not open it, and says how to turn
  *   the cursor on, in the place of the bridge's pop-up (bridge_prompt.h).
  */

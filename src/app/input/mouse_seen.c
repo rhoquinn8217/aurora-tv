@@ -32,6 +32,8 @@ struct evdev_event {
     unsigned short code;
     int value;
 };
+#define EVDEV_TYPE_SYN 0
+#define EVDEV_SYN_REPORT 0
 #define EVDEV_TYPE_REL 2
 #define EVDEV_REL_X 0
 #define EVDEV_REL_Y 1
@@ -198,6 +200,37 @@ bool mouse_seen_take_bridged(void) {
     return due;
 }
 
+/* ⓘ The kernel hands what is written to an input node to everything reading
+ * it, as if the device had sent it; webOS reads every mouse's node, and the TV
+ * lets this app write to them as it lets it read them. One pixel right and one
+ * back, so the pointer ends where it was; on the C1 a move of four and back
+ * put the PC's cursor back on the same pixel (2026-10-11).
+ * ⛔ What did not wake it, with the align bar's keys alone: putting the pointer
+ * where it already is (SDL_WarpMouseInWindow, builds 519 to 521), a longer
+ * sleep (SDL_HINT_WEBOS_CURSOR_SLEEP_TIME, 522: the remote's pointer), and
+ * asking webOS to show it (SDL_webOSCursorVisibility, 523: on the C1 SDL says
+ * no without asking webOS). */
+int mouse_seen_wake(void) {
+    static const struct evdev_event k_there_and_back[4] = {
+            {0, 0, EVDEV_TYPE_REL, EVDEV_REL_X, 1},
+            {0, 0, EVDEV_TYPE_SYN, EVDEV_SYN_REPORT, 0},
+            {0, 0, EVDEV_TYPE_REL, EVDEV_REL_X, -1},
+            {0, 0, EVDEV_TYPE_SYN, EVDEV_SYN_REPORT, 0},
+    };
+    int woken = 0;
+    for (int i = 0; i < s_seen_n; i++) {
+        const int fd = open(s_seen[i], O_WRONLY | O_NONBLOCK | O_CLOEXEC);
+        if (fd < 0) {
+            continue;
+        }
+        if (write(fd, k_there_and_back, sizeof(k_there_and_back)) == (ssize_t) sizeof(k_there_and_back)) {
+            woken++;
+        }
+        close(fd);
+    }
+    return woken;
+}
+
 #else
 
 void mouse_seen_tick(void) {
@@ -209,6 +242,10 @@ void mouse_seen_plugged(const ctm_bridge_dev_t *dev) {
 
 bool mouse_seen_take_bridged(void) {
     return false;
+}
+
+int mouse_seen_wake(void) {
+    return 0;
 }
 
 #endif

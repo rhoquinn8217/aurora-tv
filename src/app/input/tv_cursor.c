@@ -18,7 +18,6 @@
 #include <time.h>
 
 #include <SDL.h>
-#include <wayland-client.h>   /* whether webOS shows the pointer on request: tv_cursor_keep_shown */
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -424,81 +423,6 @@ bool tv_cursor_drawn(void) {
     return s_ready;
 }
 
-/* ⭐ KEEPING THE POINTER SHOWN (rhoquinn8217, 2026-10-11, aligning on builds
- * 521 and 522: "cursor is still disappearing after 5 seconds when aligning").
- * webOS hides a mouse's pointer after 5 s without movement, keys never count,
- * and neither of the two things tried first stopped it: putting the pointer
- * where it is (it is not movement to webOS), and a longer sleep for the app
- * (that one is the remote's, the "MRCU standby timer", not a mouse's).
- * ➡️ So webOS is asked to show it: wl_webos_input_manager's
- * set_cursor_visibility, which SDL gives as SDL_webOSCursorVisibility.
- * ⛔ ASKED ONLY IF webOS OFFERS THE APP THAT PROTOCOL. The SDL this app carries
- * is the build without the fix for webOS versions whose protocol differs, and
- * it sends the request without asking whether it bound the protocol at all:
- * not offered, and the app ends. Upstream took the call out on 2026-08-25 for
- * ending the app ("splash never leaves"). So the compositor's list is read
- * first, once, on a connection of this file's own that is closed at once:
- * SDL's own connection is not touched. */
-static int s_visibility_offered = -1;   /* -1 not asked yet, 0 no, 1 yes */
-static int s_shown_asks = 0;
-
-static void registry_global(void *data, struct wl_registry *registry, uint32_t name, const char *interface,
-                            uint32_t version) {
-    (void) registry;
-    (void) name;
-    (void) version;
-    if (interface != NULL && strcmp(interface, "wl_webos_input_manager") == 0) {
-        *(int *) data = 1;
-    }
-}
-
-static void registry_global_remove(void *data, struct wl_registry *registry, uint32_t name) {
-    (void) data;
-    (void) registry;
-    (void) name;
-}
-
-static const struct wl_registry_listener k_registry_listener = {
-        registry_global,
-        registry_global_remove,
-};
-
-static bool visibility_offered(void) {
-    if (s_visibility_offered >= 0) {
-        return s_visibility_offered == 1;
-    }
-    s_visibility_offered = 0;
-    struct wl_display *display = wl_display_connect(NULL);
-    if (display == NULL) {
-        tv_cursor_log("the compositor could not be asked whether it shows the pointer on request: no connection");
-        return false;
-    }
-    struct wl_registry *registry = wl_display_get_registry(display);
-    if (registry != NULL) {
-        int found = 0;
-        wl_registry_add_listener(registry, &k_registry_listener, &found);
-        if (wl_display_roundtrip(display) >= 0) {
-            s_visibility_offered = found;
-        }
-        wl_registry_destroy(registry);
-    }
-    wl_display_disconnect(display);
-    tv_cursor_log("webOS %s the pointer's visibility to this app (wl_webos_input_manager)",
-                  s_visibility_offered == 1 ? "offers" : "does not offer");
-    return s_visibility_offered == 1;
-}
-
-bool tv_cursor_keep_shown(void) {
-    if (!s_ready || !visibility_offered()) {
-        return false;
-    }
-    const SDL_bool shown = SDL_webOSCursorVisibility(SDL_TRUE);
-    if (s_shown_asks++ == 0) {
-        tv_cursor_log("the pointer asked to stay shown: %s", shown ? "done" : SDL_GetError());
-    }
-    return shown == SDL_TRUE;
-}
-
 void tv_cursor_describe(char *out, size_t len) {
     const char *mode = tv_cursor_mode_on() ? "on" : (tv_cursor_mode_switchable() ? "off" : "off(hardware-mouse)");
     const int saved_x = app_configuration != NULL ? app_configuration->bridge.tv_cursor_x : 0;
@@ -550,10 +474,6 @@ bool tv_cursor_keep(void) {
 }
 
 bool tv_cursor_drawn(void) {
-    return false;
-}
-
-bool tv_cursor_keep_shown(void) {
     return false;
 }
 

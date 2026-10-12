@@ -37,4 +37,13 @@ void mouse_seen_plugged(const ctm_bridge_dev_t *dev);
 /* Was a mouse the TV saw move just bridged? True once for each. */
 bool mouse_seen_take_bridged(void);
 
+/* ⭐ WEBOS'S POINTER WOKEN, for the bar that aligns the TV cursor
+ * (ui/streaming/cursor_align.h). webOS hides a mouse's pointer after 5 seconds
+ * without movement, and keys never count; so a movement of one pixel right and
+ * one back is written into each mouse the TV has seen move, through the
+ * mouse's own input node, which to webOS is that mouse moving.
+ * ⓘ Only mice already seen moving: one still watched would take the movement
+ * for its own and ask about the TV cursor when bridged. How many were woken. */
+int mouse_seen_wake(void);
+
 #endif /* MOUSE_SEEN_H */
