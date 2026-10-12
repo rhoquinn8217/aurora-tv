@@ -199,13 +199,15 @@ static SDL_Surface *draw_drop(double width) {
 }
 
 /* ⭐ SMALLER, BY AS MUCH AS THE TV ENLARGES AURORA (rhoquinn8217, 2026-10-11,
- * on the first try: "make it smaller and sharper"). webOS draws its own
- * pointer at the panel's resolution, and an app's cursor at the app's, then
- * enlarges it with the app: on the C1 a 1920 x 1080 app on a 3840 x 2160
- * panel, so the pointer came out twice its size and soft. So the drop is
- * shrunk by that factor first, each pixel the average of the ones it covers,
- * in premultiplied alpha so the white line does not darken. ⓘ It cannot be as
- * fine as webOS's own: the app draws at its own resolution. */
+ * on the first try: "make it smaller and sharper"). An app's cursor is
+ * enlarged with the app: on the C1 a 1920 x 1080 app on a 3840 x 2160 panel.
+ * So the drop, drawn in the TV's own pixels, is shrunk by that factor, each
+ * pixel the average of the ones it covers, in premultiplied alpha so the white
+ * line does not darken: half the size of webOS's own pointer, the small sharp
+ * one asked for. ⛔ Not because webOS draws its pointer at the panel's
+ * resolution, as this said until 2026-10-12: webOS's picture shrunk the same
+ * way came out "shrunk" (rhoquinn8217), so webOS draws it one of its pixels
+ * to one of the app's (enlarge, for the regular cursor). */
 static SDL_Surface *shrink(SDL_Surface *src, double scale) {
     const int w = (int) lround(src->w / scale);
     const int h = (int) lround(src->h / scale);
@@ -374,17 +376,61 @@ static bool load_regular(void) {
     return true;
 }
 
+/* ⭐ THE REGULAR CURSOR AT WEBOS'S OWN SIZE (rhoquinn8217, 2026-10-12, of the
+ * first build of it: "It looks like the correct shape but it's shrunk").
+ * webOS draws its picture one of its pixels to one of the app's, so it is not
+ * shrunk as the drop is: it is enlarged into the TV's own pixels first, each of
+ * its pixels `scale` by `scale` of them, so that its shift is in the TV's
+ * pixels as the drop's is, and the shrink after brings it back to its own
+ * size. ⓘ A shift saved on that first build carries over: a step is the same
+ * half of an app's pixel. */
+static SDL_Surface *enlarge(SDL_Surface *src, double scale) {
+    const int w = (int) lround(src->w * scale);
+    const int h = (int) lround(src->h * scale);
+    if (w < 1 || h < 1) {
+        return NULL;
+    }
+    SDL_Surface *dst = SDL_CreateRGBSurfaceWithFormat(0, w, h, 32, SDL_PIXELFORMAT_RGBA32);
+    if (dst == NULL) {
+        return NULL;
+    }
+    if (SDL_LockSurface(src) != 0) {
+        SDL_FreeSurface(dst);
+        return NULL;
+    }
+    if (SDL_LockSurface(dst) != 0) {
+        SDL_UnlockSurface(src);
+        SDL_FreeSurface(dst);
+        return NULL;
+    }
+    for (int y = 0; y < h; ++y) {
+        int sy = (int) floor(y / scale);
+        if (sy >= src->h) sy = src->h - 1;
+        const Uint32 *in = (const Uint32 *) ((const Uint8 *) src->pixels + (size_t) sy * (size_t) src->pitch);
+        Uint32 *out = (Uint32 *) ((Uint8 *) dst->pixels + (size_t) y * (size_t) dst->pitch);
+        for (int x = 0; x < w; ++x) {
+            int sx = (int) floor(x / scale);
+            if (sx >= src->w) sx = src->w - 1;
+            out[x] = in[sx];
+        }
+    }
+    SDL_UnlockSurface(dst);
+    SDL_UnlockSurface(src);
+    return dst;
+}
+
 /* The cursor showing, with its shift and the drop's line as they stand now.
  * False, and the cursor that was there stays, when it cannot be made. */
 static bool build(void) {
     const bool regular = s_look == LOOK_REGULAR;
+    const double scale = s_scale > 1.0 ? s_scale : 1.0;
     double width = 3.0 - s_thin;
     if (width < 1.0) width = 1.0;
     SDL_Surface *picture = NULL;
     if (regular) {
-        picture = s_regular != NULL ? SDL_ConvertSurfaceFormat(s_regular, SDL_PIXELFORMAT_RGBA32, 0) : NULL;
+        picture = s_regular != NULL ? enlarge(s_regular, scale) : NULL;
         if (picture == NULL) {
-            tv_cursor_log("webOS's picture could not be copied (%s)", SDL_GetError());
+            tv_cursor_log("webOS's picture could not be enlarged (%s)", SDL_GetError());
             return false;
         }
     } else {
@@ -412,15 +458,15 @@ static bool build(void) {
     SDL_Rect at = {m + dx, m + dy, picture->w, picture->h};
     SDL_BlitSurface(picture, NULL, canvas, &at);
     SDL_FreeSurface(picture);
-    const double scale = s_scale > 1.0 ? s_scale : 1.0;
     SDL_Surface *image = shrink(canvas, scale);
     SDL_FreeSurface(canvas);
     if (image == NULL) {
         tv_cursor_log("the shrink failed (%s)", SDL_GetError());
         return false;
     }
-    const double tip_x = regular ? s_tip_x : DROP_TIP_X;
-    const double tip_y = regular ? s_tip_y : DROP_TIP_Y;
+    /* ⓘ The regular picture's tip, in the TV's pixels it was enlarged into. */
+    const double tip_x = regular ? s_tip_x * scale : DROP_TIP_X;
+    const double tip_y = regular ? s_tip_y * scale : DROP_TIP_Y;
     int hot_x = (int) floor((tip_x + m) / scale);
     int hot_y = (int) floor((tip_y + m) / scale);
     if (hot_x >= image->w) hot_x = image->w - 1;
