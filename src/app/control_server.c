@@ -379,11 +379,9 @@ static void cmd_shot(control_job_t *job, const char *args)
      * renderer -- every command here does, which is why this can read it. */
     char detail[320];
     if (ctm_screenshot_write(args, detail, sizeof detail)) {
-        reply(job, "OK wrote %s
-", detail);
+        reply(job, "OK wrote %s\n", detail);
     } else {
-        reply(job, "ERR %s
-", detail);
+        reply(job, "ERR %s\n", detail);
     }
 }
 
