@@ -30,7 +30,7 @@ to bridge controllers.
 | **DualSense** | Your controller |
 | **Windows** | Your host machine's operating system |
 | **Moonlight-compatible host** | Streaming software on that Windows machine:<br>[Sunshine](https://github.com/LizardByte/Sunshine), [Apollo](https://github.com/ClassicOldSong/Apollo), [Vibepollo](https://github.com/Nonary/Vibepollo), [Vibeshine](https://github.com/Nonary/vibeshine), etc. |
-| **[rhoquinn8217/aurora-tv](https://github.com/rhoquinn8217/aurora-tv)** | Install the ipk (pending) on your webOS TV |
+| **[rhoquinn8217/aurora-tv](https://github.com/rhoquinn8217/aurora-tv/releases)** | Install the ipk on your webOS TV |
 
 **Set up DS5-USBIP**
 
