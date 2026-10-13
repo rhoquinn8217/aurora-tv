@@ -21,6 +21,7 @@
 
 #include "app.h"
 #include "logging.h"
+#include "ctm_screenshot.h"
 #include "util/bus.h"
 #include "util/user_event.h"
 #include "backend/pcmanager.h"
@@ -370,6 +371,18 @@ static void cmd_cursor(control_job_t *job, const char *args)
     char line[224];
     tv_cursor_describe(line, sizeof line);
     reply(job, "OK %s\n", line);
+}
+
+static void cmd_shot(control_job_t *job, const char *args)
+{
+    /* Runs on the interface thread, which is the thread that owns the
+     * renderer -- every command here does, which is why this can read it. */
+    char detail[320];
+    if (ctm_screenshot_write(args, detail, sizeof detail)) {
+        reply(job, "OK wrote %s\n", detail);
+    } else {
+        reply(job, "ERR %s\n", detail);
+    }
 }
 
 static void cmd_keys(control_job_t *job)
@@ -1034,6 +1047,8 @@ static void run_command(control_job_t *job)
         cmd_input(job);
     } else if (strcasecmp(verb, "keys") == 0) {
         cmd_keys(job);
+    } else if (strcasecmp(verb, "shot") == 0) {
+        cmd_shot(job, args);
     } else if (strcasecmp(verb, "cursor") == 0) {
         cmd_cursor(job, args);
     } else if (strcasecmp(verb, "prompt") == 0) {
