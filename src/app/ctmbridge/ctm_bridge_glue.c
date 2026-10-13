@@ -903,10 +903,10 @@ int ctm_bridge_held_sticks(ctm_bridge_stick_t *out, int max)
         if (!c || g_sessions[i].stopping) continue;
         ctm_controller_status_t st;
         ctm_controller_get_status(c, &st);
-        if (!st.held_stick) continue;
         snprintf(out[count].node, sizeof(out[count].node), "%s", g_sessions[i].node);
-        out[count].y = st.held_stick_y;
-        out[count].click = st.held_stick_click;
+        out[count].reading = st.held_stick;
+        out[count].y = st.held_stick ? st.held_stick_y : 0;
+        out[count].click = st.held_stick && st.held_stick_click;
         ++count;
     }
     pthread_mutex_unlock(&g_sessions_mutex);

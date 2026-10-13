@@ -84,6 +84,12 @@ bool ctm_bridge_gesture_pad_is_ours(SDL_GameController *controller);
  * SDL. The hidraw node is what both sides speak, so it is the join. */
 int ctm_bridge_gesture_player_for_node(const char *node);
 
+/* Is the controller SDL has at `dev_path` (SDL_GameControllerPath) the one at
+ * this hidraw or input node? ⓘ For the overlay's volume (overlay_volume.h),
+ * which must not count a bridged pad twice: SDL can still read one. ⚠️ Can
+ * look in /sys for an input node's sibling, so not every pass. */
+bool ctm_bridge_gesture_path_is_node(const char *dev_path, const char *node);
+
 /* The controller's own ADDRESS -- its Bluetooth MAC -- for the controller
  * behind this hidraw node, written NUL-terminated into out. True if there was
  * one. False leaves out untouched.

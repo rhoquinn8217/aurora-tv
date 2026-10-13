@@ -16,6 +16,7 @@
 #include "lunasynccall.h"   /* the TV's audio service */
 
 #include "app_input.h"
+#include "ctm_bridge_gesture.h"   /* which of SDL's pads is bridged */
 #include "ctmbridge/ctm_bridge_glue.h"   /* a bridged pad's right stick */
 
 /* What happened, where it can be read over SSH (tv_cursor.c says why). */
@@ -313,11 +314,37 @@ void overlay_volume_tick(struct app_input_t *input, bool overlay_up) {
         s_sticks[i].seen = false;
     }
     char key[80];
+    ctm_bridge_stick_t bridged[8];
+    const int n = ctm_bridge_held_sticks(bridged, 8);
     if (input != NULL) {
         const size_t slots = input->max_num_gamepads < 16 ? input->max_num_gamepads : 16;
+        /* ⛔⛔ A BRIDGED PAD IS READ FROM THE CORE ONLY. SDL can still read
+         * one: the Edge on its DS5Dongle, bridged on the C1, came through both,
+         * and every push stepped the volume twice and every click muted and
+         * unmuted at once (2026-10-12, build 532). So a pad of SDL's that is
+         * at a bridged node is left out. ⓘ Matched every quarter second, not
+         * every pass: the match can look in /sys. */
+        static bool s_bridged_slot[16];
+        static Uint32 s_matched_at;
+        static int s_matched_n = -1;
+        if (n != s_matched_n || (Sint32) (now - s_matched_at) >= 250) {
+            s_matched_n = n;
+            s_matched_at = now;
+            for (size_t i = 0; i < slots; ++i) {
+                app_gamepad_state_t *pad = &input->gamepads[i];
+                s_bridged_slot[i] = false;
+                if (pad->instance_id == -1 || pad->controller == NULL) {
+                    continue;
+                }
+                const char *path = SDL_GameControllerPath(pad->controller);
+                for (int b = 0; b < n && !s_bridged_slot[i]; ++b) {
+                    s_bridged_slot[i] = ctm_bridge_gesture_path_is_node(path, bridged[b].node);
+                }
+            }
+        }
         for (size_t i = 0; i < slots; ++i) {
             app_gamepad_state_t *pad = &input->gamepads[i];
-            if (pad->instance_id == -1 || pad->controller == NULL) {
+            if (pad->instance_id == -1 || pad->controller == NULL || s_bridged_slot[i]) {
                 continue;
             }
             snprintf(key, sizeof(key), "the TV's pad %d", (int) pad->instance_id);
@@ -325,9 +352,10 @@ void overlay_volume_tick(struct app_input_t *input, bool overlay_up) {
                  SDL_GameControllerGetButton(pad->controller, SDL_CONTROLLER_BUTTON_RIGHTSTICK) != 0, now);
         }
     }
-    ctm_bridge_stick_t bridged[8];
-    const int n = ctm_bridge_held_sticks(bridged, 8);
     for (int i = 0; i < n; ++i) {
+        if (!bridged[i].reading) {
+            continue;
+        }
         snprintf(key, sizeof(key), "bridged %s", bridged[i].node);
         feed(key, bridged[i].y, bridged[i].click, now);
     }

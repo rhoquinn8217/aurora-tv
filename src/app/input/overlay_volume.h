@@ -18,7 +18,9 @@
  * report while the overlay holds input (the core's held_stick.inl, through
  * ctm_bridge_held_sticks): a DualSense, an Edge, a DS4 or an Xbox pad. A
  * bridged generic gamepad is not read, since its report does not say which
- * button is the stick's click.
+ * button is the stick's click. ⛔ And a bridged pad is read from the core
+ * ONLY: SDL can still read some, and then every push counted twice (build 532,
+ * the Edge on its DS5Dongle).
  *
  * ⓘ A STICK ALREADY PUSHED WHEN THE OVERLAY OPENS DOES NOTHING until it has
  * been back at rest, so the camera stick of a game cannot change the volume
