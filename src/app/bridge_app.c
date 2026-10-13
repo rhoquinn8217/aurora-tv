@@ -15,6 +15,7 @@
 #endif
 #include "input/tv_cursor.h"
 #include "input/mouse_seen.h"
+#include "input/overlay_volume.h"   /* the TV's volume from the right stick */
 #include "ui/streaming/cursor_align.h"   /* cursor_align_shown */
 
 #if defined(TARGET_WEBOS)
@@ -72,6 +73,8 @@ void bridge_app_started(app_t *app) {
     /* ⓘ Once the window is up: the TV's pointer with its tip on the point the
      * host is told, the cursor and the place this TV keeps (input/tv_cursor.h). */
     tv_cursor_init(app->ui.window);
+    /* ⓘ The thread the TV's volume calls run on (input/overlay_volume.h). */
+    overlay_volume_init();
 #if defined(TARGET_WEBOS)
     /* ⓘ What the bridge core finds in a bridged keyboard's reports, beside
      * its S: Ctrl+Alt+Shift and A, C, M or N; and a bridged mouse's first use. */
@@ -85,6 +88,7 @@ void bridge_app_stopping(void) {
     bridge_session_run_pending();
     control_server_stop();
     tv_cursor_deinit();
+    overlay_volume_deinit();
 }
 
 void bridge_app_events(app_t *app) {
@@ -112,6 +116,10 @@ void bridge_app_events(app_t *app) {
      * works any. */
     const bool interface_has_input = streaming_overlay_shown() || bridge_prompt_shown() || cursor_align_shown();
     ctm_bridge_gesture_tick(&app->input, app->session, interface_has_input);
+    /* ⭐ The TV's volume from the right stick while the overlay is up, from a
+     * pad the TV holds or a bridged one (input/overlay_volume.h). After the
+     * tick above, which is what holds a bridged pad's input for the overlay. */
+    overlay_volume_tick(&app->input, streaming_overlay_shown() && app->session != NULL);
 #if defined(TARGET_WEBOS)
     /* The TV's keyboard grab looking again after a bridge or a release. */
     bridge_keyboard_tick(interface_has_input);

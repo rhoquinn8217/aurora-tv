@@ -2213,6 +2213,10 @@ static void arrival_watch_tick(struct app_input_t *input) {
     arrival_check(input);
 }
 
+bool ctm_bridge_gesture_path_is_node(const char *dev_path, const char *node) {
+    return controller_path_is_node(dev_path, node);
+}
+
 int ctm_bridge_gesture_player_for_node(const char *node) {
     if (!node || !node[0] || !s_gesture_input) {
         return -1;
