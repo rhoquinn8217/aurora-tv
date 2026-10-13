@@ -185,6 +185,17 @@ typedef struct {
 } ctm_bridge_pointer_t;
 int ctm_bridge_bridged_pointers(ctm_bridge_pointer_t *out, int max);
 
+/* ⭐ The overlay's volume (input/overlay_volume.h): each bridged pad's right
+ * stick, -32768 up to 32767 down, and its click, as the core read them from
+ * the pad's own report while the overlay holds input (its held_stick.inl).
+ * Only pads with a reading since the overlay opened. Returns how many. */
+typedef struct {
+    char node[64];
+    int y;
+    bool click;
+} ctm_bridge_stick_t;
+int ctm_bridge_held_sticks(ctm_bridge_stick_t *out, int max);
+
 /* True for a Bluetooth DualSense. */
 bool ctm_bridge_node_is_bluetooth(const char *node);
 
