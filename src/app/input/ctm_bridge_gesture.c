@@ -22,6 +22,7 @@
 #include <time.h>
 
 #include "ctm_bridge_gesture.h"
+#include "auto_bridge.h"
 #include "bridge_keyboard.h"
 #include "app.h"   /* app_configuration, for the bridge_enable switch */
 #include "stream/session.h"
@@ -79,7 +80,7 @@ FILE *ctm_log_open(const char *name, const char *mode);
  * finished" and the log could not say whether that was one second or ninety.
  *
  * Same clock the bridge core uses, so lines from both interleave correctly. */
-static void gesture_log(const char *fmt, ...) {
+static void gesture_vlog(const char *fmt, va_list ap) {
     FILE *f = ctm_log_open(GESTURE_LOG, "a");
     if (!f) {
         return;
@@ -87,12 +88,23 @@ static void gesture_log(const char *fmt, ...) {
     struct timespec ts;
     clock_gettime(CLOCK_REALTIME, &ts);
     fprintf(f, "%lld.%03ld ", (long long)ts.tv_sec, ts.tv_nsec / 1000000L);
-    va_list ap;
-    va_start(ap, fmt);
     vfprintf(f, fmt, ap);
-    va_end(ap);
     fputc('\n', f);
     fclose(f);
+}
+
+static void gesture_log(const char *fmt, ...) {
+    va_list ap;
+    va_start(ap, fmt);
+    gesture_vlog(fmt, ap);
+    va_end(ap);
+}
+
+void ctm_bridge_gesture_note(const char *fmt, ...) {
+    va_list ap;
+    va_start(ap, fmt);
+    gesture_vlog(fmt, ap);
+    va_end(ap);
 }
 
 /* Monotonic milliseconds, for measuring how long a call took. Separate from
@@ -1172,6 +1184,13 @@ static bool gesture_poll_one(SDL_GameController *controller, SDL_JoystickID id) 
     watched_t *w = watched_for(id);
     if (w && !was_known) {
         log_controller_identity(controller, id);
+        /* ⭐ A CONTROLLER HAS CONNECTED: the automatic bridge is told here
+         * (auto_bridge.h). ⛔ Not by /dev alone: a pad that reconnects through a
+         * DS5Dongle keeps the dongle's hidraw node, and only its input nodes go
+         * and come back, so SDL's arrival is the one sign it gives (the C1,
+         * 2026-10-15). A release keeps SDL's controller, so it says nothing
+         * here, and a pad released on purpose stays released. */
+        auto_bridge_note_node(SDL_GameControllerPath(controller));
         /* ⭐⭐ THE PLAYER COLOUR WHEN A CONTROLLER FIRST APPEARS, whether it is
          * connected while Aurora runs or was connected before Aurora started
          * (SDL reports both the same way).
@@ -1955,6 +1974,9 @@ bool ctm_bridge_gesture_light_busy(SDL_GameController *controller) {
 #define ARRIVAL_START_MS    8000    /* after the app starts */
 
 static int s_arrival_inotify = -1;
+/* ⓘ The watch on /dev itself, where hidraw nodes appear: an automatic bridge on
+ * connection is told of those (auto_bridge.h). */
+static int s_arrival_wd_dev = -1;
 static uint32_t s_arrival_due;      /* SDL ticks at which to look; 0 = nothing pending */
 static bool s_arrival_started;
 /* ⭐ After a cure, the node it was for -- so the NEXT look can say whether it
@@ -1980,7 +2002,8 @@ static void arrival_watch_init(void) {
     /* ⓘ Both directories: a pad arrives as a hidraw node and as js/event nodes,
      * and which one appears first is not ours to predict. IN_CREATE only --
      * a node going away is the ordinary path and needs nothing from us. */
-    if (inotify_add_watch(s_arrival_inotify, "/dev", IN_CREATE) < 0) {
+    s_arrival_wd_dev = inotify_add_watch(s_arrival_inotify, "/dev", IN_CREATE);
+    if (s_arrival_wd_dev < 0) {
         gesture_log("arrival watch: cannot watch /dev (%s)", strerror(errno));
     }
     if (inotify_add_watch(s_arrival_inotify, "/dev/input", IN_CREATE) < 0) {
@@ -2003,6 +2026,13 @@ static bool arrival_node_appeared(void) {
                 if (strncmp(ev->name, "hidraw", 6) == 0 || strncmp(ev->name, "js", 2) == 0 ||
                     strncmp(ev->name, "event", 5) == 0) {
                     interesting = true;
+                }
+                /* ⭐ A device the bridge core lists is known by its hidraw node,
+                 * so that is the one an automatic bridge is told of. */
+                if (ev->wd == s_arrival_wd_dev && strncmp(ev->name, "hidraw", 6) == 0) {
+                    char path[64];
+                    snprintf(path, sizeof path, "/dev/%s", ev->name);
+                    auto_bridge_note_node(path);
                 }
             }
             p += sizeof(struct inotify_event) + ev->len;

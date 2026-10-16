@@ -16,6 +16,7 @@
 #include "input/tv_cursor.h"
 #include "input/mouse_seen.h"
 #include "input/overlay_volume.h"   /* the TV's volume from the right stick */
+#include "input/auto_bridge.h"      /* a ticked device that connects, bridged */
 #include "ui/streaming/cursor_align.h"   /* cursor_align_shown */
 
 #if defined(TARGET_WEBOS)
@@ -127,6 +128,9 @@ void bridge_app_events(app_t *app) {
      * cursor: at the bridge for a mouse seen moving, at its first use for one
      * never seen. */
     mouse_seen_tick();
+    /* ⭐ A ticked device bridges itself: at a stream's start once DS5-USBIP
+     * answers, and when it connects during the stream (input/auto_bridge.h). */
+    auto_bridge_poll(app->session != NULL);
     if (app->session == NULL) {
         s_asked_at_bridge = 0;
     }

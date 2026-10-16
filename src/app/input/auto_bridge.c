@@ -7,6 +7,8 @@
 #include <string.h>
 #include <strings.h>
 
+#include <SDL.h>
+
 #include "ctm_bridge_glue.h"
 #include "ctm_bridge_gesture.h"
 #include "bridge_request.h"
@@ -282,14 +284,54 @@ void auto_bridge_mark_set(const char *csv, const ctm_bridge_dev_t *devs, const d
     }
 }
 
-int auto_bridge_run(const char *csv, bool all)
+bool auto_bridge_is_dualsense(const ctm_bridge_dev_t *devs, const device_group_t *g)
 {
-    if (!all && (csv == NULL || csv[0] == '\0')) {
-        return 0;   /* nothing marked: the common case, and it costs nothing */
+    if (devs == NULL || g == NULL) {
+        return false;
+    }
+    for (int p = 0; p < g->part_count; ++p) {
+        if (strncmp(devs[g->part[p]].kind, "ds5", 3) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool auto_bridge_ticked(const bridge_settings_t *s, const ctm_bridge_dev_t *devs, const device_group_t *g)
+{
+    if (s == NULL || devs == NULL || g == NULL) {
+        return false;
+    }
+    if (auto_bridge_is_dualsense(devs, g)) {
+        return !auto_bridge_marked(s->auto_skip, devs, g);
+    }
+    return auto_bridge_marked(s->auto_macs, devs, g);
+}
+
+void auto_bridge_set_ticked(bridge_settings_t *s, const ctm_bridge_dev_t *devs, const device_group_t *g,
+                            bool on)
+{
+    if (s == NULL || devs == NULL || g == NULL) {
+        return;
+    }
+    char out[AUTO_BRIDGE_LIST_MAX];
+    if (auto_bridge_is_dualsense(devs, g)) {
+        auto_bridge_mark_set(s->auto_skip, devs, g, !on, out, sizeof out);
+        bridge_settings_set_auto_skip(s, out);
+        return;
+    }
+    auto_bridge_mark_set(s->auto_macs, devs, g, on, out, sizeof out);
+    bridge_settings_set_auto_macs(s, out);
+}
+
+int auto_bridge_run(const bridge_settings_t *s)
+{
+    if (s == NULL) {
+        return 0;
     }
 
-    /* ⓘ On the heap: two lists of this size are too much to put on whichever
-     * thread starts the stream. */
+    /* ⓘ On the heap: two lists of this size are too much for the app's loop
+     * to keep on its stack. */
     ctm_bridge_dev_t *devs = calloc(DEVICE_PARTS_MAX, sizeof *devs);
     device_group_t *groups = calloc(DEVICE_GROUPS_MAX, sizeof *groups);
     if (devs == NULL || groups == NULL) {
@@ -305,10 +347,10 @@ int auto_bridge_run(const char *csv, bool all)
 
     for (int k = 0; k < count; ++k) {
         const device_group_t *g = &groups[k];
-        /* ⭐ "Bridge all devices when the stream starts" overrides the marks
+        /* ⭐ "Bridge all devices when the stream starts" overrides the ticks
          * entirely: every device, with a serial or without. Otherwise only a
-         * marked one. */
-        if (!all && !auto_bridge_marked(csv, devs, g)) {
+         * ticked one, which a DualSense is until someone unticks it. */
+        if (!s->auto_all && !auto_bridge_ticked(s, devs, g)) {
             continue;
         }
         /* ⭐⭐ EVERY PART OF IT, each on its own. */
@@ -329,6 +371,216 @@ int auto_bridge_run(const char *csv, bool all)
     free(groups);
     free(devs);
     return asked;
+}
+
+/* ---------------------------------------------------- by themselves, when -- */
+
+#define AB_START_WAIT_MS 20000   /* how long a stream's start waits for DS5-USBIP */
+#define AB_RECHECK_MS     2000   /* how often it asks again meanwhile */
+#define AB_SETTLE_MS      1000   /* after a connection's last node appears */
+#define AB_SDL_WAIT_MS    6000   /* the longest a controller waits for SDL to open it */
+#define AB_APPEARED_MAX     16
+#define AB_WAITING_MAX       8
+
+static SDL_atomic_t s_start_armed;      /* set by a stream's start, from its thread */
+static uint32_t s_start_since;          /* when the loop first saw it armed */
+static uint32_t s_last_recheck;
+static bool s_streaming;                /* the loop's own view: a stream, with bridging on */
+
+/* Nodes that appeared during the stream and have not been looked at. */
+static char s_appeared[AB_APPEARED_MAX][64];
+static int s_appeared_count;
+static uint32_t s_last_appeared;
+
+/* Parts of a ticked controller that connected, waiting for SDL to open them. */
+static ctm_bridge_dev_t s_waiting[AB_WAITING_MAX];
+static uint32_t s_waiting_since[AB_WAITING_MAX];
+static int s_waiting_count;
+
+void auto_bridge_stream_started(void)
+{
+    SDL_AtomicSet(&s_start_armed, 1);
+}
+
+void auto_bridge_stream_stopped(void)
+{
+    SDL_AtomicSet(&s_start_armed, 0);
+}
+
+void auto_bridge_note_node(const char *path)
+{
+    if (!s_streaming || path == NULL || path[0] == '\0') {
+        return;   /* outside a stream, the next start's run takes what is there */
+    }
+    s_last_appeared = SDL_GetTicks();
+    for (int i = 0; i < s_appeared_count; ++i) {
+        if (strcmp(s_appeared[i], path) == 0) {
+            return;
+        }
+    }
+    if (s_appeared_count < AB_APPEARED_MAX) {
+        snprintf(s_appeared[s_appeared_count++], sizeof s_appeared[0], "%s", path);
+    }
+}
+
+static void ab_forget(void)
+{
+    s_appeared_count = 0;
+    s_waiting_count = 0;
+}
+
+static bool ab_appeared(const char *node)
+{
+    if (node == NULL || node[0] == '\0') {
+        return false;
+    }
+    for (int i = 0; i < s_appeared_count; ++i) {
+        if (strcmp(s_appeared[i], node) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/* Does DS5-USBIP answer? ⓘ Asks again every two seconds while it does not: at a
+ * stream's start it may be starting with the stream. */
+static bool ab_listener_ready(uint32_t now)
+{
+    if (ctm_bridge_agent_probed() && ctm_bridge_agent_online()) {
+        return true;
+    }
+    if (now - s_last_recheck >= AB_RECHECK_MS) {
+        s_last_recheck = now;
+        ctm_bridge_agent_recheck();
+    }
+    return false;
+}
+
+/* ONE look at what connected: the devices its nodes belong to, ticked ones
+ * bridged, controllers SDL has not opened yet set to wait for it. */
+static void ab_look(uint32_t now)
+{
+    ctm_bridge_dev_t *devs = calloc(DEVICE_PARTS_MAX, sizeof *devs);
+    device_group_t *groups = calloc(DEVICE_GROUPS_MAX, sizeof *groups);
+    if (devs == NULL || groups == NULL) {
+        free(devs);
+        free(groups);
+        s_appeared_count = 0;
+        return;
+    }
+    const int n = ctm_bridge_list(devs, DEVICE_PARTS_MAX);
+    const int count = device_groups_build(devs, n, groups, DEVICE_GROUPS_MAX);
+    const uint32_t took = SDL_GetTicks() - now;
+    const bridge_settings_t *s = &app_configuration->bridge;
+    int asked = 0;
+
+    for (int k = 0; k < count; ++k) {
+        const device_group_t *g = &groups[k];
+        bool connected = false;
+        for (int p = 0; p < g->part_count && !connected; ++p) {
+            connected = ab_appeared(devs[g->part[p]].node);
+        }
+        if (!connected) {
+            continue;
+        }
+        if (!s->auto_all && !auto_bridge_ticked(s, devs, g)) {
+            ctm_bridge_gesture_note("auto bridge: %s connected, not ticked -- left with the TV", g->name);
+            continue;
+        }
+        for (int p = 0; p < g->part_count; ++p) {
+            const ctm_bridge_dev_t *d = &devs[g->part[p]];
+            if (d->plugged || d->node[0] == '\0') {
+                continue;
+            }
+            if (d->controller && ctm_bridge_gesture_player_for_node(d->node) < 0) {
+                if (s_waiting_count < AB_WAITING_MAX) {
+                    s_waiting[s_waiting_count] = *d;
+                    s_waiting_since[s_waiting_count] = now;
+                    s_waiting_count++;
+                }
+                continue;
+            }
+            ctm_bridge_gesture_note("auto bridge: %s connected -- bridging %s", d->name, d->node);
+            (void) bridge_request_device(d);
+            asked++;
+        }
+    }
+    ctm_bridge_gesture_note("auto bridge: looked at %d device(s) for %d new node(s) in %u ms; asked %d, "
+                            "%d waiting for SDL",
+                            count, s_appeared_count, (unsigned) took, asked, s_waiting_count);
+    s_appeared_count = 0;
+    free(groups);
+    free(devs);
+}
+
+void auto_bridge_poll(bool streaming)
+{
+    const bool on = streaming && app_configuration != NULL && app_configuration->bridge.enable;
+    if (!on) {
+        if (s_streaming) {
+            ab_forget();
+        }
+        s_streaming = false;
+        s_start_since = 0;
+        return;   /* ⓘ Armed stays armed: only the stream's stop disarms it */
+    }
+    s_streaming = true;
+    const uint32_t now = SDL_GetTicks();
+
+    /* ⭐ 1. THE STREAM'S START: every ticked device, once DS5-USBIP answers. */
+    if (SDL_AtomicGet(&s_start_armed)) {
+        if (s_start_since == 0) {
+            s_start_since = now;
+        }
+        if (!ab_listener_ready(now)) {
+            if (now - s_start_since >= AB_START_WAIT_MS) {
+                SDL_AtomicSet(&s_start_armed, 0);
+                s_start_since = 0;
+                ab_forget();
+                ctm_bridge_gesture_note("auto bridge: DS5-USBIP did not answer within %u s of the stream's "
+                                        "start -- nothing bridged by itself", AB_START_WAIT_MS / 1000);
+            }
+            return;
+        }
+        SDL_AtomicSet(&s_start_armed, 0);
+        const uint32_t waited = now - s_start_since;
+        s_start_since = 0;
+        ab_forget();   /* what connected meanwhile, this run takes */
+        const int n = auto_bridge_run(&app_configuration->bridge);
+        ctm_bridge_gesture_note("auto bridge at the stream's start: asked for %d part(s), DS5-USBIP "
+                                "answered after %u ms", n, (unsigned) waited);
+        return;
+    }
+
+    /* 2. Controllers that connected, once SDL has opened them: cheap, no list. */
+    for (int i = 0; i < s_waiting_count;) {
+        const ctm_bridge_dev_t *d = &s_waiting[i];
+        const bool opened = ctm_bridge_gesture_player_for_node(d->node) >= 0;
+        if (!opened && now - s_waiting_since[i] < AB_SDL_WAIT_MS) {
+            ++i;
+            continue;
+        }
+        ctm_bridge_gesture_note("auto bridge: %s connected -- bridging %s%s", d->name, d->node,
+                                opened ? "" : " (SDL never opened it)");
+        (void) bridge_request_device(d);
+        s_waiting[i] = s_waiting[s_waiting_count - 1];
+        s_waiting_since[i] = s_waiting_since[s_waiting_count - 1];
+        s_waiting_count--;
+    }
+
+    /* 3. What connected: one look, once its nodes have stopped appearing. */
+    if (s_appeared_count == 0 || now - s_last_appeared < AB_SETTLE_MS) {
+        return;
+    }
+    if (!ab_listener_ready(now)) {
+        if (now - s_last_appeared >= AB_START_WAIT_MS) {
+            ctm_bridge_gesture_note("auto bridge: DS5-USBIP does not answer -- %d new node(s) left with the TV",
+                                    s_appeared_count);
+            s_appeared_count = 0;
+        }
+        return;
+    }
+    ab_look(now);
 }
 
 #endif /* TARGET_WEBOS */

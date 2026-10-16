@@ -107,6 +107,11 @@ bool ctm_bridge_gesture_path_is_node(const char *dev_path, const char *node);
  * headset has none, and the caller falls back to what the core reported. */
 bool ctm_bridge_gesture_mac_for_node(const char *node, char *out, size_t out_len);
 
+/* A line in the gesture's own log (logs/ctm-gesture.log), readable over SSH on
+ * every set, for the bridging code beside it: an automatic bridge says there
+ * what it decided. */
+void ctm_bridge_gesture_note(const char *fmt, ...);
+
 #else
 
 /* ⓘ The desktop build has no bridge gesture. Every call that code compiled for
@@ -114,6 +119,7 @@ bool ctm_bridge_gesture_mac_for_node(const char *node, char *out, size_t out_len
  * took two until it took three, and the desktop build stopped compiling
  * (code review, 2026-10-05). */
 #define ctm_bridge_gesture_tick(input, session, interface_has_input) ((void)0)
+#define ctm_bridge_gesture_note(...) ((void)0)
 #define ctm_bridge_gesture_reset(id) ((void)0)
 #define ctm_bridge_gesture_light_busy(controller) ((void)(controller), 0)
 
