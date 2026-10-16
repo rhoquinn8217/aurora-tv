@@ -1184,6 +1184,13 @@ static bool gesture_poll_one(SDL_GameController *controller, SDL_JoystickID id) 
     watched_t *w = watched_for(id);
     if (w && !was_known) {
         log_controller_identity(controller, id);
+        /* ⭐ A CONTROLLER HAS CONNECTED: the automatic bridge is told here
+         * (auto_bridge.h). ⛔ Not by /dev alone: a pad that reconnects through a
+         * DS5Dongle keeps the dongle's hidraw node, and only its input nodes go
+         * and come back, so SDL's arrival is the one sign it gives (the C1,
+         * 2026-10-15). A release keeps SDL's controller, so it says nothing
+         * here, and a pad released on purpose stays released. */
+        auto_bridge_note_node(SDL_GameControllerPath(controller));
         /* ⭐⭐ THE PLAYER COLOUR WHEN A CONTROLLER FIRST APPEARS, whether it is
          * connected while Aurora runs or was connected before Aurora started
          * (SDL reports both the same way).

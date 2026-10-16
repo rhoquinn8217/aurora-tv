@@ -15,8 +15,12 @@
  * was ruled out on 2026-09-08: build 301 bridged from the hotplug callback,
  * which ran a multi-second enumerate on that thread while holding the device
  * lock; a quick cable replug queued several and the app froze. Now:
- * - nothing runs in a hotplug path: the arrival watch (ctm_bridge_gesture.c)
- *   only notes which hidraw nodes appeared, from its inotify read;
+ * - nothing runs in a hotplug path: SDL's arrival of a controller, and the
+ *   arrival watch's inotify read of a new hidraw node, only note the node
+ *   (ctm_bridge_gesture.c). ⭐ SDL's is the one that counts for a pad: on a
+ *   DS5Dongle the dongle's hidraw node stays while the pad goes and comes
+ *   back, and only its input nodes change (the C1, 2026-10-15, where build 535
+ *   watched /dev alone and the Edge did not bridge itself);
  * - one look per connection, once its nodes have stopped appearing for a
  *   second, however often a cable goes in and out, on the app's loop, where one
  *   look cannot overlap another;
@@ -96,7 +100,8 @@ void auto_bridge_stream_started(void);
 /* The stream is over: nothing bridges itself until the next. Any thread. */
 void auto_bridge_stream_stopped(void);
 
-/* A node has just appeared in /dev (the arrival watch's inotify read). */
+/* A device has connected, known by its hidraw node: a controller SDL has just
+ * opened, or a node the arrival watch saw appear in /dev. */
 void auto_bridge_note_node(const char *path);
 
 /* Once per pass of the app's loop. */
