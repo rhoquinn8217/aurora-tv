@@ -113,10 +113,11 @@ static void bridge_session_start_now(session_t *session) {
     bridge_proof_register(app_configuration->key_dir);
     ctm_bridge_set_host(session->server->serverInfo.address, 0);
     ctm_bridge_start();
-    /* ⭐ The controllers the user marked bridge themselves now, and only
-     * now. ⓘ Deliberately AFTER ctm_bridge_start, not inside it: the
-     * mark keys on the controller's own MAC, which only SDL knows, and
-     * the glue cannot see SDL.
+    /* ⭐ The devices the user ticked bridge themselves from now: once
+     * DS5-USBIP answers, on the app's loop, which Vibepollo may still be
+     * starting (input/auto_bridge.h). ⓘ Deliberately AFTER ctm_bridge_start,
+     * not inside it: the mark keys on the controller's own MAC, which only
+     * SDL knows, and the glue cannot see SDL.
      *
      * ⛔ And never with "Enable Device Bridging" off. The settings screen
      * greys the Auto Bridge button then, but the marks and "Bridge all"
@@ -125,17 +126,15 @@ static void bridge_session_start_now(session_t *session) {
      * was switched off. */
 #if defined(TARGET_WEBOS)
     if (app_configuration->bridge.enable) {
-        const int n = auto_bridge_run(app_configuration->bridge.auto_macs,
-                                      app_configuration->bridge.auto_all);
-        if (n > 0) {
-            commons_log_info("Session", "auto bridge: asked for %d %s device(s)", n,
-                             app_configuration->bridge.auto_all ? "connected" : "marked");
-        }
+        auto_bridge_stream_started();
     }
 #endif
 }
 
 static void bridge_session_stop_now(void) {
+#if defined(TARGET_WEBOS)
+    auto_bridge_stream_stopped();
+#endif
     ctm_bridge_stop();
     /* ⭐ The stream is over, so every controller is the TV's again -- say so in
      * the light. One of only three places the player colour is set; see

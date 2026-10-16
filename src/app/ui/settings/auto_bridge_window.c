@@ -58,7 +58,7 @@ static void abw_apply_all(void);
 static void abw_refresh_boxes(void) {
     for (int i = 0; i < s_count; ++i) {
         if (s_box[i] == NULL) continue;
-        if (auto_bridge_marked(app_configuration->bridge.auto_macs, s_parts, &s_groups[i])) {
+        if (auto_bridge_ticked(&app_configuration->bridge, s_parts, &s_groups[i])) {
             lv_obj_add_state(s_box[i], LV_STATE_CHECKED);
         } else {
             lv_obj_clear_state(s_box[i], LV_STATE_CHECKED);
@@ -76,9 +76,9 @@ static void abw_mark(int idx, bool on) {
     if (idx < 0 || idx >= s_count || s_box[idx] == NULL) {
         return;
     }
-    char out[AUTO_BRIDGE_LIST_MAX];
-    auto_bridge_mark_set(app_configuration->bridge.auto_macs, s_parts, &s_groups[idx], on, out, sizeof out);
-    bridge_settings_set_auto_macs(&app_configuration->bridge, out);
+    /* ⭐ A DualSense is ticked until someone unticks it (input/auto_bridge.h),
+     * so its box goes into or out of the unticked list, not the marks. */
+    auto_bridge_set_ticked(&app_configuration->bridge, s_parts, &s_groups[idx], on);
     abw_refresh_boxes();
 }
 

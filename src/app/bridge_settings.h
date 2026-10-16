@@ -89,8 +89,14 @@ typedef struct bridge_settings_t {
      * (feature report 0x09) and is the pad's own on every path.
      *
      * ⛔ Empty means NONE. Never "whatever is present" -- that is the auto-plug
-     * that was removed for taking devices away from the TV unasked. */
+     * that was removed for taking devices away from the TV unasked.
+     * ⓘ A DualSense is the exception since 2026-10-15: auto_skip below. */
     char *auto_macs;
+    /* ⭐ THE DUALSENSES SOMEONE UNTICKED, marks of the same form. A DualSense or
+     * an Edge is ticked until it is unticked (rhoquinn8217, 2026-10-15: "DS5
+     * and DS5 edges are just ticked by default and can be untick"), so for them
+     * the exception is what is stored. Empty: every DualSense bridges itself. */
+    char *auto_skip;
     /* ⭐ "Bridge all devices on startup" (rhoquinn8217, 2026-09-13): when a stream
      * starts, bridge EVERY device, serial or not, and ignore the marks above --
      * which are kept, so turning this off brings them back. ⛔ Off by default:
@@ -138,3 +144,6 @@ bool bridge_settings_parse(bridge_settings_t *settings, const char *name, const 
 /* Replace the auto-bridge list. ⓘ A setter because the field is an owned
  * string; the settings pane must not free and strdup it by hand. */
 void bridge_settings_set_auto_macs(bridge_settings_t *settings, const char *csv);
+
+/* Replace the list of DualSenses someone unticked, the same way. */
+void bridge_settings_set_auto_skip(bridge_settings_t *settings, const char *csv);
