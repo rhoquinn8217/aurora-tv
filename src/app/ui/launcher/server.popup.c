@@ -306,6 +306,13 @@ static void server_popup_deleted(lv_event_t *e) {
     server_popup_t *popup = lv_event_get_user_data(e);
     if (popup->group != NULL) {
         app_input_remove_modal_group(&popup->launcher->global->ui.input, popup->group);
+        /* Closed without a server picked (Esc, Back, Close): the input still
+         * points at this group, which is about to go, and every key would land
+         * nowhere until a mouse click moved focus. Hand it back to the top bar,
+         * as picking a server hands it to the grid. (2026-10-17) */
+        if (app_input_get_group(&popup->launcher->global->ui.input) == popup->group) {
+            launcher_restore_nav_focus(popup->launcher);
+        }
         lv_group_del(popup->group);
         popup->group = NULL;
     }
