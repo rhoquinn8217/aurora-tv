@@ -465,6 +465,14 @@ in_order "Ctrl+Alt+Shift+C, upstream's show-the-mouse, switches the sharp and re
      src/app/stream/input/session_keyboard.c "void performPendingSpecialKeyCombo" \
      "case KeyComboToggleCursorHide:" "tv_cursor_toggle_look();"
 
+# --- the server window gives the controls back (rhoquinn8217, 2026-10-17) ---
+# ⓘ A fix of ours inside upstream's server.popup.c. Taking upstream's back
+# compiles, and: closing "Select server" with Esc, Back, Circle or Close leaves
+# the pad, the keyboard and the remote dead until a mouse click.
+in_order "closing the server window without a pick hands focus back to the top bar" \
+     src/app/ui/launcher/server.popup.c "static void server_popup_deleted" \
+     "app_input_remove_modal_group(" "launcher_restore_nav_focus(popup->launcher);"
+
 echo
 if [ "$fail" -eq 0 ]; then
     echo "⭐ merge guard: $pass checks, nothing lost"
