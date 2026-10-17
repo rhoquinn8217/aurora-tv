@@ -18,6 +18,7 @@
 #include <unistd.h>
 
 #include "lvgl.h"
+#include <SDL.h>
 
 #include "app.h"
 #include "logging.h"
@@ -133,6 +134,8 @@ static void cmd_help(control_job_t *job)
                "set <name> <on|off>     a switch, without the remote: boost, light, rumble, tone, override, vmouse\n"
                "prompt [ok|dismiss]     the question a bridge raises: is it up, or answer it without a hand\n"
                "ui                      what is open on the screen: overlay, its keyboard, the panel, the align bar\n"
+               "press <key>[:ms] ...    keys into aurora-tv's own screens, as a keyboard types them; not in a stream\n"
+               "                        keys: up down left right enter esc home end; :ms holds it (a long press)\n"
                "input                   the stream's live input state: Bridge Override and what it switches\n"
                "keys                    key events counted since the app started: the TV's keyboard grab, and webOS\n"
                "set settle <ms>         how long to let the link settle before a DS4 handback tone\n"
@@ -403,6 +406,147 @@ static void cmd_shot(control_job_t *job, const char *args)
     } else {
         reply(job, "ERR %s\n", detail);
     }
+}
+
+/* press: keys into aurora-tv's own screens, from here.
+ *
+ * rhoquinn8217, 2026-10-17, asked how much of a test of the launcher could be
+ * run without them, and said yes to this: `shot` already shows what is on the
+ * screen, and nothing could press a key on a TV without root (the lab's virtual
+ * keyboard needs it). So a test of a menu or a window needed their hands.
+ *
+ * The keys go in as SDL key events, where a keyboard's do, and the interface
+ * reads them from there the same way (lvgl/input/lv_drv_sdl_key.c). One at a
+ * time, PRESS_GAP_MS apart: that file drops the same key twice within 50 ms as
+ * the Magic Remote's double report. `enter:600` holds it 600 ms, a long press.
+ *
+ * ⛔ Refused while a stream runs: there the keys would go to the host, into
+ * whatever is in front on the PC. The overlay is not a target. */
+#define PRESS_MAX 16
+#define PRESS_GAP_MS 150
+#define PRESS_TAP_MS 40
+
+typedef struct press_step_t {
+    SDL_Keycode sym;
+    SDL_Scancode scan;
+    uint32_t hold_ms;
+} press_step_t;
+
+static press_step_t s_press[PRESS_MAX];
+static int s_press_count;
+static int s_press_next;
+static bool s_press_down;
+static lv_timer_t *s_press_timer;
+
+static bool press_key_named(const char *name, press_step_t *step)
+{
+    static const struct {
+        const char *name;
+        SDL_Keycode sym;
+        SDL_Scancode scan;
+    } keys[] = {
+            {"up",    SDLK_UP,     SDL_SCANCODE_UP},
+            {"down",  SDLK_DOWN,   SDL_SCANCODE_DOWN},
+            {"left",  SDLK_LEFT,   SDL_SCANCODE_LEFT},
+            {"right", SDLK_RIGHT,  SDL_SCANCODE_RIGHT},
+            {"enter", SDLK_RETURN, SDL_SCANCODE_RETURN},
+            {"ok",    SDLK_RETURN, SDL_SCANCODE_RETURN},
+            {"esc",   SDLK_ESCAPE, SDL_SCANCODE_ESCAPE},
+            {"back",  SDLK_ESCAPE, SDL_SCANCODE_ESCAPE},
+            {"home",  SDLK_HOME,   SDL_SCANCODE_HOME},
+            {"end",   SDLK_END,    SDL_SCANCODE_END},
+    };
+    for (size_t i = 0; i < sizeof keys / sizeof keys[0]; i++) {
+        if (strcasecmp(name, keys[i].name) == 0) {
+            step->sym = keys[i].sym;
+            step->scan = keys[i].scan;
+            return true;
+        }
+    }
+    return false;
+}
+
+static void press_push(const press_step_t *step, bool down)
+{
+    SDL_Event event;
+    SDL_zero(event);
+    event.type = down ? SDL_KEYDOWN : SDL_KEYUP;
+    event.key.timestamp = SDL_GetTicks();
+    event.key.state = down ? SDL_PRESSED : SDL_RELEASED;
+    event.key.keysym.sym = step->sym;
+    event.key.keysym.scancode = step->scan;
+    SDL_PushEvent(&event);
+}
+
+static void press_tick(lv_timer_t *timer)
+{
+    if (s_press_next >= s_press_count) {
+        lv_timer_del(timer);
+        s_press_timer = NULL;
+        return;
+    }
+    const press_step_t *step = &s_press[s_press_next];
+    if (!s_press_down) {
+        press_push(step, true);
+        s_press_down = true;
+        lv_timer_set_period(timer, step->hold_ms);
+    } else {
+        press_push(step, false);
+        s_press_down = false;
+        s_press_next++;
+        lv_timer_set_period(timer, PRESS_GAP_MS);
+    }
+}
+
+static void cmd_press(control_job_t *job, const char *args)
+{
+    if (s_app->session != NULL) {
+        reply(job, "ERR a stream is running: press drives aurora-tv's own screens only\n");
+        return;
+    }
+    if (s_press_timer != NULL) {
+        reply(job, "ERR still pressing the last keys\n");
+        return;
+    }
+    press_step_t steps[PRESS_MAX];
+    int count = 0;
+    uint32_t total_ms = 0;
+    char copy[256];
+    snprintf(copy, sizeof copy, "%s", args != NULL ? args : "");
+    char *save = NULL;
+    for (char *word = strtok_r(copy, " \t", &save); word != NULL; word = strtok_r(NULL, " \t", &save)) {
+        if (count == PRESS_MAX) {
+            reply(job, "ERR at most %d keys at a time\n", PRESS_MAX);
+            return;
+        }
+        char *colon = strchr(word, ':');
+        long hold = PRESS_TAP_MS;
+        if (colon != NULL) {
+            *colon = '\0';
+            hold = strtol(colon + 1, NULL, 10);
+            if (hold < PRESS_TAP_MS || hold > 5000) {
+                reply(job, "ERR a hold is %d to 5000 ms\n", PRESS_TAP_MS);
+                return;
+            }
+        }
+        if (!press_key_named(word, &steps[count])) {
+            reply(job, "ERR no key '%s': up down left right enter esc home end\n", word);
+            return;
+        }
+        steps[count].hold_ms = (uint32_t) hold;
+        total_ms += (uint32_t) hold + PRESS_GAP_MS;
+        count++;
+    }
+    if (count == 0) {
+        reply(job, "ERR usage: press <key>[:ms] ...  keys: up down left right enter esc home end\n");
+        return;
+    }
+    memcpy(s_press, steps, sizeof(press_step_t) * count);
+    s_press_count = count;
+    s_press_next = 0;
+    s_press_down = false;
+    s_press_timer = lv_timer_create(press_tick, 1, NULL);
+    reply(job, "OK pressing %d key(s), done in about %u ms\n", count, (unsigned) total_ms);
 }
 
 static void cmd_keys(control_job_t *job)
@@ -1075,6 +1219,8 @@ static void run_command(control_job_t *job)
         cmd_prompt(job, args);
     } else if (strcasecmp(verb, "ui") == 0) {
         cmd_ui(job);
+    } else if (strcasecmp(verb, "press") == 0) {
+        cmd_press(job, args);
 #if defined(TARGET_WEBOS)
     } else if (strcasecmp(verb, "devices") == 0) {
         cmd_devices(job);
