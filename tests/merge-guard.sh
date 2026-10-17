@@ -465,6 +465,19 @@ in_order "Ctrl+Alt+Shift+C, upstream's show-the-mouse, switches the sharp and re
      src/app/stream/input/session_keyboard.c "void performPendingSpecialKeyCombo" \
      "case KeyComboToggleCursorHide:" "tv_cursor_toggle_look();"
 
+# --- Stream actions: Vibepollo's control tiles in a menu (rhoquinn8217, 2026-10-17)
+# ⓘ Lines of ours in upstream's launcher. Taking upstream's back compiles, and:
+# apps.controller.c's, Resume, Terminate, Remote Input, Remote Monitor and a
+# second copy of the running app are tiles in the grid again; launcher.view.c's,
+# the "Stream actions" button is gone from the top bar (src/app/ui/launcher/
+# stream_actions.c).
+in_order "the host's controls leave each list before the grid shows it" \
+     src/app/ui/launcher/apps.controller.c "static void appload_loaded" \
+     "stream_actions_take(&fragment->uuid, apps);" "lv_gridview_set_data_advanced("
+in_order "the Stream actions button sits right after the host button" \
+     src/app/ui/launcher/launcher.view.c "lv_obj_t *launcher_win_create" \
+     "lv_label_set_text_static(srv_chevron, MAT_SYMBOL_ARROW_DROP_DOWN);" "stream_actions_button(controller, topbar);"
+
 echo
 if [ "$fail" -eq 0 ]; then
     echo "⭐ merge guard: $pass checks, nothing lost"

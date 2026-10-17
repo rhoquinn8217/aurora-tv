@@ -24,6 +24,7 @@ target_sources(moonlight-lib PRIVATE
         ${CMAKE_SOURCE_DIR}/src/app/stream/bridge_pointer.c
         ${CMAKE_SOURCE_DIR}/src/app/stream/bridge_proof.c
         ${CMAKE_SOURCE_DIR}/src/app/stream/bridge_session.c
+        ${CMAKE_SOURCE_DIR}/src/app/ui/launcher/stream_actions.c
         ${CMAKE_SOURCE_DIR}/src/app/ui/settings/auto_bridge_window.c
         ${CMAKE_SOURCE_DIR}/src/app/ui/settings/panes/usbbridge.pane.c
         ${CMAKE_SOURCE_DIR}/src/app/ui/streaming/bridge_overlay.c
