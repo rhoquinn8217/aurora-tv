@@ -1711,10 +1711,18 @@ void ctm_panel_on_owner_deleted(streaming_controller_t *controller) {
     if (s_ctm_dead_nav)    { lv_group_del(s_ctm_dead_nav);    s_ctm_dead_nav = NULL; }
 }
 
+bool ctm_panel_shown(void) {
+    return s_ctm_panel != NULL;   /* set as it opens, cleared as it closes and with its owner */
+}
+
 #else /* not TARGET_WEBOS */
 
 void ctm_panel_open(lv_event_t *event) {
     (void) event;
+}
+
+bool ctm_panel_shown(void) {
+    return false;
 }
 
 void ctm_panel_on_owner_deleted(streaming_controller_t *controller) {
