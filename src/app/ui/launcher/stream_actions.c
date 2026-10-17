@@ -84,6 +84,8 @@ static void button_clicked(lv_event_t *event);
 
 static void button_deleted(lv_event_t *event);
 
+static void free_user_data(lv_event_t *event);
+
 static void menu_cancel(lv_event_t *event);
 
 static void menu_clicked(lv_event_t *event);
@@ -249,6 +251,23 @@ static void button_deleted(lv_event_t *event) {
     }
 }
 
+/* A menu entry and the question Terminate asks each hold their own copy of
+ * the action: the list reloads every few seconds, and a choice must not
+ * become a different action under the person's finger. */
+static stream_action_t *action_copy(const stream_action_t *action) {
+    stream_action_t *copy = malloc(sizeof(stream_action_t));
+    if (copy != NULL) {
+        *copy = *action;
+    }
+    return copy;
+}
+
+static void free_user_data(lv_event_t *event) {
+    lv_obj_t *obj = lv_event_get_target(event);
+    free(lv_obj_get_user_data(obj));
+    lv_obj_set_user_data(obj, NULL);
+}
+
 /* The menu: a box of buttons just under the button, built as the tiles'
  * own long-press menu is, so the pad and the remote move through it the same
  * way and Back closes it. */
@@ -272,7 +291,8 @@ static void button_clicked(lv_event_t *event) {
     for (int i = 0; i < s_count; i++) {
         lv_obj_t *item = lv_list_add_btn(content, NULL, s_actions[i].title);
         lv_obj_add_flag(item, LV_OBJ_FLAG_EVENT_BUBBLE);
-        lv_obj_set_user_data(item, &s_actions[i]);
+        lv_obj_set_user_data(item, action_copy(&s_actions[i]));
+        lv_obj_add_event_cb(item, free_user_data, LV_EVENT_DELETE, NULL);
     }
     lv_obj_update_layout(msgbox);
     lv_obj_align_to(msgbox, btn, LV_ALIGN_OUT_BOTTOM_RIGHT, 0, LV_DPX(6));
@@ -308,6 +328,8 @@ static void launch(const stream_action_t *action) {
 
 static void confirm_terminate(const stream_action_t *action);
 
+static void ask_host(const stream_action_t *action);
+
 static void menu_clicked(lv_event_t *event) {
     lv_obj_t *target = lv_event_get_target(event);
     if (target->parent != lv_event_get_current_target(event)) {
@@ -319,10 +341,19 @@ static void menu_clicked(lv_event_t *event) {
     if (action == NULL) {
         return;
     }
-    if (action->kind == ACTION_TERMINATE) {
-        confirm_terminate(action);
-    } else {
-        launch(action);
+    switch (action->kind) {
+        case ACTION_TERMINATE:
+            confirm_terminate(action);
+            break;
+        case ACTION_DISCONNECT_INPUT:
+        case ACTION_DISCONNECT_MONITOR:
+            /* Nothing to stream: the host's answer is the whole of it, shown as
+             * a message rather than as a stream that failed to start. */
+            ask_host(action);
+            break;
+        default:
+            launch(action);
+            break;
     }
 }
 
@@ -345,52 +376,64 @@ static void confirm_terminate(const stream_action_t *action) {
         lv_label_set_text_fmt(text, locstr("This closes the running app on %s. Everyone streaming it is "
                                            "kicked off, on every TV."), host);
     }
-    lv_obj_set_user_data(msgbox, (void *) action);
+    lv_obj_set_user_data(msgbox, action_copy(action));
+    lv_obj_add_event_cb(msgbox, free_user_data, LV_EVENT_DELETE, NULL);
     lv_obj_add_event_cb(msgbox, confirm_clicked, LV_EVENT_VALUE_CHANGED, NULL);
     lv_obj_center(msgbox);
 }
-
-typedef struct terminate_task_t {
-    app_t *app;
-    uuidstr_t host;
-    int id;
-    /* A copy of the host's data, so the launch call's bookkeeping (it records
-     * the id it launched as the running app) never reaches the real one. */
-    SERVER_DATA server;
-    char *address;
-    int ret;
-    bool asked_twice;
-    char message[512];
-} terminate_task_t;
 
 static void confirm_clicked(lv_event_t *event) {
     lv_obj_t *msgbox = lv_event_get_current_target(event);
     const stream_action_t *action = lv_obj_get_user_data(msgbox);
     uint16_t pressed = lv_msgbox_get_active_btn(msgbox);
+    if (pressed == 1 && action != NULL) {
+        ask_host(action);
+    }
     lv_msgbox_close_async(msgbox);
-    if (pressed != 1 || action == NULL || s_app == NULL) {
+}
+
+typedef struct host_task_t {
+    app_t *app;
+    uuidstr_t host;
+    stream_action_t action;
+    /* A copy of the host's data, so the launch call's bookkeeping (it records
+     * the id it launched as the running app) never reaches the real one. */
+    SERVER_DATA server;
+    char *address;
+    int ret;
+    char message[512];
+} host_task_t;
+
+/* A control that streams nothing (Terminate, Disconnect), asked of the host
+ * off the screen thread, with "working" on the screen until it answers. */
+static void ask_host(const stream_action_t *action) {
+    if (s_app == NULL) {
         return;
     }
     const pclist_t *node = pcmanager_node(pcmanager, &s_host);
     if (node == NULL || node->server == NULL || node->server->serverInfo.address == NULL) {
         return;
     }
-    terminate_task_t *task = calloc(1, sizeof(terminate_task_t));
+    host_task_t *task = calloc(1, sizeof(host_task_t));
     if (task == NULL) {
         return;
     }
     task->app = s_app;
     task->host = s_host;
-    task->id = action->id;
+    task->action = *action;
     task->server = *node->server;
     task->address = strdup(node->server->serverInfo.address);
     task->server.serverInfo.address = task->address;
     task->server.modes = NULL;
     task->server.unsupported = true;      /* no display mode to match: nothing streams */
     task->server.currentGame = 0;
-    commons_log_info("StreamActions", "Terminate confirmed on the TV: asking the host (app %d)", task->id);
-    s_progress = progress_dialog_create(locstr("Terminating..."));
-    SDL_Thread *thread = SDL_CreateThread(terminate_worker, "terminate", task);
+    commons_log_info("StreamActions", "%s chosen on the TV: asking the host (app %d)",
+                     task->action.title, task->action.id);
+    if (s_progress == NULL) {
+        s_progress = progress_dialog_create(action->kind == ACTION_TERMINATE ? locstr("Terminating...")
+                                                                             : locstr("Please wait..."));
+    }
+    SDL_Thread *thread = SDL_CreateThread(terminate_worker, "stream-action", task);
     if (thread == NULL) {
         free(task->address);
         free(task);
@@ -404,12 +447,12 @@ static void confirm_clicked(lv_event_t *event) {
 }
 
 /* Off the screen thread: the launch Vibepollo answers, at most twice. To a TV
- * that did not start the app its first answer is a request to confirm ("Launch
- * Terminate again within 60 seconds"), which the person already did on this
- * TV; the second request is that confirmation. Each answer is a refusal by
- * design (status 410), with the host's words in it. */
+ * that did not start the app, Terminate's first answer is a request to confirm
+ * ("Launch Terminate again within 60 seconds"), which the person already did
+ * on this TV; the second request is that confirmation. Each answer is a refusal
+ * by design (status 410), with the host's words in it. */
 static int terminate_worker(void *data) {
-    terminate_task_t *task = data;
+    host_task_t *task = data;
     GS_CLIENT client = app_gs_client_new(task->app);
     for (int attempt = 0; attempt < 2; attempt++) {
         STREAM_CONFIGURATION config;
@@ -422,15 +465,15 @@ static int terminate_worker(void *data) {
         config.audioConfiguration = AUDIO_CONFIGURATION_STEREO;
         config.supportedVideoFormats = VIDEO_FORMAT_H264;
         SERVER_DATA server = task->server;
-        task->ret = gs_start_app(client, &server, &config, task->id, server.isGfe, false, false, 0, NULL);
+        task->ret = gs_start_app(client, &server, &config, task->action.id, server.isGfe, false, false, 0, NULL);
         const char *message = NULL;
         gs_get_error(&message);
         snprintf(task->message, sizeof(task->message), "%s", task->ret == GS_OK ? "" : (message ? message : ""));
-        commons_log_info("StreamActions", "Terminate, request %d: %d %s", attempt + 1, task->ret, task->message);
-        if (task->ret == GS_OK || strstr(task->message, " again ") == NULL) {
+        commons_log_info("StreamActions", "%s, request %d: %d %s", task->action.title, attempt + 1, task->ret,
+                         task->message);
+        if (task->ret == GS_OK || task->action.kind != ACTION_TERMINATE || strstr(task->message, " again ") == NULL) {
             break;
         }
-        task->asked_twice = true;
     }
     gs_destroy(client);
     app_bus_post(task->app, (bus_actionfunc) terminate_done, task);
@@ -438,7 +481,7 @@ static int terminate_worker(void *data) {
 }
 
 static void terminate_done(void *data) {
-    terminate_task_t *task = data;
+    host_task_t *task = data;
     if (s_progress != NULL) {
         lv_msgbox_close(s_progress);
         s_progress = NULL;
@@ -450,7 +493,7 @@ static void terminate_done(void *data) {
         said = colon + 2;
     }
     static const char *btn_txts[] = {translatable("OK"), ""};
-    lv_obj_t *msgbox = lv_msgbox_create_i18n(NULL, locstr("Terminate"), "text", btn_txts, false);
+    lv_obj_t *msgbox = lv_msgbox_create_i18n(NULL, task->action.title, "text", btn_txts, false);
     lv_label_set_text(lv_msgbox_get_text(msgbox), said[0] != '\0' ? said : locstr("The host did not answer."));
     lv_obj_add_event_cb(msgbox, result_clicked, LV_EVENT_VALUE_CHANGED, NULL);
     lv_obj_center(msgbox);
