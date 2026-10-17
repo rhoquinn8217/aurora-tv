@@ -30,6 +30,7 @@
 #include "stream/video/session_video.h"
 #include "ui/streaming/streaming.controller.h"
 #include "ui/streaming/bridge_prompt.h"
+#include "ui/streaming/ctm_panel.h"
 #include "input/bridge_override.h"
 #include "input/bridge_keyboard.h"
 #include "input/tv_cursor.h"
@@ -131,6 +132,7 @@ static void cmd_help(control_job_t *job)
                "open-config             ask the host for its settings window, as the overlay's DS5-USBIP button does\n"
                "set <name> <on|off>     a switch, without the remote: boost, light, rumble, tone, override, vmouse\n"
                "prompt [ok|dismiss]     the question a bridge raises: is it up, or answer it without a hand\n"
+               "ui                      what is open on the screen: overlay, its keyboard, the panel, the align bar\n"
                "input                   the stream's live input state: Bridge Override and what it switches\n"
                "keys                    key events counted since the app started: the TV's keyboard grab, and webOS\n"
                "set settle <ms>         how long to let the link settle before a DS4 handback tone\n"
@@ -293,6 +295,24 @@ static void cmd_prompt(control_job_t *job, const char *args)
             reply(job, "OK prompt=down note=down\n");
         }
     }
+}
+
+/* What is open on the screen, read only: the overlay, its keyboard and its
+ * numbers, the USB Bridge panel, the question a bridge raises, the TV cursor's
+ * align bar and the TV cursor itself. Made so a test that drives the TV with
+ * nobody at it can see what a keyboard chord or a gesture opened or closed
+ * (2026-10-17), where until then only a person looking at the TV could. */
+static void cmd_ui(control_job_t *job)
+{
+    reply(job, "OK overlay=%s kbd=%s stats=%s panel=%s prompt=%s align=%s cursor=%s stream=%s\n",
+          streaming_overlay_shown() ? "open" : "closed",
+          streaming_soft_keyboard_shown() ? "open" : "closed",
+          streaming_stats_shown() ? "shown" : "hidden",
+          ctm_panel_shown() ? "open" : "closed",
+          bridge_prompt_shown() ? "up" : "down",
+          cursor_align_shown() ? "open" : "closed",
+          tv_cursor_drawn() ? "drawn" : "hidden",
+          s_app->session != NULL ? "active" : "idle");
 }
 
 static void cmd_status(control_job_t *job)
@@ -1053,6 +1073,8 @@ static void run_command(control_job_t *job)
         cmd_cursor(job, args);
     } else if (strcasecmp(verb, "prompt") == 0) {
         cmd_prompt(job, args);
+    } else if (strcasecmp(verb, "ui") == 0) {
+        cmd_ui(job);
 #if defined(TARGET_WEBOS)
     } else if (strcasecmp(verb, "devices") == 0) {
         cmd_devices(job);

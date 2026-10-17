@@ -377,6 +377,14 @@ fi
 # --- the panel -----------------------------------------------------------
 need "USB Bridge panel present" \
      src/app/ui/streaming/ctm_panel.c "ctm_panel_open"
+
+# --- what the control port says is on the screen (2026-10-17) -------------
+# ⓘ Tests that drive the TV with nobody at it read the overlay, the panel and
+# the rest through `ui`; losing the command or the panel's answer compiles.
+need "the control port answers ui" \
+     src/app/control_server.c 'strcasecmp(verb, "ui")'
+need "the panel says whether it is open" \
+     src/app/ui/streaming/ctm_panel.c "bool ctm_panel_shown(void)"
 # ⓘ The overlay's USB Bridge and DS5-USBIP buttons are made by
 # src/app/ui/streaming/bridge_overlay.c, called from upstream's view. Right
 # after Virtual Mouse and before the spacer is what puts them third and fourth

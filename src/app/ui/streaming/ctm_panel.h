@@ -23,3 +23,9 @@ void ctm_panel_open(lv_event_t *event);
  * own close: the fragment can be torn down with the panel still open, and the
  * groups would outlive the input device pointing at them. */
 void ctm_panel_on_owner_deleted(streaming_controller_t *controller);
+
+/* Whether the panel is open. A third entry point, and the answer to the question
+ * above is yes, it belongs on this side: only this file knows, and the control
+ * port's `ui` reads it so a test with nobody at the TV can see what is on the
+ * screen (2026-10-17). It reads only. */
+bool ctm_panel_shown(void);
