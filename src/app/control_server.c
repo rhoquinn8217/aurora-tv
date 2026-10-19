@@ -29,6 +29,7 @@
 #include "stream/session.h"
 #include "stream/bridge_session.h"
 #include "stream/video/session_video.h"
+#include "ui/launcher/launcher.controller.h"
 #include "ui/streaming/streaming.controller.h"
 #include "ui/streaming/bridge_prompt.h"
 #include "ui/streaming/ctm_panel.h"
@@ -136,6 +137,7 @@ static void cmd_help(control_job_t *job)
                "ui                      what is open on the screen: overlay, its keyboard, the panel, the align bar\n"
                "press <key>[:ms] ...    keys into aurora-tv's own screens, as a keyboard types them; not in a stream\n"
                "                        keys: up down left right enter esc home end; :ms holds it (a long press)\n"
+               "host [<host>]           the launcher's host: which it shows, or pick one (a uuid or part of its name)\n"
                "input                   the stream's live input state: Bridge Override and what it switches\n"
                "keys                    key events counted since the app started: the TV's keyboard grab, and webOS\n"
                "set settle <ms>         how long to let the link settle before a DS4 handback tone\n"
@@ -594,6 +596,69 @@ static void cmd_hosts(control_job_t *job)
         reply(job, "%s state=%s address=%s name=\"%s\"\n", cur->id.data,
               host_state_name(cur->state.code), address, host_name(cur));
     }
+}
+
+/* host: which host the launcher shows, or pick one, as "Select server" does.
+ *
+ * The lab's monitor (2026-10-17) drives the launcher with press, and its
+ * launcher showed CAELUM, the PC rhoquinn8217 uses: an Enter on a tile there
+ * starts something on their PC. Asked for by the lab, yes'd by them, so its
+ * cases can point the launcher at its own VM first. Refused in a stream, and
+ * for a host not paired: picking one opens the pairing dialog, which waits
+ * for a PIN nobody is there to type. */
+static void cmd_host(control_job_t *job, const char *args)
+{
+    char want[128] = "";
+    if (args != NULL) {
+        sscanf(args, "%127s", want);
+    }
+    if (want[0] == '\0') {
+        for (const pclist_t *cur = pcmanager_servers(pcmanager); cur != NULL; cur = cur->next) {
+            if (cur->selected) {
+                reply(job, "OK selected %s name=\"%s\"\n", cur->id.data, host_name(cur));
+                return;
+            }
+        }
+        reply(job, "OK selected none\n");
+        return;
+    }
+    if (s_app->session != NULL) {
+        reply(job, "ERR a stream is running: stop it first\n");
+        return;
+    }
+    launcher_fragment_t *launcher = launcher_instance();
+    if (launcher == NULL) {
+        reply(job, "ERR the launcher is not open\n");
+        return;
+    }
+    const pclist_t *match = NULL;
+    int matches = 0;
+    for (const pclist_t *cur = pcmanager_servers(pcmanager); cur != NULL; cur = cur->next) {
+        if (uuidstr_t_equals_s(&cur->id, want)) {
+            match = cur;
+            matches = 1;
+            break;
+        }
+        if (host_name(cur)[0] != '\0' && contains_ci(host_name(cur), want)) {
+            match = cur;
+            ++matches;
+        }
+    }
+    if (matches == 0) {
+        reply(job, "ERR no host '%s'; see hosts\n", want);
+        return;
+    }
+    if (matches > 1) {
+        reply(job, "ERR '%s' matches %d hosts; use the uuid from hosts\n", want, matches);
+        return;
+    }
+    if (match->state.code == SERVER_STATE_NOT_PAIRED) {
+        reply(job, "ERR %s is not paired with this TV\n", host_name(match));
+        return;
+    }
+    uuidstr_t id = match->id;
+    launcher_select_server(launcher, &id);
+    reply(job, "OK the launcher shows %s (%s)\n", host_name(match), id.data);
 }
 
 static void cmd_stream(control_job_t *job, const char *args)
@@ -1221,6 +1286,8 @@ static void run_command(control_job_t *job)
         cmd_ui(job);
     } else if (strcasecmp(verb, "press") == 0) {
         cmd_press(job, args);
+    } else if (strcasecmp(verb, "host") == 0) {
+        cmd_host(job, args);
 #if defined(TARGET_WEBOS)
     } else if (strcasecmp(verb, "devices") == 0) {
         cmd_devices(job);
