@@ -1,5 +1,6 @@
 #include "server.popup.h"
 #include "server.context_menu.h"
+#include "server_cards.h"
 #include "appitem.view.h"
 
 #include "app.h"
@@ -193,6 +194,7 @@ static void server_tile_bind(server_popup_t *popup, lv_obj_t *item, int position
     const server_popup_entry_t *entry = &popup->entries[position];
     lv_label_set_text(holder->title, entry->hostname);
     lv_label_set_text_static(holder->icon, server_entry_icon(entry));
+    server_cards_bind(item, popup->launcher->global, &entry->id, server_entry_icon(entry), entry->state.code);
     if (entry->selected) {
         lv_obj_add_state(item, LV_STATE_CHECKED);
     } else {
@@ -316,6 +318,7 @@ static void server_popup_deleted(lv_event_t *e) {
         lv_group_del(popup->group);
         popup->group = NULL;
     }
+    server_cards_closed();
     appitem_style_deinit(&popup->item_style);
     SDL_free(popup->entries);
     SDL_free(popup);

@@ -1,5 +1,6 @@
 #include "appitem.view.h"
 #include "res.h"
+#include "stream_actions.h"
 
 #include "draw/sdl/lv_draw_sdl_utils.h"
 #include "lvgl/theme/lv_theme_moonlight.h"
@@ -40,6 +41,7 @@ lv_obj_t *appitem_view(apps_fragment_t *controller, lv_obj_t *parent) {
     lv_obj_add_style(play_indicator, &styles->btn, 0);
     lv_label_set_text(play_indicator, MAT_SYMBOL_PLAY_ARROW);
     lv_obj_center(play_indicator);
+    stream_actions_badge_style(play_indicator, controller->col_width);
     lv_obj_t *title = lv_label_create(item);
     const lv_font_t *font = lv_theme_get_font_small(item);
     lv_obj_set_style_text_font(title, font, 0);

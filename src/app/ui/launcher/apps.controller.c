@@ -7,6 +7,7 @@
 #include "apps.controller.h"
 #include "launcher.controller.h"
 #include "stream_actions.h"
+#include "server_cards.h"
 #include "ui/streaming/streaming.controller.h"
 
 #include "coverloader.h"
@@ -574,6 +575,7 @@ static void appload_loaded(apploader_list_t *apps, void *userdata) {
         return;
     }
     stream_actions_take(&fragment->uuid, apps);
+    server_cards_learn(&fragment->uuid, apps);
     int num_changes = -1;
     lv_gridview_data_change_t *changes = apps_list_detect_change(fragment->apploader_apps, apps, &num_changes);
 

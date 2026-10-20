@@ -385,6 +385,31 @@ int stream_actions_running_id(const uuidstr_t *host, int reported) {
     return s_running_id;
 }
 
+/* rhoquinn8217, 2026-10-20, of that badge: "I don't like the large purple play
+ * button. Can you make it smaller and closer to a corner", then that it should
+ * "stand out enough that it's obvious that it's a label for the tile", and the
+ * third of four pictures: 88/240 of the tile's width across, a quarter of that
+ * in from the top and left edges, with a white ring and a shadow. */
+void stream_actions_badge_style(lv_obj_t *badge, lv_coord_t tile_width) {
+    lv_coord_t size = tile_width * 88 / 240;
+    lv_coord_t ring = LV_MAX(3, size * 6 / 100);
+    const lv_font_t *font = lv_obj_get_style_text_font(badge, LV_PART_MAIN);
+    lv_coord_t room = size - 2 * ring - (font != NULL ? font->line_height : 0);
+    lv_obj_set_size(badge, size, size);
+    lv_obj_set_style_border_color(badge, lv_color_white(), 0);
+    lv_obj_set_style_border_opa(badge, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(badge, ring, 0);
+    lv_obj_set_style_shadow_color(badge, lv_color_black(), 0);
+    lv_obj_set_style_shadow_opa(badge, LV_OPA_60, 0);
+    lv_obj_set_style_shadow_width(badge, size / 5, 0);
+    lv_obj_set_style_shadow_ofs_y(badge, size / 16, 0);
+    /* The icon centred in the ring: a label draws from the top of its box. */
+    lv_obj_set_style_pad_hor(badge, 0, 0);
+    lv_obj_set_style_pad_top(badge, LV_MAX(0, room / 2), 0);
+    lv_obj_set_style_pad_bottom(badge, 0, 0);
+    lv_obj_align(badge, LV_ALIGN_TOP_LEFT, size / 4, size / 4);
+}
+
 static const char *app_name(const apploader_list_t *apps, int id) {
     const apploader_item_t *item = apps != NULL ? apploader_list_item_by_id(apps, id) : NULL;
     return item != NULL && item->base.name != NULL ? visible_name(item->base.name) : NULL;

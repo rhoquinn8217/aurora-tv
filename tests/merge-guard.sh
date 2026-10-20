@@ -493,6 +493,25 @@ in_order "closing the server window without a pick hands focus back to the top b
      src/app/ui/launcher/server.popup.c "static void server_popup_deleted" \
      "app_input_remove_modal_group(" "launcher_restore_nav_focus(popup->launcher);"
 
+# --- the running badge and the server cards (rhoquinn8217, 2026-10-20) ---
+# ⓘ Lines of ours in upstream's launcher. Taking upstream's back compiles, and:
+# appitem.view.c's, the running app's badge is the large purple circle in the
+# middle of the tile again; apps.controller.c's and server.popup.c's, "Select
+# server" shows plain icons again, not each computer's Desktop picture
+# (src/app/ui/launcher/server_cards.c).
+in_order "the running badge is a ringed circle in the tile's top-left corner" \
+     src/app/ui/launcher/appitem.view.c "lv_obj_t *appitem_view" \
+     "lv_obj_center(play_indicator);" "stream_actions_badge_style(play_indicator, controller->col_width);"
+in_order "each host's Desktop app is noted as its list loads" \
+     src/app/ui/launcher/apps.controller.c "static void appload_loaded" \
+     "stream_actions_take(&fragment->uuid, apps);" "server_cards_learn(&fragment->uuid, apps);"
+in_order "a server tile shows its computer's Desktop picture" \
+     src/app/ui/launcher/server.popup.c "static void server_tile_bind" \
+     "lv_label_set_text_static(holder->icon, server_entry_icon(entry));" "server_cards_bind(item, popup->launcher->global, &entry->id,"
+in_order "the pictures are let go when the server window closes" \
+     src/app/ui/launcher/server.popup.c "static void server_popup_deleted" \
+     "server_cards_closed();" "SDL_free(popup);"
+
 echo
 if [ "$fail" -eq 0 ]; then
     echo "⭐ merge guard: $pass checks, nothing lost"
