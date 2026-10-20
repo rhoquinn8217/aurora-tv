@@ -207,26 +207,43 @@ static bool offered(action_kind_t kind) {
  *     of it the host lists for every other TV;
  *   - None. ⓘ Including when another TV is a Remote Input or Monitor with no
  *     app running: the host tells no other TV of it. */
+typedef enum streaming_state_t {
+    STREAMING_NONE,
+    STREAMING_APP,
+    STREAMING_INPUT,
+    STREAMING_MONITOR,
+} streaming_state_t;
+
+static streaming_state_t streaming_now(int *picture, char *name, size_t len) {
+    const int reported = pcmanager_server_current_app(pcmanager, &s_host);
+    const int running = reported != 0 ? reported : s_running_id;
+    *picture = 0;
+    if (offered(ACTION_DISCONNECT_MONITOR)) {
+        *picture = PICTURE_REMOTE_MONITOR;
+        snprintf(name, len, "%s", locstr("Remote Monitor"));
+        return STREAMING_MONITOR;
+    }
+    if (s_count > 0 && offered(ACTION_MONITOR) && !offered(ACTION_INPUT)) {
+        *picture = PICTURE_REMOTE_INPUT;
+        snprintf(name, len, "%s", locstr("Remote Input"));
+        return STREAMING_INPUT;
+    }
+    if (running != 0) {
+        *picture = running;
+        snprintf(name, len, "%s", s_running[0] != '\0' ? s_running : locstr("An app"));
+        return STREAMING_APP;
+    }
+    snprintf(name, len, "%s", locstr("None"));
+    return STREAMING_NONE;
+}
+
 static void update_button(void) {
     if (s_btn == NULL || s_btn_name == NULL) {
         return;
     }
-    const int reported = pcmanager_server_current_app(pcmanager, &s_host);
-    const int running = reported != 0 ? reported : s_running_id;
     int picture = 0;
     char name[TITLE_MAX];
-    if (offered(ACTION_DISCONNECT_MONITOR)) {
-        picture = PICTURE_REMOTE_MONITOR;
-        snprintf(name, sizeof(name), "%s", locstr("Remote Monitor"));
-    } else if (s_count > 0 && offered(ACTION_MONITOR) && !offered(ACTION_INPUT)) {
-        picture = PICTURE_REMOTE_INPUT;
-        snprintf(name, sizeof(name), "%s", locstr("Remote Input"));
-    } else if (running != 0) {
-        picture = running;
-        snprintf(name, sizeof(name), "%s", s_running[0] != '\0' ? s_running : locstr("An app"));
-    } else {
-        snprintf(name, sizeof(name), "%s", locstr("None"));
-    }
+    streaming_now(&picture, name, sizeof(name));
     if (picture == s_shown_picture_id && strcmp(name, s_shown_name) == 0) {
         return;
     }
@@ -426,33 +443,22 @@ static void free_user_data(lv_event_t *event) {
     lv_obj_set_user_data(obj, NULL);
 }
 
-/* rhoquinn8217, 2026-10-20: "i want little icons next to each menu item at
- * their left. Use a shrunk version of the tile they replaced." The host sends
- * each control's tile picture as it sends a game's cover, so the entry shows
- * that, at about the row's height and the tile's shape. */
-static void add_tile_picture(lv_obj_t *item, int picture_id, bool usable) {
-    if (s_app == NULL) {
-        return;
-    }
-    lv_coord_t height = LV_DPX(30);
-    lv_coord_t width = height * 3 / 4;
-    /* No user data: the cover loader reads an object with some as a game tile. */
-    lv_obj_t *picture = lv_img_create(item);
-    lv_obj_move_to_index(picture, 0);
+/* A tile's picture, as the host sends it for that tile, as a game's cover is.
+ * ⚠️ No user data: the cover loader reads an object with some as a game tile. */
+static lv_obj_t *add_picture(lv_obj_t *parent, int picture_id, lv_coord_t width, lv_coord_t height) {
+    lv_obj_t *picture = lv_img_create(parent);
     lv_obj_clear_flag(picture, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_size(picture, width, height);
-    lv_obj_set_style_radius(picture, LV_DPX(3), 0);
+    lv_obj_set_style_radius(picture, LV_DPX(4), 0);
     lv_obj_set_style_clip_corner(picture, true, 0);
     lv_img_set_antialias(picture, true);
-    if (!usable) {
-        lv_obj_set_style_img_opa(picture, LV_OPA_30, 0);
+    if (s_app != NULL) {
+        if (s_menu_covers == NULL) {
+            s_menu_covers = coverloader_new(s_app);
+        }
+        coverloader_display(s_menu_covers, &s_host, picture_id, picture, width, height);
     }
-    lv_obj_set_style_pad_ver(item, LV_DPX(6), 0);
-    lv_obj_set_style_pad_column(item, LV_DPX(10), 0);
-    if (s_menu_covers == NULL) {
-        s_menu_covers = coverloader_new(s_app);
-    }
-    coverloader_display(s_menu_covers, &s_host, picture_id, picture, width, height);
+    return picture;
 }
 
 /* rhoquinn8217, 2026-10-20, of the menu: "show all the buttons but gray them
@@ -512,9 +518,91 @@ static void menu_deleted(lv_event_t *event) {
     }
 }
 
-/* The menu: a box of buttons just under the button, built as the tiles'
- * own long-press menu is, so the pad and the remote move through it the same
- * way and Back closes it. */
+/* rhoquinn8217, 2026-10-20: "In the streaming action menu, just show the
+ * tile. Don't print out the name." Each entry is its tile's picture alone, in
+ * a row; greyed when it cannot be used, and the selection steps over it (LVGL
+ * skips a disabled object, lv_group.c). */
+#define MENU_TILE_H LV_DPX(56)
+#define MENU_TILE_W (MENU_TILE_H * 3 / 4)
+
+static void add_tile(lv_obj_t *row, const menu_entry_t *entry) {
+    stream_action_t action;
+    const bool usable = entry_action(entry, &action);
+    lv_obj_t *tile = lv_btn_create(row);
+    lv_obj_add_flag(tile, LV_OBJ_FLAG_EVENT_BUBBLE);
+    lv_obj_set_size(tile, MENU_TILE_W, MENU_TILE_H);
+    lv_obj_set_style_pad_all(tile, 0, 0);
+    lv_obj_set_style_radius(tile, LV_DPX(4), 0);
+    lv_obj_set_style_clip_corner(tile, true, 0);
+    lv_obj_set_style_shadow_width(tile, 0, 0);
+    lv_obj_t *picture = add_picture(tile, entry->picture_id, MENU_TILE_W, MENU_TILE_H);
+    lv_obj_center(picture);
+    if (usable) {
+        lv_obj_set_user_data(tile, action_copy(&action));
+        lv_obj_add_event_cb(tile, free_user_data, LV_EVENT_DELETE, NULL);
+    } else {
+        lv_obj_add_state(tile, LV_STATE_DISABLED);
+        lv_obj_set_style_img_opa(picture, LV_OPA_30, 0);
+    }
+}
+
+/* rhoquinn8217, 2026-10-20: "above the first menu item, write out the full
+ * status": "Currently streaming <tile> <game/app name>", "Currently acting as
+ * remote input", "Currently streaming <remote monitor> (View only)", "Nothing
+ * streaming". The same reading as the button's (streaming_now). */
+static void add_status(lv_obj_t *content) {
+    int picture = 0;
+    char name[TITLE_MAX];
+    const streaming_state_t state = streaming_now(&picture, name, sizeof(name));
+    lv_obj_t *line = lv_obj_create(content);
+    lv_obj_remove_style_all(line);
+    lv_obj_set_size(line, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(line, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(line, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_column(line, LV_DPX(8), 0);
+    lv_obj_set_style_pad_bottom(line, LV_DPX(4), 0);
+    lv_obj_clear_flag(line, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_t *text = lv_label_create(line);
+    switch (state) {
+        case STREAMING_APP:
+        case STREAMING_MONITOR:
+            lv_label_set_text_static(text, locstr("Currently streaming"));
+            break;
+        case STREAMING_INPUT:
+            lv_label_set_text_static(text, locstr("Currently acting as remote input"));
+            break;
+        default:
+            lv_label_set_text_static(text, locstr("Nothing streaming"));
+            break;
+    }
+    if (state == STREAMING_APP || state == STREAMING_MONITOR) {
+        add_picture(line, picture, LV_DPX(18), LV_DPX(24));
+        lv_obj_t *after = lv_label_create(line);
+        lv_label_set_text(after, state == STREAMING_APP ? name : locstr("(View only)"));
+    }
+}
+
+/* Along the row: Left and Right, as Up and Down already do (the theme's
+ * message box). */
+static void menu_keys(lv_event_t *event) {
+    lv_group_t *group = lv_obj_get_group(lv_event_get_target(event));
+    if (group == NULL) {
+        return;
+    }
+    switch (lv_event_get_key(event)) {
+        case LV_KEY_LEFT:
+            lv_group_focus_prev(group);
+            break;
+        case LV_KEY_RIGHT:
+            lv_group_focus_next(group);
+            break;
+        default:
+            break;
+    }
+}
+
+/* The menu: the status, then the tiles, in a box just under the button. The
+ * pad and the remote move through it, and Back closes it. */
 static void button_clicked(lv_event_t *event) {
     lv_obj_t *btn = lv_event_get_target(event);
     lv_obj_t *msgbox = lv_msgbox_create(NULL, NULL, NULL, NULL, false);
@@ -524,45 +612,35 @@ static void button_clicked(lv_event_t *event) {
         lv_obj_set_style_bg_opa(backdrop, LV_OPA_30, 0);
     }
     lv_obj_set_style_min_width(msgbox, 0, 0);
-    lv_obj_set_width(msgbox, LV_DPX(320));
+    lv_obj_set_style_max_width(msgbox, LV_PCT(90), 0);
+    lv_obj_set_width(msgbox, LV_SIZE_CONTENT);
     lv_obj_t *content = lv_msgbox_get_content(msgbox);
     lv_obj_add_flag(content, LV_OBJ_FLAG_EVENT_BUBBLE);
     lv_obj_set_flex_flow(content, LV_FLEX_FLOW_COLUMN);
-    lv_obj_add_event_cb(content, menu_cancel, LV_EVENT_CANCEL, NULL);
-    lv_obj_add_event_cb(content, menu_clicked, LV_EVENT_SHORT_CLICKED, NULL);
+    lv_obj_add_event_cb(msgbox, menu_cancel, LV_EVENT_CANCEL, NULL);
+    lv_obj_add_event_cb(msgbox, menu_keys, LV_EVENT_KEY, NULL);
     lv_obj_add_event_cb(msgbox, menu_deleted, LV_EVENT_DELETE, NULL);
+    add_status(content);
+    lv_obj_t *row = lv_obj_create(content);
+    lv_obj_remove_style_all(row);
+    lv_obj_set_size(row, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
+    lv_obj_set_style_pad_column(row, LV_DPX(8), 0);
+    lv_obj_set_style_pad_all(row, LV_DPX(4), 0);      /* room for the selection's outline */
+    lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(row, LV_OBJ_FLAG_EVENT_BUBBLE);
+    lv_obj_add_event_cb(row, menu_clicked, LV_EVENT_SHORT_CLICKED, NULL);
     for (size_t i = 0; i < sizeof(k_entries) / sizeof(k_entries[0]); i++) {
-        const menu_entry_t *entry = &k_entries[i];
-        stream_action_t action;
-        const bool usable = entry_action(entry, &action);
-        /* The host's own title when it offers the control; the entry's when
-         * Aurora does it or nothing can. */
-        const char *title = usable && action.kind != ACTION_OWN_RESUME && action.kind != ACTION_OWN_QUIT
-                            ? action.title : locstr(entry->title);
-        lv_obj_t *item = lv_list_add_btn(content, NULL, title);
-        lv_obj_add_flag(item, LV_OBJ_FLAG_EVENT_BUBBLE);
-        if (usable) {
-            lv_obj_set_user_data(item, action_copy(&action));
-            lv_obj_add_event_cb(item, free_user_data, LV_EVENT_DELETE, NULL);
-        } else {
-            /* Greyed, and the selection steps over it (LVGL skips a disabled
-             * object, lv_group.c). */
-            lv_obj_add_state(item, LV_STATE_DISABLED);
-            lv_obj_set_style_text_opa(item, LV_OPA_40, LV_STATE_DISABLED);
-        }
-        add_tile_picture(item, entry->picture_id, usable);
+        add_tile(row, &k_entries[i]);
     }
     lv_obj_update_layout(msgbox);
     /* Under the button, from its left edge, now that it is on the left. */
     lv_obj_align_to(msgbox, btn, LV_ALIGN_OUT_BOTTOM_LEFT, 0, LV_DPX(6));
 }
 
+/* Back, from any tile: the box goes. */
 static void menu_cancel(lv_event_t *event) {
-    lv_obj_t *target = lv_event_get_target(event);
-    if (target->parent != lv_event_get_current_target(event)) {
-        return;
-    }
-    lv_msgbox_close(lv_event_get_current_target(event)->parent);
+    lv_msgbox_close_async(lv_event_get_current_target(event));
 }
 
 static void launch(const stream_action_t *action) {
@@ -591,10 +669,12 @@ static void ask_host(const stream_action_t *action);
 
 static void menu_clicked(lv_event_t *event) {
     lv_obj_t *target = lv_event_get_target(event);
-    if (target->parent != lv_event_get_current_target(event)) {
+    lv_obj_t *row = lv_event_get_current_target(event);
+    if (lv_obj_get_parent(target) != row) {
         return;
     }
-    lv_obj_t *msgbox = lv_event_get_current_target(event)->parent;
+    /* The row is in the box's content, in the box. */
+    lv_obj_t *msgbox = lv_obj_get_parent(lv_obj_get_parent(row));
     const stream_action_t *action = lv_obj_get_user_data(target);
     lv_msgbox_close_async(msgbox);
     if (action == NULL) {
