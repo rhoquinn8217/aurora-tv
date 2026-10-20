@@ -474,6 +474,13 @@ in_order "Ctrl+Alt+Shift+C, upstream's show-the-mouse, switches the sharp and re
 in_order "the host's controls leave each list before the grid shows it" \
      src/app/ui/launcher/apps.controller.c "static void appload_loaded" \
      "stream_actions_take(&fragment->uuid, apps);" "lv_gridview_set_data_advanced("
+in_order "the running app's badge shows on every TV, not only the one that started it" \
+     src/app/ui/launcher/apps.controller.c "static void appitem_bind" \
+     "stream_actions_running_id(&controller->uuid, pcmanager_server_current_app(" "lv_obj_clear_flag(holder->play_indicator, LV_OBJ_FLAG_HIDDEN);"
+in_order "a tile pressed while another app runs asks first" \
+     src/app/ui/launcher/apps.controller.c "static void item_click_cb" \
+     "if (stream_actions_tile_pressed(&controller->uuid, controller->apploader_apps, holder->app_id)) { return; }" \
+     "int current_app = pcmanager_server_current_app(pcmanager, &controller->uuid);"
 in_order "the Stream actions button sits right after the host button" \
      src/app/ui/launcher/launcher.view.c "lv_obj_t *launcher_win_create" \
      "lv_label_set_text_static(srv_chevron, MAT_SYMBOL_ARROW_DROP_DOWN);" "stream_actions_button(controller, topbar);"

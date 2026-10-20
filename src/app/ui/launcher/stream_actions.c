@@ -34,6 +34,8 @@ typedef enum action_kind_t {
     ACTION_DISCONNECT_MONITOR,
     /* Left out of the grid and out of the menu: Resume joins the same app. */
     ACTION_RUNNING_COPY,
+    /* Not a control: a tile pressed while another app runs (see SWITCHING). */
+    ACTION_SWITCH,
 } action_kind_t;
 
 static action_kind_t kind_of_id(int id) {
@@ -78,6 +80,9 @@ static stream_action_t s_actions[MAX_ACTIONS];
 static int s_count;
 /* The running app's name, from its copy: what Terminate would close. */
 static char s_running[TITLE_MAX];
+/* And its own tile's id, which the copy names. Vibepollo tells a TV that did
+ * not start the app that nothing runs, so this is the only way it knows. */
+static int s_running_id;
 static lv_obj_t *s_progress;
 
 static void button_clicked(lv_event_t *event);
@@ -112,11 +117,12 @@ static const char *visible_name(const char *name) {
 
 /* The copy of the running app: Vibepollo gives it leading spaces and the
  * running app's id with bit 30 flipped (synthetic_running_game_id), so it is
- * known by both, against the app it copies. */
-static bool is_running_copy(const apploader_list_t *apps, size_t index) {
+ * known by both, against the app it copies. Answers the copied app's own id,
+ * or 0 when this is not a copy. */
+static int running_copy_of(const apploader_list_t *apps, size_t index) {
     const APP_LIST *copy = &apps->items[index].base;
     if (copy->name == NULL || copy->name[0] != ' ') {
-        return false;
+        return 0;
     }
     const char *name = visible_name(copy->name);
     for (size_t i = 0; i < apps->count; i++) {
@@ -125,10 +131,10 @@ static bool is_running_copy(const apploader_list_t *apps, size_t index) {
             continue;
         }
         if ((((unsigned) other->id ^ 0x40000000U) & 0x7fffffffU) == (unsigned) copy->id) {
-            return true;
+            return other->id;
         }
     }
-    return false;
+    return 0;
 }
 
 static int kind_rank(action_kind_t kind) {
@@ -172,6 +178,7 @@ void stream_actions_take(const uuidstr_t *host, apploader_list_t *apps) {
     s_host = *host;
     s_count = 0;
     s_running[0] = '\0';
+    s_running_id = 0;
     if (apps->count == 0) {
         update_button();
         return;
@@ -183,8 +190,10 @@ void stream_actions_take(const uuidstr_t *host, apploader_list_t *apps) {
     }
     for (size_t i = 0; i < apps->count; i++) {
         kinds[i] = kind_of_id(apps->items[i].base.id);
-        if (kinds[i] == ACTION_NONE && is_running_copy(apps, i)) {
+        int twin = kinds[i] == ACTION_NONE ? running_copy_of(apps, i) : 0;
+        if (twin != 0) {
             kinds[i] = ACTION_RUNNING_COPY;
+            s_running_id = twin;
         }
     }
     size_t keep = 0;
@@ -357,6 +366,73 @@ static void menu_clicked(lv_event_t *event) {
     }
 }
 
+/* ------------------------------------------------------------- SWITCHING -- */
+
+/* rhoquinn8217, 2026-10-19: "There use to be a badge or a play button on app
+ * that was in use. ... Sometime I see it sometimes I don't", and picking an app
+ * while one ran did nothing they could see. Both had the same root: the host
+ * tells only the TV that started an app which app runs. That TV's launcher
+ * marks it and silently ignores a press on any other tile; every other TV is
+ * told nothing runs, and the press goes to the host, which refuses it ("An app
+ * is already running. Launch this app again within 60 seconds ..."). So the
+ * badge now marks the running app on every TV (its id from the copy, above),
+ * and a press on another tile asks before it closes what runs. */
+
+int stream_actions_running_id(const uuidstr_t *host, int reported) {
+    if (reported != 0 || host == NULL || !uuidstr_t_equals_t(host, &s_host)) {
+        return reported;
+    }
+    return s_running_id;
+}
+
+static const char *app_name(const apploader_list_t *apps, int id) {
+    const apploader_item_t *item = apps != NULL ? apploader_list_item_by_id(apps, id) : NULL;
+    return item != NULL && item->base.name != NULL ? visible_name(item->base.name) : NULL;
+}
+
+static void switch_clicked(lv_event_t *event);
+
+bool stream_actions_tile_pressed(const uuidstr_t *host, const apploader_list_t *apps, int app_id) {
+    int running = stream_actions_running_id(host, pcmanager_server_current_app(pcmanager, host));
+    if (running == 0 || app_id == running || s_app == NULL) {
+        return false;       /* nothing runs, or the running app's own tile: as before */
+    }
+    const char *want = app_name(apps, app_id);
+    const char *now = s_running[0] != '\0' ? s_running : app_name(apps, running);
+    if (want == NULL) {
+        return false;
+    }
+    s_host = *host;
+    stream_action_t action = {.kind = ACTION_SWITCH, .id = app_id};
+    snprintf(action.title, sizeof(action.title), "%s", want);
+    static const char *btn_txts[] = {translatable("Cancel"), translatable("Start it"), ""};
+    lv_obj_t *msgbox = lv_msgbox_create_i18n(NULL, locstr("Another app is running"), "text", btn_txts, false);
+    const pclist_t *node = pcmanager_node(pcmanager, host);
+    const char *hostname = node != NULL && node->server != NULL && node->server->hostname != NULL
+                           ? node->server->hostname : locstr("the host");
+    lv_label_set_text_fmt(lv_msgbox_get_text(msgbox),
+                          locstr("%s is running on %s. Starting %s closes it, and everyone streaming it is "
+                                 "kicked off, on every TV."), now != NULL ? now : locstr("An app"), hostname, want);
+    lv_obj_set_user_data(msgbox, action_copy(&action));
+    lv_obj_add_event_cb(msgbox, free_user_data, LV_EVENT_DELETE, NULL);
+    lv_obj_add_event_cb(msgbox, switch_clicked, LV_EVENT_VALUE_CHANGED, NULL);
+    lv_obj_center(msgbox);
+    return true;
+}
+
+/* Yes: the host's own confirmation, as it asks for it. The first launch, off
+ * the screen thread, arms it (it answers "Launch this app again within 60
+ * seconds"); the second is the streaming screen's own launch, which then
+ * closes the running app and starts this one. */
+static void switch_clicked(lv_event_t *event) {
+    lv_obj_t *msgbox = lv_event_get_current_target(event);
+    const stream_action_t *action = lv_obj_get_user_data(msgbox);
+    if (lv_msgbox_get_active_btn(msgbox) == 1 && action != NULL) {
+        ask_host(action);
+    }
+    lv_msgbox_close_async(msgbox);
+}
+
 /* ------------------------------------------------------------- Terminate -- */
 
 /* rhoquinn8217, 2026-10-17: no warning in the menu, but "a pop up that comes
@@ -485,6 +561,14 @@ static void terminate_done(void *data) {
     if (s_progress != NULL) {
         lv_msgbox_close(s_progress);
         s_progress = NULL;
+    }
+    if (task->action.kind == ACTION_SWITCH &&
+        (task->ret == GS_OK || strstr(task->message, " again ") != NULL)) {
+        /* Armed (or a host that does not ask): the real launch confirms it. */
+        launch(&task->action);
+        free(task->address);
+        free(task);
+        return;
     }
     /* The host's own words, without libgamestream's "Bad status 410: ". */
     const char *said = task->message;

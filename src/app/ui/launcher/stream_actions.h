@@ -30,3 +30,11 @@ void stream_actions_button(launcher_fragment_t *launcher, lv_obj_t *topbar);
 /* Takes the host's controls (and the running app's copy) out of a list that
  * has just loaded, before the grid shows it. */
 void stream_actions_take(const uuidstr_t *host, apploader_list_t *apps);
+
+/* The running app's tile id: what the host reported, or, when it says nothing
+ * runs because another TV started it, the app its copy names. For the badge. */
+int stream_actions_running_id(const uuidstr_t *host, int reported);
+
+/* A tile pressed. True when it was handled here: another app runs, and the
+ * person is asked before it is closed for this one. */
+bool stream_actions_tile_pressed(const uuidstr_t *host, const apploader_list_t *apps, int app_id);

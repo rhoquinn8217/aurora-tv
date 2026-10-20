@@ -663,7 +663,7 @@ static void appitem_bind(apps_fragment_t *controller, lv_obj_t *item, apploader_
     }
     lv_label_set_text(holder->title, app->base.name);
 
-    int current_id = pcmanager_server_current_app(pcmanager, &controller->uuid);
+    int current_id = stream_actions_running_id(&controller->uuid, pcmanager_server_current_app(pcmanager, &controller->uuid));
     if (current_id == app->base.id) {
         lv_obj_clear_flag(holder->play_indicator, LV_OBJ_FLAG_HIDDEN);
     } else {
@@ -681,6 +681,7 @@ static void item_click_cb(lv_event_t *event) {
         return;
     }
     appitem_viewholder_t *holder = (appitem_viewholder_t *) lv_obj_get_user_data(target);
+    if (stream_actions_tile_pressed(&controller->uuid, controller->apploader_apps, holder->app_id)) { return; }
     int current_app = pcmanager_server_current_app(pcmanager, &controller->uuid);
     if (current_app != 0) {
         if (holder->app_id == current_app) {
