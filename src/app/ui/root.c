@@ -1,4 +1,5 @@
 #include "app.h"
+#include "input/touchpad_pointer.h"
 #include "root.h"
 #include "res.h"
 
@@ -107,6 +108,7 @@ void app_ui_open(app_ui_t *ui, bool open_launcher, const app_launch_params_t *pa
     lv_group_set_editing(group, 0);
     lv_group_set_default(group);
     app_ui_input_init(&ui->input, ui);
+    touchpad_pointer_ui_opened(ui->app);
 
     ui->container = lv_scr_act();
     lv_obj_clear_flag(ui->container, LV_OBJ_FLAG_SCROLLABLE);
@@ -134,6 +136,7 @@ void app_ui_close(app_ui_t *ui) {
     ui->fm = NULL;
     ui->container = NULL;
 
+    touchpad_pointer_ui_closing();
     app_ui_input_deinit(&ui->input);
     lv_theme_set_parent(&ui->theme, NULL);
     lv_disp_drv_t *driver = ui->disp->driver;

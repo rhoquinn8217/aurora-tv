@@ -13,6 +13,8 @@
  *   - one finger slides it, as on a laptop: a stroke across the whole pad
  *     crosses the screen about one and a quarter times;
  *   - pressing the touchpad in clicks, and held in, it drags (a list scrolls);
+ *   - a light tap clicks too ("Light touch tap should click"), except while
+ *     the pointer is hidden: then the tap only shows where it is;
  *   - with two fingers down it neither moves nor clicks: two fingers and a
  *     press are the bridge gesture.
  * With the overlay closed in a stream the touchpad goes to the host, as it
@@ -39,10 +41,18 @@
 typedef struct app_t app_t;
 struct app_input_t;
 
-/* Once the UI is up: the input device and its cursor. */
+/* At the app's start, before the interface has a display: begins the log. */
 void touchpad_pointer_init(app_t *app);
 
-/* Before the UI goes. */
+/* The interface's display has just been made (root.c, app_ui_open): the input
+ * device and its cursor. */
+void touchpad_pointer_ui_opened(app_t *app);
+
+/* The interface's display is about to go (root.c, app_ui_close): both go
+ * first. */
+void touchpad_pointer_ui_closing(void);
+
+/* At the app's end. */
 void touchpad_pointer_deinit(void);
 
 /* Once per pass of the app's loop. `ui_has_input`: Aurora's own screens have
