@@ -101,6 +101,10 @@ static int s_tip_x = 0, s_tip_y = 0;   /* its tip, in its own pixels */
 static SDL_Surface *s_image = NULL;    /* the cursor's picture */
 static SDL_Cursor *s_cursor = NULL;
 static int s_hot_x = 0, s_hot_y = 0;
+/* Where the tip is drawn in the picture, the shift taken in, and a count of
+ * the pictures made, for a pointer Aurora draws itself (tv_cursor_picture). */
+static int s_drawn_x = 0, s_drawn_y = 0;
+static unsigned s_generation = 0;
 
 /* ⭐ PUT BACK WHEN THE WINDOW HAS THE SCREEN AGAIN (rhoquinn8217, 2026-10-11:
  * "I suspect that something may reset the orientation of the cursor"). webOS
@@ -471,6 +475,10 @@ static bool build(void) {
     int hot_y = (int) floor((tip_y + m) / scale);
     if (hot_x >= image->w) hot_x = image->w - 1;
     if (hot_y >= image->h) hot_y = image->h - 1;
+    int drawn_x = (int) floor((tip_x + m + dx) / scale);
+    int drawn_y = (int) floor((tip_y + m + dy) / scale);
+    if (drawn_x >= image->w) drawn_x = image->w - 1;
+    if (drawn_y >= image->h) drawn_y = image->h - 1;
     SDL_Cursor *cursor = SDL_CreateColorCursor(image, hot_x, hot_y);
     if (cursor == NULL) {
         tv_cursor_log("SDL refused the cursor (%s)", SDL_GetError());
@@ -488,6 +496,9 @@ static bool build(void) {
     s_image = image;
     s_hot_x = hot_x;
     s_hot_y = hot_y;
+    s_drawn_x = drawn_x;
+    s_drawn_y = drawn_y;
+    s_generation++;
     s_ready = true;
     if (regular) {
         tv_cursor_log("cursor made, the regular one: %dx%d, hot spot %d,%d, shifted %d,%d of the TV's pixels"
@@ -708,9 +719,26 @@ void tv_cursor_describe(char *out, size_t len) {
              s_image->w, s_image->h, s_scale, s_reapplied);
 }
 
+const SDL_Surface *tv_cursor_picture(int *tip_x, int *tip_y, unsigned *generation) {
+    if (generation != NULL) *generation = s_generation;
+    if (!s_ready || s_image == NULL) {
+        return NULL;
+    }
+    if (tip_x != NULL) *tip_x = s_drawn_x;
+    if (tip_y != NULL) *tip_y = s_drawn_y;
+    return s_image;
+}
+
 #else
 
 #include <stdio.h>
+
+const SDL_Surface *tv_cursor_picture(int *tip_x, int *tip_y, unsigned *generation) {
+    (void) tip_x;
+    (void) tip_y;
+    if (generation != NULL) *generation = 0;
+    return NULL;
+}
 
 void tv_cursor_log(const char *fmt, ...) {
     (void) fmt;

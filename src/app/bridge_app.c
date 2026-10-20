@@ -14,6 +14,7 @@
 #include "ctm_bridge_glue.h"   /* bridge_set_shortcut_request, bridge_set_pointer_used_request */
 #endif
 #include "input/tv_cursor.h"
+#include "input/touchpad_pointer.h"   /* the touchpad as the TV's mouse */
 #include "input/mouse_seen.h"
 #include "input/overlay_volume.h"   /* the TV's volume from the right stick */
 #include "input/auto_bridge.h"      /* a ticked device that connects, bridged */
@@ -74,6 +75,9 @@ void bridge_app_started(app_t *app) {
     /* ⓘ Once the window is up: the TV's pointer with its tip on the point the
      * host is told, the cursor and the place this TV keeps (input/tv_cursor.h). */
     tv_cursor_init(app->ui.window);
+    /* ⓘ After the cursor: the touchpad's pointer wears its picture
+     * (input/touchpad_pointer.h). */
+    touchpad_pointer_init(app);
     /* ⓘ The thread the TV's volume calls run on (input/overlay_volume.h). */
     overlay_volume_init();
 #if defined(TARGET_WEBOS)
@@ -88,6 +92,7 @@ void bridge_app_stopping(void) {
     /* ⓘ A stop asked in the last pass of the loop still runs. */
     bridge_session_run_pending();
     control_server_stop();
+    touchpad_pointer_deinit();
     tv_cursor_deinit();
     overlay_volume_deinit();
 }
@@ -151,6 +156,10 @@ void bridge_app_events(app_t *app) {
 #endif
     /* The TV's cursor, put back if the window has the screen again. */
     tv_cursor_tick();
+    /* ⭐ The touchpad as the TV's mouse while Aurora's own screens have the
+     * input: no stream, or the overlay or a bridge's question up
+     * (input/touchpad_pointer.h). */
+    touchpad_pointer_tick(&app->input, app->session == NULL || streaming_overlay_shown() || bridge_prompt_shown());
     /* ⓘ Upstream v1.2.9's touchpad tap-hold, for its touchpad mouse mode, runs
      * in app.c right after this. It reads the same SDL touchpad state the
      * gesture polls here; neither consumes events, so the two coexist.
