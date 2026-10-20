@@ -11,6 +11,7 @@
 #include "server.popup.h"
 
 #include "ui/help/help.dialog.h"
+#include "ui/common/click_away.h"
 #include "ui/root.h"
 #include "ui/settings/settings.controller.h"
 
@@ -610,6 +611,7 @@ static void open_manual_add(lv_event_t *event) {
     lv_fragment_t *fragment = lv_fragment_create(&add_dialog_class, NULL);
     lv_obj_t *msgbox = lv_fragment_create_obj(fragment, NULL);
     lv_obj_add_event_cb(msgbox, ui_cb_destroy_fragment, LV_EVENT_DELETE, fragment);
+    click_away_closes(msgbox);
 }
 
 static void open_settings(lv_event_t *event) {

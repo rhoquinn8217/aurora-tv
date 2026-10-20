@@ -12,6 +12,7 @@
 #include "errors.h"
 #include "backend/pcmanager.h"
 #include "coverloader.h"
+#include "ui/common/click_away.h"
 #include "ui/common/progress_dialog.h"
 #include "ui/streaming/streaming.controller.h"
 #include "util/bus.h"
@@ -383,6 +384,16 @@ void stream_actions_button(launcher_fragment_t *launcher, lv_obj_t *topbar) {
             break;
         }
     }
+    /* rhoquinn8217, 2026-10-20: "change the AURORA label in the dashboard
+     * with AURORA-RHQN". Upstream's title, made before this button in the
+     * same bar, renamed here rather than in upstream's own line. */
+    for (uint32_t i = 0; i < lv_obj_get_child_cnt(topbar); i++) {
+        lv_obj_t *child = lv_obj_get_child(topbar, (int32_t) i);
+        if (lv_obj_check_type(child, &lv_label_class) && strcmp(lv_label_get_text(child), "AURORA") == 0) {
+            lv_label_set_text_static(child, "AURORA-RHQN");
+            break;
+        }
+    }
     update_button();
 }
 
@@ -507,6 +518,7 @@ static void menu_deleted(lv_event_t *event) {
 static void button_clicked(lv_event_t *event) {
     lv_obj_t *btn = lv_event_get_target(event);
     lv_obj_t *msgbox = lv_msgbox_create(NULL, NULL, NULL, NULL, false);
+    click_away_closes(msgbox);
     lv_obj_t *backdrop = lv_obj_get_parent(msgbox);
     if (backdrop != NULL) {
         lv_obj_set_style_bg_opa(backdrop, LV_OPA_30, 0);

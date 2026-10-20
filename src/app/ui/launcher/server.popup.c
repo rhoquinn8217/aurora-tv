@@ -1,6 +1,7 @@
 #include "server.popup.h"
 #include "server.context_menu.h"
 #include "server_cards.h"
+#include "ui/common/click_away.h"
 #include "appitem.view.h"
 
 #include "app.h"
@@ -371,6 +372,7 @@ void server_popup_open(launcher_fragment_t *controller) {
 
     static const char *btn_texts[] = {translatable("Close"), ""};
     lv_obj_t *msgbox = lv_msgbox_create_i18n(NULL, locstr("Select server"), NULL, btn_texts, false);
+    click_away_closes(msgbox);
     popup->msgbox = msgbox;
     lv_obj_set_user_data(msgbox, popup);
     lv_obj_add_event_cb(msgbox, server_popup_deleted, LV_EVENT_DELETE, popup);

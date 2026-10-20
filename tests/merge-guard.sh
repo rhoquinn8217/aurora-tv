@@ -532,6 +532,20 @@ in_order "Up from the overlay's row selects the stats' pin" \
      src/app/ui/streaming/streaming.controller.c "static void overlay_key_cb" \
      "lv_group_t *group = controller->group;" "if (stats_pin_overlay_key(controller, lv_event_get_key(e))) { return; }"
 
+# --- clicking outside a window closes it (rhoquinn8217, 2026-10-20) ---
+# ⓘ Lines of ours in three of upstream's windows. Taking upstream's back
+# compiles, and that window then stays open when the screen around it is
+# clicked (src/app/ui/common/click_away.c).
+in_order "clicking outside Select server closes it" \
+     src/app/ui/launcher/server.popup.c "void server_popup_open" \
+     "lv_msgbox_create_i18n(NULL, locstr(\"Select server\")" "click_away_closes(msgbox);"
+in_order "clicking outside the add-a-computer window closes it" \
+     src/app/ui/launcher/launcher.controller.c "static void open_manual_add" \
+     "lv_fragment_create_obj(fragment, NULL);" "click_away_closes(msgbox);"
+in_order "clicking outside Help closes it" \
+     src/app/ui/help/help.dialog.c "lv_obj_t *help_dialog_create" \
+     "lv_msgbox_create(NULL, locstr(\"Help\")" "click_away_closes(msgbox);"
+
 echo
 if [ "$fail" -eq 0 ]; then
     echo "⭐ merge guard: $pass checks, nothing lost"
