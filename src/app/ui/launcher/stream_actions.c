@@ -755,7 +755,11 @@ static void add_entry(lv_obj_t *content, const menu_entry_t *entry) {
  * status": "Currently streaming <tile> <game/app name>", "Currently acting as
  * remote input", "Currently streaming <remote monitor> (View only)", "Nothing
  * streaming"; and of the menu under it, "I still want small drop down menu".
- * The same reading as the button's (streaming_now). */
+ * The same reading as the button's (streaming_now).
+ * ⓘ Then "drop "(View only)"" (2026-10-20): a Remote Monitor is not view
+ * only. Vibepollo sends it "picture and input" (its "Mute audio on Remote
+ * Monitor" setting's own words) as a private monitor of the PC's, so the line
+ * names it as it names an app. */
 static lv_obj_t *add_status(lv_obj_t *content) {
     int picture = 0;
     char name[TITLE_MAX];
@@ -786,7 +790,7 @@ static lv_obj_t *add_status(lv_obj_t *content) {
         lv_obj_t *after = lv_label_create(line);
         lv_label_set_long_mode(after, LV_LABEL_LONG_DOT);
         lv_obj_set_style_max_width(after, LV_DPX(320), 0);
-        lv_label_set_text(after, state == SHOWN_APP ? name : locstr("(View only)"));
+        lv_label_set_text(after, name);
     }
     return line;
 }
