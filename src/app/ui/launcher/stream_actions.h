@@ -36,22 +36,33 @@
 void stream_actions_button(launcher_fragment_t *launcher, lv_obj_t *topbar);
 
 /* Takes the host's controls (and the running app's copy) out of a list that
- * has just loaded, before the grid shows it. */
+ * has just loaded, before the grid shows it, and puts the list in its order:
+ * this TV's Remote Monitor or Remote Input tile while it is one, the running
+ * app, Desktop, the starred, the rest. Launchers (Steam, Playnite ...) are
+ * starred once, by themselves. */
 void stream_actions_take(const uuidstr_t *host, apploader_list_t *apps);
 
 /* The running app's tile id: what the host reported, or, when it says nothing
  * runs because another TV started it, the app its copy names. For the badge. */
 int stream_actions_running_id(const uuidstr_t *host, int reported);
 
+/* Whether a tile wears the badges: the running app's (`running_id`, from the
+ * call above), or this TV's Remote Monitor or Remote Input tile. */
+bool stream_actions_tile_badged(const uuidstr_t *host, int running_id, int app_id);
+
 /* Whether a host's list, as it loaded, shows an app running that another TV
  * started: the running app's copy, or Resume or Terminate. For the server
  * window, which reads every host's list. */
 bool stream_actions_list_shows_running(const apploader_list_t *apps);
 
-/* Sizes and places that badge in the tile's top-left corner, and makes it the
- * see-through one: a white ring, a quarter of purple, the triangle cut out. */
+/* Makes that badge a row along the tile's bottom holding two see-through ones,
+ * each a white ring and a quarter of purple: Play, the triangle cut out, in
+ * the bottom-left corner, and Stop, a square cut out, in the bottom-right.
+ * Play resumes and Stop stops (asking first, for an app), and either grows
+ * and brightens under a pointer. */
 void stream_actions_badge_style(lv_obj_t *badge, lv_coord_t tile_width);
 
 /* A tile pressed. True when it was handled here: another app runs, and the
- * person is asked before it is closed for this one. */
+ * person is asked before it is closed for this one; or it is this TV's Remote
+ * Monitor or Remote Input tile, which goes back into it, as its Play does. */
 bool stream_actions_tile_pressed(const uuidstr_t *host, const apploader_list_t *apps, int app_id);

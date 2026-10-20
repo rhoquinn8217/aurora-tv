@@ -1,17 +1,22 @@
 #include "stream_actions.h"
 
 #include <SDL.h>
+#include <ctype.h>
 #include <math.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 
 #include "app.h"
 #include "logging.h"
 #include "client.h"
 #include "errors.h"
+#include "apps.controller.h"
 #include "backend/pcmanager.h"
 #include "coverloader.h"
+#include "util/path.h"
 #include "ui/common/click_away.h"
 #include "ui/common/progress_dialog.h"
 #include "ui/streaming/streaming.controller.h"
@@ -101,6 +106,9 @@ static lv_obj_t *s_btn_picture;
 static coverloader_t *s_btn_covers;
 static int s_shown_picture_id = -1;
 static char s_shown_name[TITLE_MAX];
+/* This TV's Remote Monitor or Remote Input tile, put in the grid while it is
+ * one (see THE ORDER), or 0. */
+static int s_role_tile;
 
 static void button_clicked(lv_event_t *event);
 
@@ -267,6 +275,191 @@ static void update_button(void) {
                         lv_obj_get_style_height(s_btn_picture, 0));
 }
 
+/* -------------------------------------------------------------- THE ORDER -- */
+
+/* rhoquinn8217, 2026-10-20, of the grid: "Desktop tile is always first except
+ * when something is streaming", "When a game app is streaming, it get's move
+ * to the front", "When Remote Input or Remote Monitor is active, that tile
+ * shows up with the purple play icon and is at placed at the front. It gets
+ * removed/hidden when they are stopped"; and of the launchers, "Since
+ * favorites are pushed to the front, lets add logic that automatically sets
+ * these to starred ... Desktop should always be in front of starred". So, in
+ * order: this TV's Remote Monitor or Remote Input tile while it is one, the
+ * running app, Desktop, the starred, the rest, the hidden; each group in name
+ * order, as upstream's list is.
+ * ⓘ Vibepollo forgets a Remote Input as its stream ends, so that tile is
+ * seldom seen; it keeps a Remote Monitor for Resume until it is disconnected
+ * (its "Remove Remote Monitor when its stream ends" is off by default). It
+ * lists no apps at all to a Remote Monitor, so there the tile is alone. */
+
+/* The launchers starred by themselves, once each: a person who unstars one
+ * keeps it unstarred. "uuid id" lines, as server-cards.txt. ⓘ By id: Vibepollo
+ * gives an app a new id when its picture changes, and a star is kept by id. */
+#define STARRED_FILE "auto-starred.txt"
+#define STARRED_MAX 64
+
+typedef struct auto_starred_t {
+    uuidstr_t host;
+    int app_id;
+} auto_starred_t;
+
+static auto_starred_t s_starred[STARRED_MAX];
+static int s_starred_count = -1;        /* -1: the file is not read yet */
+
+static void starred_read(void) {
+    s_starred_count = 0;
+    char *path = path_join(app_configuration->conf_dir, STARRED_FILE);
+    FILE *file = fopen(path, "r");
+    free(path);
+    if (file == NULL) {
+        return;
+    }
+    char line[128];
+    while (s_starred_count < STARRED_MAX && fgets(line, sizeof(line), file) != NULL) {
+        char uuid[UUIDSTR_CAPACITY];
+        int id;
+        if (sscanf(line, "%36s %d", uuid, &id) == 2 && strlen(uuid) == UUIDSTR_LENGTH && id != 0) {
+            uuidstr_fromstr(&s_starred[s_starred_count].host, uuid);
+            s_starred[s_starred_count].app_id = id;
+            s_starred_count++;
+        }
+    }
+    fclose(file);
+}
+
+static bool starred_before(const uuidstr_t *host, int id) {
+    if (s_starred_count < 0) {
+        starred_read();
+    }
+    for (int i = 0; i < s_starred_count; i++) {
+        if (s_starred[i].app_id == id && uuidstr_t_equals_t(&s_starred[i].host, host)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static void starred_note(const uuidstr_t *host, int id) {
+    if (s_starred_count < STARRED_MAX) {
+        s_starred[s_starred_count].host = *host;
+        s_starred[s_starred_count].app_id = id;
+        s_starred_count++;
+    }
+    char *path = path_join(app_configuration->conf_dir, STARRED_FILE);
+    FILE *file = fopen(path, "a");
+    if (file == NULL) {
+        commons_log_warn("StreamActions", "Cannot write %s", path);
+    } else {
+        fprintf(file, "%.36s %d\n", host->data, id);
+        fclose(file);
+    }
+    free(path);
+}
+
+/* A name that is the launcher's, whole or as its first words ("Steam Big
+ * Picture", "Playnite Fullscreen"). The short ones only whole, so a game named
+ * "EA Sports ..." is not starred. */
+static bool name_starts_with(const char *name, const char *start) {
+    const size_t n = strlen(start);
+    return strncasecmp(name, start, n) == 0 && (name[n] == '\0' || !isalnum((unsigned char) name[n]));
+}
+
+static bool is_launcher(const char *name) {
+    static const char *const by_start[] = {
+            "Steam", "Epic Games", "Playnite", "GOG Galaxy", "Ubisoft Connect", "Battle.net", "Amazon Games",
+            "Heroic", "Rockstar Games Launcher", "LaunchBox", "RetroArch", "EmulationStation", "Pegasus",
+    };
+    static const char *const whole[] = {
+            "GOG", "EA", "EA app", "EA Desktop", "Origin", "Uplay", "Xbox", "Xbox app", "itch", "itch.io",
+            "Big Box", "ES-DE",
+    };
+    if (name == NULL) {
+        return false;
+    }
+    for (size_t i = 0; i < sizeof(by_start) / sizeof(by_start[0]); i++) {
+        if (name_starts_with(name, by_start[i])) {
+            return true;
+        }
+    }
+    for (size_t i = 0; i < sizeof(whole) / sizeof(whole[0]); i++) {
+        if (strcasecmp(name, whole[i]) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static void star_launchers(const uuidstr_t *host, apploader_list_t *apps) {
+    for (size_t i = 0; i < apps->count; i++) {
+        apploader_item_t *item = &apps->items[i];
+        if (item->fav || item->hidden || !is_launcher(item->base.name) || starred_before(host, item->base.id)) {
+            continue;
+        }
+        pcmanager_favorite_app(pcmanager, host, item->base.id, true);
+        item->fav = true;
+        starred_note(host, item->base.id);
+        commons_log_info("StreamActions", "%s is a launcher: starred, once", item->base.name);
+    }
+}
+
+/* This TV's role, as a tile of the grid: the host lists its controls but not
+ * the role itself. Made in the room the controls left. */
+static void add_role_tile(apploader_list_t *apps, size_t room) {
+    s_role_tile = 0;
+    int id = 0;
+    const char *name = NULL;
+    if (offered(ACTION_DISCONNECT_MONITOR)) {
+        id = PICTURE_REMOTE_MONITOR;
+        name = locstr("Remote Monitor");
+    } else if (offered(ACTION_MONITOR) && !offered(ACTION_INPUT)) {
+        id = PICTURE_REMOTE_INPUT;
+        name = locstr("Remote Input");
+    }
+    if (id == 0 || apps->count >= room) {
+        return;
+    }
+    apploader_item_t *item = &apps->items[apps->count];
+    memset(item, 0, sizeof(*item));
+    item->base.id = id;
+    item->base.name = strdup(name);
+    if (item->base.name == NULL) {
+        return;
+    }
+    apps->count++;
+    s_role_tile = id;
+}
+
+static int s_order_running;
+
+static int order_rank(const apploader_item_t *item) {
+    if (item->hidden) {
+        return 5;
+    }
+    if (s_role_tile != 0 && item->base.id == s_role_tile) {
+        return 0;
+    }
+    if (s_order_running != 0 && item->base.id == s_order_running) {
+        return 1;
+    }
+    if (item->base.name != NULL && strcasecmp(item->base.name, "Desktop") == 0) {
+        return 2;
+    }
+    return item->fav ? 3 : 4;
+}
+
+static int order_compare(const void *a, const void *b) {
+    const apploader_item_t *x = a, *y = b;
+    const int rx = order_rank(x), ry = order_rank(y);
+    if (rx != ry) {
+        return rx - ry;
+    }
+    const int by_name = strcoll(x->base.name != NULL ? x->base.name : "", y->base.name != NULL ? y->base.name : "");
+    if (by_name != 0) {
+        return by_name;
+    }
+    return x->base.id < y->base.id ? -1 : x->base.id > y->base.id;
+}
+
 void stream_actions_take(const uuidstr_t *host, apploader_list_t *apps) {
     if (host == NULL || apps == NULL) {
         return;
@@ -275,10 +468,12 @@ void stream_actions_take(const uuidstr_t *host, apploader_list_t *apps) {
     s_count = 0;
     s_running[0] = '\0';
     s_running_id = 0;
+    s_role_tile = 0;
     if (apps->count == 0) {
         update_button();
         return;
     }
+    const size_t room = apps->count;
     /* Decided on the whole list first: the copy is known against its twin. */
     action_kind_t *kinds = calloc(apps->count, sizeof(action_kind_t));
     if (kinds == NULL) {
@@ -322,6 +517,10 @@ void stream_actions_take(const uuidstr_t *host, apploader_list_t *apps) {
             snprintf(s_running, sizeof(s_running), "%s", name);
         }
     }
+    add_role_tile(apps, room);
+    star_launchers(host, apps);
+    s_order_running = reported != 0 ? reported : s_running_id;
+    qsort(apps->items, apps->count, sizeof(apploader_item_t), order_compare);
     update_button();
 }
 
@@ -704,11 +903,20 @@ int stream_actions_running_id(const uuidstr_t *host, int reported) {
     return s_running_id;
 }
 
+bool stream_actions_tile_badged(const uuidstr_t *host, int running_id, int app_id) {
+    if (app_id != 0 && app_id == running_id) {
+        return true;
+    }
+    return s_role_tile != 0 && app_id == s_role_tile && host != NULL && uuidstr_t_equals_t(host, &s_host);
+}
+
 /* rhoquinn8217, 2026-10-20, of that badge: "I don't like the large purple play
  * button. Can you make it smaller and closer to a corner", then that it should
  * "stand out enough that it's obvious that it's a label for the tile", and the
  * third of four pictures: 88/240 of the tile's width across, a quarter of that
- * in from the top and left edges, with a white ring and a shadow. */
+ * in from the top and left edges, with a white ring and a shadow. ⓘ The size
+ * and the distance from the corner stayed; the corner moved to the bottom
+ * (PLAY AND STOP, below). */
 /* ⭐ AND SEE-THROUGH (rhoquinn8217, 2026-10-20): "the white triangle see
  * through", then "draw white outline of the inner edges of the triangle. Make
  * the purple transparent", picking "purple a quarter" of three pictures. So
@@ -722,9 +930,32 @@ int stream_actions_running_id(const uuidstr_t *host, int reported) {
 #define BADGE_PURPLE_G 77
 #define BADGE_PURPLE_B 255
 #define BADGE_PURPLE_A 64
+/* Under the pointer: the purple stronger and the badge a little larger. */
+#define BADGE_HOT_A 170
+#define BADGE_HOT_ZOOM (LV_IMG_ZOOM_NONE * 115 / 100)
+#define BADGE_CACHE 16
+
+/* rhoquinn8217, 2026-10-20: "a (stop) icon mirroring the purple play button
+ * ... with same shape and color except its has a square cut out instead of a
+ * triangle", then "vertically mirror the stop button instead. Keep them the
+ * same size". */
+typedef enum badge_symbol_t {
+    BADGE_PLAY = 1,
+    BADGE_STOP,
+} badge_symbol_t;
 
 static float badge_side(float ax, float ay, float bx, float by, float px, float py) {
     return (bx - ax) * (py - ay) - (by - ay) * (px - ax);
+}
+
+/* How far a point is from the edge of the square of half-side `half`. */
+static float badge_square_distance(float px, float py, float cx, float cy, float half) {
+    const float dx = fabsf(px - cx) - half, dy = fabsf(py - cy) - half;
+    const float ox = dx > 0 ? dx : 0, oy = dy > 0 ? dy : 0;
+    if (ox > 0 || oy > 0) {
+        return sqrtf(ox * ox + oy * oy);
+    }
+    return -(dx > dy ? dx : dy);
 }
 
 static float badge_segment_distance(float px, float py, float ax, float ay, float bx, float by) {
@@ -735,16 +966,23 @@ static float badge_segment_distance(float px, float py, float ax, float ay, floa
     return sqrtf(dx * dx + dy * dy);
 }
 
-static const lv_img_dsc_t *badge_picture(lv_coord_t size) {
-    static lv_img_dsc_t *s_badges[4];
+typedef struct badge_cached_t {
+    lv_coord_t size;
+    badge_symbol_t symbol;
+    bool hot;
+    lv_img_dsc_t *dsc;
+} badge_cached_t;
+
+static const lv_img_dsc_t *badge_picture(lv_coord_t size, badge_symbol_t symbol, bool hot) {
+    static badge_cached_t s_badges[BADGE_CACHE];
     static int s_badge_count;
     for (int i = 0; i < s_badge_count; i++) {
-        if (s_badges[i]->header.w == size) {
-            return s_badges[i];
+        if (s_badges[i].size == size && s_badges[i].symbol == symbol && s_badges[i].hot == hot) {
+            return s_badges[i].dsc;
         }
     }
-    if (size < 8 || s_badge_count >= 4) {
-        return s_badge_count > 0 ? s_badges[s_badge_count - 1] : NULL;
+    if (size < 8 || s_badge_count >= BADGE_CACHE) {
+        return NULL;
     }
     uint8_t *data = calloc((size_t) size * (size_t) size, 4);
     lv_img_dsc_t *dsc = calloc(1, sizeof(lv_img_dsc_t));
@@ -756,10 +994,13 @@ static const lv_img_dsc_t *badge_picture(lv_coord_t size) {
     const float r = size / 2.0f, cx = r, cy = r;
     const float ring = size * 0.06f < 3 ? 3 : size * 0.06f;
     const float line = ring * 0.8f;
-    /* The triangle, pointing right, a little right of the middle. */
+    const float purple_a = hot ? BADGE_HOT_A : BADGE_PURPLE_A;
+    /* The triangle, pointing right, a little right of the middle; the square,
+     * in the middle. */
     const float ax = cx - r * 0.30f, ay = cy - r * 0.42f;
     const float bx = cx + r * 0.46f, by = cy;
     const float qx = cx - r * 0.30f, qy = cy + r * 0.42f;
+    const float half = r * 0.34f;
     const int n = BADGE_SAMPLES * BADGE_SAMPLES;
     for (int y = 0; y < size; y++) {
         for (int x = 0; x < size; x++) {
@@ -774,17 +1015,24 @@ static const lv_img_dsc_t *badge_picture(lv_coord_t size) {
                     } else if (d > r - ring) {
                         a = 255;                                /* the ring */
                     } else {
-                        const float edge = fminf(badge_segment_distance(px, py, ax, ay, bx, by),
-                                                 fminf(badge_segment_distance(px, py, bx, by, qx, qy),
-                                                       badge_segment_distance(px, py, qx, qy, ax, ay)));
-                        const float s1 = badge_side(ax, ay, bx, by, px, py);
-                        const float s2 = badge_side(bx, by, qx, qy, px, py);
-                        const float s3 = badge_side(qx, qy, ax, ay, px, py);
-                        const bool inside = (s1 >= 0 && s2 >= 0 && s3 >= 0) || (s1 <= 0 && s2 <= 0 && s3 <= 0);
+                        float edge;
+                        bool inside;
+                        if (symbol == BADGE_STOP) {
+                            edge = badge_square_distance(px, py, cx, cy, half);
+                            inside = fabsf(px - cx) <= half && fabsf(py - cy) <= half;
+                        } else {
+                            edge = fminf(badge_segment_distance(px, py, ax, ay, bx, by),
+                                         fminf(badge_segment_distance(px, py, bx, by, qx, qy),
+                                               badge_segment_distance(px, py, qx, qy, ax, ay)));
+                            const float s1 = badge_side(ax, ay, bx, by, px, py);
+                            const float s2 = badge_side(bx, by, qx, qy, px, py);
+                            const float s3 = badge_side(qx, qy, ax, ay, px, py);
+                            inside = (s1 >= 0 && s2 >= 0 && s3 >= 0) || (s1 <= 0 && s2 <= 0 && s3 <= 0);
+                        }
                         if (edge <= line / 2) {
-                            a = 255;                            /* the triangle's line */
+                            a = 255;                            /* the symbol's line */
                         } else if (!inside) {
-                            a = BADGE_PURPLE_A;                 /* the purple, a quarter */
+                            a = purple_a;                       /* the purple, a quarter */
                             cr = BADGE_PURPLE_R;
                             cg = BADGE_PURPLE_G;
                             cb = BADGE_PURPLE_B;
@@ -811,31 +1059,213 @@ static const lv_img_dsc_t *badge_picture(lv_coord_t size) {
     dsc->header.h = size;
     dsc->data_size = (uint32_t) size * (uint32_t) size * 4;
     dsc->data = data;
-    s_badges[s_badge_count++] = dsc;
+    s_badges[s_badge_count++] = (badge_cached_t) {.size = size, .symbol = symbol, .hot = hot, .dsc = dsc};
     return dsc;
 }
 
+/* ⭐ PLAY AND STOP, ALONG THE TILE'S BOTTOM (rhoquinn8217, 2026-10-20): "Both
+ * the purple play and stop icon are clickable, triangle resumes and square
+ * stops", "When hovering over the purple play or stop icon cause the button
+ * to highlight", and of where: "Lets move the play and stop button both to
+ * the bottom", Play in the bottom-left corner and Stop in the bottom-right,
+ * each a quarter of its size in from its corner. So upstream's label becomes
+ * a row along the bottom holding the two, and the tile's own showing and
+ * hiding of the label shows and hides both. A press on the row between them
+ * is the tile's: only the two are clickable. */
+#define BADGE_FLAG LV_OBJ_FLAG_USER_3
+#define HOVER_IDLE_MS 4000
+#define HOVER_POINTERS 4
+
+static void badge_clicked(lv_event_t *event);
+
+static void badge_deleted(lv_event_t *event);
+
+static void hover_tick(lv_timer_t *timer);
+
+static void add_badge(lv_obj_t *row, lv_coord_t size, badge_symbol_t symbol, lv_align_t align) {
+    lv_obj_t *img = lv_img_create(row);
+    lv_obj_clear_flag(img, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(img, LV_OBJ_FLAG_CLICKABLE | BADGE_FLAG);
+    lv_obj_set_user_data(img, (void *) (intptr_t) symbol);
+    lv_img_set_src(img, badge_picture(size, symbol, false));
+    lv_img_set_antialias(img, true);
+    lv_obj_align(img, align, 0, 0);
+    lv_obj_add_event_cb(img, badge_clicked, LV_EVENT_CLICKED, NULL);
+    lv_obj_add_event_cb(img, badge_deleted, LV_EVENT_DELETE, NULL);
+}
+
 void stream_actions_badge_style(lv_obj_t *badge, lv_coord_t tile_width) {
-    lv_coord_t size = tile_width * 88 / 240;
-    lv_obj_set_size(badge, size, size);
-    lv_obj_align(badge, LV_ALIGN_TOP_LEFT, size / 4, size / 4);
-    const lv_img_dsc_t *picture = badge_picture(size);
-    if (picture == NULL) {
+    const lv_coord_t size = tile_width * 88 / 240;
+    const lv_coord_t gap = size / 4;
+    if (badge_picture(size, BADGE_PLAY, false) == NULL || badge_picture(size, BADGE_STOP, false) == NULL) {
+        lv_obj_set_size(badge, size, size);
+        lv_obj_align(badge, LV_ALIGN_TOP_LEFT, gap, gap);
         return;     /* upstream's purple circle and its arrow stay */
     }
-    /* Upstream's label, emptied: its arrow, its purple and its glow go, and
-     * the picture sits in it, so the tile's own showing and hiding of the
-     * label still shows and hides the badge. */
+    lv_obj_set_size(badge, tile_width - 2 * gap, size);
+    lv_obj_align(badge, LV_ALIGN_BOTTOM_LEFT, gap, -gap);
+    /* Upstream's label, emptied: its arrow, its purple and its glow go. */
     lv_label_set_text(badge, "");
     lv_obj_set_style_bg_opa(badge, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(badge, 0, 0);
     lv_obj_set_style_shadow_width(badge, 0, 0);
     lv_obj_set_style_shadow_opa(badge, LV_OPA_TRANSP, 0);
     lv_obj_set_style_pad_all(badge, 0, 0);
-    lv_obj_t *img = lv_img_create(badge);
-    lv_obj_clear_flag(img, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
-    lv_img_set_src(img, picture);
-    lv_obj_align(img, LV_ALIGN_TOP_LEFT, 0, 0);
+    /* A badge under the pointer grows past the row. */
+    lv_obj_add_flag(badge, LV_OBJ_FLAG_OVERFLOW_VISIBLE);
+    add_badge(badge, size, BADGE_PLAY, LV_ALIGN_LEFT_MID);
+    add_badge(badge, size, BADGE_STOP, LV_ALIGN_RIGHT_MID);
+    static lv_timer_t *s_hover;
+    if (s_hover == NULL) {
+        s_hover = lv_timer_create(hover_tick, 50, NULL);
+    }
+}
+
+/* What Play does: back into what runs, as the menu's Resume does (Aurora's own
+ * resume on the TV that started it, the host's Resume on another). On this
+ * TV's Remote Monitor tile, the host's Resume, which returns to the monitor;
+ * on its Remote Input tile, Remote Input again. */
+static const menu_entry_t *entry_of(action_kind_t kind) {
+    for (size_t i = 0; i < sizeof(k_entries) / sizeof(k_entries[0]); i++) {
+        if (k_entries[i].kind == kind) {
+            return &k_entries[i];
+        }
+    }
+    return NULL;
+}
+
+static void tile_resume(int app_id) {
+    stream_action_t action = {0};
+    if (s_role_tile != 0 && app_id == s_role_tile && app_id == PICTURE_REMOTE_INPUT) {
+        action.kind = ACTION_INPUT;
+        action.id = app_id;
+        snprintf(action.title, sizeof(action.title), "%s", locstr("Remote Input"));
+        launch(&action);
+        return;
+    }
+    const menu_entry_t *resume = entry_of(ACTION_RESUME);
+    if (resume != NULL && entry_action(resume, &action)) {
+        launch(&action);
+    } else {
+        commons_log_info("StreamActions", "Play on app %d: nothing to resume", app_id);
+    }
+}
+
+/* What Stop does: on the running app, the menu's Terminate, asking first; on
+ * this TV's Remote Monitor or Remote Input tile, its disconnect, at once, since
+ * it ends only this TV's part. ⓘ Vibepollo never lists Disconnect Input but
+ * takes it from a TV that is a Remote Input (remote_session.cpp, dispatch). */
+static void tile_stop(int app_id) {
+    stream_action_t action = {0};
+    if (s_role_tile != 0 && app_id == s_role_tile) {
+        if (app_id == PICTURE_REMOTE_MONITOR) {
+            const menu_entry_t *disconnect = entry_of(ACTION_DISCONNECT_MONITOR);
+            if (disconnect == NULL || !entry_action(disconnect, &action)) {
+                return;
+            }
+        } else {
+            action.kind = ACTION_DISCONNECT_INPUT;
+            action.id = 2147483503;
+            snprintf(action.title, sizeof(action.title), "%s", locstr("Disconnect Input"));
+        }
+        ask_host(&action);
+        return;
+    }
+    const menu_entry_t *terminate = entry_of(ACTION_TERMINATE);
+    if (terminate != NULL && entry_action(terminate, &action)) {
+        confirm_terminate(&action);
+    } else {
+        commons_log_info("StreamActions", "Stop on app %d: nothing to stop", app_id);
+    }
+}
+
+static void badge_clicked(lv_event_t *event) {
+    lv_obj_t *img = lv_event_get_target(event);
+    lv_obj_t *row = lv_obj_get_parent(img);
+    lv_obj_t *tile = row != NULL ? lv_obj_get_parent(row) : NULL;
+    const appitem_viewholder_t *holder = tile != NULL ? lv_obj_get_user_data(tile) : NULL;
+    if (holder == NULL || holder->app_id == 0) {
+        return;
+    }
+    if ((badge_symbol_t) (intptr_t) lv_obj_get_user_data(img) == BADGE_PLAY) {
+        tile_resume(holder->app_id);
+    } else {
+        tile_stop(holder->app_id);
+    }
+}
+
+/* ⭐ THE HIGHLIGHT. LVGL 8 does not mark what a pointer is over (its hovered
+ * state is "not supported"), so every 50 ms each pointer that moved in the
+ * last 4 seconds (the remote's, a mouse, a pad's touchpad: input/
+ * touchpad_pointer.h) is asked what is under it; a badge there is drawn
+ * stronger and larger until the pointer leaves it. Not through a message box:
+ * the box's backdrop is what is under the pointer then. */
+typedef struct pointer_seen_t {
+    lv_indev_t *indev;
+    lv_point_t point;
+    uint32_t moved;
+} pointer_seen_t;
+
+static lv_obj_t *s_hovered;
+
+static void badge_set_hot(lv_obj_t *img, bool hot) {
+    const lv_img_dsc_t *now = lv_img_get_src(img);
+    if (now == NULL) {
+        return;
+    }
+    const badge_symbol_t symbol = (badge_symbol_t) (intptr_t) lv_obj_get_user_data(img);
+    const lv_img_dsc_t *picture = badge_picture((lv_coord_t) now->header.w, symbol, hot);
+    if (picture != NULL) {
+        lv_img_set_src(img, picture);
+    }
+    lv_img_set_zoom(img, hot ? BADGE_HOT_ZOOM : LV_IMG_ZOOM_NONE);
+}
+
+static void badge_deleted(lv_event_t *event) {
+    if (lv_event_get_target(event) == s_hovered) {
+        s_hovered = NULL;
+    }
+}
+
+static void hover_tick(lv_timer_t *timer) {
+    (void) timer;
+    static pointer_seen_t s_seen[HOVER_POINTERS];
+    lv_obj_t *found = NULL;
+    lv_indev_t *indev = NULL;
+    int slot = 0;
+    while ((indev = lv_indev_get_next(indev)) != NULL && slot < HOVER_POINTERS) {
+        if (lv_indev_get_type(indev) != LV_INDEV_TYPE_POINTER) {
+            continue;
+        }
+        pointer_seen_t *seen = &s_seen[slot++];
+        lv_point_t point;
+        lv_indev_get_point(indev, &point);
+        if (seen->indev != indev || seen->point.x != point.x || seen->point.y != point.y) {
+            seen->indev = indev;
+            seen->point = point;
+            seen->moved = lv_tick_get();
+        }
+        if (found != NULL || lv_tick_elaps(seen->moved) > HOVER_IDLE_MS) {
+            continue;
+        }
+        lv_obj_t *under = lv_indev_search_obj(lv_layer_top(), &point);
+        if (under == NULL) {
+            under = lv_indev_search_obj(lv_scr_act(), &point);
+        }
+        if (under != NULL && lv_obj_has_flag(under, BADGE_FLAG)) {
+            found = under;
+        }
+    }
+    if (found == s_hovered) {
+        return;
+    }
+    if (s_hovered != NULL) {
+        badge_set_hot(s_hovered, false);
+    }
+    s_hovered = found;
+    if (found != NULL) {
+        badge_set_hot(found, true);
+    }
 }
 
 static const char *app_name(const apploader_list_t *apps, int id) {
@@ -846,6 +1276,12 @@ static const char *app_name(const apploader_list_t *apps, int id) {
 static void switch_clicked(lv_event_t *event);
 
 bool stream_actions_tile_pressed(const uuidstr_t *host, const apploader_list_t *apps, int app_id) {
+    /* This TV's Remote Monitor or Remote Input tile: back into it, as its Play
+     * does. ⓘ Not as another app: it closes nothing. */
+    if (s_role_tile != 0 && app_id == s_role_tile && host != NULL && uuidstr_t_equals_t(host, &s_host)) {
+        tile_resume(app_id);
+        return true;
+    }
     int running = stream_actions_running_id(host, pcmanager_server_current_app(pcmanager, host));
     if (running == 0 || app_id == running || s_app == NULL) {
         return false;       /* nothing runs, or the running app's own tile: as before */

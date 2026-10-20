@@ -488,6 +488,9 @@ in_order "the host's controls leave each list before the grid shows it" \
 in_order "the running app's badge shows on every TV, not only the one that started it" \
      src/app/ui/launcher/apps.controller.c "static void appitem_bind" \
      "stream_actions_running_id(&controller->uuid, pcmanager_server_current_app(" "lv_obj_clear_flag(holder->play_indicator, LV_OBJ_FLAG_HIDDEN);"
+in_order "... and on this TV's Remote Monitor or Remote Input tile (2026-10-20)" \
+     src/app/ui/launcher/apps.controller.c "static void appitem_bind" \
+     "if (stream_actions_tile_badged(&controller->uuid, current_id, app->base.id)) {" "lv_obj_clear_flag(holder->play_indicator, LV_OBJ_FLAG_HIDDEN);"
 in_order "a tile pressed while another app runs asks first" \
      src/app/ui/launcher/apps.controller.c "static void item_click_cb" \
      "if (stream_actions_tile_pressed(&controller->uuid, controller->apploader_apps, holder->app_id)) { return; }" \
