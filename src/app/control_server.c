@@ -27,6 +27,7 @@
 #include "util/user_event.h"
 #include "backend/pcmanager.h"
 #include "stream/session.h"
+#include "stream/session_priv.h"   /* the stream's app, for status */
 #include "stream/bridge_session.h"
 #include "stream/video/session_video.h"
 #include "ui/launcher/launcher.controller.h"
@@ -323,6 +324,20 @@ static void cmd_ui(control_job_t *job)
 static void cmd_status(control_job_t *job)
 {
     reply(job, "OK build=\"%s\" stream=%s", APP_VERSION, s_app->session != NULL ? "active" : "idle");
+    /* ⓘ What the stream is: the app this TV started or joined, or Remote
+     * Input or Remote Monitor, by the name its tile had. For the TV/VM
+     * website (rhoquinn8217, 2026-10-20: "show which VM and app/remote
+     * input/remote monitor it's currently streaming"). */
+    if (s_app->session != NULL && s_app->session->app_name != NULL) {
+        char name[96];
+        snprintf(name, sizeof(name), "%s", s_app->session->app_name);
+        for (char *c = name; *c != '\0'; c++) {
+            if (*c == '"') {
+                *c = '\'';
+            }
+        }
+        reply(job, " app=\"%s\"", name);
+    }
 #if defined(TARGET_WEBOS)
     const char *listener = !ctm_bridge_agent_probed() ? "unknown"
                          : ctm_bridge_agent_online() ? "online" : "offline";

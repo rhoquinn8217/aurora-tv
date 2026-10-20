@@ -524,6 +524,14 @@ in_order "the touchpad's pointer goes before the interface's display" \
      src/app/ui/root.c "void app_ui_close" \
      "touchpad_pointer_ui_closing();" "app_ui_input_deinit(&ui->input);"
 
+# --- the stats' pin by keys (rhoquinn8217, 2026-10-20) ---
+# ⓘ A line of ours in upstream's overlay key handler. Taking upstream's back
+# compiles, and: only a pointer reaches the pin that keeps the stats on screen
+# (src/app/ui/streaming/bridge_overlay.c).
+in_order "Up from the overlay's row selects the stats' pin" \
+     src/app/ui/streaming/streaming.controller.c "static void overlay_key_cb" \
+     "lv_group_t *group = controller->group;" "if (stats_pin_overlay_key(controller, lv_event_get_key(e))) { return; }"
+
 echo
 if [ "$fail" -eq 0 ]; then
     echo "⭐ merge guard: $pass checks, nothing lost"

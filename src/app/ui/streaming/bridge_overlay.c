@@ -136,3 +136,86 @@ static void open_listener_config(lv_event_t *event) {
     commons_log_info("Streaming", "DS5-USBIP: nothing is bridged, so nothing was asked");
     bridge_prompt_note(locstr("Bridge a device to use DS5-USBIP"));
 }
+
+/* ⭐⭐ THE STATS' PIN BY KEYS (rhoquinn8217, 2026-10-20: "in the streaming
+ * overlay, you can navigate to the (x) close button for the performance stats
+ * to turn it off or on", and of upstream's pin at the end of the stats' title:
+ * "The pin is what I mean"). Pinned, the stats stay on the screen after the
+ * overlay closes; unpinned, they show only with it. Upstream takes the pin out
+ * of every focus group, and the overlay moves only left and right along its
+ * row, so only a pointer reached it.
+ *
+ * ➡️ Up from the row selects the pin, Enter toggles it (LVGL's own toggle of a
+ * checkable button on the release, which upstream's pin_toggle hears), and
+ * Down, or Back, goes back to the button Up left. The pin joins the overlay's
+ * group only while it is selected, so Left and Right along the row never land
+ * on it. ⚠️ Its own keys are caught before LVGL's: a checkable button takes
+ * Up and Right as "check" and Left and Down as "uncheck", which would pin or
+ * unpin the stats as the person moved away. */
+static lv_obj_t *s_pin_wired = NULL;   /* the pin these handlers are on */
+static lv_obj_t *s_pin_from = NULL;    /* the row's button Up left */
+
+static void pin_leave(streaming_controller_t *controller) {
+    lv_obj_t *pin = controller->stats_pin;
+    if (s_pin_from != NULL) {
+        lv_group_focus_obj(s_pin_from);
+    }
+    lv_group_remove_obj(pin);
+    s_pin_from = NULL;
+}
+
+static void pin_key(lv_event_t *event) {
+    streaming_controller_t *controller = lv_event_get_user_data(event);
+    switch (lv_event_get_key(event)) {
+        case LV_KEY_DOWN:
+            pin_leave(controller);
+            lv_event_stop_processing(event);
+            break;
+        case LV_KEY_UP:
+        case LV_KEY_LEFT:
+        case LV_KEY_RIGHT:
+            lv_event_stop_processing(event);
+            break;
+        default:
+            break;
+    }
+}
+
+/* Back on the pin: the pin keeps the event (it does not bubble), so it goes
+ * back to the row and hands Back on to the overlay, which closes as always. */
+static void pin_cancel(lv_event_t *event) {
+    streaming_controller_t *controller = lv_event_get_user_data(event);
+    pin_leave(controller);
+    lv_event_send(controller->base.obj, LV_EVENT_CANCEL, NULL);
+}
+
+static void pin_deleted(lv_event_t *event) {
+    if (lv_event_get_target(event) == s_pin_wired) {
+        s_pin_wired = NULL;
+        s_pin_from = NULL;
+    }
+}
+
+bool stats_pin_overlay_key(streaming_controller_t *controller, uint32_t key) {
+    if (key != LV_KEY_UP || controller == NULL || controller->group == NULL) {
+        return false;
+    }
+    lv_obj_t *pin = controller->stats_pin;
+    if (pin == NULL || controller->stats == NULL || lv_obj_has_flag(controller->stats, LV_OBJ_FLAG_HIDDEN)) {
+        return false;
+    }
+    lv_obj_t *from = lv_group_get_focused(controller->group);
+    if (from == pin) {
+        return true;
+    }
+    if (s_pin_wired != pin) {
+        lv_obj_add_event_cb(pin, pin_key, LV_EVENT_KEY | LV_EVENT_PREPROCESS, controller);
+        lv_obj_add_event_cb(pin, pin_cancel, LV_EVENT_CANCEL, controller);
+        lv_obj_add_event_cb(pin, pin_deleted, LV_EVENT_DELETE, NULL);
+        s_pin_wired = pin;
+    }
+    lv_group_add_obj(controller->group, pin);
+    lv_group_focus_obj(pin);
+    s_pin_from = from;
+    return true;
+}
