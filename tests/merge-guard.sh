@@ -512,6 +512,18 @@ in_order "the pictures are let go when the server window closes" \
      src/app/ui/launcher/server.popup.c "static void server_popup_deleted" \
      "server_cards_closed();" "SDL_free(popup);"
 
+# --- the touchpad as the TV's mouse (rhoquinn8217, 2026-10-20) ---
+# ⓘ Lines of ours in upstream's root.c. Taking upstream's back compiles, and:
+# no pad's touchpad moves a pointer in Aurora's screens or the overlay, or, the
+# second one lost, the pointer outlives the display it was made for
+# (src/app/input/touchpad_pointer.c).
+in_order "the touchpad's pointer comes with the interface's display" \
+     src/app/ui/root.c "void app_ui_open" \
+     "app_ui_input_init(&ui->input, ui);" "touchpad_pointer_ui_opened(ui->app);"
+in_order "the touchpad's pointer goes before the interface's display" \
+     src/app/ui/root.c "void app_ui_close" \
+     "touchpad_pointer_ui_closing();" "app_ui_input_deinit(&ui->input);"
+
 echo
 if [ "$fail" -eq 0 ]; then
     echo "⭐ merge guard: $pass checks, nothing lost"

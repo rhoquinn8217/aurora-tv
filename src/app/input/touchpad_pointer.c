@@ -2,8 +2,11 @@
 
 #include "touchpad_pointer.h"
 
+#include <stdarg.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #include <SDL.h>
 
@@ -17,6 +20,10 @@
 #include "ctmbridge/ctm_bridge_glue.h"    /* the bridged devices' nodes */
 #endif
 
+/* What happened, where it can be read over SSH (tv_cursor.c says why). */
+#define TOUCHPAD_POINTER_LOG "touchpad-pointer.log"
+FILE *ctm_log_open(const char *name, const char *mode);
+
 #define PADS 16
 /* The pointer goes once the touchpad has been left alone this long. */
 #define HIDE_AFTER_MS 4000
@@ -27,11 +34,27 @@
  * a move up and down is shortened by as much to go as far as one across. */
 #define DS5_ASPECT (1070.0f / 1920.0f)
 #define DS4_ASPECT (920.0f / 1920.0f)
+/* A light tap clicks (rhoquinn8217, 2026-10-20: "Light touch tap should
+ * click"): a finger down and up again within this long, moving less than
+ * this much of the pad's width, without the pad pressed in. The click is held
+ * this long, long enough for LVGL to read a press and a release. */
+#define TAP_MAX_MS 250
+#define TAP_MAX_TRAVEL 0.03f
+#define TAP_CLICK_MS 60
 
 typedef struct {
     bool tracking;      /* one finger down last pass */
     float x, y;         /* where it was, 0 to 1 */
     bool bridged;       /* at a node a bridge holds: the core's, not SDL's */
+    bool seen;          /* logged once */
+    /* The touch now, for a tap: when it began, how far it went, whether the
+     * pad was pressed in or a second finger came, and whether the pointer
+     * showed when it began (a tap on a hidden pointer only shows it). */
+    bool touching;
+    Uint32 touch_at;
+    float travel;
+    bool spoiled;
+    bool pointer_was_shown;
 } pad_t;
 
 static pad_t s_pads[PADS];
@@ -43,9 +66,28 @@ static lv_img_dsc_t *s_picture = NULL;
 static unsigned s_picture_generation = 0;
 static float s_px = 0, s_py = 0;
 static bool s_pressed = false;
+static Uint32 s_tap_until = 0;
 static bool s_shown = false;
 static bool s_active = false;
 static Uint32 s_used_at = 0;
+
+static void tp_log(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
+
+static void tp_log(const char *fmt, ...) {
+    FILE *f = ctm_log_open(TOUCHPAD_POINTER_LOG, "a");
+    if (f == NULL) {
+        return;
+    }
+    struct timespec ts;
+    clock_gettime(CLOCK_REALTIME, &ts);
+    fprintf(f, "%lld.%03ld ", (long long) ts.tv_sec, ts.tv_nsec / 1000000L);
+    va_list ap;
+    va_start(ap, fmt);
+    vfprintf(f, fmt, ap);
+    va_end(ap);
+    fputc('\n', f);
+    fclose(f);
+}
 
 static void pointer_read(lv_indev_drv_t *drv, lv_indev_data_t *data) {
     (void) drv;
@@ -64,7 +106,7 @@ static void take_picture(void) {
     int tip_x = 0, tip_y = 0;
     unsigned generation = 0;
     const SDL_Surface *image = tv_cursor_picture(&tip_x, &tip_y, &generation);
-    if (image == NULL || (s_picture != NULL && generation == s_picture_generation)) {
+    if (s_cursor == NULL || image == NULL || (s_picture != NULL && generation == s_picture_generation)) {
         return;
     }
     const int w = image->w, h = image->h;
@@ -96,15 +138,33 @@ static void take_picture(void) {
     lv_obj_set_style_translate_y(s_cursor, -tip_y, 0);
     s_picture = picture;
     s_picture_generation = generation;
+    tp_log("cursor: the TV cursor's picture, %dx%d, tip %d,%d", w, h, tip_x, tip_y);
 }
 
 void touchpad_pointer_init(app_t *app) {
     s_app = app;
+    FILE *f = ctm_log_open(TOUCHPAD_POINTER_LOG, "w");   /* begun again each start */
+    if (f != NULL) {
+        fclose(f);
+    }
+}
+
+/* ⛔ NOT AT THE APP'S START. LVGL's display is made when the interface opens
+ * (root.c, app_ui_open), after the app's start, and an input device asked for
+ * before then is refused: build 552 had no pointer at all for exactly that
+ * (2026-10-20). So the device and its cursor come and go with the display,
+ * beside the app's own input devices. */
+void touchpad_pointer_ui_opened(app_t *app) {
+    s_app = app;
+    if (s_indev != NULL) {
+        return;
+    }
     lv_indev_drv_init(&s_drv);
     s_drv.type = LV_INDEV_TYPE_POINTER;
     s_drv.read_cb = pointer_read;
     s_indev = lv_indev_drv_register(&s_drv);
     if (s_indev == NULL) {
+        tp_log("no input device: LVGL refused it");
         return;
     }
     s_px = (float) lv_disp_get_hor_res(NULL) / 2.0f;
@@ -113,6 +173,7 @@ void touchpad_pointer_init(app_t *app) {
     lv_obj_clear_flag(s_cursor, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_flag(s_cursor, LV_OBJ_FLAG_HIDDEN);
     lv_indev_set_cursor(s_indev, s_cursor);
+    s_picture_generation = 0;
     take_picture();
     if (s_picture == NULL) {
         /* No cursor of Aurora's (a desktop build): a plain dot. */
@@ -124,10 +185,27 @@ void touchpad_pointer_init(app_t *app) {
         lv_obj_set_style_border_width(s_cursor, 2, 0);
         lv_obj_set_style_translate_x(s_cursor, -7, 0);
         lv_obj_set_style_translate_y(s_cursor, -7, 0);
+        tp_log("cursor: a plain dot (no picture of the TV cursor)");
     }
+    tp_log("ready on a %dx%d display", (int) lv_disp_get_hor_res(NULL), (int) lv_disp_get_ver_res(NULL));
 }
 
-void touchpad_pointer_deinit(void) {
+static void stand_down(void) {
+    for (size_t i = 0; i < PADS; ++i) {
+        s_pads[i].tracking = false;
+        s_pads[i].touching = false;
+    }
+    s_pressed = false;
+    s_tap_until = 0;
+    if (s_cursor != NULL && s_shown) {
+        lv_obj_add_flag(s_cursor, LV_OBJ_FLAG_HIDDEN);
+    }
+    s_shown = false;
+}
+
+void touchpad_pointer_ui_closing(void) {
+    stand_down();
+    s_active = false;
     if (s_indev != NULL) {
         lv_indev_delete(s_indev);
         s_indev = NULL;
@@ -141,6 +219,10 @@ void touchpad_pointer_deinit(void) {
         free(s_picture);
         s_picture = NULL;
     }
+}
+
+void touchpad_pointer_deinit(void) {
+    touchpad_pointer_ui_closing();
 }
 
 static void show(bool on) {
@@ -193,14 +275,6 @@ static void match_bridged(struct app_input_t *input, size_t slots, Uint32 now) {
 }
 #endif
 
-static void stand_down(void) {
-    for (size_t i = 0; i < PADS; ++i) {
-        s_pads[i].tracking = false;
-    }
-    s_pressed = false;
-    show(false);
-}
-
 void touchpad_pointer_tick(struct app_input_t *input, bool ui_has_input) {
     if (s_indev == NULL || input == NULL) {
         return;
@@ -209,10 +283,14 @@ void touchpad_pointer_tick(struct app_input_t *input, bool ui_has_input) {
         if (s_active) {
             s_active = false;
             stand_down();
+            tp_log("off: %s", ui_has_input ? "the setting is off" : "a stream has the input");
         }
         return;
     }
-    s_active = true;
+    if (!s_active) {
+        s_active = true;
+        tp_log("on: Aurora's screens have the input");
+    }
 #if SDL_VERSION_ATLEAST(2, 0, 14)
     const Uint32 now = SDL_GetTicks();
     const size_t slots = input->max_num_gamepads < PADS ? input->max_num_gamepads : PADS;
@@ -221,12 +299,19 @@ void touchpad_pointer_tick(struct app_input_t *input, bool ui_has_input) {
 #endif
     const float screen_w = (float) lv_disp_get_hor_res(NULL);
     const float screen_h = (float) lv_disp_get_ver_res(NULL);
-    bool pressed = false, moved = false;
+    bool pressed = false, moved = false, tapped = false;
     for (size_t i = 0; i < slots; ++i) {
         app_gamepad_state_t *pad = &input->gamepads[i];
         pad_t *p = &s_pads[i];
-        if (pad->instance_id == -1 || pad->controller == NULL || p->bridged) {
+        if (pad->instance_id == -1 || pad->controller == NULL) {
             p->tracking = false;
+            p->touching = false;
+            p->seen = false;
+            continue;
+        }
+        if (p->bridged) {
+            p->tracking = false;
+            p->touching = false;
             continue;
         }
         SDL_GameController *controller = pad->controller;
@@ -235,8 +320,17 @@ void touchpad_pointer_tick(struct app_input_t *input, bool ui_has_input) {
          * know the Edge yet names no type for it. */
         const bool playstation = type == SDL_CONTROLLER_TYPE_PS4 || type == SDL_CONTROLLER_TYPE_PS5 ||
                                  SDL_GameControllerGetVendor(controller) == 0x054c;
-        if (!playstation || SDL_GameControllerGetNumTouchpads(controller) < 1) {
+        const int touchpads = SDL_GameControllerGetNumTouchpads(controller);
+        if (!p->seen) {
+            p->seen = true;
+            tp_log("pad %d: %s, type %d, vendor %04x, %d touchpad(s)%s", (int) i,
+                   SDL_GameControllerName(controller) ? SDL_GameControllerName(controller) : "?", (int) type,
+                   SDL_GameControllerGetVendor(controller), touchpads,
+                   playstation && touchpads > 0 ? "" : ": not one the pointer reads");
+        }
+        if (!playstation || touchpads < 1) {
             p->tracking = false;
+            p->touching = false;
             continue;
         }
         int down = 0;
@@ -253,12 +347,33 @@ void touchpad_pointer_tick(struct app_input_t *input, bool ui_has_input) {
                 ++down;
             }
         }
+        const bool pad_in = SDL_GameControllerGetButton(controller, SDL_CONTROLLER_BUTTON_TOUCHPAD) != 0;
+        /* The touch, for a tap: begun, carried on, or ended. */
+        if (down >= 1 && !p->touching) {
+            p->touching = true;
+            p->touch_at = now;
+            p->travel = 0;
+            p->spoiled = false;
+            p->pointer_was_shown = s_shown;
+        } else if (down == 0 && p->touching) {
+            p->touching = false;
+            if (!p->spoiled && (Sint32) (now - p->touch_at) <= TAP_MAX_MS && p->travel <= TAP_MAX_TRAVEL) {
+                if (p->pointer_was_shown) {
+                    tapped = true;
+                }
+                moved = true;   /* a tap on a hidden pointer shows it, and does no more */
+            }
+        }
+        if (down >= 2 || pad_in) {
+            p->spoiled = true;
+        }
         if (down == 1) {
             if (p->tracking) {
                 const float k = screen_w * SPEED_SCREENS;
                 const float aspect = type == SDL_CONTROLLER_TYPE_PS4 ? DS4_ASPECT : DS5_ASPECT;
                 const float dx = (fx - p->x) * k;
                 const float dy = (fy - p->y) * k * aspect;
+                p->travel += (fx > p->x ? fx - p->x : p->x - fx) + (fy > p->y ? fy - p->y : p->y - fy);
                 if (dx != 0 || dy != 0) {
                     s_px += dx;
                     s_py += dy;
@@ -272,7 +387,7 @@ void touchpad_pointer_tick(struct app_input_t *input, bool ui_has_input) {
             /* Lifted, or two fingers: the bridge gesture's, not the pointer's. */
             p->tracking = false;
         }
-        if (down <= 1 && SDL_GameControllerGetButton(controller, SDL_CONTROLLER_BUTTON_TOUCHPAD)) {
+        if (down <= 1 && pad_in) {
             pressed = true;
         }
     }
@@ -280,6 +395,14 @@ void touchpad_pointer_tick(struct app_input_t *input, bool ui_has_input) {
     if (s_py < 0) s_py = 0;
     if (s_px > screen_w - 1) s_px = screen_w - 1;
     if (s_py > screen_h - 1) s_py = screen_h - 1;
+    if (tapped) {
+        s_tap_until = now + TAP_CLICK_MS;
+    }
+    if (s_tap_until != 0 && (Sint32) (now - s_tap_until) < 0) {
+        pressed = true;
+    } else {
+        s_tap_until = 0;
+    }
     if (pressed != s_pressed) {
         s_pressed = pressed;
         moved = true;
@@ -291,6 +414,9 @@ void touchpad_pointer_tick(struct app_input_t *input, bool ui_has_input) {
     }
     if (moved || s_pressed) {
         s_used_at = now;
+        if (!s_shown) {
+            tp_log("shown at %d,%d", (int) s_px, (int) s_py);
+        }
         show(true);
     } else if (s_shown && (Sint32) (now - s_used_at) >= HIDE_AFTER_MS) {
         show(false);

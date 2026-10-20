@@ -75,7 +75,7 @@ void bridge_app_started(app_t *app) {
     /* ⓘ Once the window is up: the TV's pointer with its tip on the point the
      * host is told, the cursor and the place this TV keeps (input/tv_cursor.h). */
     tv_cursor_init(app->ui.window);
-    /* ⓘ After the cursor: the touchpad's pointer wears its picture
+    /* ⓘ Only its log: the pointer itself comes with the interface's display
      * (input/touchpad_pointer.h). */
     touchpad_pointer_init(app);
     /* ⓘ The thread the TV's volume calls run on (input/overlay_volume.h). */
