@@ -27,11 +27,13 @@
  * (input/tv_cursor.h), its tip on the point. It shows while the touchpad is
  * used and goes after a few seconds untouched.
  *
- * ⓘ WHICH PADS. Any the TV holds through SDL, all moving the one pointer. A
- * bridged pad exists only in a stream and is left alone here: the PC already
- * stops seeing its touchpad while the overlay is up (the core's blank), and
- * reading where its finger is needs the core, from a capture of those bytes,
- * which the project takes from its own observation. */
+ * ⓘ WHICH PADS. Any the TV holds through SDL, all moving the one pointer, and
+ * a bridged one in the overlay: the PC stops seeing its touchpad while the
+ * overlay is up (the core's blank), and the core reads where its finger is
+ * from the pad's own report (the bridge core's held_touch.inl), measured on a
+ * DualSense Edge through its DS5Dongle, 2026-10-20. ⚠️ A bridged DualSense on
+ * Bluetooth or a bridged DS4 does not move it yet: their touch bytes are not
+ * captured. */
 
 #ifndef TOUCHPAD_POINTER_H
 #define TOUCHPAD_POINTER_H

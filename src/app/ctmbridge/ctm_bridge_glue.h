@@ -200,6 +200,23 @@ typedef struct {
 } ctm_bridge_stick_t;
 int ctm_bridge_held_sticks(ctm_bridge_stick_t *out, int max);
 
+/* ⭐ The TV's pointer (input/touchpad_pointer.h): every bridged device's
+ * node, and for a pad whose touch the core reads, its touchpad as read from
+ * the pad's own report while the overlay holds input (the core's
+ * held_touch.inl): how many fingers, 0 to 2; the touch's contact count, which
+ * a new touch changes; the first touch's X, 0 to 1919, and Y, 0 to 1079; and
+ * the click. `reading` false: nothing read since the overlay opened, or a pad
+ * whose touch the core does not read. Returns how many. */
+typedef struct {
+    char node[64];
+    bool reading;
+    int fingers;
+    int id;
+    int x, y;
+    bool click;
+} ctm_bridge_touch_t;
+int ctm_bridge_held_touches(ctm_bridge_touch_t *out, int max);
+
 /* True for a Bluetooth DualSense. */
 bool ctm_bridge_node_is_bluetooth(const char *node);
 
