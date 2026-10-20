@@ -615,6 +615,25 @@ void stream_actions_button(launcher_fragment_t *launcher, lv_obj_t *topbar) {
             break;
         }
     }
+    /* rhoquinn8217, 2026-10-20: "the Profile halo appears to clip on the top
+     * edge of the screen". Upstream's profile box takes its height from its
+     * text, 48 DPX against the bar's buttons' 40, and LVGL's focus ring is
+     * drawn 6 DPX outside it, which reaches the screen's top edge. Made the
+     * buttons' height here, its text still in the middle, so the ring stays on
+     * the screen. */
+    for (uint32_t i = 0; i < lv_obj_get_child_cnt(topbar); i++) {
+        lv_obj_t *child = lv_obj_get_child(topbar, (int32_t) i);
+        if (!lv_obj_check_type(child, &lv_dropdown_class)) {
+            continue;
+        }
+        const lv_coord_t height = LV_DPX(TOPBAR_BTN_SIZE);
+        const lv_font_t *font = lv_obj_get_style_text_font(child, LV_PART_MAIN);
+        const lv_coord_t border = lv_obj_get_style_border_width(child, LV_PART_MAIN);
+        const lv_coord_t pad = (height - lv_font_get_line_height(font) - 2 * border) / 2;
+        lv_obj_set_style_pad_ver(child, pad > 0 ? pad : 0, 0);
+        lv_obj_set_height(child, height);
+        break;
+    }
     update_button();
 }
 
@@ -925,17 +944,20 @@ bool stream_actions_tile_badged(const uuidstr_t *host, int running_id, int app_i
  * through", then "draw white outline of the inner edges of the triangle. Make
  * the purple transparent", picking "purple a quarter" of three pictures. So
  * the badge is a picture drawn here at the tile's size, once per size: a white
- * ring, the purple at a quarter, and the triangle cut out of it with a white
- * line round it, so the tile shows through the triangle. Each pixel is the
+ * ring, the purple at a quarter (a half since, BADGE_PURPLE_A), and the
+ * triangle cut out of it with a white line round it, so the tile shows
+ * through the triangle. Each pixel is the
  * average of 4 x 4 samples, for smooth edges. ⓘ Drawn, not a file: there is
  * no picture to keep in step with anything. */
 #define BADGE_SAMPLES 4
 #define BADGE_PURPLE_R 124
 #define BADGE_PURPLE_G 77
 #define BADGE_PURPLE_B 255
-#define BADGE_PURPLE_A 64
+/* A half since rhoquinn8217, 2026-10-20, of the quarter: "The purple play and
+ * stop button need to be less transparent". */
+#define BADGE_PURPLE_A 128
 /* Under the pointer: the purple stronger and the badge a little larger. */
-#define BADGE_HOT_A 170
+#define BADGE_HOT_A 224
 #define BADGE_HOT_ZOOM (LV_IMG_ZOOM_NONE * 115 / 100)
 #define BADGE_CACHE 16
 
@@ -1036,7 +1058,7 @@ static const lv_img_dsc_t *badge_picture(lv_coord_t size, badge_symbol_t symbol,
                         if (edge <= line / 2) {
                             a = 255;                            /* the symbol's line */
                         } else if (!inside) {
-                            a = purple_a;                       /* the purple, a quarter */
+                            a = purple_a;                       /* the purple, part see-through */
                             cr = BADGE_PURPLE_R;
                             cg = BADGE_PURPLE_G;
                             cb = BADGE_PURPLE_B;

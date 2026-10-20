@@ -56,7 +56,7 @@ bool stream_actions_tile_badged(const uuidstr_t *host, int running_id, int app_i
 bool stream_actions_list_shows_running(const apploader_list_t *apps);
 
 /* Makes that badge a row along the tile's bottom holding two see-through ones,
- * each a white ring and a quarter of purple: Play, the triangle cut out, in
+ * each a white ring and half-see-through purple: Play, the triangle cut out, in
  * the bottom-left corner, and Stop, a square cut out, in the bottom-right.
  * Play resumes and Stop stops (asking first, for an app), and either grows
  * and brightens under a pointer. */
