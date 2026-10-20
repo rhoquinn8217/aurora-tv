@@ -250,10 +250,15 @@ static void update_button(void) {
     s_shown_picture_id = picture;
     snprintf(s_shown_name, sizeof(s_shown_name), "%s", name);
     lv_label_set_text(s_btn_name, name);
+    /* rhoquinn8217, 2026-10-20: "change it to just "Streaming: <tile>"". The
+     * tile's picture alone, its name being in the menu's status line; the word
+     * only when there is no tile ("Streaming: None"). */
     if (picture == 0 || s_app == NULL) {
         lv_obj_add_flag(s_btn_picture, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_clear_flag(s_btn_name, LV_OBJ_FLAG_HIDDEN);
         return;
     }
+    lv_obj_add_flag(s_btn_name, LV_OBJ_FLAG_HIDDEN);
     lv_obj_clear_flag(s_btn_picture, LV_OBJ_FLAG_HIDDEN);
     if (s_btn_covers == NULL) {
         s_btn_covers = coverloader_new(s_app);
@@ -518,30 +523,31 @@ static void menu_deleted(lv_event_t *event) {
     }
 }
 
-/* rhoquinn8217, 2026-10-20: "In the streaming action menu, just show the
- * tile. Don't print out the name." Each entry is its tile's picture alone, in
- * a row; greyed when it cannot be used, and the selection steps over it (LVGL
- * skips a disabled object, lv_group.c). */
-#define MENU_TILE_H LV_DPX(56)
-#define MENU_TILE_W (MENU_TILE_H * 3 / 4)
-
-static void add_tile(lv_obj_t *row, const menu_entry_t *entry) {
+/* rhoquinn8217, 2026-10-20: "i want little icons next to each menu item at
+ * their left. Use a shrunk version of the tile they replaced." The host sends
+ * each control's tile picture as it sends a game's cover, so the entry shows
+ * that, at about the row's height and the tile's shape. Greyed when it cannot
+ * be used, and the selection steps over it (LVGL skips a disabled object,
+ * lv_group.c). */
+static void add_entry(lv_obj_t *content, const menu_entry_t *entry) {
     stream_action_t action;
     const bool usable = entry_action(entry, &action);
-    lv_obj_t *tile = lv_btn_create(row);
-    lv_obj_add_flag(tile, LV_OBJ_FLAG_EVENT_BUBBLE);
-    lv_obj_set_size(tile, MENU_TILE_W, MENU_TILE_H);
-    lv_obj_set_style_pad_all(tile, 0, 0);
-    lv_obj_set_style_radius(tile, LV_DPX(4), 0);
-    lv_obj_set_style_clip_corner(tile, true, 0);
-    lv_obj_set_style_shadow_width(tile, 0, 0);
-    lv_obj_t *picture = add_picture(tile, entry->picture_id, MENU_TILE_W, MENU_TILE_H);
-    lv_obj_center(picture);
+    /* The host's own title when it offers the control; the entry's when
+     * Aurora does it or nothing can. */
+    const char *title = usable && action.kind != ACTION_OWN_RESUME && action.kind != ACTION_OWN_QUIT
+                        ? action.title : locstr(entry->title);
+    lv_obj_t *item = lv_list_add_btn(content, NULL, title);
+    lv_obj_add_flag(item, LV_OBJ_FLAG_EVENT_BUBBLE);
+    lv_obj_set_style_pad_ver(item, LV_DPX(6), 0);
+    lv_obj_set_style_pad_column(item, LV_DPX(10), 0);
+    lv_obj_t *picture = add_picture(item, entry->picture_id, LV_DPX(30) * 3 / 4, LV_DPX(30));
+    lv_obj_move_to_index(picture, 0);
     if (usable) {
-        lv_obj_set_user_data(tile, action_copy(&action));
-        lv_obj_add_event_cb(tile, free_user_data, LV_EVENT_DELETE, NULL);
+        lv_obj_set_user_data(item, action_copy(&action));
+        lv_obj_add_event_cb(item, free_user_data, LV_EVENT_DELETE, NULL);
     } else {
-        lv_obj_add_state(tile, LV_STATE_DISABLED);
+        lv_obj_add_state(item, LV_STATE_DISABLED);
+        lv_obj_set_style_text_opa(item, LV_OPA_40, LV_STATE_DISABLED);
         lv_obj_set_style_img_opa(picture, LV_OPA_30, 0);
     }
 }
@@ -549,8 +555,9 @@ static void add_tile(lv_obj_t *row, const menu_entry_t *entry) {
 /* rhoquinn8217, 2026-10-20: "above the first menu item, write out the full
  * status": "Currently streaming <tile> <game/app name>", "Currently acting as
  * remote input", "Currently streaming <remote monitor> (View only)", "Nothing
- * streaming". The same reading as the button's (streaming_now). */
-static void add_status(lv_obj_t *content) {
+ * streaming"; and of the menu under it, "I still want small drop down menu".
+ * The same reading as the button's (streaming_now). */
+static lv_obj_t *add_status(lv_obj_t *content) {
     int picture = 0;
     char name[TITLE_MAX];
     const shown_state_t state = streaming_now(&picture, name, sizeof(name));
@@ -560,7 +567,7 @@ static void add_status(lv_obj_t *content) {
     lv_obj_set_flex_flow(line, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(line, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_column(line, LV_DPX(8), 0);
-    lv_obj_set_style_pad_bottom(line, LV_DPX(4), 0);
+    lv_obj_set_style_pad_bottom(line, LV_DPX(6), 0);
     lv_obj_clear_flag(line, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_t *text = lv_label_create(line);
     switch (state) {
@@ -578,31 +585,16 @@ static void add_status(lv_obj_t *content) {
     if (state == SHOWN_APP || state == SHOWN_MONITOR) {
         add_picture(line, picture, LV_DPX(18), LV_DPX(24));
         lv_obj_t *after = lv_label_create(line);
+        lv_label_set_long_mode(after, LV_LABEL_LONG_DOT);
+        lv_obj_set_style_max_width(after, LV_DPX(320), 0);
         lv_label_set_text(after, state == SHOWN_APP ? name : locstr("(View only)"));
     }
+    return line;
 }
 
-/* Along the row: Left and Right, as Up and Down already do (the theme's
- * message box). */
-static void menu_keys(lv_event_t *event) {
-    lv_group_t *group = lv_obj_get_group(lv_event_get_target(event));
-    if (group == NULL) {
-        return;
-    }
-    switch (lv_event_get_key(event)) {
-        case LV_KEY_LEFT:
-            lv_group_focus_prev(group);
-            break;
-        case LV_KEY_RIGHT:
-            lv_group_focus_next(group);
-            break;
-        default:
-            break;
-    }
-}
-
-/* The menu: the status, then the tiles, in a box just under the button. The
- * pad and the remote move through it, and Back closes it. */
+/* The menu: the status, then the entries, in a box just under the button,
+ * built as the tiles' own long-press menu is, so the pad and the remote move
+ * through it the same way and Back closes it. */
 static void button_clicked(lv_event_t *event) {
     lv_obj_t *btn = lv_event_get_target(event);
     lv_obj_t *msgbox = lv_msgbox_create(NULL, NULL, NULL, NULL, false);
@@ -612,33 +604,30 @@ static void button_clicked(lv_event_t *event) {
         lv_obj_set_style_bg_opa(backdrop, LV_OPA_30, 0);
     }
     lv_obj_set_style_min_width(msgbox, 0, 0);
-    lv_obj_set_style_max_width(msgbox, LV_PCT(90), 0);
-    lv_obj_set_width(msgbox, LV_SIZE_CONTENT);
+    lv_obj_set_width(msgbox, LV_DPX(320));
     lv_obj_t *content = lv_msgbox_get_content(msgbox);
     lv_obj_add_flag(content, LV_OBJ_FLAG_EVENT_BUBBLE);
     lv_obj_set_flex_flow(content, LV_FLEX_FLOW_COLUMN);
     lv_obj_add_event_cb(msgbox, menu_cancel, LV_EVENT_CANCEL, NULL);
-    lv_obj_add_event_cb(msgbox, menu_keys, LV_EVENT_KEY, NULL);
+    lv_obj_add_event_cb(content, menu_clicked, LV_EVENT_SHORT_CLICKED, NULL);
     lv_obj_add_event_cb(msgbox, menu_deleted, LV_EVENT_DELETE, NULL);
-    add_status(content);
-    lv_obj_t *row = lv_obj_create(content);
-    lv_obj_remove_style_all(row);
-    lv_obj_set_size(row, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
-    lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
-    lv_obj_set_style_pad_column(row, LV_DPX(8), 0);
-    lv_obj_set_style_pad_all(row, LV_DPX(4), 0);      /* room for the selection's outline */
-    lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_add_flag(row, LV_OBJ_FLAG_EVENT_BUBBLE);
-    lv_obj_add_event_cb(row, menu_clicked, LV_EVENT_SHORT_CLICKED, NULL);
+    lv_obj_t *status = add_status(content);
     for (size_t i = 0; i < sizeof(k_entries) / sizeof(k_entries[0]); i++) {
-        add_tile(row, &k_entries[i]);
+        add_entry(content, &k_entries[i]);
     }
     lv_obj_update_layout(msgbox);
+    /* Wider when the status needs it, as far as the theme's widest box. */
+    const lv_coord_t around = lv_obj_get_width(msgbox) - lv_obj_get_content_width(content);
+    const lv_coord_t wanted = lv_obj_get_width(status) + around;
+    if (wanted > lv_obj_get_width(msgbox)) {
+        lv_obj_set_width(msgbox, wanted);
+        lv_obj_update_layout(msgbox);
+    }
     /* Under the button, from its left edge, now that it is on the left. */
     lv_obj_align_to(msgbox, btn, LV_ALIGN_OUT_BOTTOM_LEFT, 0, LV_DPX(6));
 }
 
-/* Back, from any tile: the box goes. */
+/* Back, from any entry: the box goes. */
 static void menu_cancel(lv_event_t *event) {
     lv_msgbox_close_async(lv_event_get_current_target(event));
 }
@@ -669,12 +658,11 @@ static void ask_host(const stream_action_t *action);
 
 static void menu_clicked(lv_event_t *event) {
     lv_obj_t *target = lv_event_get_target(event);
-    lv_obj_t *row = lv_event_get_current_target(event);
-    if (lv_obj_get_parent(target) != row) {
+    lv_obj_t *content = lv_event_get_current_target(event);
+    if (lv_obj_get_parent(target) != content) {
         return;
     }
-    /* The row is in the box's content, in the box. */
-    lv_obj_t *msgbox = lv_obj_get_parent(lv_obj_get_parent(row));
+    lv_obj_t *msgbox = lv_obj_get_parent(content);
     const stream_action_t *action = lv_obj_get_user_data(target);
     lv_msgbox_close_async(msgbox);
     if (action == NULL) {

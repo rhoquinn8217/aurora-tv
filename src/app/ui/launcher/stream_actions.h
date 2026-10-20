@@ -12,11 +12,11 @@
  * button, and the copy is left out (Resume does the same thing).
  *
  * ⭐ Since 2026-10-20 (their words): the button reads "Streaming: <tile>",
- * with the tile's small picture (the running app, this TV's Remote Input or
- * Remote Monitor, or None); the two buttons sit on the left of the bar; and
- * the menu shows every entry, greyed when it cannot be used, with Resume and
- * Terminate on the TV that started the app done as Aurora's own resume and
- * quit.
+ * the tile's small picture alone (the running app, this TV's Remote Input or
+ * Remote Monitor), or "Streaming: None"; the two buttons sit on the left of
+ * the bar; and the menu opens with a line saying in full what streams, then
+ * shows every entry, greyed when it cannot be used, with Resume and Terminate
+ * on the TV that started the app done as Aurora's own resume and quit.
  *
  * Terminate asks first, warning that everyone streaming is kicked off, and
  * then sends what Vibepollo asks of a TV that did not start the app: the
