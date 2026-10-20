@@ -10,6 +10,7 @@
 #include "client.h"
 #include "errors.h"
 #include "backend/pcmanager.h"
+#include "coverloader.h"
 #include "ui/common/progress_dialog.h"
 #include "ui/streaming/streaming.controller.h"
 #include "util/bus.h"
@@ -84,6 +85,8 @@ static char s_running[TITLE_MAX];
  * not start the app that nothing runs, so this is the only way it knows. */
 static int s_running_id;
 static lv_obj_t *s_progress;
+/* The menu's pictures, kept while it is open. */
+static coverloader_t *s_menu_covers;
 
 static void button_clicked(lv_event_t *event);
 
@@ -94,6 +97,8 @@ static void free_user_data(lv_event_t *event);
 static void menu_cancel(lv_event_t *event);
 
 static void menu_clicked(lv_event_t *event);
+
+static void menu_deleted(lv_event_t *event);
 
 static void confirm_clicked(lv_event_t *event);
 
@@ -220,6 +225,19 @@ void stream_actions_take(const uuidstr_t *host, apploader_list_t *apps) {
     update_button();
 }
 
+bool stream_actions_list_shows_running(const apploader_list_t *apps) {
+    if (apps == NULL) {
+        return false;
+    }
+    for (size_t i = 0; i < apps->count; i++) {
+        action_kind_t kind = kind_of_id(apps->items[i].base.id);
+        if (kind == ACTION_RESUME || kind == ACTION_TERMINATE || running_copy_of(apps, i) != 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
 void stream_actions_button(launcher_fragment_t *launcher, lv_obj_t *topbar) {
     s_app = launcher->global;
     /* Styled as the host button beside it. A child of the top bar joins its
@@ -277,6 +295,40 @@ static void free_user_data(lv_event_t *event) {
     lv_obj_set_user_data(obj, NULL);
 }
 
+/* rhoquinn8217, 2026-10-20: "i want little icons next to each menu item at
+ * their left. Use a shrunk version of the tile they replaced." The host sends
+ * each control's tile picture as it sends a game's cover, so the entry shows
+ * that, at about the row's height and the tile's shape. */
+static void add_tile_picture(lv_obj_t *item, const stream_action_t *action) {
+    if (s_app == NULL) {
+        return;
+    }
+    lv_coord_t height = LV_DPX(30);
+    lv_coord_t width = height * 3 / 4;
+    /* No user data: the cover loader reads an object with some as a game tile. */
+    lv_obj_t *picture = lv_img_create(item);
+    lv_obj_move_to_index(picture, 0);
+    lv_obj_clear_flag(picture, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_size(picture, width, height);
+    lv_obj_set_style_radius(picture, LV_DPX(3), 0);
+    lv_obj_set_style_clip_corner(picture, true, 0);
+    lv_img_set_antialias(picture, true);
+    lv_obj_set_style_pad_ver(item, LV_DPX(6), 0);
+    lv_obj_set_style_pad_column(item, LV_DPX(10), 0);
+    if (s_menu_covers == NULL) {
+        s_menu_covers = coverloader_new(s_app);
+    }
+    coverloader_display(s_menu_covers, &s_host, action->id, picture, width, height);
+}
+
+static void menu_deleted(lv_event_t *event) {
+    (void) event;
+    if (s_menu_covers != NULL) {
+        coverloader_unref(s_menu_covers);
+        s_menu_covers = NULL;
+    }
+}
+
 /* The menu: a box of buttons just under the button, built as the tiles'
  * own long-press menu is, so the pad and the remote move through it the same
  * way and Back closes it. */
@@ -297,11 +349,13 @@ static void button_clicked(lv_event_t *event) {
     lv_obj_set_flex_flow(content, LV_FLEX_FLOW_COLUMN);
     lv_obj_add_event_cb(content, menu_cancel, LV_EVENT_CANCEL, NULL);
     lv_obj_add_event_cb(content, menu_clicked, LV_EVENT_SHORT_CLICKED, NULL);
+    lv_obj_add_event_cb(msgbox, menu_deleted, LV_EVENT_DELETE, NULL);
     for (int i = 0; i < s_count; i++) {
         lv_obj_t *item = lv_list_add_btn(content, NULL, s_actions[i].title);
         lv_obj_add_flag(item, LV_OBJ_FLAG_EVENT_BUBBLE);
         lv_obj_set_user_data(item, action_copy(&s_actions[i]));
         lv_obj_add_event_cb(item, free_user_data, LV_EVENT_DELETE, NULL);
+        add_tile_picture(item, &s_actions[i]);
     }
     lv_obj_update_layout(msgbox);
     lv_obj_align_to(msgbox, btn, LV_ALIGN_OUT_BOTTOM_RIGHT, 0, LV_DPX(6));

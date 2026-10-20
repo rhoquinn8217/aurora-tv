@@ -8,12 +8,15 @@
  * it says Desktop." A host sends a picture only for each app, so the TV
  * remembers which app is a host's Desktop whenever that host's list loads,
  * keeps it in conf/server-cards.txt, and shows that app's cover on the host's
- * tile through the same loader and cache as the game grid. A host whose list
- * this TV has never loaded, or that has no app named "Desktop", keeps the icon
- * and name, as before.
+ * tile through the same loader and cache as the game grid. The window also asks
+ * every ready host for its list as it opens, which teaches it the cards of
+ * hosts this TV never showed and tells it which are streaming to another TV.
+ * A host with no app named "Desktop", or never ready while the window was
+ * open, keeps the icon and name, as before.
  *
  * On a card, a host that is not ready shows the window's own status icon in a
- * small corner badge, and a host that is offline or not paired is dimmed. */
+ * small corner badge, and a host that is offline or not paired is dimmed. A
+ * host streaming to any TV shows the streaming icon in that corner. */
 
 #include "lvgl.h"
 #include "uuidstr.h"

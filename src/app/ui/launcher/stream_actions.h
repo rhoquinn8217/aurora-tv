@@ -35,6 +35,11 @@ void stream_actions_take(const uuidstr_t *host, apploader_list_t *apps);
  * runs because another TV started it, the app its copy names. For the badge. */
 int stream_actions_running_id(const uuidstr_t *host, int reported);
 
+/* Whether a host's list, as it loaded, shows an app running that another TV
+ * started: the running app's copy, or Resume or Terminate. For the server
+ * window, which reads every host's list. */
+bool stream_actions_list_shows_running(const apploader_list_t *apps);
+
 /* Sizes and places that badge: a ringed circle in the tile's top-left corner. */
 void stream_actions_badge_style(lv_obj_t *badge, lv_coord_t tile_width);
 
