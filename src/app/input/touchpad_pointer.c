@@ -17,7 +17,7 @@
 #include "ui/ui_input.h"
 #if defined(TARGET_WEBOS)
 #include "ctm_bridge_gesture.h"           /* which of SDL's pads is bridged */
-#include "ctmbridge/ctm_bridge_glue.h"    /* the bridged devices' nodes */
+#include "ctmbridge/ctm_bridge_glue.h"    /* the bridged devices' nodes and touches */
 #endif
 
 /* What happened, where it can be read over SSH (tv_cursor.c says why). */
@@ -25,15 +25,20 @@
 FILE *ctm_log_open(const char *name, const char *mode);
 
 #define PADS 16
+#define BRIDGED 8
 /* The pointer goes once the touchpad has been left alone this long. */
 #define HIDE_AFTER_MS 4000
 /* A stroke across the whole pad crosses this many widths of the screen. */
 #define SPEED_SCREENS 1.25f
 /* SDL gives a finger's place from 0 to 1 each way; the pads are wider than
  * they are tall, by SDL's own scale for each (1920 x 1070 and 1920 x 920), so
- * a move up and down is shortened by as much to go as far as one across. */
+ * a move up and down is shortened by as much to go as far as one across. The
+ * core gives a bridged DualSense's in its own units, 1920 x 1080 (held_touch.inl
+ * in the bridge core). */
 #define DS5_ASPECT (1070.0f / 1920.0f)
 #define DS4_ASPECT (920.0f / 1920.0f)
+#define DS5_RAW_W 1920.0f
+#define DS5_RAW_H 1080.0f
 /* A light tap clicks (rhoquinn8217, 2026-10-20: "Light touch tap should
  * click"): a finger down and up again within this long, moving less than
  * this much of the pad's width, without the pad pressed in. The click is held
@@ -45,6 +50,7 @@ FILE *ctm_log_open(const char *name, const char *mode);
 typedef struct {
     bool tracking;      /* one finger down last pass */
     float x, y;         /* where it was, 0 to 1 */
+    int id;             /* the touch's own count, where the core gives it; -1 */
     bool bridged;       /* at a node a bridge holds: the core's, not SDL's */
     bool seen;          /* logged once */
     /* The touch now, for a tap: when it began, how far it went, whether the
@@ -57,7 +63,17 @@ typedef struct {
     bool pointer_was_shown;
 } pad_t;
 
+/* What one pass of every pad came to. */
+typedef struct {
+    bool moved, pressed, tapped;
+} pass_t;
+
 static pad_t s_pads[PADS];
+#if defined(TARGET_WEBOS)
+/* A bridged pad's touch, kept by the node it is at. */
+static pad_t s_bridged[BRIDGED];
+static char s_bridged_node[BRIDGED][64];
+#endif
 static app_t *s_app = NULL;
 static lv_indev_drv_t s_drv;
 static lv_indev_t *s_indev = NULL;
@@ -190,11 +206,21 @@ void touchpad_pointer_ui_opened(app_t *app) {
     tp_log("ready on a %dx%d display", (int) lv_disp_get_hor_res(NULL), (int) lv_disp_get_ver_res(NULL));
 }
 
+static void forget(pad_t *p) {
+    p->tracking = false;
+    p->touching = false;
+}
+
 static void stand_down(void) {
     for (size_t i = 0; i < PADS; ++i) {
-        s_pads[i].tracking = false;
-        s_pads[i].touching = false;
+        forget(&s_pads[i]);
     }
+#if defined(TARGET_WEBOS)
+    for (size_t i = 0; i < BRIDGED; ++i) {
+        forget(&s_bridged[i]);
+        s_bridged_node[i][0] = '\0';
+    }
+#endif
     s_pressed = false;
     s_tap_until = 0;
     if (s_cursor != NULL && s_shown) {
@@ -238,6 +264,56 @@ static void show(bool on) {
     }
 }
 
+/* One pad's touch this pass, from SDL or from the core alike: `down` fingers,
+ * the first at fx, fy, from 0 to 1 each way; `aspect` the pad's height over
+ * its width in those terms; `id` the touch's own count where the core gives
+ * it (a new count is a new touch, never a slide), -1 where it does not;
+ * `pad_in` the touchpad pressed in. */
+static void feed(pad_t *p, int down, float fx, float fy, float aspect, int id, bool pad_in, Uint32 now, float k,
+                 pass_t *pass) {
+    /* The touch, for a tap: begun, carried on, or ended. */
+    if (down >= 1 && !p->touching) {
+        p->touching = true;
+        p->touch_at = now;
+        p->travel = 0;
+        p->spoiled = false;
+        p->pointer_was_shown = s_shown;
+    } else if (down == 0 && p->touching) {
+        p->touching = false;
+        if (!p->spoiled && (Sint32) (now - p->touch_at) <= TAP_MAX_MS && p->travel <= TAP_MAX_TRAVEL) {
+            if (p->pointer_was_shown) {
+                pass->tapped = true;
+            }
+            pass->moved = true;   /* a tap on a hidden pointer shows it, and does no more */
+        }
+    }
+    if (down >= 2 || pad_in) {
+        p->spoiled = true;
+    }
+    if (down == 1) {
+        if (p->tracking && (id < 0 || id == p->id)) {
+            const float dx = (fx - p->x) * k;
+            const float dy = (fy - p->y) * k * aspect;
+            p->travel += (fx > p->x ? fx - p->x : p->x - fx) + (fy > p->y ? fy - p->y : p->y - fy) * aspect;
+            if (dx != 0 || dy != 0) {
+                s_px += dx;
+                s_py += dy;
+                pass->moved = true;
+            }
+        }
+        p->tracking = true;
+        p->x = fx;
+        p->y = fy;
+        p->id = id;
+    } else {
+        /* Lifted, or two fingers: the bridge gesture's, not the pointer's. */
+        p->tracking = false;
+    }
+    if (down <= 1 && pad_in) {
+        pass->pressed = true;
+    }
+}
+
 #if defined(TARGET_WEBOS)
 /* ⛔ A BRIDGED PAD IS THE CORE'S. SDL can still read one (overlay_volume.c
  * says when), so a pad of SDL's at a node a bridge holds is left out. Matched
@@ -273,6 +349,50 @@ static void match_bridged(struct app_input_t *input, size_t slots, Uint32 now) {
         }
     }
 }
+
+/* ⭐ A BRIDGED PAD'S TOUCH, from the core: only in a stream, and only while
+ * the overlay or a bridge's question holds the pad's input, the only time the
+ * core reads it (its held_touch.inl: a DualSense or an Edge on a cable or a
+ * dongle so far). Each kept by its node, so a pad that goes is forgotten. */
+static void feed_bridged(Uint32 now, float k, pass_t *pass) {
+    if (s_app == NULL || s_app->session == NULL) {
+        return;
+    }
+    ctm_bridge_touch_t touches[BRIDGED];
+    const int n = ctm_bridge_held_touches(touches, BRIDGED);
+    bool used[BRIDGED] = {false};
+    for (int t = 0; t < n; ++t) {
+        if (!touches[t].reading) {
+            continue;
+        }
+        int slot = -1;
+        for (int i = 0; i < BRIDGED && slot < 0; ++i) {
+            if (strcmp(s_bridged_node[i], touches[t].node) == 0) {
+                slot = i;
+            }
+        }
+        for (int i = 0; i < BRIDGED && slot < 0; ++i) {
+            if (s_bridged_node[i][0] == '\0') {
+                slot = i;
+                snprintf(s_bridged_node[i], sizeof(s_bridged_node[i]), "%s", touches[t].node);
+                memset(&s_bridged[i], 0, sizeof(s_bridged[i]));
+                tp_log("bridged pad at %s: its touch read by the core", touches[t].node);
+            }
+        }
+        if (slot < 0) {
+            continue;
+        }
+        used[slot] = true;
+        feed(&s_bridged[slot], touches[t].fingers, (float) touches[t].x / DS5_RAW_W,
+             (float) touches[t].y / DS5_RAW_H, DS5_RAW_H / DS5_RAW_W, touches[t].id, touches[t].click, now, k, pass);
+    }
+    for (int i = 0; i < BRIDGED; ++i) {
+        if (!used[i] && s_bridged_node[i][0] != '\0') {
+            forget(&s_bridged[i]);
+            s_bridged_node[i][0] = '\0';
+        }
+    }
+}
 #endif
 
 void touchpad_pointer_tick(struct app_input_t *input, bool ui_has_input) {
@@ -299,19 +419,18 @@ void touchpad_pointer_tick(struct app_input_t *input, bool ui_has_input) {
 #endif
     const float screen_w = (float) lv_disp_get_hor_res(NULL);
     const float screen_h = (float) lv_disp_get_ver_res(NULL);
-    bool pressed = false, moved = false, tapped = false;
+    const float k = screen_w * SPEED_SCREENS;
+    pass_t pass = {false, false, false};
     for (size_t i = 0; i < slots; ++i) {
         app_gamepad_state_t *pad = &input->gamepads[i];
         pad_t *p = &s_pads[i];
         if (pad->instance_id == -1 || pad->controller == NULL) {
-            p->tracking = false;
-            p->touching = false;
+            forget(p);
             p->seen = false;
             continue;
         }
         if (p->bridged) {
-            p->tracking = false;
-            p->touching = false;
+            forget(p);
             continue;
         }
         SDL_GameController *controller = pad->controller;
@@ -329,8 +448,7 @@ void touchpad_pointer_tick(struct app_input_t *input, bool ui_has_input) {
                    playstation && touchpads > 0 ? "" : ": not one the pointer reads");
         }
         if (!playstation || touchpads < 1) {
-            p->tracking = false;
-            p->touching = false;
+            forget(p);
             continue;
         }
         int down = 0;
@@ -348,54 +466,19 @@ void touchpad_pointer_tick(struct app_input_t *input, bool ui_has_input) {
             }
         }
         const bool pad_in = SDL_GameControllerGetButton(controller, SDL_CONTROLLER_BUTTON_TOUCHPAD) != 0;
-        /* The touch, for a tap: begun, carried on, or ended. */
-        if (down >= 1 && !p->touching) {
-            p->touching = true;
-            p->touch_at = now;
-            p->travel = 0;
-            p->spoiled = false;
-            p->pointer_was_shown = s_shown;
-        } else if (down == 0 && p->touching) {
-            p->touching = false;
-            if (!p->spoiled && (Sint32) (now - p->touch_at) <= TAP_MAX_MS && p->travel <= TAP_MAX_TRAVEL) {
-                if (p->pointer_was_shown) {
-                    tapped = true;
-                }
-                moved = true;   /* a tap on a hidden pointer shows it, and does no more */
-            }
-        }
-        if (down >= 2 || pad_in) {
-            p->spoiled = true;
-        }
-        if (down == 1) {
-            if (p->tracking) {
-                const float k = screen_w * SPEED_SCREENS;
-                const float aspect = type == SDL_CONTROLLER_TYPE_PS4 ? DS4_ASPECT : DS5_ASPECT;
-                const float dx = (fx - p->x) * k;
-                const float dy = (fy - p->y) * k * aspect;
-                p->travel += (fx > p->x ? fx - p->x : p->x - fx) + (fy > p->y ? fy - p->y : p->y - fy);
-                if (dx != 0 || dy != 0) {
-                    s_px += dx;
-                    s_py += dy;
-                    moved = true;
-                }
-            }
-            p->tracking = true;
-            p->x = fx;
-            p->y = fy;
-        } else {
-            /* Lifted, or two fingers: the bridge gesture's, not the pointer's. */
-            p->tracking = false;
-        }
-        if (down <= 1 && pad_in) {
-            pressed = true;
-        }
+        const float aspect = type == SDL_CONTROLLER_TYPE_PS4 ? DS4_ASPECT : DS5_ASPECT;
+        feed(p, down, fx, fy, aspect, -1, pad_in, now, k, &pass);
     }
+#if defined(TARGET_WEBOS)
+    feed_bridged(now, k, &pass);
+#endif
     if (s_px < 0) s_px = 0;
     if (s_py < 0) s_py = 0;
     if (s_px > screen_w - 1) s_px = screen_w - 1;
     if (s_py > screen_h - 1) s_py = screen_h - 1;
-    if (tapped) {
+    bool pressed = pass.pressed;
+    bool moved = pass.moved;
+    if (pass.tapped) {
         s_tap_until = now + TAP_CLICK_MS;
     }
     if (s_tap_until != 0 && (Sint32) (now - s_tap_until) < 0) {
