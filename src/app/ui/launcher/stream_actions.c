@@ -207,34 +207,34 @@ static bool offered(action_kind_t kind) {
  *     of it the host lists for every other TV;
  *   - None. ⓘ Including when another TV is a Remote Input or Monitor with no
  *     app running: the host tells no other TV of it. */
-typedef enum streaming_state_t {
-    STREAMING_NONE,
-    STREAMING_APP,
-    STREAMING_INPUT,
-    STREAMING_MONITOR,
-} streaming_state_t;
+typedef enum shown_state_t {
+    SHOWN_NONE,
+    SHOWN_APP,
+    SHOWN_INPUT,
+    SHOWN_MONITOR,
+} shown_state_t;
 
-static streaming_state_t streaming_now(int *picture, char *name, size_t len) {
+static shown_state_t streaming_now(int *picture, char *name, size_t len) {
     const int reported = pcmanager_server_current_app(pcmanager, &s_host);
     const int running = reported != 0 ? reported : s_running_id;
     *picture = 0;
     if (offered(ACTION_DISCONNECT_MONITOR)) {
         *picture = PICTURE_REMOTE_MONITOR;
         snprintf(name, len, "%s", locstr("Remote Monitor"));
-        return STREAMING_MONITOR;
+        return SHOWN_MONITOR;
     }
     if (s_count > 0 && offered(ACTION_MONITOR) && !offered(ACTION_INPUT)) {
         *picture = PICTURE_REMOTE_INPUT;
         snprintf(name, len, "%s", locstr("Remote Input"));
-        return STREAMING_INPUT;
+        return SHOWN_INPUT;
     }
     if (running != 0) {
         *picture = running;
         snprintf(name, len, "%s", s_running[0] != '\0' ? s_running : locstr("An app"));
-        return STREAMING_APP;
+        return SHOWN_APP;
     }
     snprintf(name, len, "%s", locstr("None"));
-    return STREAMING_NONE;
+    return SHOWN_NONE;
 }
 
 static void update_button(void) {
@@ -553,7 +553,7 @@ static void add_tile(lv_obj_t *row, const menu_entry_t *entry) {
 static void add_status(lv_obj_t *content) {
     int picture = 0;
     char name[TITLE_MAX];
-    const streaming_state_t state = streaming_now(&picture, name, sizeof(name));
+    const shown_state_t state = streaming_now(&picture, name, sizeof(name));
     lv_obj_t *line = lv_obj_create(content);
     lv_obj_remove_style_all(line);
     lv_obj_set_size(line, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
@@ -564,21 +564,21 @@ static void add_status(lv_obj_t *content) {
     lv_obj_clear_flag(line, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_t *text = lv_label_create(line);
     switch (state) {
-        case STREAMING_APP:
-        case STREAMING_MONITOR:
+        case SHOWN_APP:
+        case SHOWN_MONITOR:
             lv_label_set_text_static(text, locstr("Currently streaming"));
             break;
-        case STREAMING_INPUT:
+        case SHOWN_INPUT:
             lv_label_set_text_static(text, locstr("Currently acting as remote input"));
             break;
         default:
             lv_label_set_text_static(text, locstr("Nothing streaming"));
             break;
     }
-    if (state == STREAMING_APP || state == STREAMING_MONITOR) {
+    if (state == SHOWN_APP || state == SHOWN_MONITOR) {
         add_picture(line, picture, LV_DPX(18), LV_DPX(24));
         lv_obj_t *after = lv_label_create(line);
-        lv_label_set_text(after, state == STREAMING_APP ? name : locstr("(View only)"));
+        lv_label_set_text(after, state == SHOWN_APP ? name : locstr("(View only)"));
     }
 }
 
