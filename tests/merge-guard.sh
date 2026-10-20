@@ -428,6 +428,17 @@ need "a stick or trigger held at the switch works again once at rest" \
      src/app/stream/input/session_gamepad.c "bridge_switch_hold_note_axes(gamepad);"
 need "a finger down at the switch stays off the stream until lifted" \
      src/app/stream/input/session_gamepad.c "bridge_switch_hold_skips_finger(gamepad, event->finger"
+
+# --- the touchpad follows Virtual Mouse (rhoquinn8217, 2026-10-20) ---
+# While Virtual Mouse lends the touchpad, two fingers pressed are the bridge
+# gesture, not upstream's right click (input/bridge_override.h). Losing either
+# line compiles, and every bridge presses the host's right button.
+in_order "two fingers pressed are the bridge gesture while Virtual Mouse lends the touchpad" \
+     src/app/stream/input/session_gamepad.c "void stream_input_handle_cbutton" \
+     "bridge_override_two_finger_press_is_gesture(input)" "if (two_finger_press || touchpad_lower_right_press(state))"
+in_order "... and that press's release sends nothing either" \
+     src/app/stream/input/session_gamepad.c "void stream_input_handle_cbutton" \
+     "if (state->physical_mouse_button < 0)" "mouse_button = state->physical_mouse_button > 0"
 in_order "what a pad holds is noted before it is announced again" \
      src/app/stream/input/session_input.c "void stream_input_restore_gamepad" \
      "bridge_switch_hold_begin(gamepad);" "stream_input_send_gamepad_arrive(input, gamepad)"

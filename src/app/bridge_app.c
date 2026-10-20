@@ -17,6 +17,7 @@
 #include "input/touchpad_pointer.h"   /* the touchpad as the TV's mouse */
 #include "input/mouse_seen.h"
 #include "input/overlay_volume.h"   /* the TV's volume from the right stick */
+#include "input/bridge_override.h"  /* the touchpad follows Virtual Mouse */
 #include "input/auto_bridge.h"      /* a ticked device that connects, bridged */
 #include "ui/streaming/cursor_align.h"   /* cursor_align_shown */
 
@@ -124,8 +125,15 @@ void bridge_app_events(app_t *app) {
     ctm_bridge_gesture_tick(&app->input, app->session, interface_has_input);
     /* ⭐ The TV's volume from the right stick while the overlay is up, from a
      * pad the TV holds or a bridged one (input/overlay_volume.h). After the
-     * tick above, which is what holds a bridged pad's input for the overlay. */
-    overlay_volume_tick(&app->input, streaming_overlay_shown() && app->session != NULL);
+     * tick above, which is what holds a bridged pad's input for the overlay.
+     * ⭐ And on Aurora's own screens with no stream (rhoquinn8217, 2026-10-20:
+     * "In the dashboard, stick up/down and press controls volume up/down and
+     * mute like it does in the streaming overlay"): they read neither the
+     * right stick nor its click. */
+    overlay_volume_tick(&app->input, app->session == NULL || streaming_overlay_shown());
+    /* ⭐ The touchpad as the host's mouse while Virtual Mouse is on
+     * (input/bridge_override.h). */
+    bridge_override_touchpad_tick(app->session);
 #if defined(TARGET_WEBOS)
     /* The TV's keyboard grab looking again after a bridge or a release. */
     bridge_keyboard_tick(interface_has_input);

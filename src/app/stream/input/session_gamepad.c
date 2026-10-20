@@ -11,6 +11,7 @@
 #include "stream/session.h"
 #include "stream/input/session_virt_mouse.h"
 #include "stream/input/bridge_switch_hold.h"
+#include "input/bridge_override.h"
 #include "logging.h"
 
 #include <SDL.h>
@@ -240,12 +241,16 @@ void stream_input_handle_cbutton(stream_input_t *input, const SDL_ControllerButt
                          * both mean secondary click -- the two ways a trackpad
                          * offers a right button without having one. */
                         bool two_finger_press = state->active_fingers == 0x3u;
+                        /* This fork: two fingers pressed are the bridge gesture while Virtual Mouse lends the touchpad (input/bridge_override.h). */
+                        if (two_finger_press && bridge_override_two_finger_press_is_gesture(input)) { state->physical_mouse_button = -1; touchpad_begin_settling(state); return; }
                         if (two_finger_press || touchpad_lower_right_press(state)) {
                             mouse_button = BUTTON_RIGHT;
                         }
                         state->physical_mouse_button = (int8_t) mouse_button;
                     }
                 } else if (state != NULL) {
+                    /* This fork: the release of a press left to the bridge gesture sends nothing either. */
+                    if (state->physical_mouse_button < 0) { state->physical_mouse_button = 0; touchpad_begin_settling(state); return; }
                     mouse_button = state->physical_mouse_button > 0 ? state->physical_mouse_button : BUTTON_LEFT;
                     state->physical_mouse_button = 0;
                 }

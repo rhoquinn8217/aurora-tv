@@ -66,4 +66,30 @@ void bridge_override_release_for_vmouse(session_t *session);
 /** The live input state as one line, for the log and the control port. */
 void bridge_override_describe(stream_input_t *input, char *buf, size_t len);
 
+/* ⭐ THE TOUCHPAD FOLLOWS VIRTUAL MOUSE (rhoquinn8217, 2026-10-20): "I want
+ * virtual Mouse turn on both stick to mouse and touch pad to mouse during a
+ * stream (not just in the overlay)". While Virtual Mouse is on, a pad's
+ * touchpad is the host's mouse too, whatever the Input setting says, through
+ * upstream's own touchpad mouse mode; when it goes off, the touchpad is the
+ * setting's again. The override still wins: with it on, the touchpad is sent
+ * as a touchpad. ⓘ Only outside the overlay: while the overlay is up the
+ * stream takes no input, and the touchpad is the TV's pointer
+ * (input/touchpad_pointer.h).
+ *
+ * ⓘ Followed every pass rather than at each switch, so every way Virtual
+ * Mouse is switched (the overlay's button, the control port, the override,
+ * the stream's start) is followed with no hook in each. ⛔ The saved settings
+ * are not written, as the override never writes them. */
+void bridge_override_touchpad_tick(session_t *session);
+
+/* ⛔ TWO FINGERS PRESSED ARE THE BRIDGE GESTURE, NOT A RIGHT CLICK, while
+ * Virtual Mouse lends the touchpad and the gesture is on. Upstream's mouse
+ * mode makes a two-finger press the right button, so every bridge would
+ * press the host's right button for the second the gesture is held, and let
+ * it go after: a context menu at the cursor, each time. Virtual Mouse's own
+ * right button is R2, and a press in the touchpad's lower-right corner is
+ * still one. ⓘ A person who chose "Send as mouse" keeps upstream's two-finger
+ * right click: that was their choice before this. */
+bool bridge_override_two_finger_press_is_gesture(const stream_input_t *input);
+
 #endif /* BRIDGE_OVERRIDE_H */
