@@ -3,6 +3,7 @@
 #include <SDL.h>
 
 #include "control_server.h"
+#include "crash_recorder.h"
 #include "ui/streaming/streaming.controller.h"   /* streaming_overlay_shown */
 #include "ui/streaming/bridge_prompt.h"
 #include "stream/bridge_session.h"         /* bridge_session_run_pending */
@@ -54,6 +55,9 @@ void bridge_app_before_sdl(void) {
      * order). Nothing in this app arms a microphone; this is here for the state
      * we cannot cause and cannot otherwise escape. */
     ctm_mic_safety_disarm_all();
+    /* ⓘ Before SDL and every thread, so a crash from here on is recorded
+     * (crash_recorder.h). Armed again once the app is up, below. */
+    crash_recorder_install();
 }
 
 void bridge_app_sdl_hints(void) {
@@ -70,6 +74,9 @@ void bridge_app_sdl_hints(void) {
 }
 
 void bridge_app_started(app_t *app) {
+    /* ⓘ Again, in case a library SDL loaded since has put a handler of its
+     * own in the recorder's place; it then hands a crash on to that one. */
+    crash_recorder_install();
     /* ⓘ Once the UI and the bus are up, because every command runs through
      * them. A no-op unless built with AURORA_TERMINAL_CONTROL. */
     control_server_start(app);
@@ -99,6 +106,8 @@ void bridge_app_stopping(void) {
 }
 
 void bridge_app_events(app_t *app) {
+    /* A crash asked for on purpose, from the control port's `crash test`. */
+    crash_recorder_tick();
     /* ⭐ First: the bridge's start or stop that the stream asked for inside
      * SDL's event filter, now that the filter has let go of the event lock
      * (bridge_session.c). The tick below then sees the bridge as it is. */
