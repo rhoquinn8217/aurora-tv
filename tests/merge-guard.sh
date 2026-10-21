@@ -439,6 +439,9 @@ in_order "two fingers pressed are the bridge gesture while Virtual Mouse lends t
 in_order "... and that press's release sends nothing either" \
      src/app/stream/input/session_gamepad.c "void stream_input_handle_cbutton" \
      "if (state->physical_mouse_button < 0)" "mouse_button = state->physical_mouse_button > 0"
+in_order "Virtual Mouse takes a bridged pad's touchpad as the mouse, as it takes its sticks" \
+     src/app/stream/input/session_gamepad.c "void stream_input_handle_ctouchpad" \
+     "!bridge_override_vmouse_lends_touchpad(input)" "if (input->touchpad_mode == TOUCHPAD_MODE_NATIVE) {"
 in_order "what a pad holds is noted before it is announced again" \
      src/app/stream/input/session_input.c "void stream_input_restore_gamepad" \
      "bridge_switch_hold_begin(gamepad);" "stream_input_send_gamepad_arrive(input, gamepad)"

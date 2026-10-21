@@ -431,7 +431,8 @@ void stream_input_handle_ctouchpad(stream_input_t *input, const SDL_ControllerTo
     if (gamepad == NULL) {
         return;
     }
-    if (!stream_input_gamepad_sends_moonlight(input, gamepad)) {
+    /* This fork: Virtual Mouse takes a bridged pad's touchpad as the mouse, as it takes its sticks (input/bridge_override.h). */
+    if (!stream_input_gamepad_sends_moonlight(input, gamepad) && !bridge_override_vmouse_lends_touchpad(input)) {
         return;
     }
     /* This fork: a finger already down as the pad came back from a bridge stays off the stream until lifted (bridge_switch_hold.c). */

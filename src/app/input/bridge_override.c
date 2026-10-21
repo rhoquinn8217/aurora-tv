@@ -145,6 +145,11 @@ void bridge_override_touchpad_tick(session_t *session) {
                      vmouse ? "on" : "off");
 }
 
+bool bridge_override_vmouse_lends_touchpad(stream_input_t *input) {
+    return input != NULL && !input->view_only && input->touchpad_mode == TOUCHPAD_MODE_MOUSE &&
+           session_input_is_vmouse_active(&input->vmouse);
+}
+
 bool bridge_override_two_finger_press_is_gesture(const stream_input_t *input) {
     if (input == NULL || input->session == NULL || app_configuration == NULL) {
         return false;

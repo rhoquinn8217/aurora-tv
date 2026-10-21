@@ -82,6 +82,20 @@ void bridge_override_describe(stream_input_t *input, char *buf, size_t len);
  * are not written, as the override never writes them. */
 void bridge_override_touchpad_tick(session_t *session);
 
+/* ⭐ AND A BRIDGED PAD'S TOUCHPAD TOO (rhoquinn8217, 2026-10-20): "If virtual
+ * mouse is on, I want the touchpad to act as a connected mouse through
+ * aurora-tv just like the stick acts like a connected mouse through aurora-tv
+ * using Virtual Mouse". A bridged pad is left out of what the stream sends,
+ * but upstream's Virtual Mouse reads its sticks before that check, so they
+ * move the host's mouse while it is bridged; the touchpad met the check first
+ * and moved nothing. True when the touchpad is the host's mouse and Virtual
+ * Mouse is on: the touchpad handler then lets a bridged pad's fingers through
+ * to the mouse, and only to the mouse (its touches as a touchpad stay the
+ * bridge's). ⓘ As with the sticks, if the host also makes that pad's
+ * touchpad a mouse (Steam, or DS5-USBIP's touchpad_to_mouse), the cursor
+ * moves twice: turning Virtual Mouse off is the answer to both. */
+bool bridge_override_vmouse_lends_touchpad(stream_input_t *input);
+
 /* ⛔ TWO FINGERS PRESSED ARE THE BRIDGE GESTURE, NOT A RIGHT CLICK, while
  * Virtual Mouse lends the touchpad and the gesture is on. Upstream's mouse
  * mode makes a two-finger press the right button, so every bridge would
