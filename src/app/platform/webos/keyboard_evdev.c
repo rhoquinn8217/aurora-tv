@@ -320,6 +320,11 @@ static int open_keyboards(keyboard_evdev_t *kbd) {
             close(fd);
             continue;
         }
+        /* webOS's own devices are webOS's: see input/bridge_keyboard.h. */
+        if (bridge_keyboard_node_is_webos_own(fd, path)) {
+            close(fd);
+            continue;
+        }
         /* A bridged keyboard is the bridge's: see input/bridge_keyboard.h. */
         if (bridge_keyboard_node_is_bridged(path)) {
             commons_log_info("Input", "Keyboard evdev: %s is bridged, left to the bridge", path);
