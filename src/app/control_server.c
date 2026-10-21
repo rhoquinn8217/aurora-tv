@@ -18,6 +18,7 @@
 #include <unistd.h>
 
 #include "lvgl.h"
+#include <SDL.h>
 
 #include "app.h"
 #include "logging.h"
@@ -26,8 +27,11 @@
 #include "util/user_event.h"
 #include "backend/pcmanager.h"
 #include "stream/session.h"
+#include "stream/session_priv.h"   /* the stream's app, for status */
 #include "stream/bridge_session.h"
 #include "stream/video/session_video.h"
+#include "ui/launcher/launcher.controller.h"
+#include "ui/launcher/stream_actions.h"   /* an app's name, by id */
 #include "ui/streaming/streaming.controller.h"
 #include "ui/streaming/bridge_prompt.h"
 #include "ui/streaming/ctm_panel.h"
@@ -133,6 +137,9 @@ static void cmd_help(control_job_t *job)
                "set <name> <on|off>     a switch, without the remote: boost, light, rumble, tone, override, vmouse\n"
                "prompt [ok|dismiss]     the question a bridge raises: is it up, or answer it without a hand\n"
                "ui                      what is open on the screen: overlay, its keyboard, the panel, the align bar\n"
+               "press <key>[:ms] ...    keys into aurora-tv's own screens, as a keyboard types them; not in a stream\n"
+               "                        keys: up down left right enter esc home end; :ms holds it (a long press)\n"
+               "host [<host>]           the launcher's host: which it shows, or pick one (a uuid or part of its name)\n"
                "input                   the stream's live input state: Bridge Override and what it switches\n"
                "keys                    key events counted since the app started: the TV's keyboard grab, and webOS\n"
                "set settle <ms>         how long to let the link settle before a DS4 handback tone\n"
@@ -318,6 +325,20 @@ static void cmd_ui(control_job_t *job)
 static void cmd_status(control_job_t *job)
 {
     reply(job, "OK build=\"%s\" stream=%s", APP_VERSION, s_app->session != NULL ? "active" : "idle");
+    /* ⓘ What the stream is: the app this TV started or joined, or Remote
+     * Input or Remote Monitor, by the name its tile had. For the TV/VM
+     * website (rhoquinn8217, 2026-10-20: "show which VM and app/remote
+     * input/remote monitor it's currently streaming"). */
+    if (s_app->session != NULL && s_app->session->app_name != NULL) {
+        char name[96];
+        snprintf(name, sizeof(name), "%s", s_app->session->app_name);
+        for (char *c = name; *c != '\0'; c++) {
+            if (*c == '"') {
+                *c = '\'';
+            }
+        }
+        reply(job, " app=\"%s\"", name);
+    }
 #if defined(TARGET_WEBOS)
     const char *listener = !ctm_bridge_agent_probed() ? "unknown"
                          : ctm_bridge_agent_online() ? "online" : "offline";
@@ -405,6 +426,147 @@ static void cmd_shot(control_job_t *job, const char *args)
     }
 }
 
+/* press: keys into aurora-tv's own screens, from here.
+ *
+ * rhoquinn8217, 2026-10-17, asked how much of a test of the launcher could be
+ * run without them, and said yes to this: `shot` already shows what is on the
+ * screen, and nothing could press a key on a TV without root (the lab's virtual
+ * keyboard needs it). So a test of a menu or a window needed their hands.
+ *
+ * The keys go in as SDL key events, where a keyboard's do, and the interface
+ * reads them from there the same way (lvgl/input/lv_drv_sdl_key.c). One at a
+ * time, PRESS_GAP_MS apart: that file drops the same key twice within 50 ms as
+ * the Magic Remote's double report. `enter:600` holds it 600 ms, a long press.
+ *
+ * ⛔ Refused while a stream runs: there the keys would go to the host, into
+ * whatever is in front on the PC. The overlay is not a target. */
+#define PRESS_MAX 16
+#define PRESS_GAP_MS 150
+#define PRESS_TAP_MS 40
+
+typedef struct press_step_t {
+    SDL_Keycode sym;
+    SDL_Scancode scan;
+    uint32_t hold_ms;
+} press_step_t;
+
+static press_step_t s_press[PRESS_MAX];
+static int s_press_count;
+static int s_press_next;
+static bool s_press_down;
+static lv_timer_t *s_press_timer;
+
+static bool press_key_named(const char *name, press_step_t *step)
+{
+    static const struct {
+        const char *name;
+        SDL_Keycode sym;
+        SDL_Scancode scan;
+    } keys[] = {
+            {"up",    SDLK_UP,     SDL_SCANCODE_UP},
+            {"down",  SDLK_DOWN,   SDL_SCANCODE_DOWN},
+            {"left",  SDLK_LEFT,   SDL_SCANCODE_LEFT},
+            {"right", SDLK_RIGHT,  SDL_SCANCODE_RIGHT},
+            {"enter", SDLK_RETURN, SDL_SCANCODE_RETURN},
+            {"ok",    SDLK_RETURN, SDL_SCANCODE_RETURN},
+            {"esc",   SDLK_ESCAPE, SDL_SCANCODE_ESCAPE},
+            {"back",  SDLK_ESCAPE, SDL_SCANCODE_ESCAPE},
+            {"home",  SDLK_HOME,   SDL_SCANCODE_HOME},
+            {"end",   SDLK_END,    SDL_SCANCODE_END},
+    };
+    for (size_t i = 0; i < sizeof keys / sizeof keys[0]; i++) {
+        if (strcasecmp(name, keys[i].name) == 0) {
+            step->sym = keys[i].sym;
+            step->scan = keys[i].scan;
+            return true;
+        }
+    }
+    return false;
+}
+
+static void press_push(const press_step_t *step, bool down)
+{
+    SDL_Event event;
+    SDL_zero(event);
+    event.type = down ? SDL_KEYDOWN : SDL_KEYUP;
+    event.key.timestamp = SDL_GetTicks();
+    event.key.state = down ? SDL_PRESSED : SDL_RELEASED;
+    event.key.keysym.sym = step->sym;
+    event.key.keysym.scancode = step->scan;
+    SDL_PushEvent(&event);
+}
+
+static void press_tick(lv_timer_t *timer)
+{
+    if (s_press_next >= s_press_count) {
+        lv_timer_del(timer);
+        s_press_timer = NULL;
+        return;
+    }
+    const press_step_t *step = &s_press[s_press_next];
+    if (!s_press_down) {
+        press_push(step, true);
+        s_press_down = true;
+        lv_timer_set_period(timer, step->hold_ms);
+    } else {
+        press_push(step, false);
+        s_press_down = false;
+        s_press_next++;
+        lv_timer_set_period(timer, PRESS_GAP_MS);
+    }
+}
+
+static void cmd_press(control_job_t *job, const char *args)
+{
+    if (s_app->session != NULL) {
+        reply(job, "ERR a stream is running: press drives aurora-tv's own screens only\n");
+        return;
+    }
+    if (s_press_timer != NULL) {
+        reply(job, "ERR still pressing the last keys\n");
+        return;
+    }
+    press_step_t steps[PRESS_MAX];
+    int count = 0;
+    uint32_t total_ms = 0;
+    char copy[256];
+    snprintf(copy, sizeof copy, "%s", args != NULL ? args : "");
+    char *save = NULL;
+    for (char *word = strtok_r(copy, " \t", &save); word != NULL; word = strtok_r(NULL, " \t", &save)) {
+        if (count == PRESS_MAX) {
+            reply(job, "ERR at most %d keys at a time\n", PRESS_MAX);
+            return;
+        }
+        char *colon = strchr(word, ':');
+        long hold = PRESS_TAP_MS;
+        if (colon != NULL) {
+            *colon = '\0';
+            hold = strtol(colon + 1, NULL, 10);
+            if (hold < PRESS_TAP_MS || hold > 5000) {
+                reply(job, "ERR a hold is %d to 5000 ms\n", PRESS_TAP_MS);
+                return;
+            }
+        }
+        if (!press_key_named(word, &steps[count])) {
+            reply(job, "ERR no key '%s': up down left right enter esc home end\n", word);
+            return;
+        }
+        steps[count].hold_ms = (uint32_t) hold;
+        total_ms += (uint32_t) hold + PRESS_GAP_MS;
+        count++;
+    }
+    if (count == 0) {
+        reply(job, "ERR usage: press <key>[:ms] ...  keys: up down left right enter esc home end\n");
+        return;
+    }
+    memcpy(s_press, steps, sizeof(press_step_t) * count);
+    s_press_count = count;
+    s_press_next = 0;
+    s_press_down = false;
+    s_press_timer = lv_timer_create(press_tick, 1, NULL);
+    reply(job, "OK pressing %d key(s), done in about %u ms\n", count, (unsigned) total_ms);
+}
+
 static void cmd_keys(control_job_t *job)
 {
     char counts[160];
@@ -452,6 +614,69 @@ static void cmd_hosts(control_job_t *job)
     }
 }
 
+/* host: which host the launcher shows, or pick one, as "Select server" does.
+ *
+ * The lab's monitor (2026-10-17) drives the launcher with press, and its
+ * launcher showed CAELUM, the PC rhoquinn8217 uses: an Enter on a tile there
+ * starts something on their PC. Asked for by the lab, yes'd by them, so its
+ * cases can point the launcher at its own VM first. Refused in a stream, and
+ * for a host not paired: picking one opens the pairing dialog, which waits
+ * for a PIN nobody is there to type. */
+static void cmd_host(control_job_t *job, const char *args)
+{
+    char want[128] = "";
+    if (args != NULL) {
+        sscanf(args, "%127s", want);
+    }
+    if (want[0] == '\0') {
+        for (const pclist_t *cur = pcmanager_servers(pcmanager); cur != NULL; cur = cur->next) {
+            if (cur->selected) {
+                reply(job, "OK selected %s name=\"%s\"\n", cur->id.data, host_name(cur));
+                return;
+            }
+        }
+        reply(job, "OK selected none\n");
+        return;
+    }
+    if (s_app->session != NULL) {
+        reply(job, "ERR a stream is running: stop it first\n");
+        return;
+    }
+    launcher_fragment_t *launcher = launcher_instance();
+    if (launcher == NULL) {
+        reply(job, "ERR the launcher is not open\n");
+        return;
+    }
+    const pclist_t *match = NULL;
+    int matches = 0;
+    for (const pclist_t *cur = pcmanager_servers(pcmanager); cur != NULL; cur = cur->next) {
+        if (uuidstr_t_equals_s(&cur->id, want)) {
+            match = cur;
+            matches = 1;
+            break;
+        }
+        if (host_name(cur)[0] != '\0' && contains_ci(host_name(cur), want)) {
+            match = cur;
+            ++matches;
+        }
+    }
+    if (matches == 0) {
+        reply(job, "ERR no host '%s'; see hosts\n", want);
+        return;
+    }
+    if (matches > 1) {
+        reply(job, "ERR '%s' matches %d hosts; use the uuid from hosts\n", want, matches);
+        return;
+    }
+    if (match->state.code == SERVER_STATE_NOT_PAIRED) {
+        reply(job, "ERR %s is not paired with this TV\n", host_name(match));
+        return;
+    }
+    uuidstr_t id = match->id;
+    launcher_select_server(launcher, &id);
+    reply(job, "OK the launcher shows %s (%s)\n", host_name(match), id.data);
+}
+
 static void cmd_stream(control_job_t *job, const char *args)
 {
     char host[128] = "";
@@ -492,11 +717,16 @@ static void cmd_stream(control_job_t *job, const char *args)
      * apps.controller.c): push the streaming screen, whose constructor starts
      * the session. ⓘ The arguments are only read during that constructor, and
      * the session copies the name, so a stack copy is safe here as it is there.
-     * The name is what the stream shows; the app id is what launches. */
+     * The name is what the stream shows; the app id is what launches.
+     * ⭐ The app's own name, from the host's list as it last loaded
+     * (rhoquinn8217, 2026-10-20: "fix the terminal name": the TV dashboard's
+     * chip read "Streaming terminal"). "terminal" only for a list not loaded. */
+    const int app_id = atoi(app_arg);
+    const char *app_name = stream_actions_app_name(&match->id, app_id);
     streaming_scene_arg_t scene = {
             .global = s_app,
             .uuid = match->id,
-            .app = {.name = (char *) "terminal", .id = atoi(app_arg)},
+            .app = {.name = (char *) (app_name != NULL ? app_name : "terminal"), .id = app_id},
     };
     lv_fragment_t *fragment = lv_fragment_create(&streaming_controller_class, &scene);
     if (fragment == NULL) {
@@ -1075,6 +1305,10 @@ static void run_command(control_job_t *job)
         cmd_prompt(job, args);
     } else if (strcasecmp(verb, "ui") == 0) {
         cmd_ui(job);
+    } else if (strcasecmp(verb, "press") == 0) {
+        cmd_press(job, args);
+    } else if (strcasecmp(verb, "host") == 0) {
+        cmd_host(job, args);
 #if defined(TARGET_WEBOS)
     } else if (strcasecmp(verb, "devices") == 0) {
         cmd_devices(job);

@@ -1,5 +1,7 @@
 #include "server.popup.h"
 #include "server.context_menu.h"
+#include "server_cards.h"
+#include "ui/common/click_away.h"
 #include "appitem.view.h"
 
 #include "app.h"
@@ -193,6 +195,7 @@ static void server_tile_bind(server_popup_t *popup, lv_obj_t *item, int position
     const server_popup_entry_t *entry = &popup->entries[position];
     lv_label_set_text(holder->title, entry->hostname);
     lv_label_set_text_static(holder->icon, server_entry_icon(entry));
+    server_cards_bind(item, popup->launcher->global, &entry->id, server_entry_icon(entry), entry->state.code);
     if (entry->selected) {
         lv_obj_add_state(item, LV_STATE_CHECKED);
     } else {
@@ -306,9 +309,17 @@ static void server_popup_deleted(lv_event_t *e) {
     server_popup_t *popup = lv_event_get_user_data(e);
     if (popup->group != NULL) {
         app_input_remove_modal_group(&popup->launcher->global->ui.input, popup->group);
+        /* Closed without a server picked (Esc, Back, Close): the input still
+         * points at this group, which is about to go, and every key would land
+         * nowhere until a mouse click moved focus. Hand it back to the top bar,
+         * as picking a server hands it to the grid. (2026-10-17) */
+        if (app_input_get_group(&popup->launcher->global->ui.input) == popup->group) {
+            launcher_restore_nav_focus(popup->launcher);
+        }
         lv_group_del(popup->group);
         popup->group = NULL;
     }
+    server_cards_closed();
     appitem_style_deinit(&popup->item_style);
     SDL_free(popup->entries);
     SDL_free(popup);
@@ -361,6 +372,7 @@ void server_popup_open(launcher_fragment_t *controller) {
 
     static const char *btn_texts[] = {translatable("Close"), ""};
     lv_obj_t *msgbox = lv_msgbox_create_i18n(NULL, locstr("Select server"), NULL, btn_texts, false);
+    click_away_closes(msgbox);
     popup->msgbox = msgbox;
     lv_obj_set_user_data(msgbox, popup);
     lv_obj_add_event_cb(msgbox, server_popup_deleted, LV_EVENT_DELETE, popup);

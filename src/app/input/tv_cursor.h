@@ -88,6 +88,13 @@ bool tv_cursor_regular(void);
 bool tv_cursor_set_look(bool regular);
 bool tv_cursor_toggle_look(void);
 
+/* The cursor's picture as it shows now, red, green, blue and alpha bytes, and
+ * where its tip is drawn in it; NULL when there is none of Aurora's.
+ * `generation` changes each time it is made again (its look switched, a shift
+ * kept). For the touchpad's pointer, which Aurora draws itself in the same
+ * look (input/touchpad_pointer.h). */
+const SDL_Surface *tv_cursor_picture(int *tip_x, int *tip_y, unsigned *generation);
+
 /* Is the cursor Aurora's own? False where SDL refused it and webOS's own
  * pointer stays: there is nothing to shift. */
 bool tv_cursor_drawn(void);

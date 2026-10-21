@@ -11,6 +11,8 @@
 #include "stream/session.h"
 #include "stream/input/session_virt_mouse.h"
 #include "stream/input/bridge_switch_hold.h"
+#include "input/bridge_override.h"
+#include "input/touchpad_pointer.h"
 #include "logging.h"
 
 #include <SDL.h>
@@ -240,12 +242,16 @@ void stream_input_handle_cbutton(stream_input_t *input, const SDL_ControllerButt
                          * both mean secondary click -- the two ways a trackpad
                          * offers a right button without having one. */
                         bool two_finger_press = state->active_fingers == 0x3u;
+                        /* This fork: two fingers pressed are the bridge gesture while Virtual Mouse lends the touchpad (input/bridge_override.h). */
+                        if (two_finger_press && bridge_override_two_finger_press_is_gesture(input)) { state->physical_mouse_button = -1; touchpad_begin_settling(state); return; }
                         if (two_finger_press || touchpad_lower_right_press(state)) {
                             mouse_button = BUTTON_RIGHT;
                         }
                         state->physical_mouse_button = (int8_t) mouse_button;
                     }
                 } else if (state != NULL) {
+                    /* This fork: the release of a press left to the bridge gesture sends nothing either. */
+                    if (state->physical_mouse_button < 0) { state->physical_mouse_button = 0; touchpad_begin_settling(state); return; }
                     mouse_button = state->physical_mouse_button > 0 ? state->physical_mouse_button : BUTTON_LEFT;
                     state->physical_mouse_button = 0;
                 }
@@ -426,7 +432,8 @@ void stream_input_handle_ctouchpad(stream_input_t *input, const SDL_ControllerTo
     if (gamepad == NULL) {
         return;
     }
-    if (!stream_input_gamepad_sends_moonlight(input, gamepad)) {
+    /* This fork: Virtual Mouse takes a bridged pad's touchpad as the mouse, as it takes its sticks (input/bridge_override.h). */
+    if (!stream_input_gamepad_sends_moonlight(input, gamepad) && !bridge_override_vmouse_lends_touchpad(input)) {
         return;
     }
     /* This fork: a finger already down as the pad came back from a bridge stays off the stream until lifted (bridge_switch_hold.c). */
@@ -620,6 +627,8 @@ void stream_input_handle_ctouchpad(stream_input_t *input, const SDL_ControllerTo
         return;
     }
 
+    /* This fork: with the TV cursor on, the touchpad moves it and the host is told the point, as a connected mouse does (input/touchpad_pointer.h). */
+    if (touchpad_pointer_stream_move(input, finger_dx, finger_dy * touchpad_aspect(gamepad))) { return; }
     float gain = input->touchpad_mouse_gain;
     state->motion_remainder_x += finger_dx * gain;
     state->motion_remainder_y += finger_dy * gain * touchpad_aspect(gamepad);

@@ -305,6 +305,15 @@ static lv_obj_t *create_obj(lv_fragment_t *self, lv_obj_t *container) {
     pref_desc_label(view, locstr("2-finger touchpad hold: 1 sec. -- Bridge"), false);
     pref_desc_label(view, locstr("2-finger touchpad hold: 4 sec. -- Release"), false);
 
+    /* ⭐ THE TOUCHPAD AS THE TV'S MOUSE, in their words (rhoquinn8217,
+     * 2026-10-20). A plain box, not a dependent one: it works with bridging
+     * off, so it does not grey out with it (input/touchpad_pointer.h). */
+    usbb_gap(view);
+    pref_checkbox(view, locstr("Enable touchpad as mouse in dashboard and streaming overlay"),
+                  &app_configuration->bridge.touchpad_pointer, false);
+    pref_desc_label(view, locstr("One finger moves the pointer; press the touchpad to click "
+                                 "(DualSense/DualSense Edge/DualShock4)."), false);
+
     /* ⭐⭐ THE WARNING IS THE WHOLE DESCRIPTION. What the switch DOES is already
      * obvious from the section above -- bridging connects the device, so its
      * microphone comes with it -- and repeating that wastes the only line the

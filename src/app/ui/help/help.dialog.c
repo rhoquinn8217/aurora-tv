@@ -1,5 +1,6 @@
 #include "app.h"
 #include "help.dialog.h"
+#include "ui/common/click_away.h"
 
 #include "util/i18n.h"
 #include "os_info.h"
@@ -87,6 +88,7 @@ lv_obj_t *help_dialog_create(app_t *app) {
                    "https://github.com/moonlight-stream/moonlight-docs/wiki");
 
     lv_obj_center(msgbox);
+    click_away_closes(msgbox);
     return msgbox;
 }
 

@@ -6,6 +6,8 @@
 #include "appitem.view.h"
 #include "apps.controller.h"
 #include "launcher.controller.h"
+#include "stream_actions.h"
+#include "server_cards.h"
 #include "ui/streaming/streaming.controller.h"
 
 #include "coverloader.h"
@@ -572,6 +574,8 @@ static void appload_loaded(apploader_list_t *apps, void *userdata) {
     if (!fragment->base.managed->obj_created || fragment->base.managed->destroying_obj) {
         return;
     }
+    stream_actions_take(&fragment->uuid, apps);
+    server_cards_learn(&fragment->uuid, apps);
     int num_changes = -1;
     lv_gridview_data_change_t *changes = apps_list_detect_change(fragment->apploader_apps, apps, &num_changes);
 
@@ -661,8 +665,8 @@ static void appitem_bind(apps_fragment_t *controller, lv_obj_t *item, apploader_
     }
     lv_label_set_text(holder->title, app->base.name);
 
-    int current_id = pcmanager_server_current_app(pcmanager, &controller->uuid);
-    if (current_id == app->base.id) {
+    int current_id = stream_actions_running_id(&controller->uuid, pcmanager_server_current_app(pcmanager, &controller->uuid));
+    if (stream_actions_tile_badged(&controller->uuid, current_id, app->base.id)) {
         lv_obj_clear_flag(holder->play_indicator, LV_OBJ_FLAG_HIDDEN);
     } else {
         lv_obj_add_flag(holder->play_indicator, LV_OBJ_FLAG_HIDDEN);
@@ -679,6 +683,7 @@ static void item_click_cb(lv_event_t *event) {
         return;
     }
     appitem_viewholder_t *holder = (appitem_viewholder_t *) lv_obj_get_user_data(target);
+    if (stream_actions_tile_pressed(&controller->uuid, controller->apploader_apps, holder->app_id)) { return; }
     int current_app = pcmanager_server_current_app(pcmanager, &controller->uuid);
     if (current_app != 0) {
         if (holder->app_id == current_app) {

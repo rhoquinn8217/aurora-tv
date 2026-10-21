@@ -33,6 +33,12 @@ typedef struct bridge_settings_t {
      * broken, with nothing to explain it. `enable` covers both. */
     bool gesture;
 
+    /* ⭐ A DualSense's, Edge's or DS4's touchpad as the TV's mouse in Aurora's
+     * own screens and the streaming overlay, on by default (rhoquinn8217,
+     * 2026-10-20: "Default is checked"). Not tied to `enable`: it works with
+     * bridging off. 🔗 input/touchpad_pointer.h. */
+    bool touchpad_pointer;
+
     /* ⭐ THE SIGNALS AND THE MICROPHONE. All on for now.
      *
      * ⓘ These are "I do not want that" switches, not a battery feature. A

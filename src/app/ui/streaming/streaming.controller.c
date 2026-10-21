@@ -22,6 +22,7 @@
 
 #include "ctm_panel.h"
 #include "bridge_prompt.h"
+#include "bridge_overlay.h"
 
 static void exit_streaming(lv_event_t *event);
 
@@ -727,6 +728,7 @@ static void hide_overlay(lv_event_t *event) {
 static void overlay_key_cb(lv_event_t *e) {
     streaming_controller_t *controller = lv_event_get_user_data(e);
     lv_group_t *group = controller->group;
+    if (stats_pin_overlay_key(controller, lv_event_get_key(e))) { return; }
     switch (lv_event_get_key(e)) {
         case LV_KEY_LEFT:
             lv_group_focus_prev(group);

@@ -13,6 +13,12 @@
  * The overlay reads neither (it moves with the left stick and the d-pad), so
  * nothing it does is taken away.
  *
+ * ⭐ AND ON AURORA'S OWN SCREENS WITH NO STREAM (rhoquinn8217, 2026-10-20):
+ * "In the dashboard, stick up/down and press controls volume up/down and mute
+ * like it does in the streaming overlay". Those screens move with the left
+ * stick and the d-pad too (lvgl/input/lv_drv_sdl_key.c), and nothing is
+ * bridged without a stream, so there the pads are the TV's own.
+ *
  * ⓘ FROM WHICH CONTROLLER. One the TV holds, through SDL. A bridged one never
  * reaches SDL, so the bridge core reads its right stick and click from its own
  * report while the overlay holds input (the core's held_stick.inl, through
@@ -46,6 +52,7 @@ void overlay_volume_init(void);
 void overlay_volume_deinit(void);
 
 /* Read the right sticks and act. `overlay_up`: the streaming overlay is shown
- * with a stream running; false forgets every stick, so the next opening starts
- * again from rest. When: every pass of the event loop. */
+ * with a stream running, or no stream runs (Aurora's own screens); false
+ * forgets every stick, so the next opening starts again from rest. When:
+ * every pass of the event loop. */
 void overlay_volume_tick(struct app_input_t *input, bool overlay_up);

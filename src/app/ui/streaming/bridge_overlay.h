@@ -22,4 +22,8 @@
  * own button styles, and connects them. */
 void bridge_overlay_buttons_create(streaming_controller_t *controller, lv_obj_t *actions);
 
+/* A key the overlay heard: Up from its row selects the stats' pin. True when
+ * it took the key. From the overlay's own key handler (streaming.controller.c). */
+bool stats_pin_overlay_key(streaming_controller_t *controller, uint32_t key);
+
 #endif /* BRIDGE_OVERLAY_H */

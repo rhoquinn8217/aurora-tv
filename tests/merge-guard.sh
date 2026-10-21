@@ -428,6 +428,23 @@ need "a stick or trigger held at the switch works again once at rest" \
      src/app/stream/input/session_gamepad.c "bridge_switch_hold_note_axes(gamepad);"
 need "a finger down at the switch stays off the stream until lifted" \
      src/app/stream/input/session_gamepad.c "bridge_switch_hold_skips_finger(gamepad, event->finger"
+
+# --- the touchpad follows Virtual Mouse (rhoquinn8217, 2026-10-20) ---
+# While Virtual Mouse lends the touchpad, two fingers pressed are the bridge
+# gesture, not upstream's right click (input/bridge_override.h). Losing either
+# line compiles, and every bridge presses the host's right button.
+in_order "two fingers pressed are the bridge gesture while Virtual Mouse lends the touchpad" \
+     src/app/stream/input/session_gamepad.c "void stream_input_handle_cbutton" \
+     "bridge_override_two_finger_press_is_gesture(input)" "if (two_finger_press || touchpad_lower_right_press(state))"
+in_order "... and that press's release sends nothing either" \
+     src/app/stream/input/session_gamepad.c "void stream_input_handle_cbutton" \
+     "if (state->physical_mouse_button < 0)" "mouse_button = state->physical_mouse_button > 0"
+in_order "Virtual Mouse takes a bridged pad's touchpad as the mouse, as it takes its sticks" \
+     src/app/stream/input/session_gamepad.c "void stream_input_handle_ctouchpad" \
+     "!bridge_override_vmouse_lends_touchpad(input)" "if (input->touchpad_mode == TOUCHPAD_MODE_NATIVE) {"
+in_order "with the TV cursor on, the touchpad moves it and tells the host the point" \
+     src/app/stream/input/session_gamepad.c "void stream_input_handle_ctouchpad" \
+     "if (touchpad_pointer_stream_move(input, finger_dx, finger_dy * touchpad_aspect(gamepad)))" "LiSendMouseMoveEvent(dx, dy);"
 in_order "what a pad holds is noted before it is announced again" \
      src/app/stream/input/session_input.c "void stream_input_restore_gamepad" \
      "bridge_switch_hold_begin(gamepad);" "stream_input_send_gamepad_arrive(input, gamepad)"
@@ -464,6 +481,90 @@ in_order "Ctrl+Alt+Shift+A opens the align bar" \
 in_order "Ctrl+Alt+Shift+C, upstream's show-the-mouse, switches the sharp and regular TV cursors" \
      src/app/stream/input/session_keyboard.c "void performPendingSpecialKeyCombo" \
      "case KeyComboToggleCursorHide:" "tv_cursor_toggle_look();"
+
+# --- Stream actions: Vibepollo's control tiles in a menu (rhoquinn8217, 2026-10-17)
+# ⓘ Lines of ours in upstream's launcher. Taking upstream's back compiles, and:
+# apps.controller.c's, Resume, Terminate, Remote Input, Remote Monitor and a
+# second copy of the running app are tiles in the grid again; launcher.view.c's,
+# the "Stream actions" button is gone from the top bar (src/app/ui/launcher/
+# stream_actions.c).
+in_order "the host's controls leave each list before the grid shows it" \
+     src/app/ui/launcher/apps.controller.c "static void appload_loaded" \
+     "stream_actions_take(&fragment->uuid, apps);" "lv_gridview_set_data_advanced("
+in_order "the running app's badge shows on every TV, not only the one that started it" \
+     src/app/ui/launcher/apps.controller.c "static void appitem_bind" \
+     "stream_actions_running_id(&controller->uuid, pcmanager_server_current_app(" "lv_obj_clear_flag(holder->play_indicator, LV_OBJ_FLAG_HIDDEN);"
+in_order "... and on this TV's Remote Monitor or Remote Input tile (2026-10-20)" \
+     src/app/ui/launcher/apps.controller.c "static void appitem_bind" \
+     "if (stream_actions_tile_badged(&controller->uuid, current_id, app->base.id)) {" "lv_obj_clear_flag(holder->play_indicator, LV_OBJ_FLAG_HIDDEN);"
+in_order "a tile pressed while another app runs asks first" \
+     src/app/ui/launcher/apps.controller.c "static void item_click_cb" \
+     "if (stream_actions_tile_pressed(&controller->uuid, controller->apploader_apps, holder->app_id)) { return; }" \
+     "int current_app = pcmanager_server_current_app(pcmanager, &controller->uuid);"
+in_order "the Stream actions button sits right after the host button" \
+     src/app/ui/launcher/launcher.view.c "lv_obj_t *launcher_win_create" \
+     "lv_label_set_text_static(srv_chevron, MAT_SYMBOL_ARROW_DROP_DOWN);" "stream_actions_button(controller, topbar);"
+
+# --- the server window gives the controls back (rhoquinn8217, 2026-10-17) ---
+# ⓘ A fix of ours inside upstream's server.popup.c. Taking upstream's back
+# compiles, and: closing "Select server" with Esc, Back, Circle or Close leaves
+# the pad, the keyboard and the remote dead until a mouse click.
+in_order "closing the server window without a pick hands focus back to the top bar" \
+     src/app/ui/launcher/server.popup.c "static void server_popup_deleted" \
+     "app_input_remove_modal_group(" "launcher_restore_nav_focus(popup->launcher);"
+
+# --- the running badge and the server cards (rhoquinn8217, 2026-10-20) ---
+# ⓘ Lines of ours in upstream's launcher. Taking upstream's back compiles, and:
+# appitem.view.c's, the running app's badge is the large purple circle in the
+# middle of the tile again; apps.controller.c's and server.popup.c's, "Select
+# server" shows plain icons again, not each computer's Desktop picture
+# (src/app/ui/launcher/server_cards.c).
+in_order "the running badge is a ringed circle in the tile's top-left corner" \
+     src/app/ui/launcher/appitem.view.c "lv_obj_t *appitem_view" \
+     "lv_obj_center(play_indicator);" "stream_actions_badge_style(play_indicator, controller->col_width);"
+in_order "each host's Desktop app is noted as its list loads" \
+     src/app/ui/launcher/apps.controller.c "static void appload_loaded" \
+     "stream_actions_take(&fragment->uuid, apps);" "server_cards_learn(&fragment->uuid, apps);"
+in_order "a server tile shows its computer's Desktop picture" \
+     src/app/ui/launcher/server.popup.c "static void server_tile_bind" \
+     "lv_label_set_text_static(holder->icon, server_entry_icon(entry));" "server_cards_bind(item, popup->launcher->global, &entry->id,"
+in_order "the pictures are let go when the server window closes" \
+     src/app/ui/launcher/server.popup.c "static void server_popup_deleted" \
+     "server_cards_closed();" "SDL_free(popup);"
+
+# --- the touchpad as the TV's mouse (rhoquinn8217, 2026-10-20) ---
+# ⓘ Lines of ours in upstream's root.c. Taking upstream's back compiles, and:
+# no pad's touchpad moves a pointer in Aurora's screens or the overlay, or, the
+# second one lost, the pointer outlives the display it was made for
+# (src/app/input/touchpad_pointer.c).
+in_order "the touchpad's pointer comes with the interface's display" \
+     src/app/ui/root.c "void app_ui_open" \
+     "app_ui_input_init(&ui->input, ui);" "touchpad_pointer_ui_opened(ui->app);"
+in_order "the touchpad's pointer goes before the interface's display" \
+     src/app/ui/root.c "void app_ui_close" \
+     "touchpad_pointer_ui_closing();" "app_ui_input_deinit(&ui->input);"
+
+# --- the stats' pin by keys (rhoquinn8217, 2026-10-20) ---
+# ⓘ A line of ours in upstream's overlay key handler. Taking upstream's back
+# compiles, and: only a pointer reaches the pin that keeps the stats on screen
+# (src/app/ui/streaming/bridge_overlay.c).
+in_order "Up from the overlay's row selects the stats' pin" \
+     src/app/ui/streaming/streaming.controller.c "static void overlay_key_cb" \
+     "lv_group_t *group = controller->group;" "if (stats_pin_overlay_key(controller, lv_event_get_key(e))) { return; }"
+
+# --- clicking outside a window closes it (rhoquinn8217, 2026-10-20) ---
+# ⓘ Lines of ours in three of upstream's windows. Taking upstream's back
+# compiles, and that window then stays open when the screen around it is
+# clicked (src/app/ui/common/click_away.c).
+in_order "clicking outside Select server closes it" \
+     src/app/ui/launcher/server.popup.c "void server_popup_open" \
+     "lv_msgbox_create_i18n(NULL, locstr(\"Select server\")" "click_away_closes(msgbox);"
+in_order "clicking outside the add-a-computer window closes it" \
+     src/app/ui/launcher/launcher.controller.c "static void open_manual_add" \
+     "lv_fragment_create_obj(fragment, NULL);" "click_away_closes(msgbox);"
+in_order "clicking outside Help closes it" \
+     src/app/ui/help/help.dialog.c "lv_obj_t *help_dialog_create" \
+     "lv_msgbox_create(NULL, locstr(\"Help\")" "click_away_closes(msgbox);"
 
 echo
 if [ "$fail" -eq 0 ]; then

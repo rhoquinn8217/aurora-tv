@@ -1,5 +1,6 @@
 #include "launcher.controller.h"
 #include "apps.controller.h"
+#include "stream_actions.h"
 
 #include "ui/root.h"
 
@@ -168,6 +169,8 @@ lv_obj_t *launcher_win_create(lv_fragment_t *self, lv_obj_t *parent) {
     lv_obj_set_style_text_font(srv_chevron, lv_theme_moonlight_get_iconfont_small(server_btn), 0);
     lv_label_set_text_static(srv_chevron, MAT_SYMBOL_ARROW_DROP_DOWN);
     lv_obj_clear_flag(srv_chevron, LV_OBJ_FLAG_CLICKABLE);
+
+    stream_actions_button(controller, topbar);
 
     /* Right-side action buttons (icon only). */
     lv_obj_t *add_btn = create_topbar_icon_btn(controller, topbar, MAT_SYMBOL_ADD_TO_QUEUE);

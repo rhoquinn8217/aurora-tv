@@ -114,3 +114,47 @@ void bridge_override_describe(stream_input_t *input, char *buf, size_t len) {
              input->report_gamepad_battery ? "on" : "off",
              grab);
 }
+
+void bridge_override_touchpad_tick(session_t *session) {
+    if (session == NULL) {
+        return;
+    }
+    stream_input_t *input = session_get_input(session);
+    if (input == NULL || !input->started) {
+        return;
+    }
+    const bool vmouse = session_input_is_vmouse_active(&input->vmouse);
+    uint8_t wanted = (uint8_t) session->config.touchpad_mode;
+    if (bridge_override_active()) {
+        wanted = TOUCHPAD_MODE_NATIVE;
+    } else if (vmouse) {
+        wanted = TOUCHPAD_MODE_MOUSE;
+    }
+    if (input->touchpad_mode == wanted) {
+        return;
+    }
+    input->touchpad_mode = wanted;
+    /* As the override does: mouse mode's per-pad state made, or let go. */
+    if (wanted == TOUCHPAD_MODE_MOUSE) {
+        stream_input_touchpad_mouse_init(input);
+    } else {
+        stream_input_touchpad_mouse_deinit(input);
+    }
+    commons_log_info("Input", "Touchpad %s: Virtual Mouse %s",
+                     wanted == TOUCHPAD_MODE_MOUSE ? "is the host's mouse" : "is sent as a touchpad",
+                     vmouse ? "on" : "off");
+}
+
+bool bridge_override_vmouse_lends_touchpad(stream_input_t *input) {
+    return input != NULL && !input->view_only && input->touchpad_mode == TOUCHPAD_MODE_MOUSE &&
+           session_input_is_vmouse_active(&input->vmouse);
+}
+
+bool bridge_override_two_finger_press_is_gesture(const stream_input_t *input) {
+    if (input == NULL || input->session == NULL || app_configuration == NULL) {
+        return false;
+    }
+    return input->touchpad_mode == TOUCHPAD_MODE_MOUSE &&
+           input->session->config.touchpad_mode != TOUCHPAD_MODE_MOUSE &&
+           app_configuration->bridge.enable && app_configuration->bridge.gesture;
+}

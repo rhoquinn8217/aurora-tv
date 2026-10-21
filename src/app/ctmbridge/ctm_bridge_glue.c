@@ -16,6 +16,7 @@
 #include "ctm_hostmouse.h" /* TV-pointer synthesizer feed (kind "hid") */
 #include "device_identity.inl" /* the identity rules, shared with the core */
 #include "protocol_level.inl"   /* whether this app and the listener can work together */
+#include "held_touch.inl"       /* a bridged pad's touchpad, for the TV's pointer */
 
 static bool s_active = false;
 
@@ -907,6 +908,35 @@ int ctm_bridge_held_sticks(ctm_bridge_stick_t *out, int max)
         out[count].reading = st.held_stick;
         out[count].y = st.held_stick ? st.held_stick_y : 0;
         out[count].click = st.held_stick && st.held_stick_click;
+        ++count;
+    }
+    pthread_mutex_unlock(&g_sessions_mutex);
+    pthread_mutex_unlock(&s_dev_mutex);
+    return count;
+}
+
+/* ⓘ The same walk, for the TV's pointer while the overlay is up. */
+int ctm_bridge_held_touches(ctm_bridge_touch_t *out, int max)
+{
+    int count = 0;
+    if (out == NULL || max <= 0) {
+        return 0;
+    }
+    pthread_mutex_lock(&s_dev_mutex);
+    pthread_mutex_lock(&g_sessions_mutex);
+    for (int i = 0; i < g_session_count && count < max; ++i) {
+        ctm_controller_t *c = g_sessions[i].controller;
+        if (!c || g_sessions[i].stopping) continue;
+        ctm_controller_status_t st;
+        ctm_controller_get_status(c, &st);
+        const uint32_t w = st.held_touch ? st.held_touch_word : 0;
+        snprintf(out[count].node, sizeof(out[count].node), "%s", g_sessions[i].node);
+        out[count].reading = st.held_touch;
+        out[count].fingers = HELD_TOUCH_FINGERS(w);
+        out[count].id = HELD_TOUCH_ID(w);
+        out[count].x = HELD_TOUCH_X(w);
+        out[count].y = HELD_TOUCH_Y(w);
+        out[count].click = st.held_touch && HELD_TOUCH_CLICK(w);
         ++count;
     }
     pthread_mutex_unlock(&g_sessions_mutex);
