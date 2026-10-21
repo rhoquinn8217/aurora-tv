@@ -255,6 +255,11 @@ in_order "the remote's pointer takes its events before the stream's own input" \
 in_order "the keyboard grab leaves a bridged keyboard alone, before it grabs" \
      src/app/platform/webos/keyboard_evdev.c "static int open_keyboards(keyboard_evdev_t *kbd) {" \
      "if (bridge_keyboard_node_is_bridged(path)) {" "if (ioctl(fd, EVIOCGRAB, 1) < 0) {"
+# ⛔ Nor webOS's own virtual devices (CHECK INPUT, IoT keypad and the like),
+# which upstream's name list does not catch: input/bridge_keyboard.c says why.
+in_order "the keyboard grab leaves webOS's own devices alone, before it grabs" \
+     src/app/platform/webos/keyboard_evdev.c "static int open_keyboards(keyboard_evdev_t *kbd) {" \
+     "if (bridge_keyboard_node_is_webos_own(fd, path)) {" "if (ioctl(fd, EVIOCGRAB, 1) < 0) {"
 in_order "the keyboard grab records what it took" \
      src/app/platform/webos/keyboard_evdev.c "static int open_keyboards(keyboard_evdev_t *kbd) {" \
      "if (ioctl(fd, EVIOCGRAB, 1) < 0) {" "bridge_keyboard_took(path, held);"
