@@ -113,6 +113,11 @@ struct SDL_KeyboardEvent;
  * one is read without being taken. */
 bool bridge_keyboard_node_is_bridged(const char *event_path);
 
+/* Is this input node one of webOS's own devices, made by webOS itself, rather
+ * than a keyboard that was plugged in or paired? Asked by the TV's keyboard grab
+ * for each keyboard it finds: webOS's own are left to webOS. */
+bool bridge_keyboard_node_is_webos_own(int fd, const char *event_path);
+
 /* The TV's keyboard grab has taken this node. For the record only. */
 void bridge_keyboard_took(const char *event_path, const char *name);
 

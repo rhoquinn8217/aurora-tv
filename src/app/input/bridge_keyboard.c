@@ -157,6 +157,9 @@ struct evdev_event {
  * EVIOCGNAME and EVIOCGBIT(EV_KEY). */
 #define EVDEV_GET_NAME(len) _IOC(_IOC_READ, 'E', 0x06, len)
 #define EVDEV_GET_KEYS(len) _IOC(_IOC_READ, 'E', 0x20 + EVDEV_TYPE_KEY, len)
+/* linux/input.h's EVIOCGPHYS: where the device is attached, empty for one that
+ * software made. */
+#define EVDEV_GET_PHYS(len) _IOC(_IOC_READ, 'E', 0x07, len)
 /* linux/input.h's EVIOCGRAB: take a node, or let it go. */
 #define EVDEV_GRAB _IOW('E', 0x90, int)
 #define NAV_CODE_MAX 111    /* the highest of the numbers in k_nav */
@@ -257,6 +260,38 @@ bool bridge_keyboard_node_is_bridged(const char *event_path) {
         return false;
     }
     keyboard_log("the TV's grab leaves %s to the bridge", event_path);
+    return true;
+}
+
+/* ⭐⭐ webOS'S OWN DEVICES ARE webOS'S (2026-10-21).
+ *
+ * The grab takes anything with letters and a Ctrl key, and keeps the Magic
+ * Remote's devices out by name (name_denied, upstream's). On the C1 it still
+ * took three devices webOS makes for itself and feeds keys through: CHECK
+ * INPUT, IoT keypad and Bluetooth-audio-source, all virtual, two of them
+ * calling themselves USB. Held for a whole stream, nothing webOS sends through
+ * them arrives.
+ * ⛔⛔ AND WHILE THEY WERE HELD, webOS NEVER SET UP A MOUSE PLUGGED IN DURING
+ * A STREAM: dead from the first second, through the end of the stream and an
+ * app restart, until it was plugged in again with no stream running
+ * (rhoquinn8217, 2026-10-20, a Razer Orochi V2: 0 of 13 replugs over three
+ * tests). Not the bridge core, the stream's priority boost, or the grab of the
+ * new device's own keyboard parts: each was ruled out with these three still
+ * held. Leaving them to webOS, 5 of 5 (2026-10-21, C1).
+ * ⓘ Known by what every keyboard a person connects has and these lack: a
+ * physical path. A USB keyboard's is its port, a Bluetooth one's its adapter's
+ * address, and the lab's virtual keyboard sets one too. */
+bool bridge_keyboard_node_is_webos_own(int fd, const char *event_path) {
+    char phys[64] = "";
+    if (ioctl(fd, EVDEV_GET_PHYS(sizeof phys - 1), phys) >= 0 && phys[0] != '\0') {
+        return false;
+    }
+    char name[64] = "";
+    if (ioctl(fd, EVDEV_GET_NAME(sizeof name - 1), name) < 0) {
+        name[0] = '\0';
+    }
+    keyboard_log("the TV's grab leaves %s (%s) to webOS: one of its own, with no physical path",
+                 event_path != NULL ? event_path : "?", name[0] != '\0' ? name : "no name");
     return true;
 }
 
@@ -948,6 +983,12 @@ void bridge_keyboard_tick(bool overlay_shown) {
 #else /* !TARGET_WEBOS */
 
 bool bridge_keyboard_node_is_bridged(const char *event_path) {
+    (void) event_path;
+    return false;
+}
+
+bool bridge_keyboard_node_is_webos_own(int fd, const char *event_path) {
+    (void) fd;
     (void) event_path;
     return false;
 }
