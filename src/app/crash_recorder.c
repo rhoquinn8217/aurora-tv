@@ -205,7 +205,11 @@ static uintptr_t parse_hex(const char **p) {
     }
 }
 
-static void read_maps(void) {
+/* ⛔ ONLY WHAT IS WANTED IS KEPT: code from a named file, and the mapping the
+ * stack pointer is in. The app has more than 500 mappings (568 on the C1,
+ * 2026-10-21), and a table of every one filled before the main thread's stack,
+ * which comes last, so its stack was never scanned. */
+static void read_maps(uintptr_t sp) {
     s_map_count = 0;
     const int fd = open("/proc/self/maps", O_RDONLY | O_CLOEXEC);
     if (fd < 0) {
@@ -250,13 +254,19 @@ static void read_maps(void) {
                 while (p < eol && *p == ' ') {
                     ++p;
                 }
-                s_maps[s_map_count].start = start;
-                s_maps[s_map_count].end = end;
-                s_maps[s_map_count].offset = offset;
-                s_maps[s_map_count].code = code;
-                s_maps[s_map_count].path = p;
-                s_maps[s_map_count].path_len = (int) (eol - p);
-                ++s_map_count;
+                /* ⓘ "Code" is a file's: on this system the stacks are
+                 * executable too, and an anonymous or [stack] mapping made
+                 * every pointer into a stack look like a return address. */
+                const bool named_code = code && eol > p && *p != '[';
+                if (named_code || (sp >= start && sp < end)) {
+                    s_maps[s_map_count].start = start;
+                    s_maps[s_map_count].end = end;
+                    s_maps[s_map_count].offset = offset;
+                    s_maps[s_map_count].code = named_code;
+                    s_maps[s_map_count].path = p;
+                    s_maps[s_map_count].path_len = (int) (eol - p);
+                    ++s_map_count;
+                }
             }
         }
         p = eol + 1;
@@ -460,7 +470,6 @@ static void record(int index, const siginfo_t *info, const void *context) {
     out_str("\n");
     out_flush();
 
-    read_maps();
     s_code_count = 0;
     uintptr_t sp = 0;
     int pc = -1, lr = -1;
@@ -481,6 +490,7 @@ static void record(int index, const siginfo_t *info, const void *context) {
 #else
     (void) context;
 #endif
+    read_maps(sp);
 
     /* ⚠️ Read only within the stack's own mapping, and only so far: a word past
      * its end would fault in here. */
@@ -530,7 +540,8 @@ static void record(int index, const siginfo_t *info, const void *context) {
 #endif
 
     if (stack_map < 0) {
-        out_str("stack: not scanned, the memory map could not be read\n");
+        out_str(s_map_count == 0 ? "stack: not scanned, the memory map could not be read\n"
+                                 : "stack: not scanned, its mapping is not in the memory map\n");
     } else {
         out_str("code addresses on the stack, nearest first (the callers are among them):\n");
         for (int c = first_stack_word; c < s_code_count; ++c) {
