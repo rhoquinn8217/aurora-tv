@@ -271,13 +271,13 @@ bool bridge_keyboard_node_is_bridged(const char *event_path) {
  * INPUT, IoT keypad and Bluetooth-audio-source, all virtual, two of them
  * calling themselves USB. Held for a whole stream, nothing webOS sends through
  * them arrives.
- * ⚠️ SUSPECTED, NOT YET SHOWN: that this is why a mouse plugged in during a
- * stream is never set up by webOS -- dead from the first second, through the
- * end of the stream and after, until it is plugged in again with no stream
- * running (rhoquinn8217, 2026-10-20, a Razer Orochi V2, every time). Neither
- * the bridge core, the stream's priority boost, nor the grab of the new
- * keyboard's own parts was the cause; these three were held through all of
- * those tests.
+ * ⛔⛔ AND WHILE THEY WERE HELD, webOS NEVER SET UP A MOUSE PLUGGED IN DURING
+ * A STREAM: dead from the first second, through the end of the stream and an
+ * app restart, until it was plugged in again with no stream running
+ * (rhoquinn8217, 2026-10-20, a Razer Orochi V2: 0 of 13 replugs over three
+ * tests). Not the bridge core, the stream's priority boost, or the grab of the
+ * new device's own keyboard parts: each was ruled out with these three still
+ * held. Leaving them to webOS, 5 of 5 (2026-10-21, C1).
  * ⓘ Known by what every keyboard a person connects has and these lack: a
  * physical path. A USB keyboard's is its port, a Bluetooth one's its adapter's
  * address, and the lab's virtual keyboard sets one too. */
