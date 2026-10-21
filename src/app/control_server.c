@@ -31,6 +31,7 @@
 #include "stream/bridge_session.h"
 #include "stream/video/session_video.h"
 #include "ui/launcher/launcher.controller.h"
+#include "ui/launcher/stream_actions.h"   /* an app's name, by id */
 #include "ui/streaming/streaming.controller.h"
 #include "ui/streaming/bridge_prompt.h"
 #include "ui/streaming/ctm_panel.h"
@@ -716,11 +717,16 @@ static void cmd_stream(control_job_t *job, const char *args)
      * apps.controller.c): push the streaming screen, whose constructor starts
      * the session. ⓘ The arguments are only read during that constructor, and
      * the session copies the name, so a stack copy is safe here as it is there.
-     * The name is what the stream shows; the app id is what launches. */
+     * The name is what the stream shows; the app id is what launches.
+     * ⭐ The app's own name, from the host's list as it last loaded
+     * (rhoquinn8217, 2026-10-20: "fix the terminal name": the TV dashboard's
+     * chip read "Streaming terminal"). "terminal" only for a list not loaded. */
+    const int app_id = atoi(app_arg);
+    const char *app_name = stream_actions_app_name(&match->id, app_id);
     streaming_scene_arg_t scene = {
             .global = s_app,
             .uuid = match->id,
-            .app = {.name = (char *) "terminal", .id = atoi(app_arg)},
+            .app = {.name = (char *) (app_name != NULL ? app_name : "terminal"), .id = app_id},
     };
     lv_fragment_t *fragment = lv_fragment_create(&streaming_controller_class, &scene);
     if (fragment == NULL) {

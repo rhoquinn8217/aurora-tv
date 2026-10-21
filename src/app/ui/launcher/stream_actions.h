@@ -50,6 +50,11 @@ int stream_actions_running_id(const uuidstr_t *host, int reported);
  * call above), or this TV's Remote Monitor or Remote Input tile. */
 bool stream_actions_tile_badged(const uuidstr_t *host, int running_id, int app_id);
 
+/* An app's name, from the host's list as it last loaded (or the title of one
+ * of the host's controls), or NULL if this host's list has not loaded. For a
+ * stream started by id (the control port). */
+const char *stream_actions_app_name(const uuidstr_t *host, int app_id);
+
 /* Whether a host's list, as it loaded, shows an app running that another TV
  * started: the running app's copy, or Resume or Terminate. For the server
  * window, which reads every host's list. */

@@ -429,6 +429,34 @@ static void add_role_tile(apploader_list_t *apps, size_t room) {
     s_role_tile = id;
 }
 
+/* rhoquinn8217, 2026-10-20: "fix the terminal name". A stream the control
+ * port starts names its app by id only (control_server.c), and showed
+ * "terminal", on the TV and on the TV dashboard's chip. The last list's names
+ * are kept here for it. */
+#define NAMES_MAX 64
+
+typedef struct known_name_t {
+    int id;
+    char name[TITLE_MAX];
+} known_name_t;
+
+static known_name_t s_names[NAMES_MAX];
+static int s_name_count;
+static uuidstr_t s_names_host;
+
+static void remember_names(const uuidstr_t *host, const apploader_list_t *apps) {
+    s_names_host = *host;
+    s_name_count = 0;
+    for (size_t i = 0; i < apps->count && s_name_count < NAMES_MAX; i++) {
+        if (apps->items[i].base.name == NULL) {
+            continue;
+        }
+        s_names[s_name_count].id = apps->items[i].base.id;
+        snprintf(s_names[s_name_count].name, TITLE_MAX, "%s", visible_name(apps->items[i].base.name));
+        s_name_count++;
+    }
+}
+
 static int s_order_running;
 
 static int order_rank(const apploader_item_t *item) {
@@ -521,7 +549,27 @@ void stream_actions_take(const uuidstr_t *host, apploader_list_t *apps) {
     star_launchers(host, apps);
     s_order_running = reported != 0 ? reported : s_running_id;
     qsort(apps->items, apps->count, sizeof(apploader_item_t), order_compare);
+    remember_names(host, apps);
     update_button();
+}
+
+const char *stream_actions_app_name(const uuidstr_t *host, int app_id) {
+    if (host == NULL || !uuidstr_t_equals_t(host, &s_names_host)) {
+        return NULL;
+    }
+    for (int i = 0; i < s_name_count; i++) {
+        if (s_names[i].id == app_id) {
+            return s_names[i].name;
+        }
+    }
+    /* The host's controls, which left the list: their titles are kept with
+     * them. */
+    for (int i = 0; i < s_count; i++) {
+        if (s_actions[i].id == app_id) {
+            return s_actions[i].title;
+        }
+    }
+    return NULL;
 }
 
 bool stream_actions_list_shows_running(const apploader_list_t *apps) {
