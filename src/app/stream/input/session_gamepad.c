@@ -12,6 +12,7 @@
 #include "stream/input/session_virt_mouse.h"
 #include "stream/input/bridge_switch_hold.h"
 #include "input/bridge_override.h"
+#include "input/touchpad_pointer.h"
 #include "logging.h"
 
 #include <SDL.h>
@@ -626,6 +627,8 @@ void stream_input_handle_ctouchpad(stream_input_t *input, const SDL_ControllerTo
         return;
     }
 
+    /* This fork: with the TV cursor on, the touchpad moves it and the host is told the point, as a connected mouse does (input/touchpad_pointer.h). */
+    if (touchpad_pointer_stream_move(input, finger_dx, finger_dy * touchpad_aspect(gamepad))) { return; }
     float gain = input->touchpad_mouse_gain;
     state->motion_remainder_x += finger_dx * gain;
     state->motion_remainder_y += finger_dy * gain * touchpad_aspect(gamepad);

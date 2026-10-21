@@ -18,6 +18,10 @@
 #if defined(TARGET_WEBOS)
 #include "ctm_bridge_gesture.h"           /* which of SDL's pads is bridged */
 #include "ctmbridge/ctm_bridge_glue.h"    /* the bridged devices' nodes and touches */
+#include "stream/session_priv.h"          /* the stream's display size */
+#include "stream/input/session_input.h"
+
+#include <Limelight.h>
 #endif
 
 /* What happened, where it can be read over SSH (tv_cursor.c says why). */
@@ -86,6 +90,11 @@ static Uint32 s_tap_until = 0;
 static bool s_shown = false;
 static bool s_active = false;
 static Uint32 s_used_at = 0;
+/* In a stream (touchpad_pointer_stream_move): the cursor up, when it last
+ * moved, and where SDL last had the mouse, to tell when a mouse moved. */
+static bool s_stream_shown = false;
+static Uint32 s_stream_used_at = 0;
+static int s_mouse_x = -1, s_mouse_y = -1;
 
 static void tp_log(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
 
@@ -405,7 +414,18 @@ void touchpad_pointer_tick(struct app_input_t *input, bool ui_has_input) {
             stand_down();
             tp_log("off: %s", ui_has_input ? "the setting is off" : "a stream has the input");
         }
+        /* The stream's cursor (touchpad_pointer_stream_move) goes 4 seconds
+         * after its last movement, or as the TV cursor is switched off. */
+        if (!ui_has_input && s_stream_shown &&
+            (!tv_cursor_mode_on() || (Sint32) (SDL_GetTicks() - s_stream_used_at) >= HIDE_AFTER_MS)) {
+            s_stream_shown = false;
+            show(false);
+        }
         return;
+    }
+    if (s_stream_shown) {
+        s_stream_shown = false;
+        s_used_at = s_stream_used_at;   /* the overlay over it: its 4 seconds go on */
     }
     if (!s_active) {
         s_active = true;
@@ -505,4 +525,46 @@ void touchpad_pointer_tick(struct app_input_t *input, bool ui_has_input) {
         show(false);
     }
 #endif
+}
+
+bool touchpad_pointer_stream_move(stream_input_t *input, float dx, float dy) {
+    if (!tv_cursor_mode_on() || s_indev == NULL || s_cursor == NULL || input == NULL || input->session == NULL) {
+        return false;
+    }
+    const float screen_w = (float) lv_disp_get_hor_res(NULL);
+    const float screen_h = (float) lv_disp_get_ver_res(NULL);
+    if (screen_w < 1 || screen_h < 1) {
+        return false;
+    }
+    /* The host's frame, as a connected mouse's point is given in it
+     * (stream/input/session_mouse.c): the window's. */
+    const float ref_w = input->session->display_width > 0 ? (float) input->session->display_width : screen_w;
+    const float ref_h = input->session->display_height > 0 ? (float) input->session->display_height : screen_h;
+    /* A connected mouse moved since: carry on from where it left the pointer. */
+    int mx = 0, my = 0;
+    SDL_GetMouseState(&mx, &my);
+    if (mx != s_mouse_x || my != s_mouse_y) {
+        if (s_mouse_x >= 0) {
+            s_px = (float) mx * screen_w / ref_w;
+            s_py = (float) my * screen_h / ref_h;
+        }
+        s_mouse_x = mx;
+        s_mouse_y = my;
+    }
+    const float k = screen_w * SPEED_SCREENS;
+    s_px += dx * k;
+    s_py += dy * k;
+    if (s_px < 0) s_px = 0;
+    if (s_py < 0) s_py = 0;
+    if (s_px > screen_w - 1) s_px = screen_w - 1;
+    if (s_py > screen_h - 1) s_py = screen_h - 1;
+    LiSendMousePositionEvent((short) (s_px * ref_w / screen_w), (short) (s_py * ref_h / screen_h), (short) ref_w,
+                             (short) ref_h);
+    s_stream_used_at = SDL_GetTicks();
+    if (!s_stream_shown) {
+        s_stream_shown = true;
+        tp_log("stream: the touchpad moves the TV cursor, from %d,%d", (int) s_px, (int) s_py);
+    }
+    show(true);
+    return true;
 }

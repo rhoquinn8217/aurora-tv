@@ -61,4 +61,26 @@ void touchpad_pointer_deinit(void);
  * the input, not a stream. */
 void touchpad_pointer_tick(struct app_input_t *input, bool ui_has_input);
 
+/* ⭐ THE TOUCHPAD AS A CONNECTED MOUSE, IN A STREAM (rhoquinn8217, 2026-10-20):
+ * "can you make the touch pad to mouse work the same way as a connected mouse?
+ * The intent is to to have the TV cursor come up when I press shift+ctrl+alt+M
+ * for the touch pad mouse movement." With the TV cursor on (upstream's
+ * absolute mouse mode, input/tv_cursor.h) a connected mouse moves the TV's own
+ * pointer and the host is told the point, so the two cursors meet. The
+ * touchpad as the host's mouse (Virtual Mouse, or Input's "Send as mouse")
+ * told the host only how far it moved. Now, with the TV cursor on, one
+ * finger's movement moves the cursor above, the TV cursor's own picture, at
+ * this file's speed, and the host is told the point; the touchpad's taps,
+ * presses, drags and two-finger scrolls stay upstream's and land there. The
+ * cursor goes 4 seconds after the last movement, and the next starts where a
+ * connected mouse last left the pointer, if one moved since. With the TV
+ * cursor off nothing changes: the host is told the movement only, for games.
+ * ⓘ Not for DS5-USBIP's touchpad_to_mouse: there the PC makes the mouse, and
+ * the TV never learns where its cursor went.
+ * `dx`, `dy`: the finger's movement, in widths of the touchpad. True when it
+ * was handled here; false, and upstream sends the movement as before. */
+typedef struct stream_input_t stream_input_t;
+
+bool touchpad_pointer_stream_move(stream_input_t *input, float dx, float dy);
+
 #endif
