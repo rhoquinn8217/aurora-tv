@@ -1089,15 +1089,16 @@ static const lv_img_dsc_t *badge_picture(lv_coord_t size, badge_symbol_t symbol,
     return dsc;
 }
 
-/* ⭐ PLAY AND STOP, ALONG THE TILE'S BOTTOM (rhoquinn8217, 2026-10-20): "Both
+/* ⭐ PLAY AND STOP, ACROSS THE TILE'S MIDDLE (rhoquinn8217, 2026-10-20): "Both
  * the purple play and stop icon are clickable, triangle resumes and square
  * stops", "When hovering over the purple play or stop icon cause the button
  * to highlight", and of where: "Lets move the play and stop button both to
- * the bottom", Play in the bottom-left corner and Stop in the bottom-right,
- * each a quarter of its size in from its corner. So upstream's label becomes
- * a row along the bottom holding the two, and the tile's own showing and
- * hiding of the label shows and hides both. A press on the row between them
- * is the tile's: only the two are clickable. */
+ * the bottom", then "vertically center the play and stop buttons": Play on
+ * the left and Stop on the right, each a quarter of its size in from its
+ * side, halfway down the tile. So upstream's label becomes a row across the
+ * tile holding the two, and the tile's own showing and hiding of the label
+ * shows and hides both. A press on the row between them is the tile's: only
+ * the two are clickable. */
 #define BADGE_FLAG LV_OBJ_FLAG_USER_3
 #define HOVER_IDLE_MS 4000
 #define HOVER_POINTERS 4
@@ -1129,7 +1130,7 @@ void stream_actions_badge_style(lv_obj_t *badge, lv_coord_t tile_width) {
         return;     /* upstream's purple circle and its arrow stay */
     }
     lv_obj_set_size(badge, tile_width - 2 * gap, size);
-    lv_obj_align(badge, LV_ALIGN_BOTTOM_LEFT, gap, -gap);
+    lv_obj_align(badge, LV_ALIGN_LEFT_MID, gap, 0);
     /* Upstream's label, emptied: its arrow, its purple and its glow go. */
     lv_label_set_text(badge, "");
     lv_obj_set_style_bg_opa(badge, LV_OPA_TRANSP, 0);
