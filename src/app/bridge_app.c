@@ -71,19 +71,22 @@ void bridge_app_sdl_hints(void) {
      * Measured 2026-08-06 on the rooted monitor. */
     SDL_SetHint(SDL_HINT_JOYSTICK_HIDAPI_PS5, "1");
     SDL_SetHint(SDL_HINT_JOYSTICK_HIDAPI_PS5_RUMBLE, "1");
-    /* ⭐⭐ A PAD PLUGGED IN AFTER THE APP STARTED (2026-10-21).
+    /* ⭐⭐ A PAD PLUGGED IN WHILE THE APP RUNS, AND SOMETIMES MISSED (2026-10-21).
      *
-     * SDL learns of a new controller from udev, and inside webOS's app jail
-     * that news evidently never reaches it: SDL takes only the pads present
-     * when the app starts (the lab restarts the app for this reason). On the
-     * C1 an Xbox pad plugged in mid-stream (045e:0b12, on the xpad driver)
-     * never got an SDL player, so it did nothing, its overlay chord included.
-     * The arrival watch can make a PlayStation pad's HIDAPI driver look again;
-     * for a pad SDL reads through evdev it has no cure.
-     * ➡️ With udev off, SDL watches /dev/input itself with inotify, which does
-     * work in the jail: the arrival watch watches the same folder and saw that
-     * pad the moment it arrived. ⓘ Read once, when the joystick subsystem
-     * starts (app_input_init), which is after this. */
+     * The app's jail has no /run, so libudev cannot see udevd
+     * (/run/udev/control) and SDL's "udev" monitor hears the kernel's own
+     * announcement instead (netlink group 1, measured on the rooted monitor).
+     * That comes before udevd has made the new /dev node usable. SDL waits
+     * 10 ms, opens it once, and when that open fails it never tries again:
+     * the pad gets no player, its buttons and the overlay chord do nothing,
+     * and only a replug or an app restart brings it (an Xbox pad on the C1,
+     * 2026-10-21; the 2026-09-22 row in reported-bugs). The arrival watch can
+     * cure a PlayStation pad through its HIDAPI driver; nothing covered a pad
+     * on evdev.
+     * ➡️ With udev off, SDL's evdev path watches /dev/input with inotify
+     * instead, and looks again when a node's permissions change, the moment
+     * it becomes usable (SDL's own comment beside that watch says so). ⓘ Read
+     * once, when the joystick subsystem starts (app_input_init), after this. */
     SDL_SetHint("SDL_JOYSTICK_DISABLE_UDEV", "1");
 #endif
 }
