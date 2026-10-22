@@ -23,6 +23,7 @@
 #include "app.h"
 #include "logging.h"
 #include "ctm_screenshot.h"
+#include "crash_recorder.h"
 #include "util/bus.h"
 #include "util/user_event.h"
 #include "backend/pcmanager.h"
@@ -149,6 +150,8 @@ static void cmd_help(control_job_t *job)
                "cursor on|off           the TV cursor on or off, and saved, as Ctrl+Alt+Shift+M does\n"
                "cursor align            open the bar that aligns the TV cursor, as Ctrl+Alt+Shift+A does\n"
                "cursor sharp|regular    the drop or webOS's own pointer, and saved, as Ctrl+Alt+Shift+C does\n"
+               "crash                   the crash recorder: armed or not, and where its record goes\n"
+               "crash test|thread       crash the app on purpose, on its own loop or on a thread, to prove it\n"
                "<device> is its number, its node, its vid:pid, or part of its name; <n> is from groups\n");
 }
 
@@ -739,6 +742,25 @@ static void cmd_stream(control_job_t *job, const char *args)
           app_arg, host_name(match)[0] != '\0' ? host_name(match) : host);
 }
 
+/* ⭐ The crash recorder (crash_recorder.h), and a crash on purpose to prove it:
+ * a recorder nobody has seen record anything cannot be trusted with the crash
+ * it is for. ⛔ `test` and `thread` end the app, and the stream with it. */
+static void cmd_crash(control_job_t *job, const char *args)
+{
+    if (args == NULL || args[0] == '\0') {
+        char state[512];
+        crash_recorder_describe(state, sizeof state);
+        reply(job, "OK crash recorder %s\n", state);
+    } else if (strcasecmp(args, "test") == 0 || strcasecmp(args, "thread") == 0) {
+        const bool on_thread = strcasecmp(args, "thread") == 0;
+        crash_recorder_test(on_thread);
+        reply(job, "OK the app crashes on purpose in half a second, %s; logs/crash.log has the record\n",
+              on_thread ? "on a thread of its own" : "on its own loop");
+    } else {
+        reply(job, "ERR usage: crash [test|thread]\n");
+    }
+}
+
 static void cmd_stop(control_job_t *job, bool quit_game)
 {
     if (s_app->session == NULL) {
@@ -1309,6 +1331,8 @@ static void run_command(control_job_t *job)
         cmd_press(job, args);
     } else if (strcasecmp(verb, "host") == 0) {
         cmd_host(job, args);
+    } else if (strcasecmp(verb, "crash") == 0) {
+        cmd_crash(job, args);
 #if defined(TARGET_WEBOS)
     } else if (strcasecmp(verb, "devices") == 0) {
         cmd_devices(job);

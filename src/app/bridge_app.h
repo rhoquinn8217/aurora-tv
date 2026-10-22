@@ -10,7 +10,8 @@
 #include "app.h"
 
 /* In app_init(), BEFORE SDL_Init(): a DualSense that a crash left streaming
- * microphone audio is told to stop before SDL can read it as input. */
+ * microphone audio is told to stop before SDL can read it as input, and the
+ * crash recorder is armed. */
 void bridge_app_before_sdl(void);
 
 /* In app_init(), with the other webOS SDL hints: PlayStation controllers are

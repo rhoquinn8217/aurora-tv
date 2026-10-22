@@ -16,7 +16,7 @@
 # !! once to pick the next number and once to name the package. Keep it on one
 # !! line and digits only: a letter inside the value would break both scans, and
 # !! the next build would silently reuse a number.
-set(CTM_BUILD_NUMBER 567)
+set(CTM_BUILD_NUMBER 569)
 
 # A tag after the build number, so a build you can SEE says what it is: EXP on
 # an experimental branch, such as the DualSense Bluetooth microphone capture.
@@ -37,6 +37,7 @@ configure_file(${CMAKE_SOURCE_DIR}/src/app/app_version.h.in ${CMAKE_BINARY_DIR}/
 set(VERSION_SOURCES
         ${CMAKE_SOURCE_DIR}/src/app/app.c
         ${CMAKE_SOURCE_DIR}/src/app/control_server.c
+        ${CMAKE_SOURCE_DIR}/src/app/crash_recorder.c
         ${CMAKE_SOURCE_DIR}/src/app/ui/help/help.dialog.c)
 if (MSVC)
     set(VERSION_HEADER_OPTION "/FI${CMAKE_BINARY_DIR}/app_version.h")
