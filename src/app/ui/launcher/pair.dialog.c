@@ -5,6 +5,7 @@
 #include "errors.h"
 #include "util/i18n.h"
 #include "ui/root.h"
+#include "backend/pcmanager/pair_cancel.h"
 
 typedef struct {
     lv_fragment_t base;
@@ -45,19 +46,24 @@ static void pair_controller_ctor(lv_fragment_t *self, void *args) {
 }
 
 static void pair_controller_dtor(lv_fragment_t *self) {
-    LV_UNUSED(self);
+    /* This fork: a pairing still waiting for its PIN is cancelled with its
+     * window, however the window goes (backend/pcmanager/pair_cancel.h). */
+    pair_cancel_end(self);
 }
 
 static lv_obj_t *pair_dialog(lv_fragment_t *self, lv_obj_t *parent) {
     LV_UNUSED(parent);
     pair_dialog_controller_t *controller = (pair_dialog_controller_t *) self;
-    static const char *btn_texts[] = {translatable("OK"), ""};
+    /* This fork (rhoquinn8217, 2026-10-22: "Add a cancel button so that I
+     * can"): Cancel while the host waits for the PIN, which Back presses too;
+     * OK after a failure, as upstream had it. Upstream hid its OK until then,
+     * so nothing closed the window. */
+    static const char *btn_texts[] = {translatable("Cancel"), ""};
     lv_obj_t *dialog = lv_msgbox_create_i18n(NULL, locstr("Pairing"), NULL, btn_texts, false);
 
     controller->btns = lv_msgbox_get_btns(dialog);
-    lv_obj_add_flag(controller->btns, LV_OBJ_FLAG_HIDDEN);
 
-    if (!pcmanager_pair(pcmanager, &controller->uuid, controller->pin, pair_result_cb, controller)) {
+    if (!pcmanager_pair(pcmanager, &controller->uuid, controller->pin, pair_result_cb, pair_cancel_begin(controller))) {
         lv_msgbox_close_async(dialog);
         return dialog;
     }
@@ -84,7 +90,11 @@ static lv_obj_t *pair_dialog(lv_fragment_t *self, lv_obj_t *parent) {
 }
 
 static void pair_result_cb(int result, const char *error, const uuidstr_t *uuid, void *userdata) {
-    pair_dialog_controller_t *controller = (pair_dialog_controller_t *) userdata;
+    /* This fork: NULL when the window was cancelled before the answer came. */
+    pair_dialog_controller_t *controller = pair_cancel_answer(userdata);
+    if (controller == NULL) {
+        return;
+    }
     if (result == GS_OK) {
         launcher_fragment_t *launcher_controller = launcher_instance();
         if (launcher_controller) {
@@ -93,7 +103,10 @@ static void pair_result_cb(int result, const char *error, const uuidstr_t *uuid,
         lv_msgbox_close_async(controller->base.obj);
         return;
     }
-    lv_obj_clear_flag(controller->btns, LV_OBJ_FLAG_HIDDEN);
+    /* This fork: Cancel reads OK once pairing has failed. */
+    static const char *ok_texts[] = {"", ""};
+    ok_texts[0] = locstr("OK");
+    lv_btnmatrix_set_map(controller->btns, ok_texts);
     lv_label_set_text(controller->message_label, error);
     lv_obj_add_flag(controller->pin_label, LV_OBJ_FLAG_HIDDEN);
 }
@@ -102,8 +115,7 @@ static void dialog_cb(lv_event_t *event) {
     pair_dialog_controller_t *controller = lv_event_get_user_data(event);
     lv_obj_t *dialog = lv_event_get_current_target(event);
     if (dialog != controller->base.obj) { return; }
-    if (lv_obj_has_flag(controller->btns, LV_OBJ_FLAG_HIDDEN)) {
-        return;
-    }
+    /* This fork: Cancel or OK, the window closes; a pairing still waiting goes
+     * with it (pair_controller_dtor). */
     lv_msgbox_close_async(dialog);
 }

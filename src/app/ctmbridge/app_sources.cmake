@@ -8,6 +8,7 @@
 # !! A new source file of the fork's goes in this list. tests/merge-guard.sh
 # !! checks that every one named here still exists.
 target_sources(moonlight-lib PRIVATE
+        ${CMAKE_SOURCE_DIR}/src/app/backend/pcmanager/pair_cancel.c
         ${CMAKE_SOURCE_DIR}/src/app/bridge_app.c
         ${CMAKE_SOURCE_DIR}/src/app/bridge_settings.c
         ${CMAKE_SOURCE_DIR}/src/app/control_server.c
@@ -26,6 +27,7 @@ target_sources(moonlight-lib PRIVATE
         ${CMAKE_SOURCE_DIR}/src/app/stream/bridge_pointer.c
         ${CMAKE_SOURCE_DIR}/src/app/stream/bridge_proof.c
         ${CMAKE_SOURCE_DIR}/src/app/stream/bridge_session.c
+        ${CMAKE_SOURCE_DIR}/src/app/stream/connect_cancel.c
         ${CMAKE_SOURCE_DIR}/src/app/ui/common/click_away.c
         ${CMAKE_SOURCE_DIR}/src/app/ui/common/type_into_box.c
         ${CMAKE_SOURCE_DIR}/src/app/ui/launcher/server_cards.c
@@ -35,6 +37,7 @@ target_sources(moonlight-lib PRIVATE
         ${CMAKE_SOURCE_DIR}/src/app/ui/settings/panes/usbbridge.pane.c
         ${CMAKE_SOURCE_DIR}/src/app/ui/streaming/bridge_overlay.c
         ${CMAKE_SOURCE_DIR}/src/app/ui/streaming/bridge_prompt.c
+        ${CMAKE_SOURCE_DIR}/src/app/ui/streaming/connecting_cancel.c
         ${CMAKE_SOURCE_DIR}/src/app/ui/streaming/ctm_panel.c
         ${CMAKE_SOURCE_DIR}/src/app/ui/streaming/cursor_align.c)
 

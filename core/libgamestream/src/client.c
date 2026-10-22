@@ -796,6 +796,10 @@ void gs_set_total_timeout(GS_CLIENT hnd, int timeout_secs) {
     http_set_total_timeout(hnd->http, timeout_secs);
 }
 
+void gs_abort(GS_CLIENT hnd) {
+    http_abort(hnd->http);
+}
+
 int gs_get_status(GS_CLIENT hnd, PSERVER_DATA server, const char *address, uint16_t port, bool unsupported) {
     LiInitializeServerInformation(&server->serverInfo);
     server->serverInfo.address = address;

@@ -598,6 +598,43 @@ in_order "... which the interface's key reader hands it first" \
      src/app/lvgl/input/lv_drv_sdl_key.c "static bool read_keyboard" \
      "bool pressed = event->type == SDL_KEYDOWN;" "if (type_into_box_key(event)) {"
 
+# --- Cancel while pairing and while connecting (rhoquinn8217, 2026-10-22) ---
+# ⓘ Lines of ours in upstream's pairing window, pairing worker, streaming screen,
+# session worker and libgamestream. Taking upstream's back compiles, and:
+# pair.dialog.c's, the PIN window has no button again and nothing closes it
+# (or its late answer touches a window already freed); pairing.c's or
+# libgamestream's, a Cancel leaves the request waiting for a PIN for ever;
+# streaming.controller.c's, "Connecting..." has no Cancel; session_worker.c's,
+# a Cancel waits for the launch, or shows "Failed to start streaming"
+# (src/app/backend/pcmanager/pair_cancel.c, src/app/stream/connect_cancel.c).
+in_order "the PIN window shows Cancel while it waits, and its answer comes by token" \
+     src/app/ui/launcher/pair.dialog.c "static lv_obj_t *pair_dialog(lv_fragment_t *self, lv_obj_t *parent) {" \
+     "static const char *btn_texts[] = {translatable(\"Cancel\"), \"\"};" "pair_result_cb, pair_cancel_begin(controller))) {"
+absent_in_function "... and does not hide its button while it waits" \
+     src/app/ui/launcher/pair.dialog.c "static lv_obj_t *pair_dialog(lv_fragment_t *self, lv_obj_t *parent) {" \
+     "lv_obj_add_flag(controller->btns, LV_OBJ_FLAG_HIDDEN);"
+in_order "a cancelled pairing's late answer finds nothing" \
+     src/app/ui/launcher/pair.dialog.c "static void pair_result_cb(int result, const char *error, const uuidstr_t *uuid, void *userdata) {" \
+     "pair_dialog_controller_t *controller = pair_cancel_answer(userdata);" "if (controller == NULL) {"
+need "a pairing still waiting is cancelled with its window" \
+     src/app/ui/launcher/pair.dialog.c "pair_cancel_end(self);"
+in_order "the pairing worker's request can be cut short" \
+     src/app/backend/pcmanager/worker/pairing.c "int worker_pairing(worker_context_t *context) {" \
+     "pair_cancel_watch(client, context->userdata);" "pair_cancel_unwatch(client);"
+need "libgamestream's requests can be cut short" \
+     core/libgamestream/src/http.c "CURLOPT_XFERINFOFUNCTION, xferinfo_fn"
+need "... from the app (gs_abort)" \
+     core/libgamestream/src/client.c "void gs_abort(GS_CLIENT hnd) {"
+in_order "Connecting... has a Cancel" \
+     src/app/ui/streaming/streaming.controller.c "static bool on_event(lv_fragment_t *self, int code, void *userdata) {" \
+     "lv_obj_set_height(controller->progress, LV_DPX(100));" "connecting_cancel_button(controller->progress, controller->global);"
+in_order "the session's launch request can be cut short" \
+     src/app/stream/session_worker.c "int session_worker(session_t *session) {" \
+     "GS_CLIENT client = app_gs_client_new(app);" "connect_cancel_watch(client);"
+in_order "... and a cancelled start ends with no error shown" \
+     src/app/stream/session_worker.c "int session_worker(session_t *session) {" \
+     "connect_cancel_done(session, client);" "gs_destroy(client);"
+
 echo
 if [ "$fail" -eq 0 ]; then
     echo "⭐ merge guard: $pass checks, nothing lost"

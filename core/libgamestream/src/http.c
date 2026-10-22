@@ -37,7 +37,22 @@
 struct HTTP_T {
     CURL *curl;
     pthread_mutex_t mutex;
+    /* This fork: set by http_abort, from any thread. The request in progress,
+     * and every one after it, gives up. */
+    int aborted;
 };
+
+/* This fork (2026-10-22): curl asks this about once a second even while a
+ * request only waits, so a request told to give up ends within a second. The
+ * pairing request waits with no read timeout until the PIN is typed on the
+ * host (gs_pair), and a Cancel has to end it. */
+static int xferinfo_fn(void *clientp, curl_off_t dltotal, curl_off_t dlnow, curl_off_t ultotal, curl_off_t ulnow) {
+    (void) dltotal;
+    (void) dlnow;
+    (void) ultotal;
+    (void) ulnow;
+    return __atomic_load_n(&((struct HTTP_T *) clientp)->aborted, __ATOMIC_ACQUIRE) ? 1 : 0;
+}
 
 static size_t write_fn(void *contents, size_t size, size_t nmemb, void *userp) {
     size_t realsize = size * nmemb;
@@ -82,8 +97,18 @@ HTTP *http_create(const char *keydir) {
     struct HTTP_T *http = malloc(sizeof(struct HTTP_T));
     assert(http != NULL);
     http->curl = curl;
+    http->aborted = 0;
+    curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION, xferinfo_fn);
+    curl_easy_setopt(curl, CURLOPT_XFERINFODATA, http);
+    curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);
     pthread_mutex_init(&http->mutex, NULL);
     return http;
+}
+
+void http_abort(HTTP *http) {
+    assert(http != NULL);
+    /* No lock: the request in progress holds it. */
+    __atomic_store_n(&http->aborted, 1, __ATOMIC_RELEASE);
 }
 
 int http_request(HTTP *http, char *url, HTTP_DATA *data) {

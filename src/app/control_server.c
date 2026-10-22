@@ -138,10 +138,10 @@ static void cmd_help(control_job_t *job)
                "set <name> <on|off>     a switch, without the remote: boost, light, rumble, tone, override, vmouse\n"
                "prompt [ok|dismiss]     the question a bridge raises: is it up, or answer it without a hand\n"
                "ui                      what is open on the screen: overlay, its keyboard, the panel, the align bar\n"
-               "press <key>[:ms] ...    keys into aurora-tv's own screens, as a keyboard types them; not in a stream\n"
+               "press <key>[:ms] ...    keys into aurora-tv's own screens, as a keyboard types them; not once a stream is up\n"
                "                        keys: up down left right enter esc home end backspace; :ms holds it (a long press)\n"
                "type <text>             characters into aurora-tv's own screens, a key each, as a keyboard types them\n"
-               "                        (Shift for capitals, ':' and '_'); letters, digits and . - _ : [ ]; not in a stream\n"
+               "                        (Shift for capitals, ':' and '_'); letters, digits and . - _ : [ ]; not once a stream is up\n"
                "host [<host>]           the launcher's host: which it shows, or pick one (a uuid or part of its name)\n"
                "input                   the stream's live input state: Bridge Override and what it switches\n"
                "keys                    key events counted since the app started: the TV's keyboard grab, and webOS\n"
@@ -444,10 +444,25 @@ static void cmd_shot(control_job_t *job, const char *args)
  * the Magic Remote's double report. `enter:600` holds it 600 ms, a long press.
  *
  * ⛔ Refused while a stream runs: there the keys would go to the host, into
- * whatever is in front on the PC. The overlay is not a target. */
+ * whatever is in front on the PC. The overlay is not a target.
+ * ⓘ But not while a stream is still connecting (2026-10-22): the host takes
+ * no keys yet, and the "Connecting..." box and its Cancel are on the screen. */
 #define PRESS_MAX 40
 #define PRESS_GAP_MS 150
 #define PRESS_TAP_MS 40
+
+/* Whether a stream would take the keys: one is up, not merely connecting. */
+static bool stream_takes_keys(void)
+{
+    session_t *session = s_app->session;
+    if (session == NULL) {
+        return false;
+    }
+    SDL_LockMutex(session->mutex);
+    const bool connecting = session->state == STREAMING_CONNECTING;
+    SDL_UnlockMutex(session->mutex);
+    return !connecting;
+}
 
 typedef struct press_step_t {
     SDL_Keycode sym;
@@ -572,7 +587,7 @@ static void press_start(control_job_t *job, const press_step_t *steps, int count
 
 static void cmd_press(control_job_t *job, const char *args)
 {
-    if (s_app->session != NULL) {
+    if (stream_takes_keys()) {
         reply(job, "ERR a stream is running: press drives aurora-tv's own screens only\n");
         return;
     }
@@ -618,7 +633,7 @@ static void cmd_press(control_job_t *job, const char *args)
 
 static void cmd_type(control_job_t *job, const char *args)
 {
-    if (s_app->session != NULL) {
+    if (stream_takes_keys()) {
         reply(job, "ERR a stream is running: type drives aurora-tv's own screens only\n");
         return;
     }

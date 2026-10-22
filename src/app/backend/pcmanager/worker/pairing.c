@@ -4,6 +4,7 @@
 
 #include "backend/pcmanager/priv.h"
 #include "backend/pcmanager/pclist.h"
+#include "backend/pcmanager/pair_cancel.h"
 
 #include <errno.h>
 
@@ -16,7 +17,10 @@ int worker_pairing(worker_context_t *context) {
     GS_CLIENT client = app_gs_client_new(context->app);
     PSERVER_DATA server = serverdata_clone(node->server);
     gs_set_timeout(client, 60);
+    /* This fork: a Cancel cuts the wait for the PIN short (pair_cancel.h). */
+    pair_cancel_watch(client, context->userdata);
     int ret = gs_pair(client, server, context->arg1);
+    pair_cancel_unwatch(client);
     gs_destroy(client);
     if (ret != GS_OK) {
         const char *gs_error = NULL;
