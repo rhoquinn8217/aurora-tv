@@ -70,6 +70,20 @@ void bridge_app_sdl_hints(void) {
      * Measured 2026-08-06 on the rooted monitor. */
     SDL_SetHint(SDL_HINT_JOYSTICK_HIDAPI_PS5, "1");
     SDL_SetHint(SDL_HINT_JOYSTICK_HIDAPI_PS5_RUMBLE, "1");
+    /* ⭐⭐ A PAD PLUGGED IN AFTER THE APP STARTED (2026-10-21).
+     *
+     * SDL learns of a new controller from udev, and inside webOS's app jail
+     * that news evidently never reaches it: SDL takes only the pads present
+     * when the app starts (the lab restarts the app for this reason). On the
+     * C1 an Xbox pad plugged in mid-stream (045e:0b12, on the xpad driver)
+     * never got an SDL player, so it did nothing, its overlay chord included.
+     * The arrival watch can make a PlayStation pad's HIDAPI driver look again;
+     * for a pad SDL reads through evdev it has no cure.
+     * ➡️ With udev off, SDL watches /dev/input itself with inotify, which does
+     * work in the jail: the arrival watch watches the same folder and saw that
+     * pad the moment it arrived. ⓘ Read once, when the joystick subsystem
+     * starts (app_input_init), which is after this. */
+    SDL_SetHint("SDL_JOYSTICK_DISABLE_UDEV", "1");
 #endif
 }
 
