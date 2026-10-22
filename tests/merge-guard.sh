@@ -521,6 +521,11 @@ in_order "the Stream actions button sits right after the host button" \
 in_order "closing the server window without a pick hands focus back to the top bar" \
      src/app/ui/launcher/server.popup.c "static void server_popup_deleted" \
      "app_input_remove_modal_group(" "launcher_restore_nav_focus(popup->launcher);"
+# ⛔ Without the second half, a window opened from it (the PIN window, a host's
+# menu) crashes the app when it closes: the input's own group is left freed.
+in_order "... and so does closing it under a window it opened (2026-10-22)" \
+     src/app/ui/launcher/server.popup.c "static void server_popup_deleted" \
+     "|| input->app_group == popup->group) {" "launcher_restore_nav_focus(popup->launcher);"
 
 # --- the running badge and the server cards (rhoquinn8217, 2026-10-20) ---
 # ⓘ Lines of ours in upstream's launcher. Taking upstream's back compiles, and:

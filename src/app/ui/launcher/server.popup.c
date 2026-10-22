@@ -312,8 +312,15 @@ static void server_popup_deleted(lv_event_t *e) {
         /* Closed without a server picked (Esc, Back, Close): the input still
          * points at this group, which is about to go, and every key would land
          * nowhere until a mouse click moved focus. Hand it back to the top bar,
-         * as picking a server hands it to the grid. (2026-10-17) */
-        if (app_input_get_group(&popup->launcher->global->ui.input) == popup->group) {
+         * as picking a server hands it to the grid. (2026-10-17)
+         * ⛔ And when a window opened on top as this one closed (a host not yet
+         * paired opens its PIN window; a long press, the host's menu), this
+         * group is still the input's own one under that window. Left there,
+         * closing that window hands every key to a freed group: SIGSEGV in
+         * lv_group_get_focused, on the rooted monitor at the PIN window's
+         * Cancel (2026-10-22). So it is handed back then too. */
+        app_ui_input_t *input = &popup->launcher->global->ui.input;
+        if (app_input_get_group(input) == popup->group || input->app_group == popup->group) {
             launcher_restore_nav_focus(popup->launcher);
         }
         lv_group_del(popup->group);
