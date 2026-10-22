@@ -575,11 +575,14 @@ in_order "clicking outside Help closes it" \
      src/app/ui/help/help.dialog.c "lv_obj_t *help_dialog_create" \
      "lv_msgbox_create(NULL, locstr(\"Help\")" "click_away_closes(msgbox);"
 
-# --- the Settings section's card, taller (rhoquinn8217, 2026-10-22) ---
-# ⓘ A line of ours at the end of upstream's settings_show_pane_popup. Taking
-# upstream's back compiles, and the card is upstream's again: 840 px of 1080,
-# centred (src/app/ui/settings/settings_card.c).
-# It must come AFTER upstream's centring, which would otherwise move it back.
+# --- the Settings windows, taller (rhoquinn8217, 2026-10-22) ---
+# ⓘ A line of ours in each of two functions of upstream's. Taking upstream's
+# back compiles, and that window is upstream's again: centred and shorter
+# (src/app/ui/settings/settings_card.c). Each must come AFTER upstream's
+# centring, which would otherwise move it back.
+in_order "the gear's Settings window reaches from under the top bar" \
+     src/app/ui/settings/settings.controller.c "lv_obj_t *settings_launcher_embedded_create" \
+     "lv_obj_center(panel);" "settings_window_under_topbar(panel);"
 in_order "a Settings section opens in a card from under the top bar" \
      src/app/ui/settings/settings.controller.c "static void settings_show_pane_popup" \
      "lv_obj_center(mbox);" "settings_card_under_topbar(mbox);"
