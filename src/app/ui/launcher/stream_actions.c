@@ -16,6 +16,7 @@
 #include "apps.controller.h"
 #include "backend/pcmanager.h"
 #include "coverloader.h"
+#include "profile/profile_manager.h"   /* the profile box: hidden with one profile */
 #include "util/path.h"
 #include "ui/common/click_away.h"
 #include "ui/common/progress_dialog.h"
@@ -98,9 +99,10 @@ static int s_running_id;
 static lv_obj_t *s_progress;
 /* The menu's pictures, kept while it is open. */
 static coverloader_t *s_menu_covers;
-/* The button's own: what streams, its small picture, and that picture's
- * loader, kept with the button. What it shows now, so it is redrawn only
- * when that changes (the list reloads every few seconds). */
+/* The button's own: the word "Streaming:", what streams, its small picture,
+ * and that picture's loader, kept with the button. What it shows now, so it
+ * is redrawn only when that changes (the list reloads every few seconds). */
+static lv_obj_t *s_btn_word;
 static lv_obj_t *s_btn_name;
 static lv_obj_t *s_btn_picture;
 static coverloader_t *s_btn_covers;
@@ -245,6 +247,62 @@ static shown_state_t streaming_now(int *picture, char *name, size_t len) {
     return SHOWN_NONE;
 }
 
+/* The narrowest the button's name is made, however full the bar. */
+#define NAME_MIN_DPX 24
+
+/* A label as wide as `text` when that fits in `room`, else `room` wide and one
+ * line high, which LVGL ends with dots. `text` is the label's whole text:
+ * ⚠️ once dotted, the label's own text reads back cut. ⓘ A label left as wide
+ * as its text is never dotted, only clipped at its largest width, mid-letter:
+ * LVGL lays that text out as one line it never breaks (LV_TEXT_FLAG_FIT), and
+ * dots replace only what a second line would hold. */
+static void fit_label(lv_obj_t *label, const char *text, lv_coord_t room) {
+    const lv_font_t *font = lv_obj_get_style_text_font(label, LV_PART_MAIN);
+    lv_point_t size;
+    lv_txt_get_size(&size, text, font, lv_obj_get_style_text_letter_space(label, LV_PART_MAIN),
+                    lv_obj_get_style_text_line_space(label, LV_PART_MAIN), LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+    lv_obj_set_width(label, size.x <= room ? LV_SIZE_CONTENT : room);
+    lv_obj_set_height(label, lv_font_get_line_height(font));
+}
+
+/* rhoquinn8217, 2026-10-21: "lets add by the full Game/App name after the mini
+ * tile". The name has the room the top bar leaves once everything else in it
+ * is laid out, as the bar's own row lays it out (lv_flex.c: the shown children
+ * and a gap between each two), and is cut with dots past that, so a long one
+ * never pushes the buttons after it off the screen, as in 557. ⓘ The room
+ * leaves out the name's own width, so fitting it never changes the room. */
+static void fit_button_name(void) {
+    if (s_btn == NULL || s_btn_name == NULL) {
+        return;
+    }
+    lv_obj_t *bar = lv_obj_get_parent(s_btn);
+    lv_obj_update_layout(bar);   /* inside a layout it does nothing, and the bar is current */
+    lv_coord_t room = lv_obj_get_content_width(bar) - (lv_obj_get_width(s_btn) - lv_obj_get_width(s_btn_name));
+    const lv_coord_t gap = lv_obj_get_style_pad_column(bar, LV_PART_MAIN);
+    int shown = 0;
+    for (uint32_t i = 0; i < lv_obj_get_child_cnt(bar); i++) {
+        lv_obj_t *child = lv_obj_get_child(bar, (int32_t) i);
+        if (lv_obj_has_flag_any(child, LV_OBJ_FLAG_HIDDEN | LV_OBJ_FLAG_IGNORE_LAYOUT | LV_OBJ_FLAG_FLOATING)) {
+            continue;
+        }
+        if (shown++ > 0) {
+            room -= gap;
+        }
+        if (child != s_btn && lv_obj_get_style_flex_grow(child, LV_PART_MAIN) == 0) {
+            room -= lv_obj_get_width(child);
+        }
+    }
+    fit_label(s_btn_name, s_shown_name, LV_MAX(room, LV_DPX(NAME_MIN_DPX)));
+}
+
+/* The bar laid out again: what else is in it may have changed width (the host
+ * button names another host). Only the bar's own; its buttons' bubble up. */
+static void bar_laid_out(lv_event_t *event) {
+    if (lv_event_get_target(event) == lv_event_get_current_target(event)) {
+        fit_button_name();
+    }
+}
+
 static void update_button(void) {
     if (s_btn == NULL || s_btn_name == NULL) {
         return;
@@ -258,16 +316,19 @@ static void update_button(void) {
     s_shown_picture_id = picture;
     snprintf(s_shown_name, sizeof(s_shown_name), "%s", name);
     lv_label_set_text(s_btn_name, name);
-    /* rhoquinn8217, 2026-10-20: "change it to just "Streaming: <tile>"". The
-     * tile's picture alone, its name being in the menu's status line; the word
-     * only when there is no tile ("Streaming: None"). */
+    /* rhoquinn8217, 2026-10-20: "change it to just "Streaming: <tile>"", and
+     * 2026-10-22, with the name after the tile: "drop the "Streaming:"". The
+     * tile's picture and its name; the word only when there is no tile
+     * ("Streaming: None"). */
     if (picture == 0 || s_app == NULL) {
         lv_obj_add_flag(s_btn_picture, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_clear_flag(s_btn_name, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_clear_flag(s_btn_word, LV_OBJ_FLAG_HIDDEN);
+        fit_button_name();
         return;
     }
-    lv_obj_add_flag(s_btn_name, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(s_btn_word, LV_OBJ_FLAG_HIDDEN);
     lv_obj_clear_flag(s_btn_picture, LV_OBJ_FLAG_HIDDEN);
+    fit_button_name();
     if (s_btn_covers == NULL) {
         s_btn_covers = coverloader_new(s_app);
     }
@@ -618,10 +679,10 @@ void stream_actions_button(launcher_fragment_t *launcher, lv_obj_t *topbar) {
     lv_img_set_antialias(picture, true);
     lv_obj_add_flag(picture, LV_OBJ_FLAG_HIDDEN);
 
+    /* Its width is the room the bar leaves it: fit_button_name. */
     lv_obj_t *name = lv_label_create(btn);
     lv_obj_set_style_text_font(name, lv_theme_get_font_small(btn), 0);
     lv_label_set_long_mode(name, LV_LABEL_LONG_DOT);
-    lv_obj_set_style_max_width(name, LV_DPX(260), 0);
     lv_label_set_text_static(name, locstr("None"));
     lv_obj_clear_flag(name, LV_OBJ_FLAG_CLICKABLE);
 
@@ -632,7 +693,9 @@ void stream_actions_button(launcher_fragment_t *launcher, lv_obj_t *topbar) {
 
     lv_obj_add_event_cb(btn, button_clicked, LV_EVENT_CLICKED, NULL);
     lv_obj_add_event_cb(btn, button_deleted, LV_EVENT_DELETE, NULL);
+    lv_obj_add_event_cb(topbar, bar_laid_out, LV_EVENT_LAYOUT_CHANGED, NULL);
     s_btn = btn;
+    s_btn_word = label;
     s_btn_name = name;
     s_btn_picture = picture;
     s_shown_picture_id = -1;
@@ -682,6 +745,15 @@ void stream_actions_button(launcher_fragment_t *launcher, lv_obj_t *topbar) {
         lv_obj_set_height(child, height);
         break;
     }
+    /* rhoquinn8217, 2026-10-21, of that profile box: "Hide it". Upstream's
+     * v1.2.0 took out the buttons that made, renamed and deleted profiles, so
+     * a set has the one, Default, and the box chooses nothing. Hidden, and out
+     * of the bar's focus group so no key can land on it; shown as upstream
+     * made it only on a set still holding more than one profile from before. */
+    if (launcher->profile_dropdown != NULL && profile_manager_count() <= 1) {
+        lv_obj_add_flag(launcher->profile_dropdown, LV_OBJ_FLAG_HIDDEN);
+        lv_group_remove_obj(launcher->profile_dropdown);
+    }
     update_button();
 }
 
@@ -701,6 +773,7 @@ static void covers_unref_later(void *covers) {
 static void button_deleted(lv_event_t *event) {
     if (lv_event_get_target(event) == s_btn) {
         s_btn = NULL;
+        s_btn_word = NULL;
         s_btn_name = NULL;
         s_btn_picture = NULL;
         if (s_btn_covers != NULL) {
@@ -869,8 +942,8 @@ static lv_obj_t *add_status(lv_obj_t *content) {
         add_picture(line, picture, LV_DPX(18), LV_DPX(24));
         lv_obj_t *after = lv_label_create(line);
         lv_label_set_long_mode(after, LV_LABEL_LONG_DOT);
-        lv_obj_set_style_max_width(after, LV_DPX(320), 0);
         lv_label_set_text(after, name);
+        fit_label(after, name, LV_DPX(320));
     }
     return line;
 }
@@ -987,11 +1060,22 @@ int stream_actions_running_id(const uuidstr_t *host, int reported) {
     return s_running_id;
 }
 
-bool stream_actions_tile_badged(const uuidstr_t *host, int running_id, int app_id) {
-    if (app_id != 0 && app_id == running_id) {
-        return true;
+static void show_stop_badge(lv_obj_t *row, bool shown);
+
+bool stream_actions_tile_badged(const uuidstr_t *host, int running_id, int app_id, lv_obj_t *badge) {
+    const bool role = s_role_tile != 0 && app_id == s_role_tile && host != NULL && uuidstr_t_equals_t(host, &s_host);
+    if (!role && (app_id == 0 || app_id != running_id)) {
+        return false;
     }
-    return s_role_tile != 0 && app_id == s_role_tile && host != NULL && uuidstr_t_equals_t(host, &s_host);
+    /* rhoquinn8217, 2026-10-21: "For other TVs, only show the play button and
+     * remove the stop button. Other TV's will need to use the streaming action
+     * to terminate a stream made from another TV." The host names the running
+     * app only to the TV that started it, so on any other the stop goes, and
+     * Terminate stays in the Streaming menu. ⓘ This TV's Remote Monitor or
+     * Remote Input tile keeps its stop: that disconnects only this TV. */
+    const bool started_here = host != NULL && pcmanager_server_current_app(pcmanager, host) == app_id;
+    show_stop_badge(badge, role || started_here);
+    return true;
 }
 
 /* rhoquinn8217, 2026-10-20, of that badge: "I don't like the large purple play
@@ -1169,6 +1253,27 @@ static void badge_clicked(lv_event_t *event);
 static void badge_deleted(lv_event_t *event);
 
 static void hover_tick(lv_timer_t *timer);
+
+/* The stop of a tile's badge row, shown or hidden. ⓘ A tile is reused as the
+ * grid scrolls, so this is set every time a tile is bound, both ways. A row
+ * without pictures (upstream's circle, when they could not be made) has no
+ * stop to touch. */
+static void show_stop_badge(lv_obj_t *row, bool shown) {
+    if (row == NULL) {
+        return;
+    }
+    for (uint32_t i = 0; i < lv_obj_get_child_cnt(row); i++) {
+        lv_obj_t *img = lv_obj_get_child(row, (int32_t) i);
+        if ((badge_symbol_t) (intptr_t) lv_obj_get_user_data(img) != BADGE_STOP) {
+            continue;
+        }
+        if (shown) {
+            lv_obj_clear_flag(img, LV_OBJ_FLAG_HIDDEN);
+        } else {
+            lv_obj_add_flag(img, LV_OBJ_FLAG_HIDDEN);
+        }
+    }
+}
 
 static void add_badge(lv_obj_t *row, lv_coord_t size, badge_symbol_t symbol, lv_align_t align) {
     lv_obj_t *img = lv_img_create(row);

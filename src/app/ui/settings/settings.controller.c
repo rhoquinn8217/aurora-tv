@@ -20,6 +20,7 @@
 #include "../launcher/launcher.controller.h"
 #include "panes/pref_obj.h"
 #include "lvgl/input/lv_drv_sdl_key.h"
+#include "settings_card.h"
 
 typedef struct {
     const char *icon;
@@ -1571,6 +1572,7 @@ static void settings_show_pane_popup(settings_controller_t *c, const lv_fragment
 
     lv_obj_add_event_cb(mbox, embed_pane_mbox_delete_cb, LV_EVENT_DELETE, c);
     lv_obj_center(mbox);
+    settings_card_under_topbar(mbox);
 }
 
 static void settings_style_embed_panel(lv_obj_t *panel) {

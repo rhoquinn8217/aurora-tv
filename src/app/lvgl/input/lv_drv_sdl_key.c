@@ -16,6 +16,7 @@
 #include "lv_drv_sdl_key.h"
 #include "stream/session_events.h"
 #include "input/bridge_keyboard.h"
+#include "ui/common/type_into_box.h"
 
 #if TARGET_WEBOS
 
@@ -422,6 +423,9 @@ static bool read_event(const SDL_Event *event, lv_drv_sdl_key_t *state) {
 
 static bool read_keyboard(app_ui_input_t *input, const SDL_KeyboardEvent *event, lv_drv_sdl_key_t *state) {
     bool pressed = event->type == SDL_KEYDOWN;
+    if (type_into_box_key(event)) {
+        return false;
+    }
     switch (event->keysym.sym) {
         case SDLK_UP:
             state->key = LV_KEY_UP;

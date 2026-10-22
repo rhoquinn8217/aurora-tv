@@ -139,7 +139,9 @@ static void cmd_help(control_job_t *job)
                "prompt [ok|dismiss]     the question a bridge raises: is it up, or answer it without a hand\n"
                "ui                      what is open on the screen: overlay, its keyboard, the panel, the align bar\n"
                "press <key>[:ms] ...    keys into aurora-tv's own screens, as a keyboard types them; not in a stream\n"
-               "                        keys: up down left right enter esc home end; :ms holds it (a long press)\n"
+               "                        keys: up down left right enter esc home end backspace; :ms holds it (a long press)\n"
+               "type <text>             characters into aurora-tv's own screens, a key each, as a keyboard types them\n"
+               "                        (Shift for capitals, ':' and '_'); letters, digits and . - _ : [ ]; not in a stream\n"
                "host [<host>]           the launcher's host: which it shows, or pick one (a uuid or part of its name)\n"
                "input                   the stream's live input state: Bridge Override and what it switches\n"
                "keys                    key events counted since the app started: the TV's keyboard grab, and webOS\n"
@@ -443,13 +445,14 @@ static void cmd_shot(control_job_t *job, const char *args)
  *
  * ⛔ Refused while a stream runs: there the keys would go to the host, into
  * whatever is in front on the PC. The overlay is not a target. */
-#define PRESS_MAX 16
+#define PRESS_MAX 40
 #define PRESS_GAP_MS 150
 #define PRESS_TAP_MS 40
 
 typedef struct press_step_t {
     SDL_Keycode sym;
     SDL_Scancode scan;
+    SDL_Keymod mod;
     uint32_t hold_ms;
 } press_step_t;
 
@@ -476,15 +479,51 @@ static bool press_key_named(const char *name, press_step_t *step)
             {"back",  SDLK_ESCAPE, SDL_SCANCODE_ESCAPE},
             {"home",  SDLK_HOME,   SDL_SCANCODE_HOME},
             {"end",   SDLK_END,    SDL_SCANCODE_END},
+            {"backspace", SDLK_BACKSPACE, SDL_SCANCODE_BACKSPACE},
     };
     for (size_t i = 0; i < sizeof keys / sizeof keys[0]; i++) {
         if (strcasecmp(name, keys[i].name) == 0) {
             step->sym = keys[i].sym;
             step->scan = keys[i].scan;
+            step->mod = KMOD_NONE;
             return true;
         }
     }
     return false;
+}
+
+/* type: the key a keyboard types `c` with (2026-10-22). A box takes a
+ * keyboard's keys as SDL key events while its text input is off
+ * (ui/common/type_into_box.h), and no keyboard the lab makes reaches the app
+ * outside a stream: webOS's compositor reads only keyboards it opened itself,
+ * which neither ctm-vdev's nor one made through uinput is. These go in where a
+ * keyboard's keys do. */
+static bool type_key_for(char c, press_step_t *step)
+{
+    step->mod = KMOD_NONE;
+    if (c >= 'a' && c <= 'z') {
+        step->sym = (SDL_Keycode) c;
+    } else if (c >= 'A' && c <= 'Z') {
+        step->sym = (SDL_Keycode) (c - 'A' + 'a');
+        step->mod = KMOD_LSHIFT;
+    } else if (c >= '0' && c <= '9') {
+        step->sym = (SDL_Keycode) c;
+    } else if (c == '.') {
+        step->sym = SDLK_PERIOD;
+    } else if (c == '-' || c == '_') {
+        step->sym = SDLK_MINUS;
+        step->mod = c == '_' ? KMOD_LSHIFT : KMOD_NONE;
+    } else if (c == ':') {
+        step->sym = SDLK_SEMICOLON;
+        step->mod = KMOD_LSHIFT;
+    } else if (c == '[' || c == ']') {
+        step->sym = c == '[' ? SDLK_LEFTBRACKET : SDLK_RIGHTBRACKET;
+    } else {
+        return false;
+    }
+    step->scan = SDL_GetScancodeFromKey(step->sym);
+    step->hold_ms = PRESS_TAP_MS;
+    return true;
 }
 
 static void press_push(const press_step_t *step, bool down)
@@ -496,6 +535,7 @@ static void press_push(const press_step_t *step, bool down)
     event.key.state = down ? SDL_PRESSED : SDL_RELEASED;
     event.key.keysym.sym = step->sym;
     event.key.keysym.scancode = step->scan;
+    event.key.keysym.mod = step->mod;
     SDL_PushEvent(&event);
 }
 
@@ -517,6 +557,17 @@ static void press_tick(lv_timer_t *timer)
         s_press_next++;
         lv_timer_set_period(timer, PRESS_GAP_MS);
     }
+}
+
+/* The keys of press or type go in on the interface's own timer, one at a time. */
+static void press_start(control_job_t *job, const press_step_t *steps, int count, uint32_t total_ms)
+{
+    memcpy(s_press, steps, sizeof(press_step_t) * count);
+    s_press_count = count;
+    s_press_next = 0;
+    s_press_down = false;
+    s_press_timer = lv_timer_create(press_tick, 1, NULL);
+    reply(job, "OK pressing %d key(s), done in about %u ms\n", count, (unsigned) total_ms);
 }
 
 static void cmd_press(control_job_t *job, const char *args)
@@ -559,15 +610,40 @@ static void cmd_press(control_job_t *job, const char *args)
         count++;
     }
     if (count == 0) {
-        reply(job, "ERR usage: press <key>[:ms] ...  keys: up down left right enter esc home end\n");
+        reply(job, "ERR usage: press <key>[:ms] ...  keys: up down left right enter esc home end backspace\n");
         return;
     }
-    memcpy(s_press, steps, sizeof(press_step_t) * count);
-    s_press_count = count;
-    s_press_next = 0;
-    s_press_down = false;
-    s_press_timer = lv_timer_create(press_tick, 1, NULL);
-    reply(job, "OK pressing %d key(s), done in about %u ms\n", count, (unsigned) total_ms);
+    press_start(job, steps, count, total_ms);
+}
+
+static void cmd_type(control_job_t *job, const char *args)
+{
+    if (s_app->session != NULL) {
+        reply(job, "ERR a stream is running: type drives aurora-tv's own screens only\n");
+        return;
+    }
+    if (s_press_timer != NULL) {
+        reply(job, "ERR still pressing the last keys\n");
+        return;
+    }
+    press_step_t steps[PRESS_MAX];
+    int count = 0;
+    for (const char *c = args != NULL ? args : ""; *c != '\0' && *c != ' ' && *c != '\t' && *c != '\r'; c++) {
+        if (count == PRESS_MAX) {
+            reply(job, "ERR at most %d characters at a time\n", PRESS_MAX);
+            return;
+        }
+        if (!type_key_for(*c, &steps[count])) {
+            reply(job, "ERR no key types '%c': letters, digits and . - _ : [ ]\n", *c);
+            return;
+        }
+        count++;
+    }
+    if (count == 0) {
+        reply(job, "ERR usage: type <text>  letters, digits and . - _ : [ ]\n");
+        return;
+    }
+    press_start(job, steps, count, (uint32_t) count * (PRESS_TAP_MS + PRESS_GAP_MS));
 }
 
 static void cmd_keys(control_job_t *job)
@@ -1329,6 +1405,8 @@ static void run_command(control_job_t *job)
         cmd_ui(job);
     } else if (strcasecmp(verb, "press") == 0) {
         cmd_press(job, args);
+    } else if (strcasecmp(verb, "type") == 0) {
+        cmd_type(job, args);
     } else if (strcasecmp(verb, "host") == 0) {
         cmd_host(job, args);
     } else if (strcasecmp(verb, "crash") == 0) {
