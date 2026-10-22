@@ -4,6 +4,7 @@
 
 #include "control_server.h"
 #include "crash_recorder.h"
+#include "backend/pcmanager/priv.h"   /* pcmanager_save_known_hosts: the hosts saved first at quit */
 #include "ui/streaming/streaming.controller.h"   /* streaming_overlay_shown */
 #include "ui/streaming/bridge_prompt.h"
 #include "stream/bridge_session.h"         /* bridge_session_run_pending */
@@ -103,9 +104,16 @@ void bridge_app_stopping(void) {
      * monitor, twice); in SDL's video, an abort inside the TV's display system
      * (the C1, twice). Either way the save never ran, and a setting changed since
      * the Settings screen last saved was lost. Saved here, before anything is
-     * taken down; the save at the end writes the same file again. */
+     * taken down; the save at the end writes the same file again.
+     * ⭐ The hosts too: hosts.ini (each host's address, the one selected, its
+     * starred and hidden apps) is written only by pcmanager_destroy, later
+     * still, so a crash on the way out lost every star and hide of the session.
+     * Saved from this thread, as pcmanager_set_wake already does. */
     if (app_configuration != NULL) {
         settings_save(app_configuration);
+    }
+    if (pcmanager != NULL) {
+        pcmanager_save_known_hosts(pcmanager);
     }
     /* ⓘ A stop asked in the last pass of the loop still runs. */
     bridge_session_run_pending();
