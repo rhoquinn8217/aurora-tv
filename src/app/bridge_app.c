@@ -97,6 +97,16 @@ void bridge_app_started(app_t *app) {
 }
 
 void bridge_app_stopping(void) {
+    /* ⭐ THE SETTINGS FIRST (2026-10-21). app_deinit saves them last, after the
+     * screens and SDL's video are taken down, and the app has died in both as it
+     * quit: in the screens, a cover loader freed before its pictures (the lab's
+     * monitor, twice); in SDL's video, an abort inside the TV's display system
+     * (the C1, twice). Either way the save never ran, and a setting changed since
+     * the Settings screen last saved was lost. Saved here, before anything is
+     * taken down; the save at the end writes the same file again. */
+    if (app_configuration != NULL) {
+        settings_save(app_configuration);
+    }
     /* ⓘ A stop asked in the last pass of the loop still runs. */
     bridge_session_run_pending();
     control_server_stop();
