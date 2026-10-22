@@ -308,6 +308,15 @@ void server_cards_bind(lv_obj_t *tile, app_t *app, const uuidstr_t *host, const 
     }
 }
 
+/* ⛔ The loader goes only after the popup's pictures have, on LVGL's next pass.
+ * This runs in the popup box's DELETE, which LVGL sends before it deletes the
+ * tiles inside, and a tile's picture lets go of its cover in its own DELETE:
+ * freed here at once, the loader left the pictures letting go of covers
+ * already freed (the crash found in stream_actions.c, 2026-10-21). */
+static void loader_unref_later(void *loader) {
+    coverloader_unref(loader);
+}
+
 void server_cards_closed(void) {
     while (s_checks != NULL) {
         apploader_cancel(s_checks->loader);
@@ -315,7 +324,7 @@ void server_cards_closed(void) {
     }
     s_tile_count = 0;
     if (s_loader != NULL) {
-        coverloader_unref(s_loader);
+        lv_async_call(loader_unref_later, s_loader);
         s_loader = NULL;
     }
 }
