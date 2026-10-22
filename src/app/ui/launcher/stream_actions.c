@@ -685,13 +685,26 @@ void stream_actions_button(launcher_fragment_t *launcher, lv_obj_t *topbar) {
     update_button();
 }
 
+/* ⛔ A COVER LOADER GOES ONLY AFTER ITS PICTURES HAVE (the K5S's crash record,
+ * 2026-10-21). LVGL sends an object its DELETE before it deletes the object's
+ * children, and a picture the loader filled lets go of its cover in its own
+ * DELETE. A loader freed in the button's DELETE, or the menu's, left that
+ * picture letting go of a cover already freed: a crash (SIGSEGV in
+ * memcache_item_unref_obj) inside the very launch that deletes the launcher
+ * (lv_fragment_manager_push), on the C1 resuming Desktop and on the K5S
+ * starting a Remote Monitor. So the loader goes on LVGL's next pass, once the
+ * whole deletion is done. */
+static void covers_unref_later(void *covers) {
+    coverloader_unref(covers);
+}
+
 static void button_deleted(lv_event_t *event) {
     if (lv_event_get_target(event) == s_btn) {
         s_btn = NULL;
         s_btn_name = NULL;
         s_btn_picture = NULL;
         if (s_btn_covers != NULL) {
-            coverloader_unref(s_btn_covers);
+            lv_async_call(covers_unref_later, s_btn_covers);
             s_btn_covers = NULL;
         }
     }
@@ -784,7 +797,7 @@ static bool entry_action(const menu_entry_t *entry, stream_action_t *out) {
 static void menu_deleted(lv_event_t *event) {
     (void) event;
     if (s_menu_covers != NULL) {
-        coverloader_unref(s_menu_covers);
+        lv_async_call(covers_unref_later, s_menu_covers);   /* after its pictures */
         s_menu_covers = NULL;
     }
 }
