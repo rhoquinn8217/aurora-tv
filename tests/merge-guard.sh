@@ -338,6 +338,10 @@ esac
 # points to it, and these checks take over the warnings it carried.
 need "a pad already opened is not opened again" \
      src/app/input/input_event.c "app_input_gamepad_state_by_instance_id(input, joy_instance_id) != NULL"
+need "the pad scan's flush waits until SDL's walk of its event queue is over" \
+     src/app/input/input_gamepad.c "ctm_bridge_gesture_flush_device_added();"
+absent "the pad scan does NOT flush SDL's event queue itself (inside the walk, it tangles the queue)" \
+     src/app/input/input_gamepad.c "SDL_FlushEvent(SDL_JOYDEVICEADDED)"
 need "the host's lightbar waits while a bridge signal draws" \
      src/app/input/input_gamepad.c "ctm_bridge_gesture_light_busy(state->controller)"
 need_count "upstream's wired feedback stays off a pad the bridge is using, at all four entry points" \

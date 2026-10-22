@@ -32,6 +32,35 @@ a single DualSense Edge connected.
 
 **Merge guard:** "a pad already opened is not opened again".
 
+## The scan's flush
+
+**Where:** `src/app/input/input_gamepad.c`, `app_input_scan_gamepads()`, where
+upstream calls `SDL_FlushEvent` for the two ADDED events.
+
+Upstream drops the ADDED events its scan made redundant. It also runs that scan
+when a stream opens (`session_input_started`), which is reached from inside
+`SDL_FilterEvents`, the app's event loop. SDL takes the next entry of its queue
+before it hands over the current one. When the flush cuts that next entry, SDL
+moves it to its list of spent entries with its link pointing there, so the walk
+goes on through spent entries, delivering old events a second time, and SDL's
+two lists end up tangled.
+
+Seen on 2026-10-21 on the C1 (573), the best fit and not yet proven: a
+Connecting box and its hint over a running stream (an old
+`USER_STREAM_CONNECTING` delivered after the stream opened), then SIGABRT at
+each quit, glibc finding a double free while `SDL_StopEventLoop` frees those
+lists.
+
+`ctm_bridge_gesture_flush_device_added()` (input/ctm_bridge_gesture.c) flushes
+at once from any other thread, where the queue's lock keeps it out of a walk, and
+on the event loop's thread waits for the next tick, after the walk. An ADDED
+event delivered meanwhile does no harm: "A pad opened twice" above, and the
+stream announces a pad once (`announcedGamepadMask`).
+
+The merge guard keeps the call and checks that upstream's two `SDL_FlushEvent`
+lines do not come back there. If an upstream release drops the flush, drop the
+call with it.
+
 ## The host's lightbar
 
 **Where:** `src/app/input/input_gamepad.c`,
