@@ -71,6 +71,23 @@ void bridge_app_sdl_hints(void) {
      * Measured 2026-08-06 on the rooted monitor. */
     SDL_SetHint(SDL_HINT_JOYSTICK_HIDAPI_PS5, "1");
     SDL_SetHint(SDL_HINT_JOYSTICK_HIDAPI_PS5_RUMBLE, "1");
+    /* ⭐⭐ A PAD PLUGGED IN WHILE THE APP RUNS, AND SOMETIMES MISSED (2026-10-21).
+     *
+     * The app's jail has no /run, so libudev cannot see udevd
+     * (/run/udev/control) and SDL's "udev" monitor hears the kernel's own
+     * announcement instead (netlink group 1, measured on the rooted monitor).
+     * That comes before udevd has made the new /dev node usable. SDL waits
+     * 10 ms, opens it once, and when that open fails it never tries again:
+     * the pad gets no player, its buttons and the overlay chord do nothing,
+     * and only a replug or an app restart brings it (an Xbox pad on the C1,
+     * 2026-10-21; the 2026-09-22 row in reported-bugs). The arrival watch can
+     * cure a PlayStation pad through its HIDAPI driver; nothing covered a pad
+     * on evdev.
+     * ➡️ With udev off, SDL's evdev path watches /dev/input with inotify
+     * instead, and looks again when a node's permissions change, the moment
+     * it becomes usable (SDL's own comment beside that watch says so). ⓘ Read
+     * once, when the joystick subsystem starts (app_input_init), after this. */
+    SDL_SetHint("SDL_JOYSTICK_DISABLE_UDEV", "1");
 #endif
 }
 
