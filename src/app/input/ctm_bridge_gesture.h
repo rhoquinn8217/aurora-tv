@@ -112,6 +112,10 @@ bool ctm_bridge_gesture_mac_for_node(const char *node, char *out, size_t out_len
  * what it decided. */
 void ctm_bridge_gesture_note(const char *fmt, ...);
 
+/* In place of upstream's two SDL_FlushEvent calls in app_input_scan_gamepads:
+ * the same flush, never inside SDL_FilterEvents (see the .c file). */
+void ctm_bridge_gesture_flush_device_added(void);
+
 #else
 
 /* ⓘ The desktop build has no bridge gesture. Every call that code compiled for
@@ -122,6 +126,8 @@ void ctm_bridge_gesture_note(const char *fmt, ...);
 #define ctm_bridge_gesture_note(...) ((void)0)
 #define ctm_bridge_gesture_reset(id) ((void)0)
 #define ctm_bridge_gesture_light_busy(controller) ((void)(controller), 0)
+#define ctm_bridge_gesture_flush_device_added() \
+    (SDL_FlushEvent(SDL_JOYDEVICEADDED), SDL_FlushEvent(SDL_CONTROLLERDEVICEADDED))
 
 #endif
 

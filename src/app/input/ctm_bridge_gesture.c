@@ -2335,8 +2335,49 @@ static void gesture_overlay_requested(void) {
     bus_pushevent(USER_OPEN_OVERLAY, NULL, NULL);
 }
 
+/* ⛔⛔ NOT INSIDE SDL_FilterEvents (2026-10-21). Upstream's pad scan
+ * (app_input_scan_gamepads) drops the ADDED events it has made redundant with
+ * SDL_FlushEvent, and upstream runs that scan when a stream opens
+ * (session_input_started), which is reached from inside SDL_FilterEvents: the
+ * app's event loop. SDL takes the next entry of its queue before it hands over
+ * the current one, and when the flush cuts that next entry, SDL moves it to its
+ * list of spent entries with its link pointing there: the walk goes on through
+ * spent entries, delivering old events a second time, and SDL's two lists end
+ * up tangled.
+ * ⓘ The best fit for what the C1 showed that evening on 573, not yet proven: a
+ * Connecting box and its hint over a running stream (an old
+ * USER_STREAM_CONNECTING delivered after the stream opened), then SIGABRT at
+ * each quit, glibc finding a double free while SDL frees those lists
+ * (SDL_QuitSubSystem > SDL_EventsQuit > SDL_StopEventLoop > SDL_free >
+ * _int_free > malloc_printerr).
+ * ➡️ So on the event loop's thread the flush waits for the next tick, which
+ * runs after the walk (bridge_app_events). An ADDED event delivered meanwhile
+ * does no harm: the opener and the stream's arrival both skip a pad they
+ * already hold. From any other thread (the session worker's scan) it runs at
+ * once: the queue's lock keeps it out of a walk. */
+static SDL_atomic_t s_flush_added_pending;
+static SDL_threadID s_event_loop_thread;   /* learned at the first tick */
+
+static void flush_device_added_now(void) {
+    SDL_FlushEvent(SDL_JOYDEVICEADDED);
+    SDL_FlushEvent(SDL_CONTROLLERDEVICEADDED);
+}
+
+void ctm_bridge_gesture_flush_device_added(void) {
+    if (s_event_loop_thread != 0 && SDL_ThreadID() == s_event_loop_thread) {
+        SDL_AtomicSet(&s_flush_added_pending, 1);
+        return;
+    }
+    flush_device_added_now();
+}
+
 void ctm_bridge_gesture_tick(struct app_input_t *input, struct session_t *session,
                              bool overlay_open) {
+    /* The scan's flush, now that SDL's walk of its queue is over (above). */
+    s_event_loop_thread = SDL_ThreadID();
+    if (SDL_AtomicSet(&s_flush_added_pending, 0)) {
+        flush_device_added_now();
+    }
     /* ⭐ T-179: has a controller arrived that SDL never heard about? See the
      * long note beside arrival_watch_tick. Cheap, and silent until a device
      * node appears. */

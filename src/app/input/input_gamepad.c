@@ -110,8 +110,7 @@ int app_input_scan_gamepads(app_input_t *input) {
     }
     /* Drop ADDED events queued while we opened during scan — otherwise the
      * event loop re-opens / re-announces the same DualSense as a second pad. */
-    SDL_FlushEvent(SDL_JOYDEVICEADDED);
-    SDL_FlushEvent(SDL_CONTROLLERDEVICEADDED);
+    ctm_bridge_gesture_flush_device_added();   /* This fork: never inside SDL_FilterEvents. Why: ctmbridge/NOTES.md, "The scan's flush". */
     if (opened > 0) {
         commons_log_info("Input", "Gamepad scan opened %d additional controller(s); mask=0x%x count=%d",
                          opened, input->activeGamepadMask, app_input_get_gamepads_count(input));
