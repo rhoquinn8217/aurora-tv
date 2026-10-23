@@ -19,6 +19,7 @@
 
 #include "http.h"
 #include "errors.h"
+#include "host_gate.h"
 #include "set_error.h"
 #include "logging.h"
 
@@ -111,7 +112,7 @@ void http_abort(HTTP *http) {
     __atomic_store_n(&http->aborted, 1, __ATOMIC_RELEASE);
 }
 
-int http_request(HTTP *http, char *url, HTTP_DATA *data) {
+static int request_once(HTTP *http, char *url, HTTP_DATA *data) {
     assert(http != NULL);
     assert(data != NULL);
     if (data->size > 0) {
@@ -154,7 +155,19 @@ int http_request(HTTP *http, char *url, HTTP_DATA *data) {
     return ret;
 }
 
-int http_post_json(HTTP *http, char *url, const char *payload, HTTP_DATA *data) {
+/* This fork (2026-10-22): one HTTPS request at a time to each host, and an
+ * answer the host spoiled is asked again (host_gate.h). */
+int http_request(HTTP *http, char *url, HTTP_DATA *data) {
+    host_gate_t *gate = host_gate_enter(url, &http->aborted);
+    int ret, attempt = 0;
+    do {
+        ret = request_once(http, url, data);
+    } while (host_gate_ask_again(url, ret, data, attempt++, &http->aborted));
+    host_gate_leave(gate);
+    return ret;
+}
+
+static int post_json_once(HTTP *http, char *url, const char *payload, HTTP_DATA *data) {
     assert(http != NULL);
     assert(data != NULL);
     if (data->size > 0) {
@@ -190,6 +203,14 @@ int http_post_json(HTTP *http, char *url, const char *payload, HTTP_DATA *data) 
     ret = GS_OK;
     finish:
     pthread_mutex_unlock(&http->mutex);
+    return ret;
+}
+
+/* This fork (2026-10-22): one HTTPS request at a time to each host (host_gate.h). */
+int http_post_json(HTTP *http, char *url, const char *payload, HTTP_DATA *data) {
+    host_gate_t *gate = host_gate_enter(url, &http->aborted);
+    int ret = post_json_once(http, url, payload, data);
+    host_gate_leave(gate);
     return ret;
 }
 

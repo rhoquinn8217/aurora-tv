@@ -640,6 +640,19 @@ in_order "... and a cancelled start ends with no error shown" \
      src/app/stream/session_worker.c "int session_worker(session_t *session) {" \
      "connect_cancel_done(session, client);" "gs_destroy(client);"
 
+# --- One HTTPS request at a time to each host (2026-10-22) ---
+# ⓘ libgamestream's http.c sends every request through our host_gate.c. Taking
+# upstream's back compiles, and the TV again overlaps its own HTTPS requests,
+# which Vibepollo 2.0 answers as if the TV were not paired: the launcher shows a
+# paired PC as "Not paired" with a Pair button, or one "Permission denied" app
+# (core/libgamestream/src/host_gate.c).
+need "an HTTPS request waits for the host's previous one, and a spoiled answer is asked again" \
+     core/libgamestream/src/http.c "} while (host_gate_ask_again(url, ret, data, attempt++, &http->aborted));"
+need "... and a JSON post waits too" \
+     core/libgamestream/src/http.c "int ret = post_json_once(http, url, payload, data);"
+need "libgamestream builds the gate" \
+     core/libgamestream/src/CMakeLists.txt "host_gate.c"
+
 echo
 if [ "$fail" -eq 0 ]; then
     echo "⭐ merge guard: $pass checks, nothing lost"
