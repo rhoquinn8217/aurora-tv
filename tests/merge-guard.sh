@@ -505,7 +505,7 @@ in_order "the running app's badge shows on every TV, not only the one that start
      "stream_actions_running_id(&controller->uuid, pcmanager_server_current_app(" "lv_obj_clear_flag(holder->play_indicator, LV_OBJ_FLAG_HIDDEN);"
 in_order "... and on this TV's Remote Monitor or Remote Input tile (2026-10-20)" \
      src/app/ui/launcher/apps.controller.c "static void appitem_bind" \
-     "if (stream_actions_tile_badged(&controller->uuid, current_id, app->base.id)) {" "lv_obj_clear_flag(holder->play_indicator, LV_OBJ_FLAG_HIDDEN);"
+     "if (stream_actions_tile_badged(&controller->uuid, current_id, app->base.id, holder->play_indicator)) {" "lv_obj_clear_flag(holder->play_indicator, LV_OBJ_FLAG_HIDDEN);"
 in_order "a tile pressed while another app runs asks first" \
      src/app/ui/launcher/apps.controller.c "static void item_click_cb" \
      "if (stream_actions_tile_pressed(&controller->uuid, controller->apploader_apps, holder->app_id)) { return; }" \
@@ -574,6 +574,29 @@ in_order "clicking outside the add-a-computer window closes it" \
 in_order "clicking outside Help closes it" \
      src/app/ui/help/help.dialog.c "lv_obj_t *help_dialog_create" \
      "lv_msgbox_create(NULL, locstr(\"Help\")" "click_away_closes(msgbox);"
+
+# --- the Settings windows, taller (rhoquinn8217, 2026-10-22) ---
+# ⓘ A line of ours in each of two functions of upstream's. Taking upstream's
+# back compiles, and that window is upstream's again: centred and shorter
+# (src/app/ui/settings/settings_card.c). Each must come AFTER upstream's
+# centring, which would otherwise move it back.
+in_order "the gear's Settings window reaches from under the top bar" \
+     src/app/ui/settings/settings.controller.c "lv_obj_t *settings_launcher_embedded_create" \
+     "lv_obj_center(panel);" "settings_window_under_topbar(panel);"
+in_order "a Settings section opens in a card from under the top bar" \
+     src/app/ui/settings/settings.controller.c "static void settings_show_pane_popup" \
+     "lv_obj_center(mbox);" "settings_card_under_topbar(mbox);"
+
+# --- a keyboard types into the add-a-computer box (rhoquinn8217, 2026-10-22) ---
+# ⓘ A line of ours in each of two upstream files. Taking upstream's back
+# compiles, and a keyboard's keys reach the box only while it has focus, with
+# webOS's on-screen keyboard over the screen (src/app/ui/common/type_into_box.c).
+in_order "the add-a-computer box takes a keyboard's keys" \
+     src/app/ui/launcher/add.dialog.c "static lv_obj_t *create_dialog" \
+     "controller->input = ip_input;" "type_into_box(dialog, ip_input, btns, 1);"
+in_order "... which the interface's key reader hands it first" \
+     src/app/lvgl/input/lv_drv_sdl_key.c "static bool read_keyboard" \
+     "bool pressed = event->type == SDL_KEYDOWN;" "if (type_into_box_key(event)) {"
 
 echo
 if [ "$fail" -eq 0 ]; then

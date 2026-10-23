@@ -47,8 +47,10 @@ void stream_actions_take(const uuidstr_t *host, apploader_list_t *apps);
 int stream_actions_running_id(const uuidstr_t *host, int reported);
 
 /* Whether a tile wears the badges: the running app's (`running_id`, from the
- * call above), or this TV's Remote Monitor or Remote Input tile. */
-bool stream_actions_tile_badged(const uuidstr_t *host, int running_id, int app_id);
+ * call above), or this TV's Remote Monitor or Remote Input tile. When it does,
+ * `badge` (the tile's badge row) shows its stop only on the TV that started
+ * the app, and on that role tile. */
+bool stream_actions_tile_badged(const uuidstr_t *host, int running_id, int app_id, lv_obj_t *badge);
 
 /* An app's name, from the host's list as it last loaded (or the title of one
  * of the host's controls), or NULL if this host's list has not loaded. For a

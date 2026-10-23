@@ -666,7 +666,7 @@ static void appitem_bind(apps_fragment_t *controller, lv_obj_t *item, apploader_
     lv_label_set_text(holder->title, app->base.name);
 
     int current_id = stream_actions_running_id(&controller->uuid, pcmanager_server_current_app(pcmanager, &controller->uuid));
-    if (stream_actions_tile_badged(&controller->uuid, current_id, app->base.id)) {
+    if (stream_actions_tile_badged(&controller->uuid, current_id, app->base.id, holder->play_indicator)) {
         lv_obj_clear_flag(holder->play_indicator, LV_OBJ_FLAG_HIDDEN);
     } else {
         lv_obj_add_flag(holder->play_indicator, LV_OBJ_FLAG_HIDDEN);
