@@ -342,6 +342,12 @@ need "the pad scan's flush waits until SDL's walk of its event queue is over" \
      src/app/input/input_gamepad.c "ctm_bridge_gesture_flush_device_added();"
 absent "the pad scan does NOT flush SDL's event queue itself (inside the walk, it tangles the queue)" \
      src/app/input/input_gamepad.c "SDL_FlushEvent(SDL_JOYDEVICEADDED)"
+in_order "Connecting... closes an older box first" \
+     src/app/ui/streaming/streaming.controller.c "static bool on_event(lv_fragment_t *self, int code, void *userdata) {" \
+     "/* This fork: an older box goes first." "progress_dialog_create(locstr(\"Connecting...\"));"
+in_order "Disconnecting... closes a Connecting box still up first" \
+     src/app/ui/streaming/streaming.controller.c "static bool on_event(lv_fragment_t *self, int code, void *userdata) {" \
+     "/* This fork: a Connecting box still up goes first." "progress_dialog_create(locstr(\"Disconnecting...\"));"
 need "the host's lightbar waits while a bridge signal draws" \
      src/app/input/input_gamepad.c "ctm_bridge_gesture_light_busy(state->controller)"
 need_count "upstream's wired feedback stays off a pad the bridge is using, at all four entry points" \
