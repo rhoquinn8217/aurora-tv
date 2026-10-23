@@ -13,6 +13,7 @@
 #include "app_session.h"
 #include "backend/pcmanager/worker/worker.h"
 #include "app_settings.h"
+#include "connect_cancel.h"
 
 #if TARGET_WEBOS
 #include "platform/webos/game_mode.h"
@@ -72,6 +73,7 @@ int session_worker(session_t *session) {
                          session->config.stream.fps, session->config.stream.bitrate);
     }
     GS_CLIENT client = app_gs_client_new(app);
+    connect_cancel_watch(client);   /* This fork: Cancel on "Connecting..." (connect_cancel.h). */
     /* moonlight-tv + Sunshine PR #2424: webOS NDL Opus only accepts 6ch / 4
      * streams / 2 coupled with mapping [0,1,4,5,2,3] (FL FR SL SR FC LFE).
      * That is surroundParams=642014523. Without it the host sends WAVE order
@@ -229,6 +231,7 @@ int session_worker(session_t *session) {
     if (session->player != NULL) {
         SS4S_PlayerClose(session->player);
     }
+    connect_cancel_done(session, client);
     gs_destroy(client);
     bus_pushevent(USER_STREAM_FINISHED, NULL, NULL);
     app_bus_post(app, (bus_actionfunc) app_session_destroy, app);

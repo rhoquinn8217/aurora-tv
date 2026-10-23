@@ -19,6 +19,7 @@
 
 #include "http.h"
 #include "errors.h"
+#include "host_gate.h"
 #include "set_error.h"
 #include "logging.h"
 
@@ -37,7 +38,22 @@
 struct HTTP_T {
     CURL *curl;
     pthread_mutex_t mutex;
+    /* This fork: set by http_abort, from any thread. The request in progress,
+     * and every one after it, gives up. */
+    int aborted;
 };
+
+/* This fork (2026-10-22): curl asks this about once a second even while a
+ * request only waits, so a request told to give up ends within a second. The
+ * pairing request waits with no read timeout until the PIN is typed on the
+ * host (gs_pair), and a Cancel has to end it. */
+static int xferinfo_fn(void *clientp, curl_off_t dltotal, curl_off_t dlnow, curl_off_t ultotal, curl_off_t ulnow) {
+    (void) dltotal;
+    (void) dlnow;
+    (void) ultotal;
+    (void) ulnow;
+    return __atomic_load_n(&((struct HTTP_T *) clientp)->aborted, __ATOMIC_ACQUIRE) ? 1 : 0;
+}
 
 static size_t write_fn(void *contents, size_t size, size_t nmemb, void *userp) {
     size_t realsize = size * nmemb;
@@ -82,11 +98,21 @@ HTTP *http_create(const char *keydir) {
     struct HTTP_T *http = malloc(sizeof(struct HTTP_T));
     assert(http != NULL);
     http->curl = curl;
+    http->aborted = 0;
+    curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION, xferinfo_fn);
+    curl_easy_setopt(curl, CURLOPT_XFERINFODATA, http);
+    curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);
     pthread_mutex_init(&http->mutex, NULL);
     return http;
 }
 
-int http_request(HTTP *http, char *url, HTTP_DATA *data) {
+void http_abort(HTTP *http) {
+    assert(http != NULL);
+    /* No lock: the request in progress holds it. */
+    __atomic_store_n(&http->aborted, 1, __ATOMIC_RELEASE);
+}
+
+static int request_once(HTTP *http, char *url, HTTP_DATA *data) {
     assert(http != NULL);
     assert(data != NULL);
     if (data->size > 0) {
@@ -129,7 +155,19 @@ int http_request(HTTP *http, char *url, HTTP_DATA *data) {
     return ret;
 }
 
-int http_post_json(HTTP *http, char *url, const char *payload, HTTP_DATA *data) {
+/* This fork (2026-10-22): one HTTPS request at a time to each host, and an
+ * answer the host spoiled is asked again (host_gate.h). */
+int http_request(HTTP *http, char *url, HTTP_DATA *data) {
+    host_gate_t *gate = host_gate_enter(url, &http->aborted);
+    int ret, attempt = 0;
+    do {
+        ret = request_once(http, url, data);
+    } while (host_gate_ask_again(url, ret, data, attempt++, &http->aborted));
+    host_gate_leave(gate);
+    return ret;
+}
+
+static int post_json_once(HTTP *http, char *url, const char *payload, HTTP_DATA *data) {
     assert(http != NULL);
     assert(data != NULL);
     if (data->size > 0) {
@@ -165,6 +203,14 @@ int http_post_json(HTTP *http, char *url, const char *payload, HTTP_DATA *data) 
     ret = GS_OK;
     finish:
     pthread_mutex_unlock(&http->mutex);
+    return ret;
+}
+
+/* This fork (2026-10-22): one HTTPS request at a time to each host (host_gate.h). */
+int http_post_json(HTTP *http, char *url, const char *payload, HTTP_DATA *data) {
+    host_gate_t *gate = host_gate_enter(url, &http->aborted);
+    int ret = post_json_once(http, url, payload, data);
+    host_gate_leave(gate);
     return ret;
 }
 

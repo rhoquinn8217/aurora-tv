@@ -43,6 +43,10 @@ void http_set_timeout(HTTP *http, int timeout);
 
 void http_set_total_timeout(HTTP *http, int timeout);
 
+/* This fork: the request in progress gives up within a second, and every one
+ * after it at once. Safe from any thread while `http` exists. */
+void http_abort(HTTP *http);
+
 HTTP_DATA * http_data_alloc();
 
 void http_data_free(HTTP_DATA * data);

@@ -23,6 +23,7 @@
 #include "ctm_panel.h"
 #include "bridge_prompt.h"
 #include "bridge_overlay.h"
+#include "connecting_cancel.h"
 
 static void exit_streaming(lv_event_t *event);
 
@@ -429,6 +430,7 @@ static bool on_event(lv_fragment_t *self, int code, void *userdata) {
             }
             lv_obj_set_width(controller->progress, LV_DPX(300));
             lv_obj_set_height(controller->progress, LV_DPX(100));
+            connecting_cancel_button(controller->progress, controller->global);   /* This fork: a Cancel. */
             lv_obj_add_flag(controller->overlay, LV_OBJ_FLAG_HIDDEN);
             lv_obj_clear_flag(controller->hint, LV_OBJ_FLAG_HIDDEN);
             return true;
