@@ -424,6 +424,7 @@ static bool on_event(lv_fragment_t *self, int code, void *userdata) {
     streaming_controller_t *controller = (streaming_controller_t *) self;
     switch (code) {
         case USER_STREAM_CONNECTING: {
+            if (controller->progress) { lv_msgbox_close(controller->progress); }   /* This fork: an older box goes first. Why: ctmbridge/NOTES.md, "One box at a time". */
             controller->progress = progress_dialog_create(locstr("Connecting..."));
             if (lv_obj_check_type(controller->progress->parent, &lv_msgbox_backdrop_class)) {
                 lv_obj_set_style_bg_opa(controller->progress->parent, LV_OPA_TRANSP, 0);
@@ -449,6 +450,7 @@ static bool on_event(lv_fragment_t *self, int code, void *userdata) {
             break;
         }
         case USER_STREAM_CLOSE: {
+            if (controller->progress) { lv_msgbox_close(controller->progress); }   /* This fork: a Connecting box still up goes first. Why: ctmbridge/NOTES.md, "One box at a time". */
             controller->progress = progress_dialog_create(locstr("Disconnecting..."));
             lv_obj_add_flag(controller->overlay, LV_OBJ_FLAG_HIDDEN);
             lv_obj_add_flag(controller->stats, LV_OBJ_FLAG_HIDDEN);

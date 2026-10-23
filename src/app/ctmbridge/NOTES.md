@@ -61,6 +61,28 @@ The merge guard keeps the call and checks that upstream's two `SDL_FlushEvent`
 lines do not come back there. If an upstream release drops the flush, drop the
 call with it.
 
+## One box at a time
+
+**Where:** `src/app/ui/streaming/streaming.controller.c`, `on_event()`, the
+`USER_STREAM_CONNECTING` and `USER_STREAM_CLOSE` cases.
+
+Upstream's stream screen keeps ONE pointer to its box: "Connecting..." from
+`USER_STREAM_CONNECTING`, "Disconnecting..." from `USER_STREAM_CLOSE`, and
+`USER_STREAM_OPEN` and `USER_STREAM_FINISHED` close whichever it points to. Both
+openers replaced the pointer without closing a box already up, and the screen's
+destructor closes none. The box has no parent (it sits on the top layer, over
+everything), so the older one stayed with nothing left to close it.
+
+Seen on 2026-10-21 on the C1 (573): an old `USER_STREAM_CONNECTING` delivered a
+second time after the stream opened ("The scan's flush" above) put a Connecting
+box over the running stream, and the stream's stop replaced it with
+"Disconnecting...", so it stayed until the app was closed. The scan's flush
+removed that cause. Each opener now closes a box still up first, whatever
+brought it.
+
+**Merge guard:** "Connecting... closes an older box first", "Disconnecting...
+closes a Connecting box still up first".
+
 ## The host's lightbar
 
 **Where:** `src/app/input/input_gamepad.c`,
