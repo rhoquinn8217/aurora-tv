@@ -659,6 +659,19 @@ need "... and a JSON post waits too" \
 need "libgamestream builds the gate" \
      core/libgamestream/src/CMakeLists.txt "host_gate.c"
 
+# --- The add-a-computer box opens filled in, with a clear button; the stream's
+# keyboard has a Close tab (rhoquinn8217, 2026-10-23) ---
+# ⓘ A line of ours in each of two upstream files. Taking upstream's back
+# compiles, and the box opens empty with nothing to empty it in one click, or
+# the keyboard has nothing a pointer can close it with
+# (src/app/ui/launcher/add_server_box.c, src/app/ui/streaming/soft_keyboard_close.c).
+in_order "the add-a-computer box opens with the TV's own network, and a clear button" \
+     src/app/ui/launcher/add.dialog.c "static lv_obj_t *create_dialog" \
+     "type_into_box(dialog, ip_input, btns, 1);" "add_server_box(ip_input, btns, 1);"
+in_order "the stream's keyboard has a Close tab" \
+     src/app/ui/streaming/soft_keyboard.c "lv_obj_t *soft_keyboard_create(lv_obj_t *parent, session_t *session," \
+     "lv_obj_add_event_cb(cont, container_delete_cb, LV_EVENT_DELETE, kbd);" "soft_keyboard_close_tab(cont, kbd_content);"
+
 echo
 if [ "$fail" -eq 0 ]; then
     echo "⭐ merge guard: $pass checks, nothing lost"

@@ -11,6 +11,7 @@
 
 #include "util/i18n.h"
 #include "ui/common/type_into_box.h"
+#include "add_server_box.h"
 
 static lv_obj_t *create_dialog(lv_fragment_t *self, lv_obj_t *parent);
 
@@ -89,6 +90,7 @@ static lv_obj_t *create_dialog(lv_fragment_t *self, lv_obj_t *parent) {
     controller->btns = btns;
     controller->error = add_error;
     type_into_box(dialog, ip_input, btns, 1);
+    add_server_box(ip_input, btns, 1);   /* This fork: the TV's own network filled in, and a clear button. */
     lv_obj_center(dialog);
     return dialog;
 }
