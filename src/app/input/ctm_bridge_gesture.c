@@ -2493,7 +2493,19 @@ void ctm_bridge_gesture_tick(struct app_input_t *input, struct session_t *sessio
      * app switch, disconnect, crash -- unbridges everything. ➡️ So off means
      * off, in both directions, and the asymmetry was solving a problem that
      * does not exist. */
-    s_stream_input = session ? session_get_input(session) : NULL;
+    /* ⛔ ONLY WHILE THE STREAM TAKES INPUT (2026-10-23). The session lives on
+     * for seconds after its input stops, and it is freed by a bus action
+     * inside SDL's walk of its queue: a pad that left later in the same walk
+     * reached the freed session through this pointer
+     * (gesture_moonlight_forget_leaving). Once the input stops, the pointer
+     * goes, and so do the slots the bridge remembered in that stream's mask. */
+    stream_input_t *const was = s_stream_input;
+    s_stream_input = session && session_has_input(session) ? session_get_input(session) : NULL;
+    if (was != NULL && s_stream_input == NULL) {
+        for (int i = 0; i < MAX_WATCHED; ++i) {
+            s_watched[i].excluded_slot1 = 0;
+        }
+    }
     if (!input) {
         return;
     }
