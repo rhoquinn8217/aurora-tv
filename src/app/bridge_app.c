@@ -255,8 +255,12 @@ void bridge_app_events(app_t *app) {
      * never seen. */
     mouse_seen_tick();
     /* ⭐ A ticked device bridges itself: at a stream's start once DS5-USBIP
-     * answers, and when it connects during the stream (input/auto_bridge.h). */
-    auto_bridge_poll(app->session != NULL);
+     * answers, and when it connects during the stream (input/auto_bridge.h).
+     * ⛔ While the bridge is up, not while the session merely exists
+     * (2026-10-23): the session outlives the bridge's stop by seconds, and a
+     * device that arrived then was bridged to the last stream's PC, with
+     * nothing to release it until the next stream ended. */
+    auto_bridge_poll(app->session != NULL && ctm_bridge_active());
     if (app->session == NULL) {
         s_asked_at_bridge = 0;
     }
