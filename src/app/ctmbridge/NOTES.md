@@ -275,6 +275,23 @@ so the row would be a control that does nothing.
 
 **Merge guard:** "the stream boost is a setting".
 
+## One service's port
+
+**Where:** `src/app/backend/pcmanager/discovery/impl/microdns.c`,
+`discovery_callback()`, its `RR_SRV` case.
+
+libmicrodns hands over a whole answer when any record in it is the streaming
+service's, and upstream took the port of EVERY service record in it, so the
+last one read won. A Windows PC answers a network browse (a Cast or AirPlay
+device on the network sends one every minute) with Delivery Optimization's
+service first and the streaming service second, in one answer, and libmicrodns
+lists them backwards: the app took port 7680, its status check there failed,
+and the PC showed "offline" for a few seconds once a minute (CAELUM,
+2026-10-23, caught on the rooted monitor). Only a record whose name ends in
+`._nvstream._tcp.local` gives the port now.
+
+**Merge guard:** "discovery takes only the streaming service's port".
+
 ## The bitrate service at a stream's end
 
 **Where:** `src/app/stream/session_worker.c` at the stream's end, and

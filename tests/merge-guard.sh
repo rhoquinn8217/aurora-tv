@@ -348,6 +348,8 @@ in_order "Connecting... closes an older box first" \
 in_order "Disconnecting... closes a Connecting box still up first" \
      src/app/ui/streaming/streaming.controller.c "static bool on_event(lv_fragment_t *self, int code, void *userdata) {" \
      "/* This fork: a Connecting box still up goes first." "progress_dialog_create(locstr(\"Disconnecting...\"));"
+need "discovery takes only the streaming service's port" \
+     src/app/backend/pcmanager/discovery/impl/microdns.c '"._nvstream._tcp.local") != 0'
 in_order "the bitrate service stops before the connection does" \
      src/app/stream/session_worker.c "int session_worker(session_t *session) {" \
      "adaptive_bitrate_stop(session->abr);" "LiStopConnection();"
