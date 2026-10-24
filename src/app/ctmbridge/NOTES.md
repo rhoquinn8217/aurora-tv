@@ -274,3 +274,18 @@ The row is shown on rooted sets only. On an unrooted TV the boost never runs,
 so the row would be a control that does nothing.
 
 **Merge guard:** "the stream boost is a setting".
+
+## The bitrate service at a stream's end
+
+**Where:** `src/app/stream/session_worker.c` at the stream's end, and
+`src/app/stream/adaptive_bitrate.c`, its thread's sleep.
+
+A `/bitrate` request that reaches the host after its stream has ended wedged
+Vibepollo 1.18.4 until it restarted (`adaptive_bitrate_stop` says how), so the
+service is stopped, and sends nothing once stopping, before
+`LiStopConnection`. "Disconnecting..." is posted before that stop, since it
+asks nothing of the host, and the thread sleeps in 50 ms steps, so the stop
+takes 50 ms rather than up to a second (2026-10-23).
+
+**Merge guard:** "the bitrate service stops before the connection does", "the
+bitrate service sees a stop within 50 ms".

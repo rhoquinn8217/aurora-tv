@@ -348,6 +348,13 @@ in_order "Connecting... closes an older box first" \
 in_order "Disconnecting... closes a Connecting box still up first" \
      src/app/ui/streaming/streaming.controller.c "static bool on_event(lv_fragment_t *self, int code, void *userdata) {" \
      "/* This fork: a Connecting box still up goes first." "progress_dialog_create(locstr(\"Disconnecting...\"));"
+in_order "the bitrate service stops before the connection does" \
+     src/app/stream/session_worker.c "int session_worker(session_t *session) {" \
+     "adaptive_bitrate_stop(session->abr);" "LiStopConnection();"
+need "... and sends nothing once stopping" \
+     src/app/stream/adaptive_bitrate.c "Once stopping, never send"
+need "the bitrate service sees a stop within 50 ms" \
+     src/app/stream/adaptive_bitrate.c "This fork: in steps, so a stop is seen in 50 ms"
 need "the host's lightbar waits while a bridge signal draws" \
      src/app/input/input_gamepad.c "ctm_bridge_gesture_light_busy(state->controller)"
 need_count "upstream's wired feedback stays off a pad the bridge is using, at all four entry points" \

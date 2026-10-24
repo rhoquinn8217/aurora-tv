@@ -201,7 +201,9 @@ static void abr_apply_pending_drop(adaptive_bitrate_service_t *service) {
 static int abr_thread(void *userdata) {
     adaptive_bitrate_service_t *service = userdata;
     while (!SDL_AtomicGet(&service->stop)) {
-        SDL_Delay(ABR_TICK_MS);
+        for (int slept = 0; slept < ABR_TICK_MS && !SDL_AtomicGet(&service->stop); slept += 50) {
+            SDL_Delay(50);   /* This fork: in steps, so a stop is seen in 50 ms. Why: ctmbridge/NOTES.md, "The bitrate service at a stream's end". */
+        }
         if (SDL_AtomicGet(&service->stop)) {
             break;
         }
