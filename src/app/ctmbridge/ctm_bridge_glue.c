@@ -7,9 +7,11 @@
 
 #include "ctm_bridge_glue.h"
 
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
 
 #include "ctm_state.h"   /* core API + shared globals (g_running, g_scan, ...) */
@@ -42,11 +44,35 @@ void ctm_bridge_use_pairing_signer(ctm_bridge_signer_fn signer)
  * and the three branches it guarded were removed 2026-09-15 (a switch nobody
  * can turn on reads as a choice somebody is making). */
 
+/* When the last scan began, on the monotonic clock: a device that connects
+ * mid-stream was scanned for up to three times in a few seconds (its bus,
+ * Auto Bridge's look, the arrival watch), each 0.25 to 0.85 s on the U5s and
+ * far more with a Bluetooth DS4 bridged. A caller that knows when its device
+ * appeared reads the last scan when it is younger than that (2026-10-23).
+ * ⓘ 32 bits, which the TV's 32-bit CPU reads and writes whole from any thread;
+ * the age wraps every 49 days, harmless for an age that matters for seconds. */
+static volatile uint32_t s_scan_at_ms;
+static volatile bool s_scanned;
+
+static uint32_t glue_now_ms(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (uint32_t)((uint64_t)ts.tv_sec * 1000u + (uint64_t)ts.tv_nsec / 1000000u);
+}
+
+uint64_t ctm_bridge_scan_age_ms(void)
+{
+    return s_scanned ? (uint64_t)(uint32_t)(glue_now_ms() - s_scan_at_ms) : UINT64_MAX;
+}
+
 /* Enumerate + build the logical model + Stage-1 puck enumeration capture. The
  * Steam puck only exposes its full composite if g_puck_enum is cached BEFORE the
  * plug; the standalone app did this in its refresh_devices(), so the glue must too. */
 static void ctm_glue_enumerate(void)
 {
+    s_scan_at_ms = glue_now_ms();
+    s_scanned = true;
     enumerate_devices(&g_scan);
     build_logical_devices(&g_scan, &g_devices);
     bool puck = false;
@@ -250,10 +276,12 @@ bool ctm_bridge_start(void)
 }
 
 /* The listing itself. Enumerates and fills; brings NOTHING up. */
-static int glue_list_locked_body(ctm_bridge_dev_t *out, int max)
+static int glue_list_locked_body(ctm_bridge_dev_t *out, int max, bool scan)
 {
     pthread_mutex_lock(&s_dev_mutex);
-    ctm_glue_enumerate();
+    if (scan || !s_scanned) {
+        ctm_glue_enumerate();
+    }
     int n = 0;
     for (int i = 0; i < g_devices.count && n < max; ++i) {
         logical_device_t *item = &g_devices.items[i];
@@ -311,7 +339,16 @@ int ctm_bridge_list(ctm_bridge_dev_t *out, int max)
         return 0;
     }
     ctm_glue_ensure_core();
-    return glue_list_locked_body(out, max);
+    return glue_list_locked_body(out, max, true);
+}
+
+int ctm_bridge_list_known(ctm_bridge_dev_t *out, int max)
+{
+    if (out == NULL || max <= 0) {
+        return 0;
+    }
+    ctm_glue_ensure_core();
+    return glue_list_locked_body(out, max, false);
 }
 
 /* ⭐⭐ THE SAME LIST WITHOUT WAKING ANYTHING (T-135, 2026-09-08).
@@ -329,7 +366,15 @@ int ctm_bridge_list_quiet(ctm_bridge_dev_t *out, int max)
     if (out == NULL || max <= 0) {
         return 0;
     }
-    return glue_list_locked_body(out, max);
+    return glue_list_locked_body(out, max, true);
+}
+
+int ctm_bridge_list_quiet_known(ctm_bridge_dev_t *out, int max)
+{
+    if (out == NULL || max <= 0) {
+        return 0;
+    }
+    return glue_list_locked_body(out, max, false);
 }
 
 /* The row behind a node in the last enumeration, or NULL. Caller holds
@@ -465,7 +510,11 @@ bool ctm_bridge_signal_refused(const char *node)
     if (!ctm_bridge_signals_enabled() || !node || !node[0]) return false;
     char kind[16] = "";
     pthread_mutex_lock(&s_dev_mutex);
-    ctm_glue_enumerate();
+    /* The last scan first, as its siblings ask (2026-10-23): this ran right
+     * after the plug's own scan, and a node's kind does not change. */
+    if (item_for_node_locked(node) == NULL) {
+        ctm_glue_enumerate();
+    }
     const char *k = kind_for_node_locked(node);
     if (k) {
         snprintf(kind, sizeof(kind), "%s", k);

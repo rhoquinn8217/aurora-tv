@@ -2121,9 +2121,14 @@ static void arrival_check(struct app_input_t *input) {
      * broadcasts for a listener -- the settings pane uses the quiet one for
      * exactly that reason -- and this runs a few seconds after ANY device
      * node appears, which includes replugging a dongle while a pad is
-     * bridged. A watchdog reads what is already known, and nothing else. */
+     * bridged.
+     * ⭐ And the last scan when it is younger than the node's appearance
+     * (2026-10-23): it then already holds the device, and the look costs no
+     * scan of its own. (This used to say a watchdog reads only what is known;
+     * the quiet list scanned every time.) */
     ctm_bridge_dev_t devs[16];
-    const int n = ctm_bridge_list_quiet(devs, 16);
+    const bool scanned_since = ctm_bridge_scan_age_ms() < (uint64_t) (ARRIVAL_SETTLE_MS - 500);
+    const int n = scanned_since ? ctm_bridge_list_quiet_known(devs, 16) : ctm_bridge_list_quiet(devs, 16);
     if (n <= 0) return;
 
     bool bridged = false;

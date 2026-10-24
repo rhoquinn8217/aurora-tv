@@ -468,7 +468,12 @@ static void ab_look(uint32_t now)
         s_appeared_count = 0;
         return;
     }
-    const int n = ctm_bridge_list(devs, DEVICE_PARTS_MAX);
+    /* ⭐ The last scan when it ran after the last node appeared (2026-10-23):
+     * a DualSense's arrival is scanned for as SDL opens it, and this look made
+     * a second scan a second later for the same news. */
+    const bool scanned_since = ctm_bridge_scan_age_ms() < (uint64_t) (now - s_last_appeared);
+    const int n = scanned_since ? ctm_bridge_list_known(devs, DEVICE_PARTS_MAX)
+                                : ctm_bridge_list(devs, DEVICE_PARTS_MAX);
     const int count = device_groups_build(devs, n, groups, DEVICE_GROUPS_MAX);
     const uint32_t took = SDL_GetTicks() - now;
     const bridge_settings_t *s = &app_configuration->bridge;

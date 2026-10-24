@@ -174,6 +174,14 @@ int ctm_bridge_list(ctm_bridge_dev_t *out, int max);
  * ⭐ For the settings pane, which lists devices with no stream running. */
 int ctm_bridge_list_quiet(ctm_bridge_dev_t *out, int max);
 
+/* The two lists from the last scan, with no new one (the first ever still
+ * scans), and how old that scan is in ms (UINT64_MAX: none yet). A caller that
+ * knows when its device appeared reads the last scan when it is younger than
+ * that: one scan, not three, for a device that connects mid-stream. */
+int ctm_bridge_list_known(ctm_bridge_dev_t *out, int max);
+int ctm_bridge_list_quiet_known(ctm_bridge_dev_t *out, int max);
+uint64_t ctm_bridge_scan_age_ms(void);
+
 /* Is the controller behind this hidraw node already bridged? A plug attempt
  * cannot answer this -- it returns false both when already plugged and when
  * genuinely refused. */
