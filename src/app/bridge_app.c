@@ -1,5 +1,11 @@
 #include "bridge_app.h"
 
+#include <dirent.h>
+#include <limits.h>
+#include <stdio.h>
+#include <string.h>
+#include <sys/stat.h>
+
 #include <SDL.h>
 
 #include "control_server.h"
@@ -39,7 +45,59 @@ static void pointer_used(void) {
 }
 #endif
 
+/* ⓘ The bridge core's: <app>/logs/<name>, the folder every log of ours is in. */
+const char *ctm_log_path(const char *name);
+
+/* ⭐ THE LOGS, SET ASIDE AT EACH START (2026-10-23). Every log of ours and of
+ * the core is appended to, and only crash.log was ever set aside
+ * (crash_recorder.c), so they grew for the life of the install: a cabled
+ * DualSense's microphone wrote a line a second. Here, before anything opens
+ * one, a log past LOG_KEEP_BYTES becomes <name>.old, in place of the last, so
+ * each keeps at most about twice that. ⓘ Logs and notes only (.log, .txt):
+ * crash.log keeps its own rule, and a screenshot is not a log. */
+#define LOG_KEEP_BYTES (512L * 1024L)
+
+static void logs_set_aside_large(void) {
+    char dir[PATH_MAX];
+    snprintf(dir, sizeof dir, "%s", ctm_log_path("."));
+    const size_t dir_len = strlen(dir);
+    if (dir_len >= 2 && strcmp(dir + dir_len - 2, "/.") == 0) {
+        dir[dir_len - 2] = '\0';
+    }
+    /* ⛔ Our own folder only: with no HOME the core falls back to /tmp, and
+     * what else lies there is not ours to move. */
+    const size_t len_dir = strlen(dir);
+    if (len_dir < 5 || strcmp(dir + len_dir - 5, "/logs") != 0) {
+        return;
+    }
+    DIR *logs = opendir(dir);
+    if (logs == NULL) {
+        return;
+    }
+    struct dirent *entry;
+    while ((entry = readdir(logs)) != NULL) {
+        const char *name = entry->d_name;
+        const size_t len = strlen(name);
+        const bool is_log = len > 4 && (strcmp(name + len - 4, ".log") == 0 || strcmp(name + len - 4, ".txt") == 0);
+        if (!is_log || strcmp(name, "crash.log") == 0) {
+            continue;
+        }
+        char path[PATH_MAX];
+        char old_path[PATH_MAX];
+        snprintf(path, sizeof path, "%s/%s", dir, name);
+        struct stat st;
+        if (stat(path, &st) != 0 || !S_ISREG(st.st_mode) || st.st_size <= LOG_KEEP_BYTES) {
+            continue;
+        }
+        snprintf(old_path, sizeof old_path, "%s.old", path);
+        rename(path, old_path);
+    }
+    closedir(logs);
+}
+
 void bridge_app_before_sdl(void) {
+    /* First: nothing has opened a log yet. */
+    logs_set_aside_large();
     /* ⛔⛔ BEFORE SDL TOUCHES ANY CONTROLLER.
      *
      * A DualSense told to stream microphone audio keeps doing it when a
