@@ -794,6 +794,8 @@ bool ctm_bridge_plug_row(const ctm_bridge_dev_t *row)
     /* ⓘ As above: a row that names nothing must not answer with the last
      * plug's "not reached". */
     g_last_plug_unreachable = false;
+    /* ⛔ Not outside a stream's bridge, as ctm_bridge_plug_node (2026-10-23). */
+    if (!s_active) return false;
     ctm_glue_ensure_core();
     pthread_mutex_lock(&s_dev_mutex);
     bool ok = false;
