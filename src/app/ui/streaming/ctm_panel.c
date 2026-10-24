@@ -1340,6 +1340,14 @@ static void ctm_panel_refresh(void) {
                        : focus_on_plugall   ? s_ctm_btn_plugall
                        : focus_on_unplugall ? s_ctm_btn_unplugall
                        : NULL;
+        /* ⛔ Never back onto a greyed button (2026-10-23). Bridge All is rebuilt
+         * greyed when the server refuses, and a greyed object with the focus
+         * takes no key, Back included (lv_indev.c, "!dis"): pressing it with
+         * DS5-USBIP off left the panel deaf. Release All, or the row, instead. */
+        if (back != NULL && lv_obj_has_state(back, LV_STATE_DISABLED)) {
+            back = s_ctm_btn_unplugall != NULL && !lv_obj_has_state(s_ctm_btn_unplugall, LV_STATE_DISABLED)
+                   ? s_ctm_btn_unplugall : NULL;
+        }
         if (back) {
             lv_group_focus_obj(back);
             lv_obj_add_state(back, LV_STATE_FOCUS_KEY);
