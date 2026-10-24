@@ -9,6 +9,7 @@
 #include "bridge_proof.h"
 #include "input/bridge_override.h"
 #include "input/bridge_keyboard.h"
+#include "stream/input/bridge_switch_hold.h"   /* nothing held across streams */
 #if defined(TARGET_WEBOS)
 #include "input/ctm_bridge_gesture.h"
 #include "input/auto_bridge.h"
@@ -44,6 +45,7 @@ static void bridge_session_start_now(session_t *session);
 static void bridge_session_stop_now(void);
 
 void bridge_session_started(session_t *session) {
+    bridge_switch_hold_reset();
     if (s_pending_count == PENDING_MAX) {
         /* ⓘ Never seen: four starts and stops in one pass. Run them rather
          * than lose one. */
@@ -55,6 +57,7 @@ void bridge_session_started(session_t *session) {
 }
 
 void bridge_session_stopped(void) {
+    bridge_switch_hold_reset();
     if (s_pending_count > 0 && s_pending[s_pending_count - 1].kind == PENDING_START) {
         --s_pending_count;   /* its start never ran: nothing to stop */
         return;

@@ -3,6 +3,7 @@
 #include <Limelight.h>
 #include <SDL.h>
 #include <stdint.h>
+#include <string.h>
 
 #include "input/app_input.h"
 #include "logging.h"
@@ -21,6 +22,12 @@ static struct {
     uint8_t axes;
     uint8_t fingers;
 } s_held[SWITCH_SLOTS];
+
+void bridge_switch_hold_reset(void) {
+    /* ⓘ At a stream's start and end (2026-10-23): a hold left at the end of a
+     * stream masked that button's first press in the next one. */
+    memset(s_held, 0, sizeof s_held);
+}
 
 /* This pad's slot, or NULL. ⓘ A slot another pad held is emptied first: a pad
  * that left while something was held passes nothing on. */
