@@ -157,6 +157,10 @@ typedef struct {
      * SDL tick to try at (0 = none); retry_used keeps it to one per request. */
     uint32_t retry_at;
     bool retry_used;
+    /* ⭐ The core's refusal signal for prep_node still playing on its own
+     * thread (2026-10-23): the pad waits for its answer, as it waited for the
+     * call before, and refusal_answered() does what the answer asks. */
+    bool refusal_waiting;
 
     uint8_t buzz_left;   /* half-steps of the refusal rumble still to run */
     uint32_t buzz_next;  /* SDL ticks when the next buzz half-step is due */
@@ -294,6 +298,7 @@ static watched_t *watched_for(SDL_JoystickID id) {
         free_slot->fired = false;
         free_slot->painted_slot = PAINTED_NEVER;
         free_slot->excluded_slot1 = 0;
+        free_slot->refusal_waiting = false;
     }
     return free_slot;
 }
@@ -1178,6 +1183,40 @@ static void request_arm(watched_t *w, SDL_GameController *controller, const char
     w->retry_used = false;
 }
 
+/* ⭐ WHAT A REFUSAL'S ANSWER ASKS FOR (2026-10-23): the player colour once the
+ * core has lit and sounded it, or this side's red and buzz when it could not.
+ * The core plays its signal on a thread of its own now
+ * (ctm_bridge_signal_refused_begin): on the app's loop it froze the screen
+ * and every pad for 1.6 to 5 s. */
+static void refusal_answered(watched_t *w, SDL_GameController *controller, bool sounded) {
+    const bool lit = sounded && ctm_bridge_node_is_bluetooth(w->prep_node);
+
+    if (lit) {
+        /* ⭐ The core lit it, and its Bluetooth signal has finished by the time
+         * its answer comes. Then the player colour (rhoquinn8217, 2026-09-15),
+         * where a refused controller used to keep whatever the last flash left. */
+        paint_player_colour_for(w, controller);
+    } else {
+        /* ⭐ The user's switch. ⓘ The refusal is the one worth being loudest
+         * about, so it is gated last and independently of the others. */
+        if (app_configuration->bridge.signal_light)
+            flash_arm(w, 0xff, 0x00, 0x00, REFUSED_FLASHES);
+    }
+    if (!sounded) {
+        /* ⭐ THREE BUZZES ONLY FOR A PAD WITH NO LIGHT (rhoquinn8217,
+         * 2026-09-23): "non DS5 and non DS4 don't have 3 because they don't
+         * have lightbar or audio feedback." A pad with a light says it in red,
+         * with the one buzz every other signal has; a cabled DS4 was getting
+         * three. */
+        const int bursts = SDL_GameControllerHasLED(controller) ? 1 : BUZZ_BURSTS;
+        if (app_configuration->bridge.signal_rumble)
+            w->buzz_left = (uint8_t)(bursts * 2);   /* on and off per burst */
+        w->buzz_next = SDL_GetTicks();
+    }
+    gesture_log("refused on %s: core sounded=%d lit=%d",
+                w->prep_node, (int)sounded, (int)lit);
+}
+
 /* Returns true if the controller was just handed to the bridge. */
 static bool gesture_poll_one(SDL_GameController *controller, SDL_JoystickID id) {
     const bool was_known = (watched_slot_exists(id));
@@ -1206,6 +1245,15 @@ static bool gesture_poll_one(SDL_GameController *controller, SDL_JoystickID id) 
     }
     if (!w) {
         return false;
+    }
+    /* A refusal still playing: nothing else for this pad until its answer. */
+    if (w->refusal_waiting) {
+        const int answer = ctm_bridge_signal_refused_answer(w->prep_node);
+        if (answer < 0) {
+            return false;
+        }
+        w->refusal_waiting = false;
+        refusal_answered(w, controller, answer == 1);
     }
 
     /* ⭐ AND AGAIN WHEN THE PLAYER NUMBER ARRIVES OR CHANGES (rhoquinn8217,
@@ -1618,39 +1666,11 @@ static bool gesture_poll_one(SDL_GameController *controller, SDL_JoystickID id) 
                          *
                          * Treating it as one decision left a wired refusal
                          * with two tones and no red at all. */
-                        const bool sounded =
-                            ctm_bridge_signal_refused(w->prep_node);
-                        const bool lit =
-                            sounded && ctm_bridge_node_is_bluetooth(w->prep_node);
-
-                        if (lit) {
-                            /* ⭐ The core lit it, and its Bluetooth signal has
-                             * finished by the time the call returns. Then the
-                             * player colour (rhoquinn8217, 2026-09-15), where a
-                             * refused controller used to keep whatever the last
-                             * flash left. */
-                            paint_player_colour_for(w, controller);
+                        if (ctm_bridge_signal_refused_begin(w->prep_node)) {
+                            w->refusal_waiting = true;   /* answered in a later tick */
                         } else {
-                            /* ⭐ The user's switch. ⓘ The refusal is the one
-                             * worth being loudest about, so it is gated last
-                             * and independently of the others. */
-                            if (app_configuration->bridge.signal_light)
-                                flash_arm(w, 0xff, 0x00, 0x00, REFUSED_FLASHES);
+                            refusal_answered(w, controller, false);
                         }
-                        if (!sounded) {
-                            /* ⭐ THREE BUZZES ONLY FOR A PAD WITH NO LIGHT
-                             * (rhoquinn8217, 2026-09-23): "non DS5 and non
-                             * DS4 don't have 3 because they don't have
-                             * lightbar or audio feedback." A pad with a light
-                             * says it in red, with the one buzz every other
-                             * signal has; a cabled DS4 was getting three. */
-                            const int bursts = SDL_GameControllerHasLED(controller) ? 1 : BUZZ_BURSTS;
-                            if (app_configuration->bridge.signal_rumble)
-                                w->buzz_left = (uint8_t)(bursts * 2);   /* on and off per burst */
-                            w->buzz_next = SDL_GetTicks();
-                        }
-                        gesture_log("refused on %s: core sounded=%d lit=%d",
-                                    w->prep_node, (int)sounded, (int)lit);
                     }
                 }
                 return ok;

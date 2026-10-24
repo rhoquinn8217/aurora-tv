@@ -255,6 +255,13 @@ bool ctm_bridge_node_signals_itself(const char *node);
  * Bluetooth only: a cable needs a session to reach its sound card. */
 bool ctm_bridge_signal_refused(const char *node);
 
+/* The same refusal on a thread of its own, so the app's loop goes on
+ * (2026-10-23). _begin says whether it started; _answer says -1 while it
+ * plays, then once 1 (the core sounded it) or 0 (it could not: this side
+ * signals instead). */
+bool ctm_bridge_signal_refused_begin(const char *node);
+int ctm_bridge_signal_refused_answer(const char *node);
+
 /* Plug whichever device owns this /dev/hidrawN. When: a local gesture on the
  * controller itself named a device -- its node is the only identifier that
  * separates two otherwise identical controllers. Returns true if it plugged. */

@@ -545,6 +545,95 @@ bool ctm_bridge_signal_refused(const char *node)
     return false;
 }
 
+/* ⭐ THE REFUSAL OFF THE APP'S LOOP (2026-10-23). Its tones and flashes take
+ * 1.6 to 2.9 s on a Bluetooth DualSense, about 2.5 s on a DS4 and up to about
+ * 5 s on a cable, and the gesture played them on the app's loop: nothing drew
+ * and no pad was read meanwhile. Played on a thread of its own now; the
+ * gesture asks for the answer each tick. A few pads at once at most. */
+#define REFUSALS_MAX 4
+enum { REFUSAL_FREE, REFUSAL_PLAYING, REFUSAL_SOUNDED, REFUSAL_SILENT };
+static struct {
+    char node[64];
+    int state;
+} s_refusals[REFUSALS_MAX];
+static pthread_mutex_t s_refusal_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+static void *refusal_thread(void *arg)
+{
+    const int i = (int)(intptr_t)arg;
+    char node[64];
+    pthread_mutex_lock(&s_refusal_mutex);
+    snprintf(node, sizeof(node), "%s", s_refusals[i].node);
+    pthread_mutex_unlock(&s_refusal_mutex);
+    const bool sounded = ctm_bridge_signal_refused(node);
+    pthread_mutex_lock(&s_refusal_mutex);
+    s_refusals[i].state = sounded ? REFUSAL_SOUNDED : REFUSAL_SILENT;
+    pthread_mutex_unlock(&s_refusal_mutex);
+    return NULL;
+}
+
+bool ctm_bridge_signal_refused_begin(const char *node)
+{
+    if (!node || !node[0]) return false;
+    pthread_mutex_lock(&s_refusal_mutex);
+    int slot = -1;
+    int done = -1;
+    for (int i = 0; i < REFUSALS_MAX; ++i) {
+        const bool same = strcmp(s_refusals[i].node, node) == 0;
+        if (s_refusals[i].state == REFUSAL_PLAYING && same) {
+            pthread_mutex_unlock(&s_refusal_mutex);
+            return true;   /* already playing for this pad */
+        }
+        /* ⓘ An answer nobody collected (its pad left while it played) is
+         * stale: this node's goes now, another's when no slot is free. */
+        if (s_refusals[i].state == REFUSAL_SOUNDED || s_refusals[i].state == REFUSAL_SILENT) {
+            if (same) {
+                s_refusals[i].state = REFUSAL_FREE;
+            } else if (done < 0) {
+                done = i;
+            }
+        }
+        if (slot < 0 && s_refusals[i].state == REFUSAL_FREE) slot = i;
+    }
+    if (slot < 0) slot = done;
+    if (slot < 0) {
+        pthread_mutex_unlock(&s_refusal_mutex);
+        return false;
+    }
+    snprintf(s_refusals[slot].node, sizeof(s_refusals[slot].node), "%s", node);
+    s_refusals[slot].state = REFUSAL_PLAYING;
+    pthread_mutex_unlock(&s_refusal_mutex);
+    pthread_t thread;
+    if (pthread_create(&thread, NULL, refusal_thread, (void *)(intptr_t)slot) != 0) {
+        pthread_mutex_lock(&s_refusal_mutex);
+        s_refusals[slot].state = REFUSAL_FREE;
+        pthread_mutex_unlock(&s_refusal_mutex);
+        return false;
+    }
+    pthread_detach(thread);
+    return true;
+}
+
+int ctm_bridge_signal_refused_answer(const char *node)
+{
+    int answer = 0;   /* none asked for this pad: nothing sounded */
+    pthread_mutex_lock(&s_refusal_mutex);
+    for (int i = 0; i < REFUSALS_MAX; ++i) {
+        if (!node || strcmp(s_refusals[i].node, node) != 0 || s_refusals[i].state == REFUSAL_FREE) {
+            continue;
+        }
+        if (s_refusals[i].state == REFUSAL_PLAYING) {
+            answer = -1;
+        } else {
+            answer = s_refusals[i].state == REFUSAL_SOUNDED ? 1 : 0;
+            s_refusals[i].state = REFUSAL_FREE;
+        }
+        break;
+    }
+    pthread_mutex_unlock(&s_refusal_mutex);
+    return answer;
+}
+
 /* Does the CORE have a connected signal for the pad on this node? (T-212)
  *
  * ⓘ The core answers, from the same two ops fields its own branch uses. The
