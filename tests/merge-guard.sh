@@ -359,6 +359,8 @@ need "the bitrate service sees a stop within 50 ms" \
      src/app/stream/adaptive_bitrate.c "This fork: in steps, so a stop is seen in 50 ms"
 need "a Cancel ends with its session on the desktop path too" \
      src/app/stream/session_worker_embedded.c "connect_cancel_done(session, NULL);"
+need "the hardware mouse's stop is said until its worker has gone" \
+     src/app/stream/input/session_evmouse.c "while (!SDL_AtomicGet(&mouse->exited))"
 need "the host's lightbar waits while a bridge signal draws" \
      src/app/input/input_gamepad.c "ctm_bridge_gesture_light_busy(state->controller)"
 need_count "upstream's wired feedback stays off a pad the bridge is using, at all four entry points" \
