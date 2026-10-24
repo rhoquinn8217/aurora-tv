@@ -1090,6 +1090,12 @@ void ctm_bridge_stop(void)
     s_core_up = false;
 }
 
+void ctm_bridge_stop_quietly(void)
+{
+    ctm_unplug_quietly = true;
+    ctm_bridge_stop();
+}
+
 bool ctm_bridge_active(void)
 {
     return s_active;

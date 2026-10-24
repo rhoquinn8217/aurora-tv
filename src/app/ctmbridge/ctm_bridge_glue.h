@@ -72,6 +72,10 @@ void bridge_set_pointer_used_request(void (*cb)(void));
 
 void ctm_bridge_stop(void);
 
+/* The stop when the app quits: no release signals, so every BRIDGE_STOP goes
+ * out before webOS ends the app, about a second after closing it. */
+void ctm_bridge_stop_quietly(void);
+
 /* True while the bridge is active. */
 bool ctm_bridge_active(void);
 

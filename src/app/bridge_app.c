@@ -192,6 +192,17 @@ void bridge_app_stopping(void) {
     }
     /* ⓘ A stop asked in the last pass of the loop still runs. */
     bridge_session_run_pending();
+#if defined(TARGET_WEBOS)
+    /* ⭐ AND A STREAM STILL UP AT QUIT STOPS ITS BRIDGE HERE (2026-10-23).
+     * Only the stream screen's close stopped it, and at quit that event is
+     * dropped unread (app_bus_drain): no BRIDGE_STOP went out, and the PC kept
+     * every bridged pad for its grace, about 15 s, with its last state. Quietly:
+     * webOS ends a closing app about a second after closing it, and a release
+     * signal takes a second or more a pad. */
+    if (ctm_bridge_active()) {
+        ctm_bridge_stop_quietly();
+    }
+#endif
     control_server_stop();
     touchpad_pointer_deinit();
     tv_cursor_deinit();
