@@ -257,6 +257,9 @@ bool ctm_bridge_start(void)
      * ⓘ Safe to call more than once -- it starts a worker only if one is not
      * already running. */
     ctm_bridge_gesture_init();
+    /* The probe asks the PC only during a stream: woken here, with a probe at
+     * once, and parked again by ctm_bridge_stop (2026-10-23). */
+    ctm_agent_probe_park(false);
 
     /* The TV pointer used to be bridged here unconditionally, whatever the
      * auto-plug setting said -- the third path that claimed a device without
@@ -1220,6 +1223,7 @@ void ctm_bridge_stop(void)
         return;
     }
     release_local_sessions_on_exit();
+    ctm_agent_probe_park(true);
     g_running = false;
     if (g_stop_sniff_thread_started) {
         pthread_join(g_stop_sniff_thread, NULL);
