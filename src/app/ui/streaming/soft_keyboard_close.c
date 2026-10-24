@@ -3,6 +3,7 @@
 #include "soft_keyboard_close.h"
 
 #include "lvgl/font/material_icons_regular_symbols.h"
+#include "util/font.h"   /* app_fonts_t, which the theme's header names without declaring */
 #include "lvgl/theme/lv_theme_moonlight.h"
 #include "util/bus.h"
 #include "util/i18n.h"
