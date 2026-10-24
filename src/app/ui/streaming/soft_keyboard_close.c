@@ -17,10 +17,17 @@ static void tab_clicked(lv_event_t *event) {
 }
 
 /* On the panel's top edge, overlapping its top padding but not the keys, the
- * tab's right end over the keys' right end. */
+ * tab's right end over the keys' right end. The keys sit inside the panel's
+ * padding and inside their button matrix's own (the panel's first child),
+ * which the theme sets: the panel's alone left the tab 46 px past F12 on the
+ * rooted monitor (Build 583). */
 static void place(lv_obj_t *tab, lv_obj_t *panel) {
-    lv_obj_align_to(tab, panel, LV_ALIGN_OUT_TOP_RIGHT, -lv_obj_get_style_pad_right(panel, LV_PART_MAIN),
-                    LV_DPX(6));
+    lv_coord_t inset = lv_obj_get_style_pad_right(panel, LV_PART_MAIN);
+    lv_obj_t *keys = lv_obj_get_child(panel, 0);
+    if (keys != NULL) {
+        inset += lv_obj_get_style_pad_right(keys, LV_PART_MAIN);
+    }
+    lv_obj_align_to(tab, panel, LV_ALIGN_OUT_TOP_RIGHT, -inset, LV_DPX(6));
 }
 
 static void panel_resized(lv_event_t *event) {
