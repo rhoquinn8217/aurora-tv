@@ -152,6 +152,7 @@ static void cmd_help(control_job_t *job)
                "cursor on|off           the TV cursor on or off, and saved, as Ctrl+Alt+Shift+M does\n"
                "cursor align            open the bar that aligns the TV cursor, as Ctrl+Alt+Shift+A does\n"
                "cursor sharp|regular    the drop or webOS's own pointer, and saved, as Ctrl+Alt+Shift+C does\n"
+               "shot [name]             the app's own screen (never the stream's picture) to logs/, as a .bmp\n"
                "crash                   the crash recorder: armed or not, and where its record goes\n"
                "crash test|thread       crash the app on purpose, on its own loop or on a thread, to prove it\n"
                "<device> is its number, its node, its vid:pid, or part of its name; <n> is from groups\n");
@@ -374,9 +375,6 @@ static void cmd_input(control_job_t *job)
     reply(job, "OK %s\n", state);
 }
 
-/* Where key events have come from since the app started: the TV's keyboard
- * grab, and webOS through SDL. Works with no stream too, which is how to see
- * whether webOS hands a keyboard's keys to the app at all. */
 /* Aurora's TV pointer (input/tv_cursor.h): what stands now, or a shift and a
  * thinning to try live, not saved (rhoquinn8217, 2026-10-11: "move it
  * slightly down and to the right"), so a test needs no build per try. And
@@ -617,7 +615,7 @@ static void cmd_press(control_job_t *job, const char *args)
             }
         }
         if (!press_key_named(word, &steps[count])) {
-            reply(job, "ERR no key '%s': up down left right enter esc home end\n", word);
+            reply(job, "ERR no key '%s': up down left right enter ok esc back home end backspace\n", word);
             return;
         }
         steps[count].hold_ms = (uint32_t) hold;
@@ -625,7 +623,7 @@ static void cmd_press(control_job_t *job, const char *args)
         count++;
     }
     if (count == 0) {
-        reply(job, "ERR usage: press <key>[:ms] ...  keys: up down left right enter esc home end backspace\n");
+        reply(job, "ERR usage: press <key>[:ms] ...  keys: up down left right enter ok esc back home end backspace\n");
         return;
     }
     press_start(job, steps, count, total_ms);
@@ -643,7 +641,14 @@ static void cmd_type(control_job_t *job, const char *args)
     }
     press_step_t steps[PRESS_MAX];
     int count = 0;
-    for (const char *c = args != NULL ? args : ""; *c != '\0' && *c != ' ' && *c != '\t' && *c != '\r'; c++) {
+    const char *text = args != NULL ? args : "";
+    /* ⓘ One word: a space types nothing (no key for it), and stopping at it
+     * while answering OK hid that the rest was never typed (2026-10-23). */
+    if (strpbrk(text, " \t") != NULL) {
+        reply(job, "ERR type takes one word: no key types a space\n");
+        return;
+    }
+    for (const char *c = text; *c != '\0' && *c != '\r'; c++) {
         if (count == PRESS_MAX) {
             reply(job, "ERR at most %d characters at a time\n", PRESS_MAX);
             return;
@@ -661,6 +666,9 @@ static void cmd_type(control_job_t *job, const char *args)
     press_start(job, steps, count, (uint32_t) count * (PRESS_TAP_MS + PRESS_GAP_MS));
 }
 
+/* Where key events have come from since the app started: the TV's keyboard
+ * grab, and webOS through SDL. Works with no stream too, which is how to see
+ * whether webOS hands a keyboard's keys to the app at all. */
 static void cmd_keys(control_job_t *job)
 {
     char counts[160];

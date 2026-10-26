@@ -274,3 +274,35 @@ The row is shown on rooted sets only. On an unrooted TV the boost never runs,
 so the row would be a control that does nothing.
 
 **Merge guard:** "the stream boost is a setting".
+
+## One service's port
+
+**Where:** `src/app/backend/pcmanager/discovery/impl/microdns.c`,
+`discovery_callback()`, its `RR_SRV` case.
+
+libmicrodns hands over a whole answer when any record in it is the streaming
+service's, and upstream took the port of EVERY service record in it, so the
+last one read won. A Windows PC answers a network browse (a Cast or AirPlay
+device on the network sends one every minute) with Delivery Optimization's
+service first and the streaming service second, in one answer, and libmicrodns
+lists them backwards: the app took port 7680, its status check there failed,
+and the PC showed "offline" for a few seconds once a minute (CAELUM,
+2026-10-23, caught on the rooted monitor). Only a record whose name ends in
+`._nvstream._tcp.local` gives the port now.
+
+**Merge guard:** "discovery takes only the streaming service's port".
+
+## The bitrate service at a stream's end
+
+**Where:** `src/app/stream/session_worker.c` at the stream's end, and
+`src/app/stream/adaptive_bitrate.c`, its thread's sleep.
+
+A `/bitrate` request that reaches the host after its stream has ended wedged
+Vibepollo 1.18.4 until it restarted (`adaptive_bitrate_stop` says how), so the
+service is stopped, and sends nothing once stopping, before
+`LiStopConnection`. "Disconnecting..." is posted before that stop, since it
+asks nothing of the host, and the thread sleeps in 50 ms steps, so the stop
+takes 50 ms rather than up to a second (2026-10-23).
+
+**Merge guard:** "the bitrate service stops before the connection does", "the
+bitrate service sees a stop within 50 ms".

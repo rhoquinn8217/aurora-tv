@@ -72,6 +72,10 @@ void bridge_set_pointer_used_request(void (*cb)(void));
 
 void ctm_bridge_stop(void);
 
+/* The stop when the app quits: no release signals, so every BRIDGE_STOP goes
+ * out before webOS ends the app, about a second after closing it. */
+void ctm_bridge_stop_quietly(void);
+
 /* True while the bridge is active. */
 bool ctm_bridge_active(void);
 
@@ -170,6 +174,14 @@ int ctm_bridge_list(ctm_bridge_dev_t *out, int max);
  * ⭐ For the settings pane, which lists devices with no stream running. */
 int ctm_bridge_list_quiet(ctm_bridge_dev_t *out, int max);
 
+/* The two lists from the last scan, with no new one (the first ever still
+ * scans), and how old that scan is in ms (UINT64_MAX: none yet). A caller that
+ * knows when its device appeared reads the last scan when it is younger than
+ * that: one scan, not three, for a device that connects mid-stream. */
+int ctm_bridge_list_known(ctm_bridge_dev_t *out, int max);
+int ctm_bridge_list_quiet_known(ctm_bridge_dev_t *out, int max);
+uint64_t ctm_bridge_scan_age_ms(void);
+
 /* Is the controller behind this hidraw node already bridged? A plug attempt
  * cannot answer this -- it returns false both when already plugged and when
  * genuinely refused. */
@@ -242,6 +254,13 @@ bool ctm_bridge_node_signals_itself(const char *node);
 /* Signal a refused plug richly if this controller can be -- true if it did.
  * Bluetooth only: a cable needs a session to reach its sound card. */
 bool ctm_bridge_signal_refused(const char *node);
+
+/* The same refusal on a thread of its own, so the app's loop goes on
+ * (2026-10-23). _begin says whether it started; _answer says -1 while it
+ * plays, then once 1 (the core sounded it) or 0 (it could not: this side
+ * signals instead). */
+bool ctm_bridge_signal_refused_begin(const char *node);
+int ctm_bridge_signal_refused_answer(const char *node);
 
 /* Plug whichever device owns this /dev/hidrawN. When: a local gesture on the
  * controller itself named a device -- its node is the only identifier that

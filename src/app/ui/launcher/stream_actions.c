@@ -355,17 +355,35 @@ static void update_button(void) {
 
 /* The launchers starred by themselves, once each: a person who unstars one
  * keeps it unstarred. "uuid id" lines, as server-cards.txt. ⓘ By id: Vibepollo
- * gives an app a new id when its picture changes, and a star is kept by id. */
+ * gives an app a new id when its picture changes, and a star is kept by id.
+ * ⛔ No cap (2026-10-23): with 64 kept in memory and every note appended to
+ * the file, a launcher noted past the 64th read as never starred, so one the
+ * person unstarred was starred again at the next list, and noted again. */
 #define STARRED_FILE "auto-starred.txt"
-#define STARRED_MAX 64
 
 typedef struct auto_starred_t {
     uuidstr_t host;
     int app_id;
 } auto_starred_t;
 
-static auto_starred_t s_starred[STARRED_MAX];
+static auto_starred_t *s_starred;
 static int s_starred_count = -1;        /* -1: the file is not read yet */
+static int s_starred_room;
+
+static void starred_add(const uuidstr_t *host, int id) {
+    if (s_starred_count == s_starred_room) {
+        const int room = s_starred_room > 0 ? s_starred_room * 2 : 16;
+        auto_starred_t *more = realloc(s_starred, (size_t) room * sizeof(*more));
+        if (more == NULL) {
+            return;
+        }
+        s_starred = more;
+        s_starred_room = room;
+    }
+    s_starred[s_starred_count].host = *host;
+    s_starred[s_starred_count].app_id = id;
+    s_starred_count++;
+}
 
 static void starred_read(void) {
     s_starred_count = 0;
@@ -376,13 +394,13 @@ static void starred_read(void) {
         return;
     }
     char line[128];
-    while (s_starred_count < STARRED_MAX && fgets(line, sizeof(line), file) != NULL) {
+    while (fgets(line, sizeof(line), file) != NULL) {
         char uuid[UUIDSTR_CAPACITY];
         int id;
         if (sscanf(line, "%36s %d", uuid, &id) == 2 && strlen(uuid) == UUIDSTR_LENGTH && id != 0) {
-            uuidstr_fromstr(&s_starred[s_starred_count].host, uuid);
-            s_starred[s_starred_count].app_id = id;
-            s_starred_count++;
+            uuidstr_t host;
+            uuidstr_fromstr(&host, uuid);
+            starred_add(&host, id);
         }
     }
     fclose(file);
@@ -401,11 +419,10 @@ static bool starred_before(const uuidstr_t *host, int id) {
 }
 
 static void starred_note(const uuidstr_t *host, int id) {
-    if (s_starred_count < STARRED_MAX) {
-        s_starred[s_starred_count].host = *host;
-        s_starred[s_starred_count].app_id = id;
-        s_starred_count++;
+    if (s_starred_count < 0) {
+        starred_read();
     }
+    starred_add(host, id);
     char *path = path_join(app_configuration->conf_dir, STARRED_FILE);
     FILE *file = fopen(path, "a");
     if (file == NULL) {
@@ -879,9 +896,12 @@ static void menu_deleted(lv_event_t *event) {
  * their left. Use a shrunk version of the tile they replaced." The host sends
  * each control's tile picture as it sends a game's cover, so the entry shows
  * that, at about the row's height and the tile's shape. Greyed when it cannot
- * be used, and the selection steps over it (LVGL skips a disabled object,
- * lv_group.c). */
-static void add_entry(lv_obj_t *content, const menu_entry_t *entry) {
+ * be used, and taken out of the box's group (2026-10-23): the theme focuses
+ * the first button as it is added, before it is greyed, and while a greyed
+ * object has the focus LVGL drops every key but Tab (lv_indev.c, "!dis"). With
+ * nothing running, Resume came first and greyed, and arrows, OK and Back did
+ * nothing. Answers whether the entry can be used. */
+static bool add_entry(lv_obj_t *content, const menu_entry_t *entry) {
     stream_action_t action;
     const bool usable = entry_action(entry, &action);
     /* The host's own title when it offers the control; the entry's when
@@ -901,7 +921,9 @@ static void add_entry(lv_obj_t *content, const menu_entry_t *entry) {
         lv_obj_add_state(item, LV_STATE_DISABLED);
         lv_obj_set_style_text_opa(item, LV_OPA_40, LV_STATE_DISABLED);
         lv_obj_set_style_img_opa(picture, LV_OPA_30, 0);
+        lv_group_remove_obj(item);
     }
+    return usable;
 }
 
 /* rhoquinn8217, 2026-10-20: "above the first menu item, write out the full
@@ -968,8 +990,17 @@ static void button_clicked(lv_event_t *event) {
     lv_obj_add_event_cb(content, menu_clicked, LV_EVENT_SHORT_CLICKED, NULL);
     lv_obj_add_event_cb(msgbox, menu_deleted, LV_EVENT_DELETE, NULL);
     lv_obj_t *status = add_status(content);
+    bool any_usable = false;
     for (size_t i = 0; i < sizeof(k_entries) / sizeof(k_entries[0]); i++) {
-        add_entry(content, &k_entries[i]);
+        any_usable |= add_entry(content, &k_entries[i]);
+    }
+    if (!any_usable) {
+        /* Every entry greyed (plain Sunshine with nothing running): nothing
+         * could hold the focus, and Back reaches the box only through a focused
+         * object. A press on it closes the box (menu_clicked, no action). */
+        lv_obj_t *close = lv_list_add_btn(content, NULL, locstr("Close"));
+        lv_obj_add_flag(close, LV_OBJ_FLAG_EVENT_BUBBLE);
+        lv_obj_set_style_pad_ver(close, LV_DPX(6), 0);
     }
     lv_obj_update_layout(msgbox);
     /* Wider when the status needs it, as far as the theme's widest box. */
@@ -1502,17 +1533,59 @@ bool stream_actions_tile_pressed(const uuidstr_t *host, const apploader_list_t *
     return true;
 }
 
-/* Yes: the host's own confirmation, as it asks for it. The first launch, off
- * the screen thread, arms it (it answers "Launch this app again within 60
- * seconds"); the second is the streaming screen's own launch, which then
- * closes the running app and starts this one. */
+static void switch_quit_done(int result, const char *error, const uuidstr_t *uuid, void *userdata);
+
+/* Yes. On the TV that started what runs, it is ended first, as Terminate ends
+ * it, and the app launches once the host has answered (2026-10-23): ⛔ a plain
+ * launch while an app runs is refused by Sunshine and Apollo ("An app is
+ * already running on this host"), so the box promised what only Vibepollo did.
+ * Seen through Vibepollo's copy (another TV started it): the host's own
+ * confirmation, as it asks for it. The first launch, off the screen thread,
+ * arms it (it answers "Launch this app again within 60 seconds"); the second
+ * is the streaming screen's own launch, which then closes the running app and
+ * starts this one. */
 static void switch_clicked(lv_event_t *event) {
     lv_obj_t *msgbox = lv_event_get_current_target(event);
     const stream_action_t *action = lv_obj_get_user_data(msgbox);
     if (lv_msgbox_get_active_btn(msgbox) == 1 && action != NULL) {
-        ask_host(action);
+        if (pcmanager_server_current_app(pcmanager, &s_host) != 0) {
+            stream_action_t *copy = action_copy(action);
+            if (copy != NULL) {
+                if (s_progress == NULL) {
+                    s_progress = progress_dialog_create(locstr("Please wait..."));
+                }
+                if (!pcmanager_quitapp(pcmanager, &s_host, switch_quit_done, copy)) {
+                    /* Nothing runs any more, as the host last said: launch now. */
+                    switch_quit_done(GS_OK, NULL, &s_host, copy);
+                }
+            }
+        } else {
+            ask_host(action);
+        }
     }
     lv_msgbox_close_async(msgbox);
+}
+
+static void switch_quit_done(int result, const char *error, const uuidstr_t *uuid, void *userdata) {
+    (void) uuid;
+    stream_action_t *action = userdata;
+    if (s_progress != NULL) {
+        lv_msgbox_close(s_progress);
+        s_progress = NULL;
+    }
+    commons_log_info("StreamActions", "%s: the running app ended first: %d %s", action->title, result,
+                     error != NULL ? error : "");
+    if (result == GS_OK) {
+        launch(action);
+    } else {
+        static const char *btn_txts[] = {translatable("OK"), ""};
+        lv_obj_t *msgbox = lv_msgbox_create_i18n(NULL, action->title, "text", btn_txts, false);
+        lv_label_set_text(lv_msgbox_get_text(msgbox), error != NULL && error[0] != '\0'
+                                                      ? error : locstr("The host did not end the running app."));
+        lv_obj_add_event_cb(msgbox, result_clicked, LV_EVENT_VALUE_CHANGED, NULL);
+        lv_obj_center(msgbox);
+    }
+    free(action);
 }
 
 /* ------------------------------------------------------------- Terminate -- */

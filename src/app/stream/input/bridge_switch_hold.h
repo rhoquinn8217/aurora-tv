@@ -20,6 +20,9 @@ typedef struct app_gamepad_state_t app_gamepad_state_t;
  * Call before it is announced to the host again. */
 void bridge_switch_hold_begin(const app_gamepad_state_t *gamepad);
 
+/* Nothing held, at a stream's start and end. */
+void bridge_switch_hold_reset(void);
+
 /* A button went down or up: one held from the switch works again once up. */
 void bridge_switch_hold_note_button(const app_gamepad_state_t *gamepad, int button_flag, bool down);
 

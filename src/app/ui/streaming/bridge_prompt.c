@@ -415,9 +415,12 @@ static void on_deleted(lv_event_t *event) {
     if (s_released_grab) {
         s_released_grab = false;
         /* ⓘ Back to the stream, unless something else of the interface's has
-         * come up since and wants the pointer. */
-        if (global != NULL && global->session != NULL && !streaming_overlay_shown() &&
-            !streaming_soft_keyboard_shown()) {
+         * come up since and wants the pointer. ⛔ And only while the stream
+         * still takes input (2026-10-23): the session lives on through
+         * "Disconnecting...", after the stream's close has let the pointer
+         * go, and a grab taken then stayed in the launcher. */
+        if (global != NULL && global->session != NULL && session_has_input(global->session) &&
+            !streaming_overlay_shown() && !streaming_soft_keyboard_shown()) {
             app_set_mouse_grab(&global->input, true);
         }
     }

@@ -18,6 +18,16 @@ static unsigned button_bit(Uint8 sdl_button) {
     }
 }
 
+/* The buttons SDL holds down now, as the bits above. */
+static unsigned live_buttons(void) {
+    const Uint32 state = SDL_GetMouseState(NULL, NULL);
+    unsigned bits = 0;
+    if (state & SDL_BUTTON(SDL_BUTTON_LEFT)) bits |= button_bit(SDL_BUTTON_LEFT);
+    if (state & SDL_BUTTON(SDL_BUTTON_RIGHT)) bits |= button_bit(SDL_BUTTON_RIGHT);
+    if (state & SDL_BUTTON(SDL_BUTTON_MIDDLE)) bits |= button_bit(SDL_BUTTON_MIDDLE);
+    return bits;
+}
+
 /* Remote D-pad/OK keys routed through the pointer's keyboard report while it
  * is bridged (SDL scancodes for these equal the HID usages). webOS special
  * scancodes (EXIT/HOME/BACK/CH/colored) are NOT listed: they keep their local
@@ -68,6 +78,11 @@ bool bridge_pointer_event(session_t *session, const SDL_Event *event) {
             }
             s_pointer_x = event->motion.x;
             s_pointer_y = event->motion.y;
+            /* ⛔ The buttons as SDL holds them now, not as last seen here
+             * (2026-10-23): a release that went to the overlay, a pop-up or
+             * the stream's end never came here, and every movement after it
+             * reached the PC as a drag, into the next stream too. */
+            s_pointer_buttons = live_buttons();
             ctm_bridge_pointer_feed(s_pointer_x, s_pointer_y,
                                     session->display_width, session->display_height,
                                     s_pointer_buttons, 0);

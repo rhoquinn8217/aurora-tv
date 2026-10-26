@@ -3,6 +3,7 @@
 #include "stream/session_priv.h"
 
 #include <errno.h>
+#include <SDL_timer.h>
 
 #include "logging.h"
 
@@ -19,6 +20,7 @@ void session_evmouse_init(session_evmouse_t *mouse, session_t *session) {
     mouse->disabled = SDL_FALSE;
     mouse->stopped = SDL_FALSE;
     mouse->ready = SDL_FALSE;
+    SDL_AtomicSet(&mouse->exited, 0);
     mouse->thread = SDL_CreateThread((SDL_ThreadFunction) mouse_worker, "sessinput", mouse);
 }
 
@@ -26,7 +28,14 @@ void session_evmouse_deinit(session_evmouse_t *mouse) {
     if (mouse->thread != NULL) {
         // Defensive: make sure the worker is told to stop before joining it;
         // the stopped latch makes a repeated interrupt harmless.
-        session_evmouse_interrupt(mouse);
+        // This fork: said again until the worker has gone (2026-10-23): the latch is
+        // read before evmouse_listen() marks itself listening, and a stop that
+        // lands in between is overwritten there, so the listen loop ran on for
+        // good and this join hung the main thread.
+        while (!SDL_AtomicGet(&mouse->exited)) {
+            session_evmouse_interrupt(mouse);
+            SDL_Delay(5);
+        }
         SDL_WaitThread(mouse->thread, NULL);
         mouse->thread = NULL;
     }
@@ -88,6 +97,7 @@ static int mouse_worker(session_evmouse_t *mouse) {
     SDL_UnlockMutex(mouse->lock);
     if (dev == NULL) {
         commons_log_warn("Session", "No mouse device available");
+        SDL_AtomicSet(&mouse->exited, 1);
         return ENODEV;
     }
     if (!stopped) {
@@ -97,6 +107,7 @@ static int mouse_worker(session_evmouse_t *mouse) {
     set_evmouse(mouse, NULL);
     evmouse_close(dev);
     commons_log_info("Session", "EvMouse closed");
+    SDL_AtomicSet(&mouse->exited, 1);
     return 0;
 }
 
