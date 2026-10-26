@@ -11,8 +11,9 @@
  * is exactly why it is the one thing that can be set beforehand.
  *
  * ➡️ So this shares the panel's shape but none of its state vocabulary: no
- * BASIC/FULL, no arrows, no Bridge all. A window offering an action that cannot
- * work is worse than one that does not offer it. */
+ * BASIC/FULL, no arrows, no Bridge All action. ("Bridge all devices on
+ * startup" is a setting for the next stream, not an action.) A window offering
+ * an action that cannot work is worse than one that does not offer it. */
 
 #ifndef AUTO_BRIDGE_WINDOW_H
 #define AUTO_BRIDGE_WINDOW_H
