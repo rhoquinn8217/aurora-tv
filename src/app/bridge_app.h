@@ -18,10 +18,14 @@ void bridge_app_before_sdl(void);
  * asked for their full input report, which the bridge's gesture reads. */
 void bridge_app_sdl_hints(void);
 
-/* In app_init(), once the interface and the bus are up: the command port. */
+/* In app_init(), once the interface and the bus are up: the crash recorder,
+ * the command port, the TV cursor, the touchpad as a mouse, the overlay's
+ * volume and the bridged keyboard's and mouse's callbacks. */
 void bridge_app_started(app_t *app);
 
-/* First thing in app_deinit(): the command port goes. */
+/* First thing in app_deinit(): the settings and hosts saved, a stop still
+ * asked run, a stream's bridge stopped quietly, and the command port and the
+ * rest bridge_app_started brought up taken down. */
 void bridge_app_stopping(void);
 
 /* In app_process_events(), after SDL's events are filtered: the bridge's

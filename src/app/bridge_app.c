@@ -183,7 +183,7 @@ void bridge_app_stopping(void) {
      * ⭐ The hosts too: hosts.ini (each host's address, the one selected, its
      * starred and hidden apps) is written only by pcmanager_destroy, later
      * still, so a crash on the way out lost every star and hide of the session.
-     * Saved from this thread, as pcmanager_set_wake already does. */
+     * Saved from this thread, as pcmanager_set_wake_settings already does. */
     if (app_configuration != NULL) {
         settings_save(app_configuration);
     }

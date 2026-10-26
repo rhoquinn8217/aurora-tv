@@ -27,9 +27,10 @@ static bool dev_is(const ctm_bridge_dev_t *d, const char *vid, const char *pid)
 
 const char *device_short_name(const ctm_bridge_dev_t *d)
 {
-    /* ⛔ MATCHED ON VID/PID, NOT ON KIND, for the pads. `kind` is eight bytes, so
-     * "ds5e_usb" arrives as "ds5e_us" and matches nothing: a wired Edge fell
-     * through to its full system name. vid and pid cannot be truncated. */
+    /* ⛔ MATCHED ON VID/PID, NOT ON KIND, for the pads. `kind` was eight bytes,
+     * so "ds5e_usb" arrived as "ds5e_us" and matched nothing: a wired Edge fell
+     * through to its full system name. It is sixteen now; vid and pid could
+     * never be truncated. */
     if (dev_is(d, "054c", "0ce6")) return "DualSense";
     if (dev_is(d, "054c", "0df2")) return "DualSense Edge";
     if (dev_is(d, "054c", "09cc") || dev_is(d, "054c", "05c4")) return "DualShock 4";
