@@ -392,6 +392,9 @@ need "the stream boost is a setting" \
      src/app/ui/settings/panes/experimental.pane.c "app_configuration->stream_priority"
 need "the stream boost setting is read before the connection starts" \
      src/app/stream/session_worker.c "settings.stream_priority"
+in_order "rounded pictures keep their corners: the drawing is wrapped once the display exists" \
+     src/app/ui/root.c "void app_ui_open(" \
+     "lv_disp_t *disp = lv_disp_drv_register(driver);" "image_corners_install(disp);"
 
 # ⓘ The notes and the code stay in step: every "This fork:" line names a section
 # that exists, and every section is named by at least one such line.

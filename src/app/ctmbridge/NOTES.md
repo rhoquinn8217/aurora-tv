@@ -306,3 +306,21 @@ takes 50 ms rather than up to a second (2026-10-23).
 
 **Merge guard:** "the bitrate service stops before the connection does", "the
 bitrate service sees a stop within 50 ms".
+
+## Cover corners after a stream
+
+**Where:** `src/app/ui/root.c`, `app_ui_open()`, right after the display is
+registered; the fix is `src/app/lvgl/image_corners.c`.
+
+After a stream, every cover in the launcher had a black square at each corner
+where the rounding should be. LVGL's SDL renderer cuts a rounded picture's
+corners with the mask a rounded background of the same radius is drawn with,
+and the background leaves its own colour and opacity on that mask. The
+stream's statistics box is black, with the covers' radius, so covers whose
+corners were made after it got black ones, and kept them from the cache.
+LVGL is a submodule of someone else's, so the fix wraps the display's
+rectangle drawing instead: after each rounded background, the mask is set back
+to plain white and fully opaque (2026-10-26).
+
+**Merge guard:** "rounded pictures keep their corners: the drawing is wrapped
+once the display exists".
