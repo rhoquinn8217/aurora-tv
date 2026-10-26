@@ -42,14 +42,10 @@ void ctm_bridge_set_enabled(bool enabled);
  * Returns true. */
 bool ctm_bridge_start(void);
 
-/* Stop bridging: unplug all sessions and stop the keep-alive thread. Idempotent. */
 /* Switch the UNBRIDGE chord on or off. ⭐ The app owns the setting and the
  * bridge half of the gesture; this passes the other half to the core. */
 void ctm_bridge_set_gesture_enabled(bool enabled);
 
-/* Hold a bridged controller's input while the TV's overlay is open, so
- * navigating the panel does not also play the game. ⭐ Reports are blanked, not
- * dropped -- a held button is released rather than left stuck. */
 /* Which confirmation signals the bridge may make, and whether it captures the
  * controller's microphone. ⭐ Set when a stream starts. */
 void ctm_bridge_set_signals(bool light, bool rumble, bool tone);
@@ -57,6 +53,9 @@ void ctm_bridge_set_tone_gap(int ms);
 
 void ctm_bridge_set_mic_capture(bool on);
 
+/* Hold a bridged controller's input while the TV's overlay is open, so
+ * navigating the panel does not also play the game. ⭐ Reports are blanked, not
+ * dropped -- a held button is released rather than left stuck. */
 void ctm_bridge_set_input_held(bool held);
 
 /* Who to tell when a bridged keyboard presses the overlay's shortcut,
@@ -70,6 +69,7 @@ void bridge_set_overlay_request(void (*cb)(void));
 void bridge_set_shortcut_request(void (*cb)(char letter));
 void bridge_set_pointer_used_request(void (*cb)(void));
 
+/* Stop bridging: unplug all sessions and stop the keep-alive thread. Idempotent. */
 void ctm_bridge_stop(void);
 
 /* The stop when the app quits: no release signals, so every BRIDGE_STOP goes
@@ -242,10 +242,6 @@ bool ctm_bridge_ds5_bt_paint(const char *node, uint8_t r, uint8_t g, uint8_t b, 
  * hidraw node, opened O_RDONLY | O_NONBLOCK and kept open by the caller. Never
  * blocks. 1 over, 0 not yet, -1 nothing to read yet. */
 int ctm_bridge_ds5_animation_over(int fd);
-
-/* Confirmation signals, all or nothing -- tone, pulse, lightbar and fallback,
- * on every transport. */
-bool ctm_bridge_signals_enabled(void);
 
 /* Will the core signal this controller itself? If so the app leaves it alone,
  * rather than adding a second, coarser signal on top. */

@@ -183,7 +183,7 @@ void ctm_bridge_set_gesture_enabled(bool enabled)
 /* ⭐⭐ "ENABLE DEVICE BRIDGING", HANDED IN THE SAME WAY (code review,
  * 2026-10-05). Only Auto Bridge asked it, so every stream started the agent
  * probe, the hotplug watch and the stopSniff worker, fresh installs included,
- * where bridging is off by default.
+ * where bridging was off by default then.
  * ⓘ Off, ctm_bridge_start() still marks the stream up: the control port is
  * ungated by design and bridges with the switch off, and a plug brings the
  * core up itself. */
@@ -194,16 +194,6 @@ void ctm_bridge_set_enabled(bool enabled)
     s_enabled = enabled;
 }
 
-/* ⭐⭐ HOLD OR RELEASE A BRIDGED CONTROLLER'S INPUT.
- *
- * ⓘ Called as the TV's own overlay opens and closes -- see app_ui_open. The
- * core blanks each report while held rather than dropping it, so a button that
- * was down when the overlay opened is actually released in the game instead of
- * staying stuck. ⭐ Audio, rumble, the lightbar and the unbridge chord all keep
- * working throughout.
- *
- * ⓘ Safe with nothing bridged: the flag is only read in the relay path, and
- * with no session there is nothing to relay. */
 /* ⭐ WHICH SIGNALS THIS SIDE MAY MAKE, and whether the microphone is captured.
  *
  * ⓘ Handed in rather than read here: this target cannot see the app's headers
@@ -225,6 +215,16 @@ void ctm_bridge_set_mic_capture(bool on)
     ctm_mic_capture_set_enabled(on ? 1 : 0);
 }
 
+/* ⭐⭐ HOLD OR RELEASE A BRIDGED CONTROLLER'S INPUT.
+ *
+ * ⓘ Called as the TV's own overlay opens and closes -- see app_ui_open. The
+ * core blanks each report while held rather than dropping it, so a button that
+ * was down when the overlay opened is actually released in the game instead of
+ * staying stuck. ⭐ Audio, rumble, the lightbar and the unbridge chord all keep
+ * working throughout.
+ *
+ * ⓘ Safe with nothing bridged: the flag is only read in the relay path, and
+ * with no session there is nothing to relay. */
 void ctm_bridge_set_input_held(bool held)
 {
     ctm_input_set_held(held ? 1 : 0);
@@ -438,53 +438,6 @@ bool ctm_bridge_node_is_plugged(const char *node)
     return plugged;
 }
 
-/* Is this node a Bluetooth controller rather than a wired one?
- *
- * Asked so the app can leave the confirmation signals to the bridge core on
- * Bluetooth, where it builds the controller's reports itself and can do the
- * light, the pulse and the tone together. Running the app's own patterns as
- * well produces two overlapping signals with different characters, which
- * reads as a controller that does not know what it is doing.
- *
- * The distinction is already in the device kind -- "ds5" is the Bluetooth
- * DualSense, "ds5_usb" the wired one -- so nothing new has to be worked out
- * to answer it. */
-/* The one switch, asked through the glue because the app cannot see the core's
- * headers directly. One definition, both sides. */
-bool ctm_bridge_signals_enabled(void)
-{
-    return CTM_SIGNALS_ENABLED ? true : false;
-}
-
-/* Will the bridge core signal this controller itself?
- *
- * ⭐ THE RIGHT QUESTION, replacing "is this Bluetooth". Both transports have a
- * rich signal and a coarse SDL fallback, and running both gives two buzzes of
- * different characters -- which reads as a controller that does not know what
- * it is doing. What matters is not which cable it is but whether the rich one
- * is about to play.
- *
- * Bluetooth: always. The core builds the controller's own reports -- light,
- * felt pulse and tone together -- and needs nothing but a device node.
- *
- * Wired: only once a session exists, because that is what opens the speaker
- * the tone and pulse are written to. So a refused plug on a cable correctly
- * falls back, and a successful one correctly does not. */
-/* Signal a REFUSED plug richly, on whichever transport this is.
- *
- * Returns true if it did, false if the caller should fall back to SDL.
- *
- * ⭐ A refusal is the moment the user most needs telling, and until now it got
- * the coarsest signal we had -- because a failed plug leaves no session to
- * play through. Neither transport actually needs one:
- *
- *   Bluetooth: the signal is bytes to a device node, and the node is still
- *     there. Nothing about it depends on the host, which is the point, since
- *     the host being unreachable is WHY the plug failed.
- *
- *   Wired: the sound card exists because the controller is plugged into the
- *     TV, not because a bridge succeeded. ⚠️ But with two plugged in there is
- *     no telling which card is which, so that case declines and falls back. */
 /* The bridge kind of the row behind a node, or NULL. Caller holds s_dev_mutex
  * and has enumerated. */
 static const char *kind_for_node_locked(const char *node)
@@ -508,9 +461,24 @@ bool bridge_identity_mac_shaped(const char *s)
     return identity_mac_shaped(s) != 0;
 }
 
+/* Signal a REFUSED plug richly, on whichever transport this is.
+ *
+ * Returns true if it did, false if the caller should fall back to SDL.
+ *
+ * ⭐ A refusal is the moment the user most needs telling, and until now it got
+ * the coarsest signal we had -- because a failed plug leaves no session to
+ * play through. Neither transport actually needs one:
+ *
+ *   Bluetooth: the signal is bytes to a device node, and the node is still
+ *     there. Nothing about it depends on the host, which is the point, since
+ *     the host being unreachable is WHY the plug failed.
+ *
+ *   Wired: the sound card exists because the controller is plugged into the
+ *     TV, not because a bridge succeeded. ⚠️ But with two plugged in there is
+ *     no telling which card is which, so that case declines and falls back. */
 bool ctm_bridge_signal_refused(const char *node)
 {
-    if (!ctm_bridge_signals_enabled() || !node || !node[0]) return false;
+    if (!node || !node[0]) return false;
     char kind[16] = "";
     pthread_mutex_lock(&s_dev_mutex);
     /* The last scan first, as its siblings ask (2026-10-23): this ran right
@@ -670,8 +638,6 @@ static bool core_signals_node_locked(const char *node)
 
 bool ctm_bridge_node_signals_itself(const char *node)
 {
-    if (!ctm_bridge_signals_enabled()) return false;
-
     /* ⛔⛔ T-212: ASK WHETHER THE CORE WILL, NOT WHETHER THE PAD IS PLUGGED.
      *
      * This said "plugged, so the core has it" -- and for a Bluetooth Xbox pad
@@ -717,6 +683,10 @@ int ctm_bridge_ds5_animation_over(int fd)
     return ctm_ds5_animation_over(fd);
 }
 
+/* Is this node a Bluetooth controller rather than a wired one? The device kind
+ * says -- "ds5" is the Bluetooth DualSense, "ds5_usb" the wired one -- so
+ * nothing new has to be worked out to answer it. ⓘ Whether the core signals a
+ * pad is ctm_bridge_node_signals_itself's question, not this one's. */
 bool ctm_bridge_node_is_bluetooth(const char *node)
 {
     if (!node || !node[0]) {
@@ -1108,7 +1078,7 @@ bool ctm_bridge_open_config(char *name, size_t name_len)
         name[0] = '\0';
     }
     /* ⛔ Not before the bridge is running: nothing can be bridged outside a
-     * stream, and looking would bring the core up early. */
+     * stream, so there is nothing to look for. */
     if (!ctm_bridge_active()) {
         return false;
     }
