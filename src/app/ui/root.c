@@ -4,6 +4,7 @@
 #include "res.h"
 
 #include "lvgl/lv_disp_drv_app.h"
+#include "lvgl/image_corners.h"
 #include "lvgl/theme/lv_theme_moonlight.h"
 #include "lvgl/theme/lv_theme_moonlight_colors.h"
 #include "draw/sdl/lv_draw_sdl_utils.h"
@@ -93,6 +94,7 @@ void app_ui_open(app_ui_t *ui, bool open_launcher, const app_launch_params_t *pa
     }
     lv_disp_drv_t *driver = lv_app_disp_drv_create(ui->window, ui->dpi);
     lv_disp_t *disp = lv_disp_drv_register(driver);
+    image_corners_install(disp);   /* This fork: rounded pictures keep their corners. Why: ctmbridge/NOTES.md, "Cover corners after a stream". */
     disp->bg_color = lv_color_make(0, 0, 0);
     disp->bg_opa = 0;
     ui->disp = disp;

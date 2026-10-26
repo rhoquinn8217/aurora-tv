@@ -24,6 +24,7 @@ target_sources(moonlight-lib PRIVATE
         ${CMAKE_SOURCE_DIR}/src/app/input/overlay_volume.c
         ${CMAKE_SOURCE_DIR}/src/app/input/touchpad_pointer.c
         ${CMAKE_SOURCE_DIR}/src/app/input/tv_cursor.c
+        ${CMAKE_SOURCE_DIR}/src/app/lvgl/image_corners.c
         ${CMAKE_SOURCE_DIR}/src/app/stream/bridge_pointer.c
         ${CMAKE_SOURCE_DIR}/src/app/stream/bridge_proof.c
         ${CMAKE_SOURCE_DIR}/src/app/stream/bridge_session.c
