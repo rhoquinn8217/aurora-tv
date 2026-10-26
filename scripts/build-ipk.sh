@@ -27,11 +27,12 @@
 # MOUNTS
 # ═══════════════════════════════════════════════════════════════════════════
 #
-# ../.build-cache/tmp   -> /tmp                 created if missing
+# temp/build-cache/tmp  -> /tmp                 created if missing
 #
 #   The webOS toolchain is downloaded and unpacked into /tmp inside the
 #   container, which does not survive it. Without this mount every build
-#   re-downloads the whole SDK.
+#   re-downloads the whole SDK. Inside the clone, in its ignored temp folder;
+#   until 2026-10-23 it sat beside the clone (../.build-cache), outside it.
 #
 # ═══════════════════════════════════════════════════════════════════════════
 #
@@ -71,7 +72,7 @@ fi
 RECORDED="$(git -C "$ROOT" rev-parse -q --verify "HEAD:$CORE_PATH" 2>/dev/null | cut -c1-12)"
 
 # ── The toolchain cache ─────────────────────────────────────────────────────
-mkdir -p "$ROOT/../.build-cache/tmp"
+mkdir -p "$ROOT/temp/build-cache/tmp"
 
 echo "building the webOS package"
 echo "  bridge core:  $CORE_COMMIT"
@@ -85,7 +86,7 @@ docker run --rm --platform linux/amd64 \
   --dns 8.8.8.8 --dns 1.1.1.1 \
   -v "$ROOT:/build" \
   -v "$ROOT/scripts/webos/docker_build_inner.sh:/docker_build.sh" \
-  -v "$ROOT/../.build-cache/tmp:/tmp" \
+  -v "$ROOT/temp/build-cache/tmp:/tmp" \
   -w /build -e CI=1 -e DOCKER_SKIP_SUBMODULES=1 \
   -e BRIDGE_CORE_COMMIT="$CORE_COMMIT" \
   ubuntu:22.04 \
