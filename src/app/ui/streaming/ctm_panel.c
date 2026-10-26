@@ -40,10 +40,6 @@
  * 2026-10-05: it did not compile there). */
 #if defined(TARGET_WEBOS)
 
-/* Which setting a detail row edits. ⚠️ This lived one line above the block that
- * was lifted and was missed on the first pass -- the whole build failed on it. */
-
-
 /* Forward declarations, moved with the block rather than left behind: several of
  * these functions call each other in both directions. */
 static void ctm_close_panel(void);
@@ -510,17 +506,6 @@ static void ctm_toggle_device(int row) {
     }
 }
 
-/* Release every bridged device, one at a time, the same way a row does.
- *
- * ⛔ NOT release_local_sessions_on_exit(), the APP SHUTDOWN path. It tears
- * down every session at once while holding the device mutex, and with the
- * microphone disarm in the unplug path -- then five writes twenty milliseconds
- * apart, per device -- the overlay froze long enough to look like a crash.
- * Measured 2026-08-18.
- *
- * ⚠️ This still runs on the UI thread and still blocks; it just has far less to
- * do, and it does the same thing pressing each row would. Getting these calls
- * off the UI thread is T-062 and is a bigger change than this. */
 /* Bridge every device that is not already bridged, the same way pressing its
  * row would.
  *
@@ -539,6 +524,17 @@ static void ctm_bridge_all(void) {
     }
 }
 
+/* Release every bridged device, one at a time, the same way a row does.
+ *
+ * ⛔ NOT release_local_sessions_on_exit(), the APP SHUTDOWN path. It tears
+ * down every session at once while holding the device mutex, and with the
+ * microphone disarm in the unplug path -- then five writes twenty milliseconds
+ * apart, per device -- the overlay froze long enough to look like a crash.
+ * Measured 2026-08-18.
+ *
+ * ⚠️ This still runs on the UI thread and still blocks; it just has far less to
+ * do, and it does the same thing pressing each row would. Getting these calls
+ * off the UI thread is a bigger change than this. */
 static void ctm_release_all(void) {
     for (int i = 0; i < s_ctm_ndev; ++i) {
         if (s_ctm_devs[i].plugged) {
@@ -818,7 +814,7 @@ static lv_obj_t *ctm_make_dev_row(const device_group_t *g, int idx) {
     lv_obj_set_style_border_color(row, CTM_COL_FOCUS, LV_STATE_FOCUSED);
     lv_obj_set_style_bg_color(row, CTM_COL_FOCUS, LV_STATE_FOCUSED);
     lv_obj_set_style_bg_opa(row, LV_OPA_COVER, LV_STATE_FOCUSED);
-    /* Persistent selection: stays lit while focus is in the detail pane. */
+    /* Persistent selection: the row last focused stays lit (ctm_dev_focus_cb). */
     lv_obj_set_style_bg_color(row, lv_color_hex(0x223046), LV_STATE_CHECKED);
     lv_obj_set_style_bg_opa(row, LV_OPA_COVER, LV_STATE_CHECKED);
     lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
@@ -967,9 +963,10 @@ static lv_obj_t *ctm_make_dev_row(const device_group_t *g, int idx) {
      * ⛔ "idle" was wrong for an unbridged controller, and for a mouse: the
      * stream carries them, so they are WORKING, just by the other path. */
 
-    /* The action, drawn as a button. ⚠️ NOT actually clickable in its own right:
-     * the whole row takes the press, so this is an affordance rather than a
-     * second target to aim at. */
+    /* The action, drawn as a button. ⚠️ NOT clickable in its own right: a click
+     * falls through to the row, which a pointer only focuses (2026-10-11). A
+     * pointer bridges and releases with the badges; Select on the row does it
+     * from the keys. */
     /* ⭐⭐ FULL IN A GREEN BOX, BASIC AS PLAIN TEXT.
      *
      * ⛔ Colour used to be on the ACTION button, and it read backwards: a big
@@ -1060,9 +1057,9 @@ static lv_obj_t *ctm_make_dev_row(const device_group_t *g, int idx) {
      *
      * ⭐ ONLY THE AVAILABLE DIRECTION IS EVER SHOWN. A bridged device offers
      * "release" and nothing else; pressing right does nothing, and showing it
-     * would promise otherwise. ⓘ The row itself still takes a press, which
-     * toggles -- that is the path for anyone who does not want to think about
-     * direction. */
+     * would promise otherwise. ⓘ Select on the row still toggles, for anyone
+     * who does not want to think about direction; a pointer's click on the row
+     * only focuses it (2026-10-11), and the badges are a pointer's switch. */
     lv_obj_t *actlbl = lv_label_create(act);
     /* ⛔ PLAIN CHARACTERS, NOT LV_SYMBOL_*. LV_SYMBOL_LEFT was tried on
      * 2026-08-20 and rendered as an empty box -- the small theme font on these
@@ -1124,8 +1121,9 @@ static lv_obj_t *ctm_make_dev_row(const device_group_t *g, int idx) {
     return row;
 }
 
-/* ⛔ Guarded rather than trusting LV_STATE_DISABLED, which greys a button but
- * does not reliably stop it being activated. ⭐ And it flashes the reason. */
+/* ⛔ Guarded for a server that went away after the panel was drawn: Bridge All
+ * is greyed (LV_STATE_DISABLED) only when it was refusing already then, and a
+ * greyed button takes no press at all. ⭐ And it flashes the reason. */
 static void ctm_act_plugall_cb(lv_event_t *e) {
     LV_UNUSED(e);
     if (ctm_server_refuses()) {
@@ -1382,6 +1380,13 @@ static void ctm_close_panel(void) {
         s_ctm_flash_timer = NULL;
     }
     s_ctm_flash_left = 0;
+    /* ⓘ And the online timer, which has only this panel's labels to write to
+     * (code review, 2026-10-23): it ran on once a second until the stream
+     * ended. The next open makes a new one. */
+    if (s_ctm_online_timer) {
+        lv_timer_del(s_ctm_online_timer);
+        s_ctm_online_timer = NULL;
+    }
     /* Hide NOW (same-frame UI change) and move input back to the overlay; the old
      * group stays alive until the async teardown, so the in-flight keypad event
      * that triggered this close keeps a valid group pointer. */

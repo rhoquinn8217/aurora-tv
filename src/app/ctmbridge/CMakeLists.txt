@@ -2,9 +2,9 @@
 #
 # Compiles the bridge's headless core from the ctm-bridge-webos repo (this
 # fork's own, forked from github.com/CTM-Bridge/ctm-bridge-webos, whose
-# stand-alone TV app this fork removed from it on 2026-10-07). The core carries
-# no ENet client: moonlight has its own bundled ENet, and enet_stub.c satisfies
-# the enet_client_* references (TCP-only at runtime). No LVGL/SDL.
+# stand-alone TV app this fork removed from it on 2026-10-07). The core speaks
+# TCP only: its ENet client went with that app, and the stubs that stood in for
+# it here went on 2026-10-23. No LVGL/SDL.
 #
 # The core is a SUBMODULE of this repo, at third_party/ctm-bridge-webos, as the
 # app's other dependencies are. It used to be read from a folder beside this
@@ -36,7 +36,6 @@ add_library(ctmbridge STATIC
     ${CTM_BRIDGE_DIR}/src/controllers/controller_xpad.c
     ${CTM_BRIDGE_DIR}/src/controllers/controller_steam_puck.c
     ${CTM_BRIDGE_DIR}/src/controllers/controller_generic.c
-    enet_stub.c
     ctm_bridge_glue.c
 )
 

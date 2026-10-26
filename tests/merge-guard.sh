@@ -92,6 +92,14 @@ need "USB Bridge pane declared" \
 need "USB Bridge pane compiled" \
      src/app/ctmbridge/app_sources.cmake "usbbridge.pane.c"
 
+# --- the fork's own identity ---------------------------------------------
+# ⛔ A merge taking upstream's id would install over GuiDev1994's Aurora and
+# read its settings and hosts (code review, 2026-10-23).
+need "the fork's own app id" \
+     CMakeLists.txt 'set(WEBOS_APPINFO_ID "com.aurora.gamestream.rhqn")'
+need "... and its own title in the TV's launcher" \
+     deploy/webos/appinfo.json '"title": "Aurora RHQN"'
+
 # --- the fork's build files ----------------------------------------------
 # ⛔ EVERYTHING OF OURS HANGS OFF ONE LINE IN A FILE OF UPSTREAM'S. If a merge
 # takes upstream's side of src/app/CMakeLists.txt, nothing of ours is compiled.
@@ -152,7 +160,7 @@ else
 fi
 
 # --- the settings themselves ---------------------------------------------
-# ⓘ The ten bridge settings are one member of upstream's settings struct, and
+# ⓘ The bridge's settings are one member of upstream's settings struct, and
 # src/app/bridge_settings.c holds the rest. Upstream's settings code makes
 # three calls into it, and losing any of them compiles: without the defaults
 # every switch starts off and the auto-bridge list is unset, without the save
@@ -284,7 +292,8 @@ need "a removed controller's gesture is forgotten" \
 
 # --- the branch switch ---------------------------------------------------
 # ⛔ THE ONE LINE THAT SEPARATES THE BRANCHES. On stable it must be absent, so
-# every gated block compiles out. On mic-capture-experimental it must be 1.
+# every gated block compiles out. On the Bluetooth microphone's branch,
+# ds5-bt-mic-capture, it must be 1.
 # ⚠️ BY CONTENT, NOT BY BRANCH NAME. A working copy checked out under any other
 # name -- a bisect branch, a local experiment -- would otherwise be judged
 # against the wrong rules and report a loss that is not one.
@@ -317,12 +326,12 @@ absent_built() {   # absent_built <description> <pattern>
 }
 
 if build_files_have "CTM_BT_MIC_ARMING=1"; then
-    branch=mic-capture-experimental
+    branch=ds5-bt-mic-capture
 else
     branch=stable
 fi
 case "$branch" in
-    mic-capture-experimental)
+    ds5-bt-mic-capture)
         need_built "experimental arms the BT microphone" "CTM_BT_MIC_ARMING=1"
         need_built "experimental marks its packages" 'CTM_BUILD_SUFFIX "_EXP"'
         ;;
@@ -355,6 +364,8 @@ in_order "the bitrate service stops before the connection does" \
      "adaptive_bitrate_stop(session->abr);" "LiStopConnection();"
 need "... and sends nothing once stopping" \
      src/app/stream/adaptive_bitrate.c "Once stopping, never send"
+absent_in_function "... not even the old bitrate back, which wedged the host" \
+     src/app/stream/adaptive_bitrate.c "void adaptive_bitrate_stop(" "abr_set_bitrate("
 need "the bitrate service sees a stop within 50 ms" \
      src/app/stream/adaptive_bitrate.c "This fork: in steps, so a stop is seen in 50 ms"
 need "a Cancel ends with its session on the desktop path too" \
@@ -447,7 +458,7 @@ in_order "the USB Bridge panel goes before the screen's focus group" \
 # Losing any of these compiles, and a button held at the release is held on
 # the stream's controller.
 need "the switch's file is built" \
-     src/app/stream/input/CMakeLists.txt "bridge_switch_hold.c"
+     src/app/ctmbridge/app_sources.cmake "src/app/stream/input/bridge_switch_hold.c"
 need_count "what the stream is sent leaves out what was held at the switch" \
      src/app/stream/input/session_gamepad.c "bridge_switch_hold_send(gamepad, input->input->activeGamepadMask" 2
 need "a button held at the switch works again once let go" \
@@ -518,7 +529,7 @@ in_order "Ctrl+Alt+Shift+C, upstream's show-the-mouse, switches the sharp and re
 # stream_actions.c).
 in_order "the host's controls leave each list before the grid shows it" \
      src/app/ui/launcher/apps.controller.c "static void appload_loaded" \
-     "stream_actions_take(&fragment->uuid, apps);" "lv_gridview_set_data_advanced("
+     "stream_actions_take(&fragment->uuid, apps);" "lv_gridview_set_data_advanced(fragment->applist,"
 in_order "the running app's badge shows on every TV, not only the one that started it" \
      src/app/ui/launcher/apps.controller.c "static void appitem_bind" \
      "stream_actions_running_id(&controller->uuid, pcmanager_server_current_app(" "lv_obj_clear_flag(holder->play_indicator, LV_OBJ_FLAG_HIDDEN);"

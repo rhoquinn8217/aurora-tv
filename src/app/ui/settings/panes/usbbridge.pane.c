@@ -16,7 +16,8 @@
 #include "pref_obj.h"
 
 /* ⭐ 0 on this branch: the Bluetooth microphone arming code does not exist here.
- * The experimental branch defines it 1. ⓘ See upstream-direction.md,
+ * The experimental branch defines it 1. ⓘ See upstream-direction.md in the docs
+ * repo, ds5-webos-bridge,
  * 2026-08-21 -- the branches are meant to differ by the arming and nothing
  * else, so anything that has to change with it is gated on this rather than
  * kept in step by hand. */
@@ -197,7 +198,7 @@ static lv_obj_t *create_obj(lv_fragment_t *self, lv_obj_t *container) {
 
     /* ⭐⭐ THE ONLY WAYS TO BRIDGE ARE THE PANEL, THE GESTURE AND AUTO BRIDGE,
      * so switching this off switches all three and nothing can be handed over.
-     * ⓘ Auto Bridge is checked where it runs, at stream start (session.c).
+     * ⓘ Auto Bridge is checked where it runs, at stream start (bridge_session.c).
      *
      * ⛔ IT IS NOT THE OLD "use CTM Bridge" SWITCH, removed 2026-08-19. That one
      * stopped Moonlight announcing any gamepad for the whole session, so an
@@ -223,8 +224,8 @@ static lv_obj_t *create_obj(lv_fragment_t *self, lv_obj_t *container) {
 
 #if defined(TARGET_WEBOS)
     /* ⭐⭐ FIRST UNDER THE SWITCH, and that is the point (rhoquinn8217,
-     * 2026-09-08): bridging ships OFF, so the first thing anyone meets after
-     * turning it on is the way to never think about it again.
+     * 2026-09-08): the first thing anyone meets under the switch is the way to
+     * never think about it again.
      *
      * ⭐ The line teaches the idea before the preference. A mark does nothing
      * visible when it is made -- the effect arrives at the NEXT stream -- so

@@ -193,7 +193,7 @@ static bool s_nodes_known = false;
 /* The record a person can read on any set: logs/tv-keyboard.log, beside the
  * bridge core's own logs and stamped with the same clock. ⓘ commons_log goes
  * to PmLog, which a C1 or a C3 does not let the developer account read.
- * ⛔ From the app's loop only: the core builds the path in one shared buffer. */
+ * ⓘ The core builds the path in a buffer of each thread's own (log_path.inl). */
 #define KEYBOARD_LOG "tv-keyboard.log"
 #define KEYBOARD_LOG_MAX_BYTES (128L * 1024L)
 FILE *ctm_log_open(const char *name, const char *mode);
@@ -252,7 +252,7 @@ static int nav_slot_for_sym(SDL_Keycode sym) {
 
 bool bridge_keyboard_node_is_bridged(const char *event_path) {
     /* ⛔ Not before the bridge is running: nothing can be bridged outside a
-     * stream, and asking the glue would bring the core up early. */
+     * stream, so there is nothing to look for. */
     if (event_path == NULL || !ctm_bridge_active()) {
         return false;
     }

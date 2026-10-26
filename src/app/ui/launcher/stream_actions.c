@@ -1285,6 +1285,12 @@ static void badge_deleted(lv_event_t *event);
 
 static void hover_tick(lv_timer_t *timer);
 
+/* ⓘ The hover timer runs while a badge exists (code review, 2026-10-23):
+ * made with the first badge, it ran twenty times a second for the life of the
+ * app. */
+static lv_timer_t *s_hover_timer;
+static int s_badges_alive;
+
 /* The stop of a tile's badge row, shown or hidden. ⓘ A tile is reused as the
  * grid scrolls, so this is set every time a tile is bound, both ways. A row
  * without pictures (upstream's circle, when they could not be made) has no
@@ -1316,6 +1322,10 @@ static void add_badge(lv_obj_t *row, lv_coord_t size, badge_symbol_t symbol, lv_
     lv_obj_align(img, align, 0, 0);
     lv_obj_add_event_cb(img, badge_clicked, LV_EVENT_CLICKED, NULL);
     lv_obj_add_event_cb(img, badge_deleted, LV_EVENT_DELETE, NULL);
+    ++s_badges_alive;
+    if (s_hover_timer == NULL) {
+        s_hover_timer = lv_timer_create(hover_tick, 50, NULL);
+    }
 }
 
 void stream_actions_badge_style(lv_obj_t *badge, lv_coord_t tile_width) {
@@ -1339,10 +1349,6 @@ void stream_actions_badge_style(lv_obj_t *badge, lv_coord_t tile_width) {
     lv_obj_add_flag(badge, LV_OBJ_FLAG_OVERFLOW_VISIBLE);
     add_badge(badge, size, BADGE_PLAY, LV_ALIGN_LEFT_MID);
     add_badge(badge, size, BADGE_STOP, LV_ALIGN_RIGHT_MID);
-    static lv_timer_t *s_hover;
-    if (s_hover == NULL) {
-        s_hover = lv_timer_create(hover_tick, 50, NULL);
-    }
 }
 
 /* What Play does: back into what runs, as the menu's Resume does (Aurora's own
@@ -1448,6 +1454,13 @@ static void badge_set_hot(lv_obj_t *img, bool hot) {
 static void badge_deleted(lv_event_t *event) {
     if (lv_event_get_target(event) == s_hovered) {
         s_hovered = NULL;
+    }
+    if (--s_badges_alive <= 0) {
+        s_badges_alive = 0;
+        if (s_hover_timer != NULL) {
+            lv_timer_del(s_hover_timer);
+            s_hover_timer = NULL;
+        }
     }
 }
 

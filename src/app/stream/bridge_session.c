@@ -97,14 +97,15 @@ static void bridge_session_start_now(session_t *session) {
                            app_configuration->bridge.signal_rumble,
                            app_configuration->bridge.signal_tone);
     /* ⓘ Wired only. The Bluetooth setting is greyed out on this branch and
-     * the core refuses it regardless -- see app_settings.h. */
+     * the core refuses it regardless -- see bridge_settings.h. */
     ctm_bridge_set_mic_capture(app_configuration->bridge.mic_wired);
     /* ⓘ Off, the bridge starts nothing for this stream; see the glue. */
     ctm_bridge_set_enabled(app_configuration->bridge.enable);
 
-    // Keep Moonlight's controllers open (UI nav still works); host sends are
-    // gated and the controller-arrival is suppressed, so nothing reaches the
-    // host. The bridge forwards the plugged controller to the game itself.
+    // Keep Moonlight's controllers open (UI nav still works); a bridged pad's
+    // slot is left out of the mask Moonlight announces and its sends are
+    // gated, so nothing of it reaches the host twice. The bridge forwards the
+    // plugged controller to the game itself.
     //
     // The agent runs on the machine we are streaming from, so hand the
     // bridge that address rather than letting it broadcast for one: a

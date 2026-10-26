@@ -179,7 +179,6 @@ typedef struct {
      * (flash_write), with the takeover the first time. ds5_since is when the
      * pad was first seen (SDL ticks, 0 = not a DualSense). */
     uint32_t ds5_since;
-    bool ds5_bt_checked; /* the transport has been asked: once, when it matters */
     bool ds5_bt;         /* and it is Bluetooth */
     bool ds5_took_light; /* the takeover has gone out for this connection */
     /* ⭐ WHEN IT WILL TAKE A COLOUR, from its own clock (rhoquinn8217,
@@ -342,25 +341,6 @@ static void log_controller_identity(SDL_GameController *controller, SDL_Joystick
                 SDL_GameControllerGetPlayerIndex(controller));
 }
 
-/* Is the gesture being made right now? Two fingers down AND the touchpad
- * pressed -- the same three facts the bridge core reads out of the raw report,
- * asked of SDL instead. */
-/* Should THIS file produce the signal, or has the core already?
- *
- * Both transports have a rich signal -- a tone and a felt pulse through the
- * controller's audio -- and a coarse SDL fallback. Running both gives two
- * buzzes of different characters, which reads as a controller that does not
- * know what it is doing.
- *
- * ⭐ So the question is not "which cable is this" but "is the rich one about
- * to play". On Bluetooth the core always can; on a cable it can once a session
- * has opened the speaker, which means a refused plug correctly falls back here
- * and a successful one correctly does not.
- *
- * ⚠️ And on Bluetooth there is deliberately NO fallback. The ways that path
- * can fail take SDL down with it -- a controller that has stopped accepting
- * reports ignores SDL's just as readily as ours -- so a second signal that
- * fails in the same conditions is noise, not insurance. */
 /* T-212 -- SAY WHETHER A PULSE ACTUALLY HAPPENED.
  *
  * ⛔ Every "pulse" line in this file used to print whether or not a rumble was
@@ -429,12 +409,30 @@ static void flash_arm(watched_t *w, uint8_t r, uint8_t g, uint8_t b, int flashes
     w->flash_next = SDL_GetTicks();
 }
 
+/* Should THIS file produce the signal, or has the core already?
+ *
+ * Both transports have a rich signal -- a tone and a felt pulse through the
+ * controller's audio -- and a coarse SDL fallback. Running both gives two
+ * buzzes of different characters, which reads as a controller that does not
+ * know what it is doing.
+ *
+ * ⭐ So the question is not "which cable is this" but "is the rich one about
+ * to play". On Bluetooth the core always can; on a cable it can once a session
+ * has opened the speaker, which means a refused plug correctly falls back here
+ * and a successful one correctly does not.
+ *
+ * ⚠️ And on Bluetooth there is deliberately NO fallback. The ways that path
+ * can fail take SDL down with it -- a controller that has stopped accepting
+ * reports ignores SDL's just as readily as ours -- so a second signal that
+ * fails in the same conditions is noise, not insurance. */
 static bool gesture_signal_here(const char *node)
 {
-    if (!ctm_bridge_signals_enabled()) return false;
     return !ctm_bridge_node_signals_itself(node);
 }
 
+/* Is the gesture being made right now? Two fingers down AND the touchpad
+ * pressed -- the same three facts the bridge core reads out of the raw report,
+ * asked of SDL instead. */
 static bool gesture_held(SDL_GameController *controller) {
     if (!controller) {
         return false;
@@ -479,51 +477,6 @@ static bool gesture_held(SDL_GameController *controller) {
 #define PREP_STEPS        20
 #define PREP_STEP_MS      50
 
-/* The post-unplug signal: three shorter breaths rather than one long one.
- * Repetition is what makes it unmistakable, and each breath is brief enough
- * that three of them still pass in about a second and a half. */
-/* ⭐⭐ TWO breaths, not three, and MANY more steps in each.
- *
- * ⛔ Ten steps is too few to read as breathing -- each one is a visible jump,
- * and nine jumps in a row look like a flicker however long they take. Slowing
- * the step to 90 ms made it MORE steppy, not smoother: measured 453 ms then
- * 812 ms for the same nine steps, and it still read as fast.
- *
- * ⭐ Smoothness is the step COUNT; pace is the interval. 26 steps at 45 ms is a
- * breath of about 1.2 s with 26 brightness levels in it. ⓘ Dropped to two
- * breaths so the handback does not run to three and a half seconds. */
-
-/* ⭐⭐ HOW LONG ONE BREATH TAKES. Ten steps at this interval.
- *
- * ⛔ It used to borrow the pre-plug pulse's 50 ms, which made a breath half a
- * second long -- and half a second reads as a BLINK, not breathing. rhoquinn8217,
- * 2026-08-19: "it's just going really fast now." ⓘ The log had been saying so
- * all along: `bridge pulse finished, 9 steps in 453ms`.
- *
- * ⚠️ The pre-plug pulse keeps the shorter step deliberately: it fills the
- * second between the one-second hold and the plug, so it is a different job.
- *
- * ⭐ 90 ms gives a breath just under a second, which is about the rate a person
- * breathes and is what makes it read as calm rather than urgent. */
-/* ⭐ 20 ms, which the app's loop can hold -- it ran 25 steps in 1128 ms at 45,
- * so the pace is real rather than aspirational. Sixty steps at 20 ms is a
- * breath of 1.2 s with THIRTY brightness levels climbing and thirty falling. */
-/* ⭐ How long ONE breath lasts. The shape is drawn from the clock, so this is
- * a real duration rather than a step count times an interval -- and it holds
- * whatever the app's loop is doing. About a second reads as breathing; half a
- * second reads as a blink. */
-
-/* ⭐ The BRIDGE breath is deliberately shorter than the handback's.
- *
- * ⛔ Not a style choice. A bridge hands the controller over the instant this
- * starts -- the emulated pad retires, the real one arrives, and the host
- * repaints -- so a long breath spends most of itself competing with a device
- * changing hands. ⚠️ Measured by eye across builds: 450 ms read as clean,
- * 800-1200 ms read as flickering throughout.
- *
- * ⓘ A handback has no such problem, because nothing is being relayed by then --
- * which is why yellow has never flickered and can afford to be slow. */
-
 /* How often to ask whether a controller we plugged is still bridged.
  *
  * The app is never told when an unplug finishes -- the teardown happens on the
@@ -531,17 +484,18 @@ static bool gesture_held(SDL_GameController *controller) {
  * So the transition has to be noticed by asking.
  *
  * Twice a second, and only while a controller we plugged is still plugged.
- * That lookup enumerates devices, which is real work; asking every pass would
- * put a filesystem scan on the app's main loop. The cheaper fix, when it is
+ * That lookup reads the last scan, and scans again for a node it does not
+ * know, which is real work; asking every pass could put a filesystem scan on
+ * the app's main loop. The cheaper fix, when it is
  * worth doing, is for the core to say so rather than for this to ask. */
 #define PLUG_CHECK_MS     500
 /* ⛔⛔ HOW MANY CONSECUTIVE "NOT PLUGGED" ANSWERS BEFORE WE BELIEVE IT.
  *
- * ctm_bridge_node_is_plugged() RE-ENUMERATES on every call, and an enumeration
- * that runs while a device is arriving or leaving can miss a node that is
- * perfectly well bridged. On one answer that is indistinguishable from an
- * unplug, so a healthy bridge was torn down by an unrelated controller being
- * paired.
+ * ctm_bridge_node_is_plugged() reads the last scan and scans again for a node
+ * it does not know, and a scan that runs while a device is arriving or leaving
+ * can miss a node that is perfectly well bridged. On one answer that is
+ * indistinguishable from an unplug, so a healthy bridge was torn down by an
+ * unrelated controller being paired.
  *
  * ⭐ Measured 2026-08-18: a DualSense was paired over Bluetooth while a
  * DualSense Edge was bridged. Three milliseconds after the new controller
@@ -603,8 +557,9 @@ static bool gesture_held(SDL_GameController *controller) {
  * half a second is a report every 40 ms with nothing to spare, so an "on"
  * lands late and its "off" lands on top of it.
  *
- * At 200/150 each burst gets five or six reports and each gap gets four, so
- * the shape survives the pacing. Slower on a cable too, but three taps at
+ * At 200/150 each burst got five or six reports and each gap four, so the
+ * shape survived the pacing; doubled since (BUZZ_ON_MS, BUZZ_OFF_MS below), it
+ * has room to spare. Slower on a cable too, but three taps at
  * this length still read as three taps -- and a signal that is legible
  * everywhere beats one that is crisp on the transport most people do not
  * use.
@@ -691,27 +646,6 @@ static bool gesture_held(SDL_GameController *controller) {
 #define REFUSED_ON_MS     125
 #define REFUSED_OFF_MS    125
 
-/* One step of the flash.
- *
- * Set through SDL rather than by writing a report ourselves. Two reasons, both
- * learned the hard way on 2026-08-06:
- *
- * SDL's own PlayStation driver is enabled here (it is what makes a Bluetooth
- * controller send its touchpad at all), and that driver writes output reports
- * including the lightbar. A raw write is simply overwritten by it -- the light
- * went straight to whatever SDL wanted and our colour was never seen.
- *
- * And SDL builds the right report for whichever transport the controller is
- * on, checksum included. Writing the wired report over a Bluetooth link was
- * killing sessions, which is why the earlier confirmation light had to be
- * gated to wired. Going through SDL removes that limit entirely.
- *
- * Deliberately NOT a loop with sleeps in it: this runs on the app's main loop,
- * and sleeping here would freeze the interface for the length of the signal.
- * The loop's own passes are the clock, exactly as the gesture hold is timed. */
-/* ⓘ Returns what SDL said: 0 accepted, -1 refused or no light. Almost every
- * caller is an animation step and ignores it; the handback paint reads it, so a
- * colour that never lands is a line in the log. */
 /* Stop reading a DualSense's clock: its animation is over, or it has gone. */
 static void ds5_clock_close(watched_t *w) {
     if (w->ds5_clock_fd1 != 0) {
@@ -746,8 +680,7 @@ static bool ds5_light_ready(watched_t *w) {
  * gesture's own hold takes a second. Only while this side draws the pulse. */
 static bool ds5_bridge_held(watched_t *w) {
     if (w->ds5_since == 0 || !w->ds5_bt || w->ds5_took_light) return false;
-    if (!ctm_bridge_signals_enabled() ||
-        !(app_configuration && app_configuration->bridge.signal_light)) {
+    if (!(app_configuration && app_configuration->bridge.signal_light)) {
         return false;
     }
     if (ds5_light_ready(w)) {
@@ -774,10 +707,7 @@ static void flash_write_past_sdl(SDL_GameController *controller, uint8_t r, uint
     if (!ds5_light_ready(w)) return;
     const char *path = SDL_GameControllerPath(controller);
     if (!path) return;
-    if (!w->ds5_bt_checked) {
-        w->ds5_bt_checked = true;
-        w->ds5_bt = ctm_bridge_node_is_bluetooth(path);
-    }
+    /* ⓘ ds5_bt was asked with ds5_since, which is set by then. */
     if (!w->ds5_bt) return;
     const bool take = !w->ds5_took_light;
     const bool ok = ctm_bridge_ds5_bt_paint(path, r, g, b, take);
@@ -788,6 +718,30 @@ static void flash_write_past_sdl(SDL_GameController *controller, uint8_t r, uint
     }
 }
 
+/* One step of the flash.
+ *
+ * Set through SDL rather than by writing a report ourselves. Two reasons, both
+ * learned the hard way on 2026-08-06:
+ *
+ * SDL's own PlayStation driver is enabled here (it is what makes a Bluetooth
+ * controller send its touchpad at all), and that driver writes output reports
+ * including the lightbar. A raw write is simply overwritten by it -- the light
+ * went straight to whatever SDL wanted and our colour was never seen.
+ *
+ * And SDL builds the right report for whichever transport the controller is
+ * on, checksum included. Writing the wired report over a Bluetooth link was
+ * killing sessions, which is why the earlier confirmation light had to be
+ * gated to wired. Going through SDL removes that limit entirely.
+ *
+ * Deliberately NOT a loop with sleeps in it: this runs on the app's main loop,
+ * and sleeping here would freeze the interface for the length of the signal.
+ * The loop's own passes are the clock, exactly as the gesture hold is timed. */
+/* ⓘ Returns what SDL said: 0 accepted, -1 refused or no light. Almost every
+ * caller is an animation step and ignores it; the handback paint reads it, so a
+ * colour that never lands is a line in the log. */
+/* ⓘ And on a Bluetooth DualSense the colour goes past SDL as well
+ * (flash_write_past_sdl), which holds every colour back until it has taken
+ * the light over itself. */
 static int flash_write(SDL_GameController *controller, uint8_t r, uint8_t g, uint8_t b) {
     if (controller) {
         const int rc = SDL_GameControllerSetLED(controller, r, g, b);
@@ -807,23 +761,6 @@ static int flash_write(SDL_GameController *controller, uint8_t r, uint8_t g, uin
  * Set directly rather than by re-applying the index: SDL sees the same value
  * and repaints nothing, which left the light stuck on the signal colour.
  * Measured 2026-08-06 on both transports. */
-/* ⭐⭐ THE COLOUR A BRIDGED CONTROLLER IS HANDED OVER IN.
- *
- * ⛔ After a bridge the light is NOT ours. The controller belongs to the host,
- * and Windows and Steam paint it themselves -- measured 2026-08-07: plugging a
- * ds5 in leaves the lightbar TEAL.
- *
- * ⚠️ So repainting the player colour on the way out was a claim we do not have.
- * It also showed: our colour, then Steam's a moment later, a visible flip that
- * says the wrong thing about who owns the controller.
- *
- * ⭐ Painting it where the host is about to put it makes the handover
- * seamless. rhoquinn8217, 2026-08-19: "setting it early makes the flow cleaner."
- *
- * ⓘ THE EXACT VALUE IS APPROXIMATE. Teal was observed, not measured as an RGB
- * triple. If it ever visibly steps when Steam takes over, this is the number to
- * tune -- it is one line. */
-
 static int paint_player_colour(SDL_GameController *controller) {
     static const uint8_t player_rgb[4][3] = {
         { 0x00, 0x00, 0xff },   /* 1: blue   */
@@ -847,29 +784,6 @@ static int paint_player_colour_for(watched_t *w, SDL_GameController *controller)
     }
     return rc;
 }
-
-/* A ramp that rises and falls: bright in the middle, dark at both ends, so it
- * reads as a breath rather than a blink. For a signal that ends on a colour of
- * its own, where the last step is not the thing being seen.
- *
- * `span` is the length of ONE breath, so a longer count simply repeats it. */
-/* ⭐⭐ BRIGHTNESS FROM THE CLOCK, NOT FROM A STEP COUNTER.
- *
- * ⛔ The pulse used to count steps and sleep between them, which means the
- * SHAPE depended on the app's loop keeping time -- and that loop is also
- * drawing the interface. This file already warned about it: an earlier version
- * "froze at its brightest and stayed there, because it animated on the UI
- * thread and lost the competition for it."
- *
- * ⚠️ It was got wrong twice in one day, in opposite directions. Fifty
- * milliseconds a step looked smooth; ninety looked steppy; twenty looked like
- * the light was fighting something, because the loop cannot promise fifty
- * updates a second and the steps landed unevenly.
- *
- * ⭐ Asking the clock removes the problem instead of tuning it. A late pass
- * simply lands at the brightness that moment deserves, so jitter shifts nothing
- * -- and the shape is the same on a busy loop as an idle one. */
-
 
 /* A ramp that only rises, ending at full brightness.
  *
@@ -1175,8 +1089,7 @@ static void request_arm(watched_t *w, SDL_GameController *controller, const char
     /* ⭐ The light switch is the gate the note above means (code review,
      * 2026-10-05): with only the build's master switch asked, a pulse with the
      * light signal off drew nothing and still held the bridge back a second. */
-    w->prep_left = (!ctm_bridge_signals_enabled() ||
-                    !(app_configuration && app_configuration->bridge.signal_light))
+    w->prep_left = !(app_configuration && app_configuration->bridge.signal_light)
                        ? 1 : PREP_STEPS;
     w->prep_next = SDL_GetTicks();
     w->retry_at = 0;
@@ -1359,10 +1272,7 @@ static bool gesture_poll_one(SDL_GameController *controller, SDL_JoystickID id) 
                  * ⚠️ Measured on the monitor 2026-09-18 -- it rumbled on the
                  * bridge and was handed back in silence, while the Xbox pad beside
                  * it did both. ⭐ A DualSense still says nothing here, because
-                 * gesture_signal_here() is false for it: the core does sing.
-                 *
-                 * ⓘ gesture_signal_here() folds in ctm_bridge_signals_enabled(),
-                 * so the switch that used to be tested on this line still is. */
+                 * gesture_signal_here() is false for it: the core does sing. */
                 if (controller && app_configuration &&
                     app_configuration->bridge.signal_rumble &&
                     gesture_signal_here(w->prep_node)) {
@@ -1648,35 +1558,33 @@ static bool gesture_poll_one(SDL_GameController *controller, SDL_JoystickID id) 
                      * plug failed, so on a cable there is no session and no
                      * speaker to write a richer one to.
                      *
-                     * ⚠️ The one switch silences this too, deliberately. A
-                     * switch that keeps failures but drops successes sounds
-                     * thoughtful and is really a second thing to reason about
-                     * -- and if signals are off, being told nothing on failure
-                     * is what was asked for. */
-                    if (ctm_bridge_signals_enabled()) {
-                        /* ⭐ THE LIGHT AND THE SOUND ARE TWO DECISIONS, not
-                         * one -- because on a cable they live on different
-                         * devices.
-                         *
-                         * On Bluetooth the core's signal carries both: the
-                         * lightbar and the audio ride the same report. On a
-                         * cable the audio goes to the sound card and the
-                         * lightbar to the HID device, so the core can only do
-                         * the sound and the flashes have to come from here.
-                         *
-                         * Treating it as one decision left a wired refusal
-                         * with two tones and no red at all. */
-                        if (ctm_bridge_signal_refused_begin(w->prep_node)) {
-                            w->refusal_waiting = true;   /* answered in a later tick */
-                        } else {
-                            refusal_answered(w, controller, false);
-                        }
+                     * ⚠️ The signal switches silence this too, each its own
+                     * part, deliberately. A switch that keeps failures but
+                     * drops successes sounds thoughtful and is really a second
+                     * thing to reason about -- and if signals are off, being
+                     * told nothing on failure is what was asked for.
+                     *
+                     * ⭐ THE LIGHT AND THE SOUND ARE TWO DECISIONS, not one --
+                     * because on a cable they live on different devices.
+                     *
+                     * On Bluetooth the core's signal carries both: the lightbar
+                     * and the audio ride the same report. On a cable the audio
+                     * goes to the sound card and the lightbar to the HID
+                     * device, so the core can only do the sound and the flashes
+                     * have to come from here.
+                     *
+                     * Treating it as one decision left a wired refusal with two
+                     * tones and no red at all. */
+                    if (ctm_bridge_signal_refused_begin(w->prep_node)) {
+                        w->refusal_waiting = true;   /* answered in a later tick */
+                    } else {
+                        refusal_answered(w, controller, false);
                     }
                 }
                 return ok;
             }
-            /* Up then back down: bright in the middle, dark at both ends, so it
-             * reads as a breath rather than a blink.
+            /* Rising, dark to full as the plug nears (pulse_level_rising),
+             * so the light is brightest as control is handed over.
              *
              * ⓘ Stays MAGENTA the whole way. Turning it green halfway was tried
              * on 2026-08-19 and rejected by rhoquinn8217: green before the plug means
@@ -1748,7 +1656,6 @@ static bool gesture_poll_one(SDL_GameController *controller, SDL_JoystickID id) 
              * because a bridge may be held for it from the first moment
              * (ds5_bridge_held); and its own clock, read past SDL until its
              * animation is over (ds5_light_ready). */
-            w->ds5_bt_checked = true;
             w->ds5_bt = path && ctm_bridge_node_is_bluetooth(path);
             if (w->ds5_bt && strncmp(path, "/dev/hidraw", 11) == 0) {
                 const int fd = open(path, O_RDONLY | O_NONBLOCK);
@@ -1769,7 +1676,7 @@ static bool gesture_poll_one(SDL_GameController *controller, SDL_JoystickID id) 
      * takeover first (flash_write_past_sdl), so a pad that SDL left on its
      * connection colour shows its player colour. Once a connection. */
     if (w->ds5_since != 0 && !w->ds5_took_light && !w->ours_plugged &&
-        (!w->ds5_bt_checked || w->ds5_bt) && ds5_light_ready(w)) {
+        w->ds5_bt && ds5_light_ready(w)) {
         paint_player_colour_for(w, controller);
     }
 
@@ -2076,8 +1983,8 @@ static bool arrival_node_appeared(void) {
  * only when no other pad on the driver is in use (arrival_check).
  *
  * ⓘ Which hint depends on the pad, so a missing DualSense does not disturb a
- * DS4 that is perfectly happy. ⚠️ The core's kind strings are cut to 8 bytes
- * ("ds5e_us"), hence the prefix test. */
+ * DS4 that is perfectly happy. ⓘ The prefix test dates from when the kind was
+ * cut to 8 bytes ("ds5e_us"); it is 16 now, and the prefix still fits both. */
 static const char *arrival_hidapi_hint(const char *kind) {
     if (kind == NULL) return NULL;
     if (strncmp(kind, "ds5", 3) == 0) return SDL_HINT_JOYSTICK_HIDAPI_PS5;
@@ -2477,10 +2384,9 @@ void ctm_bridge_gesture_tick(struct app_input_t *input, struct session_t *sessio
         }
     }
 
-    /* ⭐ THE SETTING GATES THE WHOLE THING, at the one place it runs.
-     *
-     * ⓘ Returning here means no chord is ever detected: no pre-plug pulse, no
-     * plug, no watching.
+    /* ⭐ THE SETTING GATES THE CHORD, in gesture_poll_one ("THE GESTURE
+     * SWITCH BELONGS HERE"), not here: the tick returned early until
+     * 2026-08-20, which left a panel's request armed and never finished.
      *
      * ⓘ THE UNBRIDGE HALF IS GATED IN THE CORE, not here -- a bridged
      * controller's touchpad reports go through the bridge, so this side cannot

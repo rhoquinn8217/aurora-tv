@@ -4,7 +4,8 @@
 #include <stdio.h>
 
 /* ⭐ THE USB BRIDGE'S SETTINGS, saved in moonlight.ini beside the app's own,
- * and the one other setting of this fork's: where the TV cursor's tip sits.
+ * and this fork's other settings beside them: the TV cursor's tips, the
+ * touchpad as a mouse, the bridge pop-up's override.
  *
  * ⓘ They are one member of the app's settings, app_settings_t's `bridge`, so
  * every copy of the settings carries them, and upstream's settings code makes
@@ -13,7 +14,8 @@
  * in bridge_settings.c), so a TV keeps what it was set to.
  */
 typedef struct bridge_settings_t {
-    /* ⭐ CAN A DEVICE BE HANDED TO THE PC AT ALL? Defaults OFF (since build 307).
+    /* ⭐ CAN A DEVICE BE HANDED TO THE PC AT ALL? Defaults ON since 2026-10-15,
+     * when a DualSense started bridging itself (off from build 307 until then).
      *
      * ⓘ The gesture, the USB Bridge panel and Auto Bridge at stream start are
      * the only ways to ask for a bridge, so this switches all three and nothing
@@ -75,7 +77,8 @@ typedef struct bridge_settings_t {
      *
      * ⚠️ mic_bt EXISTS ON THIS BRANCH but can never be set: the settings
      * screen greys it out. ⭐ It is here so the two branches differ ONLY by the
-     * arming code itself -- see upstream-direction.md, 2026-08-21. ⛔ Do not
+     * arming code itself -- see upstream-direction.md in the docs repo,
+     * ds5-webos-bridge, 2026-08-21. ⛔ Do not
      * "tidy" it away; that reintroduces the divergence it exists to prevent. */
     bool mic_wired;
     bool mic_bt;
