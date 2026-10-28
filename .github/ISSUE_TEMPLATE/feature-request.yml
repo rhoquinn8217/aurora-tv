@@ -1,24 +1,22 @@
 name: Feature Request
-description: Suggest a new feature or improvement
+description: Suggest a new feature or an improvement
 labels:
   - enhancement
 body:
   - type: textarea
     attributes:
       label: Description
-      description: Describe the feature you would like to see added to Moonlight.
-      placeholder: "Example: I would like to see support for custom ports."
+      description: The feature or change you would like.
+      placeholder: "Example: a setting to bridge only the DualSense's touchpad"
     validations:
       required: true
   - type: textarea
     attributes:
-      label: Motivation
-      description: Why do you think this feature should be added?
-      placeholder: "Example: My host is behind a firewall and I cannot open default ports."
+      label: Why
+      description: What it would let you do that you cannot do now.
     validations:
       required: true
   - type: textarea
     attributes:
-      label: Additional Context
-      description: Add any other context or screenshots about the feature request here.
-      placeholder: "Example: I am using Moonlight on a Raspberry Pi 4."
+      label: Anything else
+      description: Optional. Your TV model, your controller, screenshots.
