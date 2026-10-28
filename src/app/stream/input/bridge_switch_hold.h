@@ -3,6 +3,7 @@
 #include <stdbool.h>
 
 typedef struct app_gamepad_state_t app_gamepad_state_t;
+typedef struct stream_input_t stream_input_t;
 
 /* ⭐⭐ NOTHING HELD AS A PAD COMES BACK FROM A BRIDGE REACHES THE STREAM
  * (rhoquinn8217, 2026-10-09: "if you bridge while hold anything down should
@@ -17,8 +18,10 @@ typedef struct app_gamepad_state_t app_gamepad_state_t;
  * that leaves while something is held passes nothing on to the next one. */
 
 /* The pad is coming back from a bridge: what it holds now is kept released.
- * Call before it is announced to the host again. */
-void bridge_switch_hold_begin(const app_gamepad_state_t *gamepad);
+ * Call before it is announced to the host again. ⓘ Read from the pad itself,
+ * not from the stream's copy of it, which stands still while the overlay is
+ * open; `input` gives the stream's dead zone and touchpad mode. */
+void bridge_switch_hold_begin(const stream_input_t *input, const app_gamepad_state_t *gamepad);
 
 /* Nothing held, at a stream's start and end. */
 void bridge_switch_hold_reset(void);

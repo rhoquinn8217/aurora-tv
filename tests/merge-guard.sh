@@ -489,7 +489,7 @@ in_order "with the TV cursor on, the touchpad moves it and tells the host the po
      "if (touchpad_pointer_stream_move(input, finger_dx, finger_dy * touchpad_aspect(gamepad)))" "LiSendMouseMoveEvent(dx, dy);"
 in_order "what a pad holds is noted before it is announced again" \
      src/app/stream/input/session_input.c "void stream_input_restore_gamepad" \
-     "bridge_switch_hold_begin(gamepad);" "stream_input_send_gamepad_arrive(input, gamepad)"
+     "bridge_switch_hold_begin(input, gamepad);" "stream_input_send_gamepad_arrive(input, gamepad)"
 
 # --- the wheel in the overlay (rhoquinn8217, 2026-10-11) --------------------
 # ⓘ Upstream's file: the encoder fallback moved the focus against the wheel.

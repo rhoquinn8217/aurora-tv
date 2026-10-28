@@ -222,7 +222,7 @@ void stream_input_restore_gamepad(stream_input_t *input, app_gamepad_state_t *ga
     }
     input->moonlightExcludedMask &= (uint16_t) ~(1u << gamepad->gs_id);   /* BEFORE the arrive */
     /* This fork: what it holds now reaches the stream released until let go (bridge_switch_hold.c). */
-    bridge_switch_hold_begin(gamepad);
+    bridge_switch_hold_begin(input, gamepad);
     if (input->started) {
         stream_input_send_gamepad_arrive(input, gamepad);
     }
