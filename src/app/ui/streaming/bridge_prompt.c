@@ -133,8 +133,8 @@ static bool (*s_note_true)(void) = NULL;
 
 static prompt_words_t prompt_words(bool vmouse, bool touchpad_mouse) {
     /* ⓘ Virtual Mouse in the overlay is the way back for all three: pressing
-     * it puts every one of the TV's mouse controls back as the Input settings
-     * have them, and Virtual Mouse on. */
+     * it turns Virtual Mouse on, and the touchpad's mouse mode with it
+     * (input/bridge_override.h). */
     if (vmouse && touchpad_mouse) {
         return (prompt_words_t) {
                 locstr("Warning: Turn off Virtual Mouse and the touchpad's mouse mode to prevent binding conflicts "
@@ -174,6 +174,17 @@ static prompt_words_t tv_cursor_words(void) {
 /* The message after the TV cursor's button stays while the cursor is off. */
 static bool tv_cursor_off(void) {
     return !tv_cursor_mode_on();
+}
+
+/* And the one after the first button, while Virtual Mouse and the touchpad's
+ * mouse mode are both off: Virtual Mouse turned on again takes it away. */
+static bool mouse_controls_off(void) {
+    if (global == NULL || global->session == NULL) {
+        return false;
+    }
+    const stream_input_t *input = session_get_input(global->session);
+    return input != NULL && !bridge_session_vmouse_active(global->session) &&
+           input->touchpad_mode != TOUCHPAD_MODE_MOUSE;
 }
 
 /* The top of the overlay's row of buttons, in pixels down the picture, read
@@ -439,13 +450,12 @@ static void switch_off(const char *by) {
         return;
     }
     commons_log_info("Streaming", "bridge prompt: accepted, %s -- the TV's mouse controls go off", by);
-    bridge_override_set(global != NULL ? global->session : NULL, true);
-    /* ⓘ Said only if it is so: the switch does not act with device bridging
-     * off, though nothing bridges then to raise the pop-up either. */
-    if (!bridge_override_active() || s_mbox == NULL) {
+    bridge_override_mouse_off(global != NULL ? global->session : NULL);
+    /* ⓘ Said only if it is so. */
+    if (!mouse_controls_off() || s_mbox == NULL) {
         return;
     }
-    note_show(s_done, "the message after the button", bridge_override_active, lv_obj_get_parent(s_mbox));
+    note_show(s_done, "the message after the button", mouse_controls_off, lv_obj_get_parent(s_mbox));
 }
 
 static void on_button(lv_event_t *event) {
@@ -528,10 +538,6 @@ void bridge_prompt_request(void) {
     }
     if (s_mbox != NULL && s_about != PROMPT_ABOUT_MOUSE_CONTROLS) {
         commons_log_info("Streaming", "bridge prompt: the TV cursor's is up, this one is not raised");
-        return;
-    }
-    if (bridge_override_active()) {
-        commons_log_info("Streaming", "bridge prompt: the TV's mouse controls are off already, nothing to ask");
         return;
     }
     stream_input_t *input = session_get_input(global->session);

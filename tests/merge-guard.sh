@@ -235,20 +235,17 @@ in_order "app.c runs the bridge's turn after SDL's events are filtered" \
 
 # --- the calls the stream files make into files of ours ------------------------
 # ⓘ session.c and session_events.c are upstream's stream files. The bridge's
-# start and stop, its hold on the virtual mouse and the remote's pointer are a
-# call each into src/app/stream/bridge_session.c and bridge_pointer.c, and the
-# order of each call against upstream's own line beside it is what makes it
-# work.
-need "session.c lets Bridge Override keep the virtual mouse off at stream start" \
-     src/app/stream/session.c "session->config.vmouse && bridge_session_vmouse_allowed()"
+# start and stop and the remote's pointer are a call each into
+# src/app/stream/bridge_session.c and bridge_pointer.c, and the order of each
+# call against upstream's own line beside it is what makes it work.
+# ⓘ Virtual Mouse needs no call of ours in session.c since 2026-10-28: what is
+# kept of it is followed from bridge_app.c (input/bridge_override.h).
 in_order "session.c starts the bridge after the input has started" \
      src/app/stream/session.c "bool session_start_input" \
      "session_input_started(&session->input);" "bridge_session_started(session);"
 in_order "session.c stops the bridge after the input has stopped" \
      src/app/stream/session.c "void session_stop_input" \
      "session_input_stopped(&session->input);" "bridge_session_stopped();"
-need "a Virtual Mouse press switches Bridge Override off, in session.c" \
-     src/app/stream/session.c "if (bridge_session_vmouse_pressed(session)) {"
 in_order "the remote's pointer takes its events before the stream's own input" \
      src/app/stream/session_events.c "bool session_handle_input_event" \
      "bridge_pointer_event(session, event)" "switch (event->type)"
@@ -280,11 +277,6 @@ in_order "a grabbed keyboard's keys are asked about before they go to the host" 
 in_order "the interface drops a key the keyboard grab already fed it" \
      src/app/lvgl/input/lv_drv_sdl_key.c "static void sdl_input_read(lv_indev_drv_t *drv, lv_indev_data_t *data) {" \
      "const int fed = bridge_keyboard_sdl_key(&e.key);" "webos_key_input_mode(input, &e.key);"
-# ⓘ Bridge Override changes the stream's live copy of the settings, so it has
-# to come after upstream fills that copy in, or upstream's line puts it back.
-in_order "Bridge Override applies after the stream's settings are copied" \
-     src/app/stream/input/session_input.c "void session_input_init" \
-     "input->touchpad_scroll_scale = config->touchpad_natural_scroll" "bridge_override_apply(input);"
 need "the bridge's question holds the input as the overlay does" \
      src/app/ui/root.c "streaming_soft_keyboard_shown() || bridge_prompt_shown()"
 need "a removed controller's gesture is forgotten" \

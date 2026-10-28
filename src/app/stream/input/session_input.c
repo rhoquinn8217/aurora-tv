@@ -24,7 +24,6 @@
 #include "session_evmouse.h"
 #include "input/app_input.h"
 #include "input/input_gamepad.h"
-#include "input/bridge_override.h"
 #include "logging.h"
 
 #if TARGET_WEBOS
@@ -97,14 +96,6 @@ void session_input_init(stream_input_t *input, session_t *session, app_input_t *
         }
     }
 #endif
-    /* ⭐ Bridge Override acts on the LIVE copy made above, never on the saved
-     * settings. With it off, nothing here differs from upstream. */
-    if (bridge_override_active()) {
-        bridge_override_apply(input);
-        char state[256];
-        bridge_override_describe(input, state, sizeof state);
-        commons_log_info("Input", "Bridge override on for this stream: %s", state);
-    }
 }
 
 void session_input_set_keyboard_grab(stream_input_t *input, bool on) {

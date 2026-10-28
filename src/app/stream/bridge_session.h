@@ -9,10 +9,6 @@
 
 #include "stream/session.h"
 
-/* In session_start_input(), on the virtual mouse's line: false while Bridge
- * Override holds the TV's own mouse controls off (input/bridge_override.h). */
-bool bridge_session_vmouse_allowed(void);
-
 /* In session_start_input(), after the input has started: the bridge's
  * settings go in, then the bridge starts, and the devices marked for Auto
  * Bridge are bridged. */
@@ -27,11 +23,6 @@ void bridge_session_stopped(void);
  * This does the work. When: bridge_app_events, straight after the filter, and
  * once more as the app stops. */
 void bridge_session_run_pending(void);
-
-/* At the top of session_toggle_vmouse(): a press of Virtual Mouse with Bridge
- * Override on switches the override off and the virtual mouse on, and is not a
- * toggle. True when that is what it did. */
-bool bridge_session_vmouse_pressed(session_t *session);
 
 /* Is the TV's own mouse mode driving the cursor right now? So that a caller
  * does not have to reach into the session's input. */

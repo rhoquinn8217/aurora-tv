@@ -95,9 +95,9 @@ void bridge_overlay_buttons_create(streaming_controller_t *controller, lv_obj_t 
     lv_obj_add_event_cb(usb_bridge, ctm_panel_open, LV_EVENT_CLICKED, controller);
 
     /* ⭐ DS5-USBIP, beside the USB Bridge button and hidden with it, for the
-     * same focus-order reason. ⓘ It stands where Bridge Override stood until
-     * 2026-10-01, at rhoquinn8217's word. That switch has no button now: the
-     * question a bridge raises turns it on (bridge_prompt.h). */
+     * same focus-order reason. ⓘ It stands where the Bridge Override switch
+     * stood until 2026-10-01, at rhoquinn8217's word; the switch itself went
+     * on 2026-10-28 (input/bridge_override.h). */
     lv_obj_t *ds5usbip = overlay_button(controller, actions, locstr("DS5-USBIP"), LV_PALETTE_DEEP_PURPLE);
     lv_obj_add_event_cb(ds5usbip, open_listener_config, LV_EVENT_CLICKED, NULL);
 

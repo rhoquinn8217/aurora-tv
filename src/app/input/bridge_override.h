@@ -1,38 +1,29 @@
-/* Bridge Override: one switch that turns the TV's own mouse and touchpad
- * handling off.
+/* The TV's own mouse controls while controllers are bridged: Virtual Mouse,
+ * and the touchpad as the host's mouse.
  *
- * ⭐ HOW A PERSON REACHES IT (2026-10-01). It is switched ON by the question a
- * bridge raises when the TV's mouse controls are on
- * (ui/streaming/bridge_prompt.h), and switched OFF by turning Virtual Mouse on
- * from the overlay. It has no button of its own, and its name is never shown:
- * to a person it is "turn off Virtual Mouse". ⓘ It stood beside the USB
- * Bridge button until the DS5-USBIP button took that place. The control port
- * still sets it by name.
- *
- * ⭐ WHY IT EXISTS. A bridged controller reaches the host as itself, over
+ * ⭐ WHY THIS EXISTS. A bridged controller reaches the host as itself, over
  * USB/IP, and the TV goes on READING it. The virtual mouse turns its sticks and
  * triggers into a host mouse, and the touchpad's mouse mode sends its click as
  * a host mouse click. Each of those is an Input setting of the upstream app,
- * and neither asks whether a pad is bridged.
+ * and neither asks whether a pad is bridged. So a bridge asks the person
+ * (ui/streaming/bridge_prompt.h).
  *
- * What it switches off for the stream: the virtual mouse, the touchpad's mouse
- * mode (the touchpad is sent as a touchpad), multi-touch gestures, natural
- * scrolling and battery reports to the host. ⓘ The last three never reach a
- * bridged pad anyway; they are included so that everything the override leaves
- * off is off for every pad.
- *
- * ⛔ NOT THE KEYBOARD (rhoquinn8217, 2026-09-30). It used to switch upstream
- * v1.3.0's USB keyboard grab off as well, because that grab held a keyboard's
- * node against the bridge and every key arrived twice. The grab now leaves a
- * bridged keyboard alone by itself (bridge_keyboard.h), so the override taking
- * it away only cost the keyboards that are NOT bridged upstream's handling.
- *
- * ⛔⛔ THE SAVED SETTINGS ARE NEVER WRITTEN. They are saved on leaving Settings
- * and on exit, so changing them would overwrite the person's own choices. The
- * override changes only the running stream's LIVE copy, the one
- * session_input_init() makes from the stream's config, and switching it off
- * puts that copy back from the same config. The Input menu keeps showing what
- * the person chose.
+ * ⭐⭐ NOTHING IS REMEMBERED BEHIND THE PERSON'S BACK (rhoquinn8217,
+ * 2026-10-28). Until then the pop-up's first button saved a hidden switch,
+ * "Bridge Override", that turned the TV's mouse controls off in every stream
+ * after, while Settings > Input went on showing them on: "I don't want it to
+ * remember forever because it make you believe mouse mode doesn't exist or
+ * will make people forget that mouse mode is a thing ... The stream will only
+ * remember if mouse mode was on or off when it was closed. So if it was off,
+ * not message. If it was on, then always a message, not assumed and
+ * automatically turned off or on." So now:
+ *   - Virtual Mouse is kept as it was left: whatever it is when a stream
+ *     closes is the Input setting the next stream starts from;
+ *   - the pop-up's first button turns Virtual Mouse off, and the touchpad's
+ *     mouse mode off for that one stream; the touchpad follows Settings again
+ *     in the next;
+ *   - nothing else is touched: multi-touch, natural scrolling and battery
+ *     reports stay as Settings has them.
  *
  * ⛔⛔ THE OVERLAY CHORD IS NEVER TOUCHED. Everything here REMOVES an early exit
  * from the button handler (the virtual mouse's Triangle, the touchpad's mouse
@@ -47,21 +38,13 @@
 typedef struct session_t session_t;
 typedef struct stream_input_t stream_input_t;
 
-/** Switched on AND device bridging enabled: the only state in which it acts. */
-bool bridge_override_active(void);
+/** The pop-up's first button: Virtual Mouse off (kept so by the tick below,
+ * for the next stream too), and the touchpad's mouse mode off for the rest of
+ * this stream. */
+void bridge_override_mouse_off(session_t *session);
 
-/** Put the override's current state onto a stream's live input settings. */
-void bridge_override_apply(stream_input_t *input);
-
-/** Switch it, keep the choice, and apply it to the running stream if there is
- * one. The choice is kept like any other setting: in memory now, and in
- * moonlight.ini when the app next saves its settings. */
-void bridge_override_set(session_t *session, bool on);
-
-/** The Virtual Mouse button, pressed while the override is on: the press wins.
- * The override is switched off exactly as its own button would, and the virtual
- * mouse comes on, which is what the press asked for. */
-void bridge_override_release_for_vmouse(session_t *session);
+/** A stream starts: the touchpad's mouse mode is Settings' again. */
+void bridge_override_stream_started(void);
 
 /** The live input state as one line, for the log and the control port. */
 void bridge_override_describe(stream_input_t *input, char *buf, size_t len);
@@ -71,15 +54,17 @@ void bridge_override_describe(stream_input_t *input, char *buf, size_t len);
  * stream (not just in the overlay)". While Virtual Mouse is on, a pad's
  * touchpad is the host's mouse too, whatever the Input setting says, through
  * upstream's own touchpad mouse mode; when it goes off, the touchpad is the
- * setting's again. The override still wins: with it on, the touchpad is sent
- * as a touchpad. ⓘ Only outside the overlay: while the overlay is up the
- * stream takes no input, and the touchpad is the TV's pointer
- * (input/touchpad_pointer.h).
+ * setting's again, unless the pop-up's button turned it off for this stream.
+ * ⓘ Only outside the overlay: while the overlay is up the stream takes no
+ * input, and the touchpad is the TV's pointer (input/touchpad_pointer.h).
+ *
+ * ⭐ AND VIRTUAL MOUSE IS REMEMBERED HERE: when the stream's Virtual Mouse
+ * differs from the Input setting, the setting takes its value, so the next
+ * stream starts as this one was left (saved with the other settings).
  *
  * ⓘ Followed every pass rather than at each switch, so every way Virtual
- * Mouse is switched (the overlay's button, the control port, the override,
- * the stream's start) is followed with no hook in each. ⛔ The saved settings
- * are not written, as the override never writes them. */
+ * Mouse is switched (the overlay's button, the control port, the pop-up, the
+ * stream's start) is followed with no hook in each. */
 void bridge_override_touchpad_tick(session_t *session);
 
 /* ⭐ AND A BRIDGED PAD'S TOUCHPAD TOO (rhoquinn8217, 2026-10-20): "If virtual
