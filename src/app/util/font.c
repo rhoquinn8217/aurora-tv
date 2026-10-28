@@ -70,6 +70,7 @@ int app_font_init(app_fonts_t *fonts, int dpi) {
                 fontset.normal->fallback = fontset.fallback->normal;
                 fontset.large->fallback = fontset.fallback->large;
                 fontset.small->fallback = fontset.fallback->small;
+                /* This fork: and the bold small font's (font.h). */
                 if (fontset.small_bold) {
                     fontset.small_bold->fallback = fontset.fallback->small_bold;
                 }
@@ -113,8 +114,9 @@ static bool fontset_load_fc(app_fontset_t *set, FcPattern *font) {
         if (lv_ft_font_init(&ft_info_sm)) {
             set->small = ft_info_sm.font;
         }
-        /* ⓘ Bold is drawn by FreeType thickening the regular face, so it needs no
-         * bold font file on the TV. */
+        /* This fork: the small size in bold too (font.h). ⓘ Bold is drawn by
+         * FreeType thickening the regular face, so it needs no bold font file
+         * on the TV. */
         lv_ft_info_t ft_info_sm_bold = {.name=(char *) file, .style = FT_FONT_STYLE_BOLD, .weight = set->small_size};
         if (lv_ft_font_init(&ft_info_sm_bold)) {
             set->small_bold = ft_info_sm_bold.font;
@@ -162,13 +164,13 @@ static void fontset_destroy_fonts(app_fontset_t *fontset) {
     lv_ft_font_destroy(fontset->large);
     lv_ft_font_destroy(fontset->normal);
     lv_ft_font_destroy(fontset->small);
-    lv_ft_font_destroy(fontset->small_bold);
+    lv_ft_font_destroy(fontset->small_bold);   /* This fork (font.h) */
     app_fontset_t *fallback = fontset->fallback;
     if (fallback) {
         lv_ft_font_destroy(fallback->large);
         lv_ft_font_destroy(fallback->normal);
         lv_ft_font_destroy(fallback->small);
-        lv_ft_font_destroy(fallback->small_bold);
+        lv_ft_font_destroy(fallback->small_bold);   /* This fork (font.h) */
         free(fallback);
     }
 }

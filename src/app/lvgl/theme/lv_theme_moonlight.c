@@ -52,6 +52,7 @@ const lv_font_t *lv_theme_moonlight_get_iconfont_small(lv_obj_t *obj) {
     return ((app_t *) th->user_data)->ui.fonts.icons.small;
 }
 
+/* This fork: the small font in bold, for a line that must not be missed (util/font.h). */
 const lv_font_t *lv_theme_moonlight_get_font_small_bold(lv_obj_t *obj) {
     lv_theme_t *th = lv_theme_get_from_obj(obj);
     const lv_font_t *bold = ((app_t *) th->user_data)->ui.fonts.fonts.small_bold;

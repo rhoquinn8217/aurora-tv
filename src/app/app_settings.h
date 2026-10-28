@@ -107,6 +107,7 @@ typedef struct app_settings_t {
      * Default on; UI row only shown when Homebrew Channel elevated service is present.
      */
     bool game_mode;
+    /* This fork: the stream boost is a setting. Why: ctmbridge/NOTES.md, "Stream boost". */
     /**
      * webOS rooted only: the session boost in stream_priority.c (nice -10, deep
      * C-states held off, other apps closed and caches dropped, performance governor,
