@@ -108,11 +108,13 @@ typedef struct app_settings_t {
      */
     bool game_mode;
     /**
-     * webOS rooted only: the session boost in stream_priority.c (nice -10, mlockall of
-     * current and future pages, deep C-states held off, other apps closed and caches
-     * dropped, performance governor, network and USB Ethernet tuning). Default on, as
-     * upstream. Off skips all of it: with it on, a stream start restarted a rooted LG
-     * 34SR65QC (webOS 8.3) with a crash in its video driver, at every mode tried.
+     * webOS rooted only: the session boost in stream_priority.c (nice -10, deep
+     * C-states held off, other apps closed and caches dropped, performance governor,
+     * network and USB Ethernet tuning). Default on, as upstream. Off skips all of it:
+     * with it on, a stream start restarted a rooted LG 34SR65QC (webOS 8.3) with a
+     * crash in its video driver, at every mode tried. That was with mlockall in the
+     * boost, which upstream took out in 1.3.0 (issue #75); whether the set still
+     * restarts without it is not tested yet.
      */
     bool stream_priority;
     char *conf_dir;

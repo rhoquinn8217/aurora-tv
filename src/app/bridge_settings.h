@@ -53,10 +53,12 @@ typedef struct bridge_settings_t {
      * nothing and there is no way to tell that from a gesture that was not
      * recognised. Said in the section description rather than per switch.
      *
-     * ⚠️ DEFAULTS ARE NOT SETTLED. Everything is on while this is being worked
-     * on so testing is not gated behind ticking boxes. ⓘ Microphone capture is
-     * expected to end up OFF -- it is only for voice chat through the
-     * controller itself, and most people will not want it. */
+     * ⭐ EVERYTHING IS ON OUT OF THE BOX, the wired microphone included
+     * (rhoquinn8217, 2026-10-28, asked in the code review whether it should
+     * start off: "All features need to be presented as that what is being
+     * advertised. I don't want some looking for how to turn something on. I
+     * rather they only look when they need to turn something off."). These
+     * switches are there to turn a thing off. */
     bool signal_light;
     bool signal_rumble;
     bool signal_tone;
