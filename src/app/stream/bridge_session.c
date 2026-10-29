@@ -15,10 +15,6 @@
 #include "input/auto_bridge.h"
 #endif
 
-bool bridge_session_vmouse_allowed(void) {
-    return !bridge_override_active();
-}
-
 /* ⛔⛔ NOT INSIDE SDL'S EVENT FILTER (code review, 2026-10-05). The stream's
  * start and stop reach the two functions below from session_start_input and
  * session_stop_input, which upstream calls while it dispatches
@@ -46,6 +42,7 @@ static void bridge_session_stop_now(void);
 
 void bridge_session_started(session_t *session) {
     bridge_switch_hold_reset();
+    bridge_override_stream_started();   /* the pop-up's touchpad switch is for one stream */
     if (s_pending_count == PENDING_MAX) {
         /* ⓘ Never seen: four starts and stops in one pass. Run them rather
          * than lose one. */
@@ -146,25 +143,6 @@ static void bridge_session_stop_now(void) {
 #if defined(TARGET_WEBOS)
     ctm_bridge_gesture_restore_player_colours();
 #endif
-}
-
-bool bridge_session_vmouse_pressed(session_t *session) {
-    /* ⭐ THE PRESS WINS (rhoquinn8217, 2026-09-30, in place of a notice refusing
-     * it): Virtual Mouse pressed while Bridge Override is on switches the
-     * override off and the virtual mouse on.
-     * ⓘ Every way of switching the virtual mouse comes through
-     * session_toggle_vmouse(): the overlay's button, and the USER_TOGGLE_VMOUSE
-     * event, which the control port sends. So this is the one place that
-     * decides it, and the overlay's two handlers are upstream's.
-     * ⭐ Since 2026-10-01 this is the ONLY way a person switches the override
-     * off. The question a bridge raises switches it on (bridge_prompt.h), and
-     * it has no button of its own. ⓘ Nothing is said about it: the override's
-     * other switches come back with the mouse, without a notice. */
-    if (!bridge_override_active()) {
-        return false;
-    }
-    bridge_override_release_for_vmouse(session);
-    return true;
 }
 
 bool bridge_session_vmouse_active(session_t *session) {

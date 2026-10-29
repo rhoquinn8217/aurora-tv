@@ -5,7 +5,7 @@
 
 /* ⭐ THE USB BRIDGE'S SETTINGS, saved in moonlight.ini beside the app's own,
  * and this fork's other settings beside them: the TV cursor's tips, the
- * touchpad as a mouse, the bridge pop-up's override.
+ * touchpad as a mouse.
  *
  * ⓘ They are one member of the app's settings, app_settings_t's `bridge`, so
  * every copy of the settings carries them, and upstream's settings code makes
@@ -53,10 +53,12 @@ typedef struct bridge_settings_t {
      * nothing and there is no way to tell that from a gesture that was not
      * recognised. Said in the section description rather than per switch.
      *
-     * ⚠️ DEFAULTS ARE NOT SETTLED. Everything is on while this is being worked
-     * on so testing is not gated behind ticking boxes. ⓘ Microphone capture is
-     * expected to end up OFF -- it is only for voice chat through the
-     * controller itself, and most people will not want it. */
+     * ⭐ EVERYTHING IS ON OUT OF THE BOX, the wired microphone included
+     * (rhoquinn8217, 2026-10-28, asked in the code review whether it should
+     * start off: "All features need to be presented as that what is being
+     * advertised. I don't want some looking for how to turn something on. I
+     * rather they only look when they need to turn something off."). These
+     * switches are there to turn a thing off. */
     bool signal_light;
     bool signal_rumble;
     bool signal_tone;
@@ -111,12 +113,11 @@ typedef struct bridge_settings_t {
      * which are kept, so turning this off brings them back. ⛔ Off by default:
      * it is the user's explicit choice, never the unasked auto-plug. */
     bool auto_all;
-    /* ⭐ Bridge Override: the TV's own mouse and touchpad handling off for the
-     * stream. Off by default, and acts only with `enable` set. ⓘ It has
-     * no button: bridge_override.h says how a person switches it.
-     * ⛔ It never writes the Input settings it overrides; see
-     * input/bridge_override.h. */
-    bool override;
+    /* ⓘ No Bridge Override any more (rhoquinn8217, 2026-10-28): the pop-up's
+     * answer was saved here and kept the TV's mouse controls off in every
+     * stream after, with Settings showing them on. Its key, bridge_override,
+     * is read and ignored (bridge_settings.c); input/bridge_override.h says
+     * what is kept now. */
     /* ⭐ WHERE THIS TV DRAWS THE TIP OF ITS CURSOR, in the TV's own pixels,
      * right and down (input/tv_cursor.h): the drop's. Set by the align bar
      * (Ctrl+Alt+Shift+A), and so kept per TV, since this file is the TV's.

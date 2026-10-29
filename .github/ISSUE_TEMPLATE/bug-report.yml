@@ -1,96 +1,94 @@
 name: Bug Report
-description: Something is not working (video, audio, gamepad, crash, etc...)
+description: Something does not work (bridging, a controller, the stream, a crash)
 labels:
   - bug
 body:
   - type: markdown
     attributes:
       value: |
-        ## Device Information
-        Please provide information about the device you are using as a client.
+        ## The TV
   - type: input
     attributes:
-      label: Moonlight Version
-      description: What is the version of Moonlight you are using?
-      placeholder: "Example: 1.6.0"
-    validations:
-      required: true
-  - type: dropdown
-    attributes:
-      label: Device Type
-      description: What kind of device are you running Moonlight on?
-      options:
-        - webOS TV
-        - Raspberry Pi
-        - Steam Link
-        - Other (Desktop Linux, macOS, etc...)
+      label: App build
+      description: The version and build in the app's Help window.
+      placeholder: "Example: 1.3.0 (585)"
     validations:
       required: true
   - type: input
     attributes:
-      label: Device Model
-      description: What is the model of your device?
-      placeholder: "Example: LG C9"
+      label: TV model
+      placeholder: "Example: LG OLED48C1"
     validations:
       required: true
   - type: input
     attributes:
-      label: Device OS
-      description: What is the OS version of your device?
-      placeholder: "Example: webOS 4.5.3"
+      label: webOS version
+      description: Settings > General > About This TV.
+      placeholder: "Example: webOS 6.0"
     validations:
       required: true
   - type: markdown
     attributes:
       value: |
-        ## Host Information
-        Please provide information about the computer you are streaming from.
-        This information is important especially when experiencing performance issues.
+        ## The PC
   - type: dropdown
     attributes:
-      label: Host OS
-      description: What is the OS of your computer?
+      label: Streaming host
       options:
-        - Windows
-        - Linux
-        - macOS
-  - type: dropdown
-    attributes:
-      label: Host Software
-      description: What streaming software are you using?
-      options:
+        - Vibepollo
+        - Apollo
         - Sunshine
-        - GeForce Experience
-  - type: textarea
+        - Other
+    validations:
+      required: true
+  - type: input
     attributes:
-      label: Host Setup
-      description: What is the hardware and software setup of your computer?
-      placeholder: "Example: Intel Core i7-8700K, NVIDIA GeForce RTX 2080 Ti, 16GB RAM with Windows 10 Home"
+      label: DS5-USBIP version
+      description: In the menu of DS5-USBIP's tray icon. Leave empty if you do not use bridging.
+      placeholder: "Example: 0.2.0"
   - type: markdown
     attributes:
       value: |
-        ## Issue Information
-        Please provide information about the issue you are experiencing.
-        This information is important to help us understand the issue.
+        ## The controller
+  - type: input
+    attributes:
+      label: Controller and connection
+      description: Which controller, and how it is connected to the TV.
+      placeholder: "Example: DualSense on the TV's USB port"
+    validations:
+      required: true
+  - type: dropdown
+    attributes:
+      label: Bridged?
+      description: Was the controller bridged to the PC when it happened?
+      options:
+        - "Yes"
+        - "No"
+        - Not sure
+  - type: markdown
+    attributes:
+      value: |
+        ## What happened
   - type: textarea
     attributes:
-      label: Bug Description
-      description: What kind of incorrect behavior did you see?
-      placeholder: "Example: I can't see video output when I start streaming"
+      label: What happened
+      placeholder: "Example: the controller stopped responding a few seconds after it was bridged"
     validations:
       required: true
   - type: textarea
     attributes:
-      label: Reproduction Steps
-      description: Can you reproduce the issue? If so, please share below as steps.
+      label: Steps to reproduce
+      description: How to make it happen again, if you know.
       placeholder: |
-        Example: 
-        1. Select computer
-        2. Open "desktop" in the apps list
-        3. Wait for the connection to be established
-        4. Seeing black screen without video
+        Example:
+        1. Start a stream of Desktop
+        2. Hold two fingers on the touchpad for one second to bridge the DualSense
+        3. Press any button
   - type: textarea
     attributes:
-      label: Expected Behavior
-      description: What is the correct behavior do you think?
-      placeholder: "Seeing video output of my computer screen"
+      label: What you expected
+      placeholder: "Example: the controller works on the PC"
+  - type: textarea
+    attributes:
+      label: Screenshots or photos
+      description: Optional. A photo of the TV or a screenshot of DS5-USBIP often helps.

@@ -9,7 +9,11 @@
  * ⭐ HIDDEN RATHER THAN ABSENT when device bridging is switched off: the
  * overlay's focus order is built from the row's children, and removing one
  * shifts everything after it. ⓘ A hidden object keeps its place and takes no
- * focus. */
+ * focus.
+ *
+ * ⭐ AND A CHECK ON UPSTREAM'S VIRTUAL MOUSE BUTTON WHILE IT IS ON
+ * (rhoquinn8217, 2026-10-28): a white circle with a green check on its top
+ * right corner (bridge_overlay.c). */
 
 #ifndef BRIDGE_OVERLAY_H
 #define BRIDGE_OVERLAY_H
@@ -19,7 +23,8 @@
 #include "streaming.controller.h"
 
 /* Makes the two buttons in the overlay's row, `actions`, with the overlay's
- * own button styles, and connects them. */
+ * own button styles, and connects them; and the check on Virtual Mouse, the
+ * row's last button when this is called. */
 void bridge_overlay_buttons_create(streaming_controller_t *controller, lv_obj_t *actions);
 
 /* A key the overlay heard: Up from its row selects the stats' pin. True when

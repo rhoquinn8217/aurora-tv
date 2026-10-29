@@ -508,9 +508,10 @@ static bool read_webos_key(app_ui_input_t *input, const SDL_KeyboardEvent *event
                 app_request_exit();
                 return false;
             }
-            /* Reached only while streaming with the overlay/panel up (otherwise the
-             * game input path consumes it first). Treat Exit like Back so it closes
-             * the overlay instead of letting webOS background the whole app. */
+            /* This fork: reached only while streaming with the overlay/panel up
+             * (otherwise the game input path consumes it first). Treat Exit like
+             * Back so it closes the overlay instead of letting webOS background
+             * the whole app. */
             state->key = LV_KEY_ESC;
             return true;
         }

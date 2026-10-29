@@ -3,9 +3,10 @@
  * ⭐ WHY IT EXISTS. A bridged controller reaches the host as itself, and the TV
  * goes on reading it. Virtual Mouse turns its sticks and triggers into a host
  * mouse, and the touchpad's mouse mode sends its click as a mouse click, so one
- * press arrives as a controller and as a mouse. One switch turns the TV's own
- * handling off for the stream (input/bridge_override.h), and this is where a
- * person is offered it: at the moment they bridge a controller.
+ * press arrives as a controller and as a mouse. This is where a person is
+ * offered to turn them off: at the moment they bridge a controller, each time
+ * Virtual Mouse or the touchpad's mouse mode is on. The answer itself is not
+ * kept; Virtual Mouse's own on or off is (input/bridge_override.h).
  *
  * It warns, offers the fix and its refusal as two buttons, counts, and goes
  * away by itself:

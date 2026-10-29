@@ -965,8 +965,7 @@ void bridge_keyboard_tick(bool overlay_shown) {
     s_look_again_at = 0;
     /* Let go of everything, then look again: the scan skips what is bridged
      * (bridge_keyboard_node_is_bridged) and takes what has been released or
-     * has just connected. ⓘ Whatever Bridge Override says: it leaves the
-     * keyboard alone. */
+     * has just connected. */
     let_go(input);
     session_input_set_keyboard_grab(input, true);
     const bool holding = input->keyboard_evdev != NULL;

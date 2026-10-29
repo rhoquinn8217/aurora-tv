@@ -10,6 +10,7 @@
 #include <SDL.h>
 
 void stream_input_handle_mbutton(stream_input_t *input, const SDL_MouseButtonEvent *event) {
+    /* This fork: a view-only stream sends no mouse button. */
     if (input->view_only) {
         return;
     }
@@ -53,6 +54,7 @@ void stream_input_handle_mbutton(stream_input_t *input, const SDL_MouseButtonEve
 }
 
 void stream_input_handle_mwheel(stream_input_t *input, const SDL_MouseWheelEvent *event) {
+    /* This fork: nor the wheel. */
     if (input->view_only) {
         return;
     }
