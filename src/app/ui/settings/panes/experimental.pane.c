@@ -125,7 +125,8 @@ static lv_obj_t *create_obj(lv_fragment_t *self, lv_obj_t *container) {
     if (webos_game_mode_is_rooted()) {
         pref_checkbox(view, locstr("Stream boost"), &app_configuration->stream_priority, false);
         pref_desc_label(view,
-                        locstr("Rooted sets only: raises the stream's priority and locks its memory. "
+                        locstr("Rooted sets only: puts the stream first while it plays (a higher priority, "
+                               "other apps closed, the processor at full speed). "
                                "Turn OFF if the set restarts when a stream starts — the LG 34SR65QC does."),
                         false);
     }

@@ -24,7 +24,6 @@
 #include "session_evmouse.h"
 #include "input/app_input.h"
 #include "input/input_gamepad.h"
-#include "input/bridge_override.h"
 #include "logging.h"
 
 #if TARGET_WEBOS
@@ -58,7 +57,7 @@ void session_input_init(stream_input_t *input, session_t *session, app_input_t *
     input->session = session;
     input->input = app_input;
     input->announcedGamepadMask = 0;
-    input->moonlightExcludedMask = 0;
+    input->moonlightExcludedMask = 0;   /* This fork: no pad handed to the bridge (stream_input_exclude_gamepad) */
     input->remoteOkPressed = false;
     input->remoteOkPressedAt = 0;
     input->remoteOkModifiers = 0;
@@ -97,16 +96,9 @@ void session_input_init(stream_input_t *input, session_t *session, app_input_t *
         }
     }
 #endif
-    /* ⭐ Bridge Override acts on the LIVE copy made above, never on the saved
-     * settings. With it off, nothing here differs from upstream. */
-    if (bridge_override_active()) {
-        bridge_override_apply(input);
-        char state[256];
-        bridge_override_describe(input, state, sizeof state);
-        commons_log_info("Input", "Bridge override on for this stream: %s", state);
-    }
 }
 
+/* This fork: the TV's keyboard grab let go and taken again around a bridge (input/bridge_keyboard.h). */
 void session_input_set_keyboard_grab(stream_input_t *input, bool on) {
 #if TARGET_WEBOS
     if (on) {
@@ -174,7 +166,7 @@ void session_input_stopped(stream_input_t *input) {
     pointer_gesture_reset(input);
     input->started = false;
     input->announcedGamepadMask = 0;
-    input->moonlightExcludedMask = 0;
+    input->moonlightExcludedMask = 0;   /* This fork: as above */
     input->remoteOkPressed = false;
     input->remoteOkPressedAt = 0;
     input->remoteOkModifiers = 0;

@@ -135,7 +135,7 @@ static void cmd_help(control_job_t *job)
                "release-group <n>       release every part of a device, exactly as its panel row does\n"
                "bridge-all, release-all every part, as the panel's buttons do\n"
                "open-config             ask the host for its settings window, as the overlay's DS5-USBIP button does\n"
-               "set <name> <on|off>     a switch, without the remote: boost, light, rumble, tone, override, vmouse\n"
+               "set <name> <on|off>     a switch, without the remote: boost, light, rumble, tone, vmouse\n"
                "prompt [ok|dismiss]     the question a bridge raises: is it up, or answer it without a hand\n"
                "ui                      what is open on the screen: overlay, its keyboard, the panel, the align bar\n"
                "press <key>[:ms] ...    keys into aurora-tv's own screens, as a keyboard types them; not once a stream is up\n"
@@ -143,7 +143,7 @@ static void cmd_help(control_job_t *job)
                "type <text>             characters into aurora-tv's own screens, a key each, as a keyboard types them\n"
                "                        (Shift for capitals, ':' and '_'); letters, digits and . - _ : [ ]; not once a stream is up\n"
                "host [<host>]           the launcher's host: which it shows, or pick one (a uuid or part of its name)\n"
-               "input                   the stream's live input state: Bridge Override and what it switches\n"
+               "input                   the stream's live input state: Virtual Mouse, the touchpad and the rest\n"
                "keys                    key events counted since the app started: the TV's keyboard grab, and webOS\n"
                "set settle <ms>         how long to let the link settle before a DS4 handback tone\n"
                "signal refuse <n>       play a device's refusal signal; no plug has to fail\n"
@@ -176,7 +176,7 @@ static void cmd_set(control_job_t *job, const char *args)
     char name[32] = "";
     char value[16] = "";
     if (args == NULL || sscanf(args, "%31s %15s", name, value) != 2) {
-        reply(job, "ERR usage: set <boost|light|rumble|tone|override|vmouse> <on|off>, or set settle <ms>\n");
+        reply(job, "ERR usage: set <boost|light|rumble|tone|vmouse> <on|off>, or set settle <ms>\n");
         return;
     }
     /* ⛔⛔ BEFORE THE on/off CHECK, AND THAT IS THE WHOLE POINT.
@@ -218,7 +218,8 @@ static void cmd_set(control_job_t *job, const char *args)
         return;
     }
     /* ⭐ Virtual Mouse through the event its overlay button's twin on the
-     * remote raises, so it ends Bridge Override exactly as a press does. */
+     * remote raises, so it acts exactly as a press does: kept for the next
+     * stream too, and saved (input/bridge_override.h). */
     if (strcasecmp(name, "vmouse") == 0) {
         if (s_app->session == NULL) {
             reply(job, "ERR no stream is running\n");
@@ -230,18 +231,6 @@ static void cmd_set(control_job_t *job, const char *args)
         }
         reply(job, "OK virtual mouse %s%s\n", on ? "on" : "off",
               on != active ? ": asked for, as its button does" : " already");
-        return;
-    }
-    /* ⭐ Bridge Override by name, which a person never sees: the question a
-     * bridge raises switches it on and Virtual Mouse switches it off. Here
-     * it is set directly. Nothing is shown on the TV, as with either of those. */
-    if (strcasecmp(name, "override") == 0) {
-        bridge_override_set(s_app->session, on);
-        char state[256];
-        bridge_override_describe(s_app->session != NULL ? session_get_input(s_app->session) : NULL,
-                                 state, sizeof state);
-        reply(job, "OK %s%s\n", state,
-              on && !bridge_override_active() ? " -- Enable Device Bridging is off, so it does not act" : "");
         return;
     }
 #if defined(TARGET_WEBOS)
@@ -260,7 +249,7 @@ static void cmd_set(control_job_t *job, const char *args)
         return;
     }
 #endif
-    reply(job, "ERR try boost, light, rumble, tone, override, vmouse or settle\n");
+    reply(job, "ERR try boost, light, rumble, tone, vmouse or settle\n");
 }
 
 /* The question a bridge raises (ui/streaming/bridge_prompt.h): whether it is
@@ -359,11 +348,11 @@ static void cmd_status(control_job_t *job)
     reply(job, " bridge=%s listener=%s protocol=%s agent=\"%s\" core=%s",
           ctm_bridge_active() ? "running" : "stopped", listener, protocol, agent, bridge_core_commit());
 #endif
-    reply(job, " override=%s\n", bridge_override_active() ? "on" : "off");
+    reply(job, "\n");
 }
 
-/* The stream's LIVE input state, which is what Bridge Override changes. The
- * saved settings are not it: the override never writes them. */
+/* The stream's LIVE input state. Of the saved settings, only Virtual Mouse
+ * follows it (input/bridge_override.h). */
 static void cmd_input(control_job_t *job)
 {
     if (s_app->session == NULL) {

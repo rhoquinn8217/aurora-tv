@@ -72,8 +72,9 @@ void session_input_init(stream_input_t *input, session_t *session, app_input_t *
 
 void session_input_deinit(stream_input_t *input);
 
-/** Take or release the USB keyboard grab mid-stream (webOS only). Taking it
- * twice, or releasing it when not held, does nothing. */
+/** This fork: take or release the USB keyboard grab mid-stream (webOS only),
+ * around a bridge (input/bridge_keyboard.h). Taking it twice, or releasing it
+ * when not held, does nothing. */
 void session_input_set_keyboard_grab(stream_input_t *input, bool on);
 
 void session_input_interrupt(stream_input_t *input);
@@ -97,7 +98,7 @@ void stream_input_send_gamepad_arrive(stream_input_t *input, app_gamepad_state_t
 
 void stream_input_send_gamepad_remove(stream_input_t *input, app_gamepad_state_t *gamepad);
 
-/* Stop and resume forwarding ONE controller to the host.
+/* This fork: stop and resume forwarding ONE controller to the host.
  *
  * Called when a controller is handed to the bridge and when it comes back.
  * The order inside each is load-bearing -- see the definitions. */

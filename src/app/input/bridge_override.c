@@ -1,5 +1,5 @@
-/* Bridge Override. The why, and the two rules it is built around, are in the
- * header. */
+/* The TV's own mouse controls while controllers are bridged. The why, and
+ * what is kept from one stream to the next, are in the header. */
 
 #include "bridge_override.h"
 
@@ -13,82 +13,28 @@
 #include "stream/input/session_input.h"
 #include "stream/input/session_virt_mouse.h"
 
-bool bridge_override_active(void) {
-    /* ⓘ Only with bridging enabled: with it off there is nothing bridged for
-     * the TV's own handling to get in the way of, and the switch is hidden with
-     * the USB Bridge button, so it could not be seen to be on. */
-    return app_configuration != NULL && app_configuration->bridge.enable &&
-           app_configuration->bridge.override;
-}
+/* The pop-up's button turned the touchpad's mouse mode off, for this stream. */
+static bool s_touchpad_off;
 
-void bridge_override_apply(stream_input_t *input) {
-    if (input == NULL || input->session == NULL) {
-        return;
-    }
-    /* ⭐ THE STREAM'S CONFIG IS THE ONE TO RESTORE FROM. It is copied from the
-     * saved settings when the stream is created and nothing writes it after, so
-     * it still says what the person chose. */
-    const session_config_t *config = &input->session->config;
-    const bool on = bridge_override_active();
-
-    input->touchpad_mode = (uint8_t) (on ? TOUCHPAD_MODE_NATIVE : config->touchpad_mode);
-    if (input->touchpad_mode != TOUCHPAD_MODE_MOUSE) {
-        /* Mouse mode's per-pad state goes, as it does when a stream ends. */
-        stream_input_touchpad_mouse_deinit(input);
-    } else if (input->started) {
-        /* Back to mouse mode mid-stream: the state it needs is normally made
-         * as the stream starts, which has already happened. */
-        stream_input_touchpad_mouse_init(input);
-    }
-    input->touchpad_multitouch = on ? false : config->touchpad_multitouch;
-    /* The scroll direction is the sign of the scale; its size is not ours. */
-    const float scroll = input->touchpad_scroll_scale < 0 ? -input->touchpad_scroll_scale
-                                                          : input->touchpad_scroll_scale;
-    input->touchpad_scroll_scale = (!on && config->touchpad_natural_scroll) ? scroll : -scroll;
-    input->report_gamepad_battery = on ? false : config->report_gamepad_battery;
-
-    if (on) {
-        session_input_set_vmouse_active(&input->vmouse, false);
-    } else if (input->started && config->vmouse) {
-        /* ⓘ Before the stream starts there is nothing to restore: the stream
-         * start turns it on from the same config. */
-        session_input_set_vmouse_active(&input->vmouse, true);
-    }
-    /* ⓘ The USB keyboard grab is NOT one of them any more (rhoquinn8217,
-     * 2026-09-30). The grab itself leaves a bridged keyboard to the bridge
-     * (bridge_keyboard.h), so switching it off here only took upstream's
-     * handling away from the keyboards that are not bridged. */
-}
-
-void bridge_override_set(session_t *session, bool on) {
-    if (app_configuration == NULL) {
-        return;
-    }
-    app_configuration->bridge.override = on;
+void bridge_override_mouse_off(session_t *session) {
     if (session == NULL) {
-        commons_log_info("Input", "Bridge override %s, from the next stream", on ? "on" : "off");
         return;
     }
     stream_input_t *input = session_get_input(session);
-    bridge_override_apply(input);
+    if (input == NULL) {
+        return;
+    }
+    s_touchpad_off = true;
+    session_input_set_vmouse_active(&input->vmouse, false);
+    /* The touchpad goes with it now, not at the next pass. */
+    bridge_override_touchpad_tick(session);
     char state[256];
     bridge_override_describe(input, state, sizeof state);
-    commons_log_info("Input", "Bridge override switched %s: %s", on ? "on" : "off", state);
+    commons_log_info("Input", "The TV's mouse controls off for the bridge: %s", state);
 }
 
-void bridge_override_release_for_vmouse(session_t *session) {
-    bridge_override_set(session, false);
-    if (session == NULL) {
-        return;
-    }
-    stream_input_t *input = session_get_input(session);
-    /* ⓘ Switching the override off brings the virtual mouse back only if the
-     * Input setting has it on. The press asked for it either way. */
-    if (input->started) {
-        session_input_set_vmouse_active(&input->vmouse, true);
-    }
-    commons_log_info("Input", "Virtual Mouse pressed with Bridge Override on: override off, virtual mouse %s",
-                     session_input_is_vmouse_active(&input->vmouse) ? "on" : "off");
+void bridge_override_stream_started(void) {
+    s_touchpad_off = false;
 }
 
 void bridge_override_describe(stream_input_t *input, char *buf, size_t len) {
@@ -96,7 +42,7 @@ void bridge_override_describe(stream_input_t *input, char *buf, size_t len) {
         return;
     }
     if (input == NULL) {
-        snprintf(buf, len, "override=%s", bridge_override_active() ? "on" : "off");
+        snprintf(buf, len, "no stream");
         return;
     }
 #if defined(TARGET_WEBOS)
@@ -104,9 +50,7 @@ void bridge_override_describe(stream_input_t *input, char *buf, size_t len) {
 #else
     const char *grab = "n/a";
 #endif
-    snprintf(buf, len,
-             "override=%s vmouse=%s touchpad=%s multitouch=%s natural_scroll=%s battery=%s keyboard_grab=%s",
-             bridge_override_active() ? "on" : "off",
+    snprintf(buf, len, "vmouse=%s touchpad=%s multitouch=%s natural_scroll=%s battery=%s keyboard_grab=%s",
              session_input_is_vmouse_active(&input->vmouse) ? "on" : "off",
              input->touchpad_mode == TOUCHPAD_MODE_MOUSE ? "mouse" : "touchpad",
              input->touchpad_multitouch ? "on" : "off",
@@ -124,8 +68,20 @@ void bridge_override_touchpad_tick(session_t *session) {
         return;
     }
     const bool vmouse = session_input_is_vmouse_active(&input->vmouse);
+    /* Virtual Mouse as it was left: the next stream starts from it. Saved at
+     * once, as the TV cursor's shift is: a toggle is rare, and an app that
+     * dies on its way out saves nothing after. */
+    if (app_configuration != NULL && app_configuration->virtual_mouse != vmouse) {
+        app_configuration->virtual_mouse = vmouse;
+        settings_save(app_configuration);
+        commons_log_info("Input", "Virtual Mouse %s: kept for the next stream", vmouse ? "on" : "off");
+    }
+    if (vmouse) {
+        /* Turned on again: the touchpad comes back with it. */
+        s_touchpad_off = false;
+    }
     uint8_t wanted = (uint8_t) session->config.touchpad_mode;
-    if (bridge_override_active()) {
+    if (s_touchpad_off) {
         wanted = TOUCHPAD_MODE_NATIVE;
     } else if (vmouse) {
         wanted = TOUCHPAD_MODE_MOUSE;
@@ -134,7 +90,7 @@ void bridge_override_touchpad_tick(session_t *session) {
         return;
     }
     input->touchpad_mode = wanted;
-    /* As the override does: mouse mode's per-pad state made, or let go. */
+    /* Mouse mode's per-pad state made, or let go, as at a stream's start and end. */
     if (wanted == TOUCHPAD_MODE_MOUSE) {
         stream_input_touchpad_mouse_init(input);
     } else {
