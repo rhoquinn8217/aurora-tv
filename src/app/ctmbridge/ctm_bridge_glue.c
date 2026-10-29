@@ -815,6 +815,13 @@ static bool plug_node_reached(const char *node, bool *unreachable)
     ctm_glue_ensure_core();
     pthread_mutex_lock(&s_dev_mutex);
     bool ok = plug_in_by_node(node);
+    /* ⓘ The plug scanned every device into the same list (plug_in_by_node),
+     * so that is the last scan: the control port reads it rather than
+     * scanning again while the new session starts. On the lab's monitor a
+     * Bluetooth DS4 hung up 0.6 s after its bridge, with a 607 ms scan
+     * running through those 0.6 s (2026-10-28). */
+    s_scan_at_ms = glue_now_ms();
+    s_scanned = true;
     if (ok) {
         plugged_node_note_locked(node);
     } else {
