@@ -2,6 +2,8 @@
 
 #include "bridge_overlay.h"
 
+#include <string.h>
+
 #include "app.h"
 #include "logging.h"
 #include "util/i18n.h"
@@ -9,8 +11,10 @@
 #include "ctm_bridge_glue.h"
 #include "ctm_panel.h"
 #include "bridge_prompt.h"
+#include "stream/bridge_session.h"   /* is Virtual Mouse on */
 
 static void open_listener_config(lv_event_t *event);
+static void vmouse_badge_look(void);
 
 /* ⭐ DS5-USBIP IS GREYED OUT WHILE NOTHING IS BRIDGED, AND STILL SELECTABLE
  * (rhoquinn8217, 2026-10-02). Grey and faded, as the USB Bridge panel greys a
@@ -56,6 +60,102 @@ static void ds5usbip_tick(lv_timer_t *timer) {
     if (ready >= 0) {
         ds5usbip_look(ready == 0);
     }
+    /* And Virtual Mouse's check, on the same timer (below). */
+    vmouse_badge_look();
+}
+
+/* ⭐ A CHECK ON VIRTUAL MOUSE WHILE IT IS ON (rhoquinn8217, 2026-10-28: "Lets
+ * add a check in the mouse mode button in the overlay when it is on", and of
+ * three pictures, B: a small white circle with a green check on the button's
+ * top right corner, and nothing while it is off). Virtual Mouse is kept from
+ * one stream to the next now (input/bridge_override.h), so the button says
+ * whether it is on.
+ * ⓘ Asked with DS5-USBIP's look, four times a second, so every way Virtual
+ * Mouse is switched (its button, the remote, the control port, the pop-up)
+ * shows, with no hook in each.
+ * ⓘ The button is upstream's, made just before this file's two
+ * (streaming.view.c; the merge guard keeps that order). The badge is a child
+ * of it that takes no layout, no focus and no click. */
+#define VMOUSE_TICK_COLOUR lv_color_hex(0x2e7d32)
+
+static lv_obj_t *s_vmouse_badge = NULL;
+/* The check's three points: lv_line keeps a pointer to them, not a copy. */
+static lv_point_t s_vmouse_tick[3];
+/* 1 shown, 0 hidden, -1 not yet decided. */
+static int s_vmouse_shown = -1;
+
+static void vmouse_badge_look(void) {
+    if (s_vmouse_badge == NULL) {
+        return;
+    }
+    const bool on = global != NULL && bridge_session_vmouse_active(global->session);
+    if ((int) on == s_vmouse_shown) {
+        return;
+    }
+    s_vmouse_shown = on;
+    if (on) {
+        lv_obj_clear_flag(s_vmouse_badge, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        lv_obj_add_flag(s_vmouse_badge, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
+static void vmouse_badge_deleted(lv_event_t *event) {
+    if (lv_event_get_target(event) == s_vmouse_badge) {
+        s_vmouse_badge = NULL;
+        s_vmouse_shown = -1;
+    }
+}
+
+static void vmouse_badge_create(lv_obj_t *vmouse_btn) {
+    lv_obj_t *label = vmouse_btn != NULL ? lv_obj_get_child(vmouse_btn, 0) : NULL;
+    if (label == NULL || !lv_obj_check_type(label, &lv_label_class) ||
+        strcmp(lv_label_get_text(label), locstr("Virtual Mouse")) != 0) {
+        commons_log_warn("Streaming", "the overlay's Virtual Mouse button was not found: no check on it");
+        return;
+    }
+    /* As in the picture: 1.35 times the height of the button's words. */
+    const lv_font_t *font = lv_obj_get_style_text_font(label, 0);
+    const lv_coord_t text_h = font != NULL ? lv_font_get_line_height(font) : LV_DPX(20);
+    const lv_coord_t size = text_h * 135 / 100;
+    const lv_coord_t ring = LV_MAX(1, size / 14);
+    lv_obj_t *badge = lv_obj_create(vmouse_btn);
+    lv_obj_remove_style_all(badge);
+    lv_obj_add_flag(badge, LV_OBJ_FLAG_FLOATING | LV_OBJ_FLAG_HIDDEN);
+    lv_obj_clear_flag(badge, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_size(badge, size, size);
+    lv_obj_set_style_radius(badge, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_bg_color(badge, lv_color_white(), 0);
+    lv_obj_set_style_bg_opa(badge, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_color(badge, lv_color_black(), 0);
+    lv_obj_set_style_border_width(badge, ring, 0);
+    /* On the button's corner, a third of it outside. ⓘ Counted from the
+     * button's own edge: an aligned child starts inside its padding and
+     * border. The gap between buttons is wider than the third, so the next
+     * button does not cover it. */
+    const lv_coord_t edge = lv_obj_get_style_border_width(vmouse_btn, 0);
+    lv_obj_align(badge, LV_ALIGN_TOP_RIGHT,
+                 lv_obj_get_style_pad_right(vmouse_btn, 0) + edge + size / 3,
+                 -(lv_obj_get_style_pad_top(vmouse_btn, 0) + edge + size / 3));
+    lv_obj_add_flag(vmouse_btn, LV_OBJ_FLAG_OVERFLOW_VISIBLE);
+
+    /* The check: the picture's path (5,12.5) (9.4,16.9) (19,7.4) on a 24 grid,
+     * in the middle 70% of the circle. ⓘ The points start inside its ring. */
+    const lv_coord_t box = size * 70 / 100;
+    const lv_coord_t off = (size - box) / 2 - ring;
+    s_vmouse_tick[0] = (lv_point_t) {(lv_coord_t) (off + box * 50 / 240), (lv_coord_t) (off + box * 125 / 240)};
+    s_vmouse_tick[1] = (lv_point_t) {(lv_coord_t) (off + box * 94 / 240), (lv_coord_t) (off + box * 169 / 240)};
+    s_vmouse_tick[2] = (lv_point_t) {(lv_coord_t) (off + box * 190 / 240), (lv_coord_t) (off + box * 74 / 240)};
+    lv_obj_t *tick = lv_line_create(badge);
+    lv_line_set_points(tick, s_vmouse_tick, 3);
+    lv_obj_set_style_line_width(tick, LV_MAX(2, box * 34 / 240), 0);
+    lv_obj_set_style_line_color(tick, VMOUSE_TICK_COLOUR, 0);
+    lv_obj_set_style_line_rounded(tick, true, 0);
+
+    s_vmouse_badge = badge;
+    s_vmouse_shown = -1;
+    lv_obj_add_event_cb(badge, vmouse_badge_deleted, LV_EVENT_DELETE, NULL);
+    vmouse_badge_look();
 }
 
 /* The timer goes with the button, or it would fire at a freed one. */
@@ -89,6 +189,10 @@ static lv_obj_t *overlay_button(streaming_controller_t *controller, lv_obj_t *ac
 }
 
 void bridge_overlay_buttons_create(streaming_controller_t *controller, lv_obj_t *actions) {
+    /* ⓘ Upstream's Virtual Mouse button is the row's last child at this
+     * point, for its check (below). */
+    lv_obj_t *vmouse_btn = lv_obj_get_child(actions, -1);
+
     /* ⓘ The panel takes the streaming screen from the click, to know whose
      * overlay it opens over. */
     lv_obj_t *usb_bridge = overlay_button(controller, actions, locstr("USB Bridge"), LV_PALETTE_PURPLE);
@@ -112,6 +216,8 @@ void bridge_overlay_buttons_create(streaming_controller_t *controller, lv_obj_t 
     lv_obj_add_event_cb(ds5usbip, ds5usbip_deleted, LV_EVENT_DELETE, NULL);
     ds5usbip_tick(NULL);
     s_ds5usbip_timer = lv_timer_create(ds5usbip_tick, DS5USBIP_CHECK_MS, NULL);
+
+    vmouse_badge_create(vmouse_btn);
 }
 
 /* ⭐ THE DS5-USBIP BUTTON (rhoquinn8217, 2026-09-28: "I want the DS5-USBIP
