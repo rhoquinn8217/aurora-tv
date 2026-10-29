@@ -976,11 +976,22 @@ static void cmd_stats(control_job_t *job)
 
 #if defined(TARGET_WEBOS)
 
+/* ⭐ A SCAN UNDER TWO SECONDS OLD IS READ, NOT MADE AGAIN (2026-10-28). The
+ * lab asks for `groups` about once a second, and each ask scanned every device
+ * on the app's loop; with a Bluetooth DS4 bridged one such scan waited behind
+ * its writes for five seconds (ctm_bridge_glue.c). Whether a device is bridged
+ * is read from the session table either way, so it is never stale. */
+#define CONTROL_SCAN_FRESH_MS 2000
+
 static int list_devices(ctm_bridge_dev_t *devs)
 {
     /* ⛔ The quiet list outside a stream. The full one wakes the bridge core and
      * broadcasts for a listener that cannot exist yet, which is why the settings
      * pane uses the quiet one too. */
+    if (ctm_bridge_scan_age_ms() < CONTROL_SCAN_FRESH_MS) {
+        return ctm_bridge_active() ? ctm_bridge_list_known(devs, CONTROL_MAX_DEVICES)
+                                   : ctm_bridge_list_quiet_known(devs, CONTROL_MAX_DEVICES);
+    }
     return ctm_bridge_active() ? ctm_bridge_list(devs, CONTROL_MAX_DEVICES)
                                : ctm_bridge_list_quiet(devs, CONTROL_MAX_DEVICES);
 }

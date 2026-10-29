@@ -66,12 +66,21 @@ uint64_t ctm_bridge_scan_age_ms(void)
     return s_scanned ? (uint64_t)(uint32_t)(glue_now_ms() - s_scan_at_ms) : UINT64_MAX;
 }
 
+/* ⏱️ EVERY SCAN TIMED, AND A SLOW ONE NAMED (2026-10-28). With a Bluetooth DS4
+ * bridged, a write to it holds the kernel's lock over every hidraw node for up
+ * to five seconds, and a scan opens and asks every node: on the rooted monitor
+ * the app's loop went still for 15 s after one was bridged, and nothing said
+ * which scan it had been. Past this, the scan is logged with what asked. */
+#define SCAN_SLOW_MS 300
+
 /* Enumerate + build the logical model + Stage-1 puck enumeration capture. The
  * Steam puck only exposes its full composite if g_puck_enum is cached BEFORE the
- * plug; the standalone app did this in its refresh_devices(), so the glue must too. */
-static void ctm_glue_enumerate(void)
+ * plug; the standalone app did this in its refresh_devices(), so the glue must too.
+ * `why` is what asked, for the log of a slow one. */
+static void ctm_glue_enumerate(const char *why)
 {
-    s_scan_at_ms = glue_now_ms();
+    const uint32_t started = glue_now_ms();
+    s_scan_at_ms = started;
     s_scanned = true;
     enumerate_devices(&g_scan);
     build_logical_devices(&g_scan, &g_devices);
@@ -85,6 +94,10 @@ static void ctm_glue_enumerate(void)
     }
     if (!puck) {
         g_puck_enum.valid = 0;
+    }
+    const uint32_t took = glue_now_ms() - started;
+    if (took > SCAN_SLOW_MS) {
+        log_append("ctm glue: slow scan, %u ms, for %s", (unsigned)took, why ? why : "?");
     }
 }
 
@@ -157,7 +170,7 @@ static void ctm_glue_ensure_core(void)
     if (!agent_is_known()) {
         log_append("ctm glue: no agent address yet -- a stream sets it");
     }
-    ctm_glue_enumerate();
+    ctm_glue_enumerate("the bridge's start");
     s_core_up = true;
 }
 
@@ -283,7 +296,7 @@ static int glue_list_locked_body(ctm_bridge_dev_t *out, int max, bool scan)
 {
     pthread_mutex_lock(&s_dev_mutex);
     if (scan || !s_scanned) {
-        ctm_glue_enumerate();
+        ctm_glue_enumerate("a device list");
     }
     int n = 0;
     for (int i = 0; i < g_devices.count && n < max; ++i) {
@@ -422,15 +435,87 @@ static logical_device_t *item_for_node_locked(const char *node)
  * live. The scan only maps the node to its row's key, which a connected device
  * keeps, so a stale scan cannot make a live bridge look gone -- which also
  * removes the "a scan blinked" misses PLUG_MISSES exists for. */
+/* ⭐ THE KEY OF A NODE THE GESTURE PLUGGED, NOTED AT THE PLUG (2026-10-28).
+ * The check above runs every 500 ms for each pad the gesture bridged, and took
+ * the device lock to turn the node into its row's key. A plug now runs on its
+ * own thread (ctm_bridge_plug_node_begin) and holds that lock through its scan
+ * and a Bluetooth DS4's handover tone, so the check would have held the app's
+ * loop just as long. The key is noted when the plug succeeds, and the session
+ * table, which has a lock of its own, answers. A node no longer bridged is
+ * forgotten the first time it is asked about. */
+#define PLUGGED_NODES_MAX 8
+static struct {
+    char node[64];
+    char key[96];
+} s_plugged_nodes[PLUGGED_NODES_MAX];
+static pthread_mutex_t s_plugged_nodes_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+/* Notes the key of the row behind `node`. Under s_dev_mutex. */
+static void plugged_node_note_locked(const char *node)
+{
+    const logical_device_t *item = item_for_node_locked(node);
+    if (item == NULL || !node || !node[0]) {
+        return;
+    }
+    pthread_mutex_lock(&s_plugged_nodes_mutex);
+    int slot = -1;
+    for (int i = 0; i < PLUGGED_NODES_MAX; ++i) {
+        if (strcmp(s_plugged_nodes[i].node, node) == 0) {
+            slot = i;
+            break;
+        }
+        if (slot < 0 && !s_plugged_nodes[i].node[0]) {
+            slot = i;
+        }
+    }
+    if (slot >= 0) {
+        snprintf(s_plugged_nodes[slot].node, sizeof(s_plugged_nodes[slot].node), "%s", node);
+        snprintf(s_plugged_nodes[slot].key, sizeof(s_plugged_nodes[slot].key), "%s", item->key);
+    }
+    pthread_mutex_unlock(&s_plugged_nodes_mutex);
+}
+
+/* 1 bridged, 0 not (and forgotten), -1 not a node noted at a plug. */
+static int plugged_node_answer(const char *node)
+{
+    char key[96] = "";
+    pthread_mutex_lock(&s_plugged_nodes_mutex);
+    int slot = -1;
+    for (int i = 0; i < PLUGGED_NODES_MAX; ++i) {
+        if (s_plugged_nodes[i].node[0] && strcmp(s_plugged_nodes[i].node, node) == 0) {
+            slot = i;
+            snprintf(key, sizeof(key), "%s", s_plugged_nodes[i].key);
+            break;
+        }
+    }
+    pthread_mutex_unlock(&s_plugged_nodes_mutex);
+    if (slot < 0) {
+        return -1;
+    }
+    if (session_index_for_key(key) >= 0) {
+        return 1;
+    }
+    pthread_mutex_lock(&s_plugged_nodes_mutex);
+    if (strcmp(s_plugged_nodes[slot].node, node) == 0) {
+        s_plugged_nodes[slot].node[0] = '\0';
+    }
+    pthread_mutex_unlock(&s_plugged_nodes_mutex);
+    return 0;
+}
+
 bool ctm_bridge_node_is_plugged(const char *node)
 {
     if (!node || !node[0]) {
         return false;
     }
+    const int noted = plugged_node_answer(node);
+    if (noted >= 0) {
+        return noted == 1;
+    }
     pthread_mutex_lock(&s_dev_mutex);
     logical_device_t *item = item_for_node_locked(node);
     if (item == NULL) {
-        ctm_glue_enumerate();
+        ctm_glue_enumerate("an is-plugged check");
         item = item_for_node_locked(node);
     }
     const bool plugged = item != NULL && session_index_for_key(item->key) >= 0;
@@ -484,7 +569,7 @@ bool ctm_bridge_signal_refused(const char *node)
     /* The last scan first, as its siblings ask (2026-10-23): this ran right
      * after the plug's own scan, and a node's kind does not change. */
     if (item_for_node_locked(node) == NULL) {
-        ctm_glue_enumerate();
+        ctm_glue_enumerate("a refusal signal");
     }
     const char *k = kind_for_node_locked(node);
     if (k) {
@@ -659,7 +744,7 @@ bool ctm_bridge_node_signals_itself(const char *node)
      * ctm_bridge_node_is_plugged, which learned the same on the U5s. */
     pthread_mutex_lock(&s_dev_mutex);
     if (item_for_node_locked(node) == NULL) {
-        ctm_glue_enumerate();
+        ctm_glue_enumerate("a will-the-core-signal check");
     }
     const bool core_has_one = core_signals_node_locked(node);
     pthread_mutex_unlock(&s_dev_mutex);
@@ -699,7 +784,7 @@ bool ctm_bridge_node_is_bluetooth(const char *node)
      * that only log lines read. A pad's bus does not change while it is in the
      * list, so a new scan is made only for a node the last one does not have. */
     if (item_for_node_locked(node) == NULL) {
-        ctm_glue_enumerate();
+        ctm_glue_enumerate("an is-Bluetooth check");
     }
     /* ⛔⛔ THE BUS SAYS THIS, NOT A LIST OF TWO KINDS.
      *
@@ -718,17 +803,165 @@ bool ctm_bridge_node_is_bluetooth(const char *node)
     return bt;
 }
 
-bool ctm_bridge_plug_node(const char *node)
+/* The plug, and whether a failed one never reached the listener, read under
+ * the same lock: two plugs on two threads cannot then swap their answers. */
+static bool plug_node_reached(const char *node, bool *unreachable)
 {
     /* ⓘ Said before any way out, as in the core's own entry points (code
      * review, 2026-10-05): a stale "not reached" schedules a retry. */
     g_last_plug_unreachable = false;
+    *unreachable = false;
     if (!s_active) return false;
     ctm_glue_ensure_core();
     pthread_mutex_lock(&s_dev_mutex);
     bool ok = plug_in_by_node(node);
+    if (ok) {
+        plugged_node_note_locked(node);
+    } else {
+        *unreachable = g_last_plug_unreachable;
+    }
     pthread_mutex_unlock(&s_dev_mutex);
     return ok;
+}
+
+bool ctm_bridge_plug_node(const char *node)
+{
+    bool unreachable;
+    return plug_node_reached(node, &unreachable);
+}
+
+/* ⭐⭐ THE PLUG OFF THE APP'S LOOP (2026-10-28). The gesture plugged on the
+ * app's loop, and a plug scans every device (plug_in_by_node) and, for a
+ * DualShock 4, plays its handover tone before the session starts (about 2.5 s,
+ * ui_bridge.c). With a Bluetooth DS4 the scan waits behind its writes too, so
+ * a bridge froze the picture and every pad for seconds; the lab's monitor went
+ * still for 15 s around one. Played as the refusal is (above): on a thread of
+ * its own, the gesture asking for the answer each tick. ⓘ The tone still
+ * comes before the session, on the same thread, as the core requires. */
+#define PLUGS_MAX 4
+enum { PLUG_FREE, PLUG_RUNNING, PLUG_DONE };
+static struct {
+    char node[64];
+    int state;
+    bool ok;
+    bool unreachable;
+} s_plugs[PLUGS_MAX];
+static pthread_mutex_t s_plug_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+static void *plug_thread(void *arg)
+{
+    const int i = (int)(intptr_t)arg;
+    char node[64];
+    pthread_mutex_lock(&s_plug_mutex);
+    snprintf(node, sizeof(node), "%s", s_plugs[i].node);
+    pthread_mutex_unlock(&s_plug_mutex);
+    bool unreachable = false;
+    const bool ok = plug_node_reached(node, &unreachable);
+    pthread_mutex_lock(&s_plug_mutex);
+    s_plugs[i].ok = ok;
+    s_plugs[i].unreachable = unreachable;
+    s_plugs[i].state = PLUG_DONE;
+    pthread_mutex_unlock(&s_plug_mutex);
+    return NULL;
+}
+
+bool ctm_bridge_plug_node_begin(const char *node)
+{
+    if (!node || !node[0]) return false;
+    pthread_mutex_lock(&s_plug_mutex);
+    int slot = -1;
+    int done = -1;
+    for (int i = 0; i < PLUGS_MAX; ++i) {
+        const bool same = strcmp(s_plugs[i].node, node) == 0;
+        if (s_plugs[i].state == PLUG_RUNNING && same) {
+            pthread_mutex_unlock(&s_plug_mutex);
+            return true;   /* already plugging this pad */
+        }
+        /* ⓘ An answer nobody collected (its pad left while it plugged) is
+         * stale: this node's goes now, another's when no slot is free. */
+        if (s_plugs[i].state == PLUG_DONE) {
+            if (same) {
+                s_plugs[i].state = PLUG_FREE;
+            } else if (done < 0) {
+                done = i;
+            }
+        }
+        if (slot < 0 && s_plugs[i].state == PLUG_FREE) slot = i;
+    }
+    if (slot < 0) slot = done;
+    if (slot < 0) {
+        pthread_mutex_unlock(&s_plug_mutex);
+        return false;
+    }
+    snprintf(s_plugs[slot].node, sizeof(s_plugs[slot].node), "%s", node);
+    s_plugs[slot].state = PLUG_RUNNING;
+    s_plugs[slot].ok = false;
+    s_plugs[slot].unreachable = false;
+    pthread_mutex_unlock(&s_plug_mutex);
+    pthread_t thread;
+    if (pthread_create(&thread, NULL, plug_thread, (void *)(intptr_t)slot) != 0) {
+        pthread_mutex_lock(&s_plug_mutex);
+        s_plugs[slot].state = PLUG_FREE;
+        pthread_mutex_unlock(&s_plug_mutex);
+        return false;
+    }
+    pthread_detach(thread);
+    return true;
+}
+
+int ctm_bridge_plug_node_answer(const char *node)
+{
+    int answer = 0;   /* none asked for this pad: nothing plugged */
+    pthread_mutex_lock(&s_plug_mutex);
+    for (int i = 0; i < PLUGS_MAX; ++i) {
+        if (!node || strcmp(s_plugs[i].node, node) != 0 || s_plugs[i].state == PLUG_FREE) {
+            continue;
+        }
+        if (s_plugs[i].state == PLUG_RUNNING) {
+            answer = -1;
+        } else {
+            answer = s_plugs[i].ok ? 1 : (s_plugs[i].unreachable ? 2 : 0);
+            s_plugs[i].state = PLUG_FREE;
+        }
+        break;
+    }
+    pthread_mutex_unlock(&s_plug_mutex);
+    return answer;
+}
+
+/* ⛔ A BRIDGE CANNOT OUTLIVE ITS STREAM, SO THE STOP WAITS FOR A PLUG UNDER
+ * WAY (2026-10-28). A plug on its thread could add its session after the stop
+ * had released every session, and leave that pad bridged with no stream. A
+ * plug only begins on the app's loop, as the stop runs, so none can start
+ * while this waits. ⓘ Bounded: a plug past it is said in the log. */
+#define PLUG_STOP_WAIT_MS 20000
+
+static void plugs_wait_finished(void)
+{
+    const uint32_t started = glue_now_ms();
+    for (;;) {
+        bool running = false;
+        pthread_mutex_lock(&s_plug_mutex);
+        for (int i = 0; i < PLUGS_MAX; ++i) {
+            if (s_plugs[i].state == PLUG_RUNNING) {
+                running = true;
+                break;
+            }
+        }
+        pthread_mutex_unlock(&s_plug_mutex);
+        const uint32_t waited = glue_now_ms() - started;
+        if (!running) {
+            if (waited > 0) {
+                log_append("ctm glue: the stop waited %u ms for a plug under way", (unsigned)waited);
+            }
+            return;
+        }
+        if (waited > PLUG_STOP_WAIT_MS) {
+            log_append("ctm glue: a plug still under way after %u ms; the stop goes on", (unsigned)waited);
+            return;
+        }
+        usleep(10 * 1000);
+    }
 }
 
 /* ⭐⭐ THE DEVICE A ROW NAMES, AS THE LIST STANDS NOW (code review,
@@ -1192,6 +1425,7 @@ void ctm_bridge_stop(void)
     if (!s_active && !s_core_up) {
         return;
     }
+    plugs_wait_finished();
     release_local_sessions_on_exit();
     ctm_agent_probe_park(true);
     g_running = false;
