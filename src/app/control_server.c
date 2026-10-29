@@ -39,6 +39,7 @@
 #include "input/bridge_override.h"
 #include "input/bridge_keyboard.h"
 #include "input/tv_cursor.h"
+#include "input/bt_pairing.h"
 #include "ui/streaming/cursor_align.h"
 
 #if defined(TARGET_WEBOS)
@@ -155,6 +156,8 @@ static void cmd_help(control_job_t *job)
                "shot [name]             the app's own screen (never the stream's picture) to logs/, as a .bmp\n"
                "crash                   the crash recorder: armed or not, and where its record goes\n"
                "crash test|thread       crash the app on purpose, on its own loop or on a thread, to prove it\n"
+               "bt <method> [json]      one call to the TV's Bluetooth controller service, and its answer\n"
+               "                        (getPairedDeviceLists, requestDiscovery, cancelDiscovery and the rest)\n"
                "<device> is its number, its node, its vid:pid, or part of its name; <n> is from groups\n");
 }
 
@@ -1528,6 +1531,42 @@ static void handle_client(int fd)
     }
     if (len == 0) {
         send_text(fd, "ERR empty command; try help\n");
+        return;
+    }
+
+    /* The TV's Bluetooth controller service needs nothing of the app's, so it
+     * is asked from this thread: the screens never wait on the TV, which can
+     * take up to five seconds to answer (input/bt_pairing.h). */
+    if (strncasecmp(line, "bt", 2) == 0 && (line[2] == ' ' || line[2] == '\0')) {
+        const char *p = line + 2;
+        while (*p == ' ') {
+            ++p;
+        }
+        char method[40] = "";
+        size_t m = 0;
+        while (*p != '\0' && *p != ' ' && m + 1 < sizeof method) {
+            method[m++] = *p++;
+        }
+        method[m] = '\0';
+        while (*p == ' ') {
+            ++p;
+        }
+        if (method[0] == '\0') {
+            send_text(fd, "ERR bt <method> [json]; try help\n");
+            return;
+        }
+        char *answer = bt_pairing_call(method, *p != '\0' ? p : "{}");
+        if (answer == NULL) {
+            send_text(fd, "ERR no answer: not a method of the service, the call could not be made, "
+                          "or nothing came back in five seconds (logs/bt-pairing.log)\n");
+            return;
+        }
+        send_text(fd, "OK ");
+        send_text(fd, method);
+        send_text(fd, " ");
+        send_text(fd, answer);
+        send_text(fd, "\n");
+        free(answer);
         return;
     }
 

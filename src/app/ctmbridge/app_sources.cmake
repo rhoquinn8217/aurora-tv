@@ -18,6 +18,7 @@ target_sources(moonlight-lib PRIVATE
         ${CMAKE_SOURCE_DIR}/src/app/input/bridge_keyboard.c
         ${CMAKE_SOURCE_DIR}/src/app/input/bridge_override.c
         ${CMAKE_SOURCE_DIR}/src/app/input/bridge_request.c
+        ${CMAKE_SOURCE_DIR}/src/app/input/bt_pairing.c
         ${CMAKE_SOURCE_DIR}/src/app/input/ctm_bridge_gesture.c
         ${CMAKE_SOURCE_DIR}/src/app/input/device_groups.c
         ${CMAKE_SOURCE_DIR}/src/app/input/mouse_seen.c
