@@ -342,7 +342,10 @@ static void do_refresh(void) {
         for (ssize_t i = 0; i < n && fresh.count < BT_PAIRING_MAX; i++) {
             jvalue_ref d = jarray_get(list, i);
             bt_pairing_device_t *dev = &fresh.devices[fresh.count];
-            if (!string_member(d, "deviceAddr", dev->addr, sizeof dev->addr)) {
+            /* ⓘ The C1 lists its empty slots too, as "Not Paired" at "N/A"
+             * (2026-10-29): only what is paired is a device. */
+            if (!string_member(d, "deviceAddr", dev->addr, sizeof dev->addr) || strcmp(dev->addr, "N/A") == 0 ||
+                bool_member(d, "isPaired") == 0) {
                 continue;
             }
             if (!string_member(d, "deviceName", dev->name, sizeof dev->name) || dev->name[0] == '\0') {
@@ -350,7 +353,9 @@ static void do_refresh(void) {
             }
             char type[24] = "";
             string_member(d, "deviceType", type, sizeof type);
-            dev->gamepad = strcmp(type, "gamepad") == 0;
+            /* ⓘ By its name as well: the C1 calls its DualSense "undefined". */
+            dev->gamepad = strcmp(type, "gamepad") == 0 || strcasestr(dev->name, "controller") != NULL ||
+                           strcasestr(dev->name, "dualsense") != NULL || strcasestr(dev->name, "gamepad") != NULL;
             dev->connected = bool_member(d, "isConnected") == 1;
             fresh.count++;
         }

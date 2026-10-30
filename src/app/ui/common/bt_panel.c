@@ -32,6 +32,7 @@
 #define TOPBAR_BTN_SIZE 40
 
 static lv_obj_t   *s_win;
+static lv_obj_t   *s_card;
 static lv_group_t *s_group;
 static lv_obj_t   *s_close;
 static lv_obj_t   *s_count;
@@ -167,6 +168,32 @@ static void btp_row(int i, const bt_pairing_device_t *dev) {
     s_forget[i] = forget;
 }
 
+/* ⭐ THE LIST TAKES ITS ROWS' ROOM, and scrolls only when the window would run
+ * off the screen: then the window takes its full height and the list what the
+ * rest leaves. The Auto Bridge window's answer to its cut-off buttons; a fixed
+ * share for the list cut the C1's three rows at two and a half (2026-10-29). */
+static void btp_fit(void) {
+    lv_obj_set_height(s_card, LV_SIZE_CONTENT);
+    lv_obj_set_flex_grow(s_list, 0);
+    lv_obj_set_height(s_list, LV_SIZE_CONTENT);
+    lv_obj_update_layout(s_card);
+    lv_obj_t *last = lv_obj_get_child(s_card, -1);
+    if (last == NULL) {
+        return;
+    }
+    lv_area_t card_area;
+    lv_area_t last_area;
+    lv_obj_get_coords(s_card, &card_area);
+    lv_obj_get_coords(last, &last_area);
+    const lv_coord_t inner_bottom = card_area.y2 - lv_obj_get_style_pad_bottom(s_card, 0) -
+                                    lv_obj_get_style_border_width(s_card, 0);
+    if (last_area.y2 > inner_bottom) {
+        lv_obj_set_height(s_card, lv_obj_get_style_max_height(s_card, 0));
+        lv_obj_set_height(s_list, 1);
+        lv_obj_set_flex_grow(s_list, 1);
+    }
+}
+
 /* ⭐ Built again from the state at every change, with the selection kept on
  * what it was on: the same device's Forget, the row that took its place, or
  * the same button. The group is refilled in the order the panel reads, top to
@@ -205,7 +232,10 @@ static void btp_refresh(void) {
     char count[80];
     snprintf(count, sizeof count, "%s %d", locstr("Registered on this TV:"), st.count);
     lv_label_set_text(s_count, count);
-    lv_label_set_text(s_status, st.status);
+    lv_label_set_text(s_status, st.status[0] != '\0' ? st.status
+                                : locstr("Forget a controller that will not pair, switch Search on, then put "
+                                         "the controller in pairing mode."));
+    btp_fit();
 
     if (st.searching) {
         lv_obj_add_state(s_switch, LV_STATE_CHECKED);
@@ -298,6 +328,7 @@ void bt_panel_open(bool over_stream) {
     lv_obj_add_flag(s_win, LV_OBJ_FLAG_CLICKABLE);   /* swallow clicks behind it */
 
     lv_obj_t *card = lv_obj_create(s_win);
+    s_card = card;
     lv_obj_remove_style_all(card);
     lv_obj_set_width(card, over_stream ? LV_PCT(38) : LV_PCT(56));
     lv_obj_set_height(card, LV_SIZE_CONTENT);
@@ -353,7 +384,6 @@ void bt_panel_open(bool over_stream) {
     lv_obj_remove_style_all(s_list);
     lv_obj_set_width(s_list, LV_PCT(100));
     lv_obj_set_height(s_list, LV_SIZE_CONTENT);
-    lv_obj_set_style_max_height(s_list, LV_PCT(55), 0);
     lv_obj_set_flex_flow(s_list, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_gap(s_list, LV_DPX(6), 0);
     lv_obj_set_scrollbar_mode(s_list, LV_SCROLLBAR_MODE_AUTO);
