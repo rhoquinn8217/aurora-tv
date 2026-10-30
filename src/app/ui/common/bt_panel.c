@@ -39,6 +39,7 @@ static lv_obj_t   *s_list;
 static lv_obj_t   *s_all;
 static lv_obj_t   *s_search;
 static lv_obj_t   *s_switch;
+static lv_obj_t   *s_knob;
 static lv_obj_t   *s_status;
 static lv_obj_t   *s_forget[BT_PAIRING_MAX];
 static char        s_addr[BT_PAIRING_MAX][24];
@@ -208,8 +209,10 @@ static void btp_refresh(void) {
 
     if (st.searching) {
         lv_obj_add_state(s_switch, LV_STATE_CHECKED);
+        lv_obj_align(s_knob, LV_ALIGN_RIGHT_MID, -LV_DPX(3), 0);
     } else {
         lv_obj_clear_state(s_switch, LV_STATE_CHECKED);
+        lv_obj_align(s_knob, LV_ALIGN_LEFT_MID, LV_DPX(3), 0);
     }
     const bool can_forget = st.count > 0 && !st.searching;
     lv_obj_set_style_opa(s_all, can_forget ? LV_OPA_COVER : LV_OPA_40, 0);
@@ -374,14 +377,27 @@ void bt_panel_open(bool over_stream) {
     lv_obj_set_style_pad_gap(s_search, LV_DPX(10), 0);
     lv_obj_t *sl = lv_label_create(s_search);
     lv_label_set_text(sl, over_stream ? locstr("Search") : locstr("Search for controllers"));
-    /* ⛔ Not clickable and not checkable: its state is set from the search's,
-     * by hand, as the Auto Bridge window's boxes are (a checkable one ticked
-     * itself as the selection moved onto it). */
-    s_switch = lv_switch_create(s_search);
-    lv_obj_clear_flag(s_switch, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_clear_flag(s_switch, LV_OBJ_FLAG_CHECKABLE);
+    /* ⓘ Drawn by hand, a track and a knob: this LVGL is built without its switch
+     * widget. ⛔ Not clickable: its state is set from the search's, as the Auto
+     * Bridge window's boxes are (a checkable one ticked itself as the selection
+     * moved onto it). Green when on, so it still reads on the blue of a
+     * selected button. */
+    s_switch = lv_obj_create(s_search);
+    lv_obj_remove_style_all(s_switch);
     lv_obj_set_size(s_switch, LV_DPX(40), LV_DPX(22));
-    lv_obj_set_style_bg_color(s_switch, BTP_COL_FOCUS, LV_PART_INDICATOR | LV_STATE_CHECKED);
+    lv_obj_set_style_radius(s_switch, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_bg_opa(s_switch, LV_OPA_COVER, 0);
+    lv_obj_set_style_bg_color(s_switch, lv_color_hex(0x4b5563), 0);
+    lv_obj_set_style_bg_color(s_switch, BTP_COL_ON, LV_STATE_CHECKED);
+    lv_obj_clear_flag(s_switch, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+    s_knob = lv_obj_create(s_switch);
+    lv_obj_remove_style_all(s_knob);
+    lv_obj_set_size(s_knob, LV_DPX(16), LV_DPX(16));
+    lv_obj_set_style_radius(s_knob, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_bg_opa(s_knob, LV_OPA_COVER, 0);
+    lv_obj_set_style_bg_color(s_knob, lv_color_white(), 0);
+    lv_obj_clear_flag(s_knob, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_align(s_knob, LV_ALIGN_LEFT_MID, LV_DPX(3), 0);
     lv_obj_add_event_cb(s_search, btp_search_cb, LV_EVENT_CLICKED, NULL);
 
     s_status = btp_text(card, "", BTP_COL_SUB, lv_theme_get_font_small(card), true);
