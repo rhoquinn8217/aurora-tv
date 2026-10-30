@@ -335,8 +335,8 @@ static void btp_refresh(void) {
     for (int i = 0; i < s_found_rows; i++) {
         lv_group_add_obj(s_group, s_pair[i]);
     }
-    lv_group_add_obj(s_group, s_all);
     lv_group_add_obj(s_group, s_search);
+    lv_group_add_obj(s_group, s_all);
     lv_group_add_obj(s_group, s_auto_row);
     btp_auto_look();
 
@@ -484,30 +484,15 @@ void bt_panel_open(bool over_stream) {
     lv_obj_set_style_pad_gap(s_list, LV_DPX(6), 0);
     lv_obj_set_scrollbar_mode(s_list, LV_SCROLLBAR_MODE_AUTO);
 
-    /* The foot: Forget all on the left, the Search switch on the right. */
+    /* The foot: the Search switch on the left, Forget all on the right
+     * (rhoquinn8217, 2026-10-29: "switch the position of the Forget all and the
+     * Search for controllers button"). */
     lv_obj_t *foot = lv_obj_create(card);
     lv_obj_remove_style_all(foot);
     lv_obj_set_size(foot, LV_PCT(100), LV_SIZE_CONTENT);
     lv_obj_set_flex_flow(foot, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(foot, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_clear_flag(foot, LV_OBJ_FLAG_SCROLLABLE);
-
-    s_all = btp_button(foot, BTP_COL_ALL, BTP_COL_TXT, locstr("Forget all"));
-    lv_obj_add_event_cb(s_all, btp_forget_all_cb, LV_EVENT_CLICKED, NULL);
-
-    /* ⭐ Over a stream, the note stands between the two buttons (rhoquinn8217,
-     * 2026-10-29). Nothing is bridged on the dashboard, so nothing stands there. */
-    if (over_stream) {
-        lv_obj_t *note = lv_label_create(foot);
-        lv_label_set_text(note, locstr("Forgetting a bridged device releases it."));
-        lv_label_set_long_mode(note, LV_LABEL_LONG_WRAP);
-        lv_obj_set_width(note, 1);
-        lv_obj_set_flex_grow(note, 1);
-        lv_obj_set_style_text_align(note, LV_TEXT_ALIGN_CENTER, 0);
-        lv_obj_set_style_text_color(note, BTP_COL_SUB, 0);
-        lv_obj_set_style_text_font(note, lv_theme_get_font_small(foot), 0);
-        lv_obj_set_style_pad_hor(note, LV_DPX(8), 0);
-    }
 
     s_search = btp_button(foot, BTP_COL_ROW, BTP_COL_TXT, NULL);
     lv_obj_set_style_border_width(s_search, LV_DPX(1), 0);
@@ -516,7 +501,7 @@ void bt_panel_open(bool over_stream) {
     lv_obj_set_flex_align(s_search, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_gap(s_search, LV_DPX(10), 0);
     lv_obj_t *sl = lv_label_create(s_search);
-    lv_label_set_text(sl, over_stream ? locstr("Search") : locstr("Search for controllers"));
+    lv_label_set_text(sl, over_stream ? locstr("Search") : locstr("Search for devices"));
     /* ⓘ Drawn by hand, a track and a knob: this LVGL is built without its switch
      * widget. ⛔ Not clickable: its state is set from the search's, as the Auto
      * Bridge window's boxes are (a checkable one ticked itself as the selection
@@ -539,6 +524,23 @@ void bt_panel_open(bool over_stream) {
     lv_obj_clear_flag(s_knob, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_align(s_knob, LV_ALIGN_LEFT_MID, LV_DPX(3), 0);
     lv_obj_add_event_cb(s_search, btp_search_cb, LV_EVENT_CLICKED, NULL);
+
+    /* ⭐ Over a stream, the note stands between the two buttons (rhoquinn8217,
+     * 2026-10-29). Nothing is bridged on the dashboard, so nothing stands there. */
+    if (over_stream) {
+        lv_obj_t *note = lv_label_create(foot);
+        lv_label_set_text(note, locstr("Forgetting a bridged device releases it."));
+        lv_label_set_long_mode(note, LV_LABEL_LONG_WRAP);
+        lv_obj_set_width(note, 1);
+        lv_obj_set_flex_grow(note, 1);
+        lv_obj_set_style_text_align(note, LV_TEXT_ALIGN_CENTER, 0);
+        lv_obj_set_style_text_color(note, BTP_COL_SUB, 0);
+        lv_obj_set_style_text_font(note, lv_theme_get_font_small(foot), 0);
+        lv_obj_set_style_pad_hor(note, LV_DPX(8), 0);
+    }
+
+    s_all = btp_button(foot, BTP_COL_ALL, BTP_COL_TXT, locstr("Forget all"));
+    lv_obj_add_event_cb(s_all, btp_forget_all_cb, LV_EVENT_CLICKED, NULL);
 
     s_status = btp_text(card, "", BTP_COL_SUB, lv_theme_get_font_small(card), true);
 
@@ -601,6 +603,24 @@ static void btp_topbar_clicked(lv_event_t *e) {
     bt_panel_open(false);
 }
 
+/* ⭐ THE BUTTON IS A BLUETOOTH MARK, DRAWN (rhoquinn8217, 2026-10-29: "change the
+ * controller icon that opens the panel to just a bluetooth symbol"). The icon
+ * font holds only the glyphs upstream chose, and one more means regenerating
+ * upstream's font files, so the mark is drawn as the Search switch is: the
+ * middle line of Material's "bluetooth" picture, two units wide on its 24 grid,
+ * at the icon font's size. Each point is its distance from the middle in
+ * hundredths of a unit, rounded the same way on both sides so it stays
+ * symmetrical: arm, bottom-right corner, foot, head, top-right corner, arm. */
+static const int16_t BTP_RUNE[6][2] = {
+        {-629, -629}, {429, 429}, {0, 859}, {0, -859}, {429, -429}, {-629, 629},
+};
+static lv_point_t s_rune[6];
+
+static lv_coord_t btp_rune_at(lv_coord_t box, int hundredths) {
+    const int scaled = (box * (hundredths < 0 ? -hundredths : hundredths) + 1200) / 2400;
+    return (lv_coord_t) (box / 2 + (hundredths < 0 ? -scaled : scaled));
+}
+
 void bt_panel_topbar_button(launcher_fragment_t *launcher, lv_obj_t *topbar) {
     /* Styled as the icons after it (launcher.view.c, create_topbar_icon_btn). A
      * child of the top bar joins its focus group, and its keys bubble to the
@@ -610,12 +630,18 @@ void bt_panel_topbar_button(launcher_fragment_t *launcher, lv_obj_t *topbar) {
     lv_obj_set_size(btn, LV_DPX(TOPBAR_BTN_SIZE), LV_DPX(TOPBAR_BTN_SIZE));
     lv_obj_add_style(btn, &launcher->topbar_btn_style, 0);
     lv_obj_set_style_bg_opa(btn, LV_OPA_70, 0);
-    lv_obj_t *lbl = lv_label_create(btn);
-    lv_obj_set_style_text_font(lbl, lv_theme_moonlight_get_iconfont_small(topbar), 0);
-    lv_obj_set_style_text_color(lbl, ml_color_hex(ML_COLOR_TEXT), 0);
-    lv_label_set_text_static(lbl, MAT_SYMBOL_SPORTS_ESPORTS);
-    lv_obj_center(lbl);
-    lv_obj_clear_flag(lbl, LV_OBJ_FLAG_CLICKABLE);
+    const lv_coord_t box = LV_DPX(14);     /* the icon font's small size, util/font.c */
+    for (int i = 0; i < 6; i++) {
+        s_rune[i] = (lv_point_t) {btp_rune_at(box, BTP_RUNE[i][0]), btp_rune_at(box, BTP_RUNE[i][1])};
+    }
+    lv_obj_t *rune = lv_line_create(btn);
+    lv_line_set_points(rune, s_rune, 6);
+    lv_obj_set_size(rune, box, box);
+    lv_obj_set_style_line_width(rune, LV_MAX(2, box / 12), 0);
+    lv_obj_set_style_line_color(rune, ml_color_hex(ML_COLOR_TEXT), 0);
+    lv_obj_set_style_line_rounded(rune, true, 0);
+    lv_obj_center(rune);
+    lv_obj_clear_flag(rune, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb(btn, btp_topbar_clicked, LV_EVENT_CLICKED, NULL);
 }
 

@@ -4,8 +4,9 @@
  * itself off (input/bt_pairing.h has the why and the TV's calls).
  *
  * ⭐ WHERE IT OPENS (rhoquinn8217, 2026-10-29, the picture they said "build" to):
- *   - the dashboard: a controller button in the top bar, after Stream actions
- *     and before Add, Help, Settings and Close; the panel in the middle;
+ *   - the dashboard: a button in the top bar, after Stream actions and before
+ *     Add, Help, Settings and Close, drawn as a Bluetooth mark since
+ *     2026-10-29; the panel in the middle;
  *   - the streaming overlay: a Controllers button in the overlay's row, after
  *     DS5-USBIP; the panel on the right, where the USB Bridge panel opens, with
  *     the overlay left open behind it, so a bridged controller's presses stay
