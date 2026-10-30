@@ -308,9 +308,13 @@ static lv_obj_t *create_obj(lv_fragment_t *self, lv_obj_t *container) {
 
     /* ⭐ THE TOUCHPAD AS THE TV'S MOUSE, in their words (rhoquinn8217,
      * 2026-10-20). A plain box, not a dependent one: it works with bridging
-     * off, so it does not grey out with it (input/touchpad_pointer.h). */
+     * off, so it does not grey out with it (input/touchpad_pointer.h).
+     *
+     * ⛔ TWO LINES ON PURPOSE (2026-10-30). A checkbox never wraps its text, and
+     * one line this long runs past the pane's edge; the row is tall enough for
+     * the second line. */
     usbb_gap(view);
-    pref_checkbox(view, locstr("Enable touchpad as mouse in dashboard and streaming overlay"),
+    pref_checkbox(view, locstr("Enable DualSense touchpad as mouse\nin dashboard and streaming overlay"),
                   &app_configuration->bridge.touchpad_pointer, false);
     pref_desc_label(view, locstr("One finger moves the pointer; press the touchpad to click "
                                  "(DualSense/DualSense Edge/DualShock4)."), false);
