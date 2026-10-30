@@ -638,8 +638,10 @@ static void do_search_on(void) {
     s_pairing_addr[0] = '\0';
     SDL_UnlockMutex(s_lock);
     s_search_since = SDL_GetTicks();
-    set_status("Searching. Put your controller in pairing mode: on a DualSense, hold Create and PS until "
-               "the light flashes; on a DS4, Share and PS; on an Xbox controller, its pair button.");
+    /* ⓘ One plain line (rhoquinn8217, 2026-10-29: "Your instruction to put
+     * devices in pairing mode is inflated"): the button already says it is
+     * searching. */
+    set_status("Put your devices in pairing mode");
     notify();
     subscribe(&s_status_ctx, &s_status_on, BT_SERVICE "subscribeDevicesStatus", status_cb);
     subscribe(&s_disc_ctx, &s_disc_on, BT_SERVICE "subscribeDiscovery", discovery_cb);

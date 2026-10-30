@@ -42,6 +42,10 @@ static lv_obj_t   *s_count;
 static lv_obj_t   *s_list;
 static lv_obj_t   *s_all;
 static lv_obj_t   *s_search;
+static lv_obj_t   *s_search_label;
+static const char *s_search_idle;   /* its words while the search is off */
+static lv_timer_t *s_dots;          /* steps the dots of "Searching ..." */
+static int         s_dot_count;
 static lv_obj_t   *s_switch;
 static lv_obj_t   *s_knob;
 static lv_obj_t   *s_status;
@@ -249,6 +253,42 @@ static void btp_fit(void) {
     }
 }
 
+/* ⭐ WHILE IT SEARCHES THE BUTTON SAYS SO (rhoquinn8217, 2026-10-29): "Searching
+ * ." then "Searching .." then "Searching ...", a dot a second, and round again.
+ * ⓘ The label keeps the width of the longest of the three meanwhile, so the
+ * switch beside it stays still as the dots come and go. */
+static void btp_dots_show(void) {
+    char line[64];
+    snprintf(line, sizeof line, "%s %.*s", locstr("Searching"), s_dot_count, "...");
+    lv_label_set_text(s_search_label, line);
+}
+
+static void btp_dots_tick(lv_timer_t *timer) {
+    LV_UNUSED(timer);
+    s_dot_count = s_dot_count % 3 + 1;
+    btp_dots_show();
+}
+
+static void btp_dots(bool searching) {
+    if (searching && s_dots == NULL) {
+        char widest[64];
+        snprintf(widest, sizeof widest, "%s ...", locstr("Searching"));
+        lv_point_t size;
+        lv_txt_get_size(&size, widest, lv_obj_get_style_text_font(s_search_label, LV_PART_MAIN),
+                        lv_obj_get_style_text_letter_space(s_search_label, LV_PART_MAIN), 0, LV_COORD_MAX,
+                        LV_TEXT_FLAG_NONE);
+        lv_obj_set_width(s_search_label, size.x);
+        s_dot_count = 1;
+        btp_dots_show();
+        s_dots = lv_timer_create(btp_dots_tick, 1000, NULL);
+    } else if (!searching && s_dots != NULL) {
+        lv_timer_del(s_dots);
+        s_dots = NULL;
+        lv_obj_set_width(s_search_label, LV_SIZE_CONTENT);
+        lv_label_set_text(s_search_label, s_search_idle);
+    }
+}
+
 /* ⭐ Built again from the state at every change, with the selection kept on
  * what it was on: the same device's button (a found device that has paired
  * lands on its Forget), the row that took its place, or the same button. The
@@ -289,21 +329,24 @@ static void btp_refresh(void) {
         btp_device_row(i, &st.devices[i]);
         s_rows++;
     }
-    if (st.count == 0) {
-        btp_text(s_list, st.listed ? locstr("Nothing is registered on this TV.")
-                                   : locstr("Asking the TV for its devices..."),
-                 BTP_COL_SUB, lv_theme_get_font_small(s_list), true);
-    }
-    if (st.found_count > 0) {
-        btp_text(s_list, locstr("Found by the search"), BTP_COL_SUB, lv_theme_get_font_small(s_list), false);
-        for (int i = 0; i < st.found_count && i < BT_PAIRING_MAX; i++) {
-            btp_found_row(i, &st.found[i]);
-            s_found_rows++;
-        }
+    /* ⓘ No heading over what the search found: its rows read "Found, not
+     * paired" and carry Pair (rhoquinn8217, 2026-10-29: "Remove the 'Found by
+     * Search' that will be obvious"). */
+    for (int i = 0; i < st.found_count && i < BT_PAIRING_MAX; i++) {
+        btp_found_row(i, &st.found[i]);
+        s_found_rows++;
     }
 
+    /* ⓘ ONE LINE FOR THE COUNT, and none in the empty list beneath it
+     * (rhoquinn8217, 2026-10-29: "You have two lines that say the same thing
+     * about 0 devices registered"). Until the TV first answers, the line says
+     * it is asking. */
     char count[80];
-    snprintf(count, sizeof count, "%s %d", locstr("Registered on this TV:"), st.count);
+    if (st.listed) {
+        snprintf(count, sizeof count, "%s %d", locstr("Registered on this TV:"), st.count);
+    } else {
+        snprintf(count, sizeof count, "%s", locstr("Asking the TV for its devices..."));
+    }
     lv_label_set_text(s_count, count);
     /* ⓘ Hidden while there is nothing to say, so it leaves no empty line. No
      * standing hint in its place (rhoquinn8217, 2026-10-29: "Remove the
@@ -314,7 +357,6 @@ static void btp_refresh(void) {
     } else {
         lv_obj_clear_flag(s_status, LV_OBJ_FLAG_HIDDEN);
     }
-    btp_fit();
 
     if (st.searching) {
         lv_obj_add_state(s_switch, LV_STATE_CHECKED);
@@ -323,6 +365,8 @@ static void btp_refresh(void) {
         lv_obj_clear_state(s_switch, LV_STATE_CHECKED);
         lv_obj_align(s_knob, LV_ALIGN_LEFT_MID, LV_DPX(3), 0);
     }
+    btp_dots(st.searching);
+    btp_fit();
     const bool can_forget = st.count > 0 && !st.searching;
     lv_obj_set_style_opa(s_all, can_forget ? LV_OPA_COVER : LV_OPA_40, 0);
     if (can_forget) {
@@ -393,6 +437,10 @@ void bt_panel_close(void) {
      * what is focused, and popping it hands the keys back (auto_bridge_window.c
      * says why). */
     app_input_remove_modal_group(&global->ui.input, s_group);
+    if (s_dots != NULL) {
+        lv_timer_del(s_dots);
+        s_dots = NULL;
+    }
     lv_obj_del(s_win);
     s_win = NULL;
     if (s_group != NULL) {
@@ -503,8 +551,9 @@ void bt_panel_open(bool over_stream) {
     lv_obj_set_flex_flow(s_search, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(s_search, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_gap(s_search, LV_DPX(10), 0);
-    lv_obj_t *sl = lv_label_create(s_search);
-    lv_label_set_text(sl, over_stream ? locstr("Search") : locstr("Search for devices"));
+    s_search_idle = over_stream ? locstr("Search") : locstr("Search for devices");
+    s_search_label = lv_label_create(s_search);
+    lv_label_set_text(s_search_label, s_search_idle);
     /* ⓘ Drawn by hand, a track and a knob: this LVGL is built without its switch
      * widget. ⛔ Not clickable: its state is set from the search's, as the Auto
      * Bridge window's boxes are (a checkable one ticked itself as the selection
