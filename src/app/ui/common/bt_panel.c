@@ -418,7 +418,7 @@ void bt_panel_open(bool over_stream) {
     lv_obj_t *card = lv_obj_create(s_win);
     s_card = card;
     lv_obj_remove_style_all(card);
-    lv_obj_set_width(card, over_stream ? LV_PCT(38) : LV_PCT(56));
+    lv_obj_set_width(card, over_stream ? LV_PCT(44) : LV_PCT(56));
     lv_obj_set_height(card, LV_SIZE_CONTENT);
     lv_obj_set_style_max_height(card, over_stream ? LV_PCT(82) : LV_PCT(80), 0);
     if (over_stream) {
@@ -547,6 +547,10 @@ void bt_panel_open(bool over_stream) {
     lv_checkbox_set_text(s_auto_box, "");
     lv_obj_clear_flag(s_auto_box, LV_OBJ_FLAG_CHECKABLE);
     lv_obj_clear_flag(s_auto_box, LV_OBJ_FLAG_CLICKABLE);
+    /* ⓘ Out of every group: a check box joins the screen's default one as it is
+     * made, and over the overlay that drew its focus ring (2026-10-29, the C1).
+     * The row is what the keys reach. */
+    lv_group_remove_obj(s_auto_box);
     lv_obj_set_style_bg_color(s_auto_box, lv_palette_main(LV_PALETTE_PURPLE), LV_PART_INDICATOR | LV_STATE_CHECKED);
     lv_obj_set_style_border_color(s_auto_box, BTP_COL_SUB, LV_PART_INDICATOR);
     lv_obj_t *auto_text = lv_label_create(s_auto_row);
@@ -563,7 +567,10 @@ void bt_panel_open(bool over_stream) {
     app_input_push_modal_group(&global->ui.input, s_group);
     bt_pairing_set_listener(btp_changed);
     btp_refresh();
-    lv_group_focus_obj(s_rows > 0 ? s_forget[0] : s_search);
+    /* ⛔ OPENS ON SEARCH, never on a Forget (2026-10-29, the C1): over the
+     * overlay it opened on the second row's Forget, one Enter from forgetting a
+     * controller. Forget all is one step away. */
+    lv_group_focus_obj(s_search);
     bt_pairing_refresh();
 }
 
