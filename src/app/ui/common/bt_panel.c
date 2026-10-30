@@ -27,6 +27,8 @@
 #define BTP_COL_FORGET  lv_color_hex(0x3a2326)
 #define BTP_COL_FORGET_TXT lv_color_hex(0xfca5a5)
 #define BTP_COL_ALL     lv_palette_main(LV_PALETTE_RED)
+#define BTP_COL_PAIR    lv_color_hex(0x1f3a2b)
+#define BTP_COL_PAIR_TXT lv_color_hex(0x86efac)
 
 /* The top bar's icon size, as launcher.view.c and stream_actions.c have it. */
 #define TOPBAR_BTN_SIZE 40
@@ -42,9 +44,13 @@ static lv_obj_t   *s_search;
 static lv_obj_t   *s_switch;
 static lv_obj_t   *s_knob;
 static lv_obj_t   *s_status;
+/* The registered devices' Forget buttons, and the found ones' Pair buttons. */
 static lv_obj_t   *s_forget[BT_PAIRING_MAX];
 static char        s_addr[BT_PAIRING_MAX][24];
 static int         s_rows;
+static lv_obj_t   *s_pair[BT_PAIRING_MAX];
+static char        s_found_addr[BT_PAIRING_MAX][24];
+static int         s_found_rows;
 
 static void btp_close_cb(lv_event_t *e) {
     LV_UNUSED(e);
@@ -127,8 +133,17 @@ static lv_obj_t *btp_button(lv_obj_t *parent, lv_color_t bg, lv_color_t fg, cons
     return b;
 }
 
-/* One registered device: what it is, whether it is connected, and Forget. */
-static void btp_row(int i, const bt_pairing_device_t *dev) {
+static void btp_pair_cb(lv_event_t *e) {
+    const int i = (int) (intptr_t) lv_event_get_user_data(e);
+    if (i >= 0 && i < s_found_rows) {
+        bt_pairing_pair(s_found_addr[i]);
+    }
+}
+
+/* One device: the controller icon or its space, its name, a line under it,
+ * and one button, which this returns. */
+static lv_obj_t *btp_row(const char *name, bool gamepad, const char *line, lv_color_t line_color,
+                         lv_color_t bg, lv_color_t fg, const char *button) {
     lv_obj_t *row = lv_obj_create(s_list);
     lv_obj_remove_style_all(row);
     lv_obj_set_size(row, LV_PCT(100), LV_SIZE_CONTENT);
@@ -148,7 +163,7 @@ static void btp_row(int i, const bt_pairing_device_t *dev) {
     lv_obj_set_width(icon, LV_DPX(24));
     lv_obj_set_style_text_font(icon, lv_theme_moonlight_get_iconfont_small(row), 0);
     lv_obj_set_style_text_color(icon, BTP_COL_TXT, 0);
-    lv_label_set_text_static(icon, dev->gamepad ? MAT_SYMBOL_SPORTS_ESPORTS : "");
+    lv_label_set_text_static(icon, gamepad ? MAT_SYMBOL_SPORTS_ESPORTS : "");
 
     lv_obj_t *col = lv_obj_create(row);
     lv_obj_remove_style_all(col);
@@ -158,14 +173,31 @@ static void btp_row(int i, const bt_pairing_device_t *dev) {
     lv_obj_set_flex_flow(col, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_gap(col, LV_DPX(2), 0);
     lv_obj_clear_flag(col, LV_OBJ_FLAG_SCROLLABLE);
-    btp_text(col, dev->name, BTP_COL_TXT, lv_theme_get_font_normal(col), false);
-    btp_text(col, dev->connected ? locstr("Connected") : locstr("Not connected"),
-             dev->connected ? BTP_COL_ON : BTP_COL_SUB, lv_theme_get_font_small(col), false);
+    btp_text(col, name, BTP_COL_TXT, lv_theme_get_font_normal(col), false);
+    btp_text(col, line, line_color, lv_theme_get_font_small(col), false);
 
-    lv_obj_t *forget = btp_button(row, BTP_COL_FORGET, BTP_COL_FORGET_TXT, locstr("Forget"));
+    return btp_button(row, bg, fg, button);
+}
+
+/* A registered device: whether it is connected, and Forget. */
+static void btp_device_row(int i, const bt_pairing_device_t *dev) {
+    lv_obj_t *forget = btp_row(dev->name, dev->gamepad, dev->connected ? locstr("Connected") : locstr("Not connected"),
+                               dev->connected ? BTP_COL_ON : BTP_COL_SUB, BTP_COL_FORGET, BTP_COL_FORGET_TXT,
+                               locstr("Forget"));
     lv_obj_add_event_cb(forget, btp_forget_cb, LV_EVENT_CLICKED, (void *) (intptr_t) i);
     snprintf(s_addr[i], sizeof s_addr[i], "%s", dev->addr);
     s_forget[i] = forget;
+}
+
+/* ⭐ A device the search found and did not pair by itself: Pair (rhoquinn8217,
+ * 2026-10-29). Once it has paired, it is a registered device with Forget. */
+static void btp_found_row(int i, const bt_pairing_found_t *f) {
+    lv_obj_t *pair = btp_row(f->name, f->gamepad, f->pairing ? locstr("Pairing...") : locstr("Found, not paired"),
+                             f->pairing ? BTP_COL_PAIR_TXT : BTP_COL_SUB, BTP_COL_PAIR, BTP_COL_PAIR_TXT,
+                             locstr("Pair"));
+    lv_obj_add_event_cb(pair, btp_pair_cb, LV_EVENT_CLICKED, (void *) (intptr_t) i);
+    snprintf(s_found_addr[i], sizeof s_found_addr[i], "%s", f->addr);
+    s_pair[i] = pair;
 }
 
 /* ⭐ THE LIST TAKES ITS ROWS' ROOM, and scrolls only when the window would run
@@ -195,9 +227,10 @@ static void btp_fit(void) {
 }
 
 /* ⭐ Built again from the state at every change, with the selection kept on
- * what it was on: the same device's Forget, the row that took its place, or
- * the same button. The group is refilled in the order the panel reads, top to
- * bottom, so Up and Down walk it as it is drawn. */
+ * what it was on: the same device's button (a found device that has paired
+ * lands on its Forget), the row that took its place, or the same button. The
+ * group is refilled in the order the panel reads, top to bottom, so Up and Down
+ * walk it as it is drawn. */
 static void btp_refresh(void) {
     if (s_win == NULL) {
         return;
@@ -208,25 +241,42 @@ static void btp_refresh(void) {
     lv_obj_t *focused = lv_group_get_focused(s_group);
     char was_addr[24] = "";
     int was_row = -1;
+    bool was_found = false;
     for (int i = 0; i < s_rows; i++) {
         if (focused == s_forget[i]) {
             was_row = i;
             snprintf(was_addr, sizeof was_addr, "%s", s_addr[i]);
         }
     }
+    for (int i = 0; i < s_found_rows; i++) {
+        if (focused == s_pair[i]) {
+            was_row = i;
+            was_found = true;
+            snprintf(was_addr, sizeof was_addr, "%s", s_found_addr[i]);
+        }
+    }
 
     lv_group_remove_all_objs(s_group);
     lv_obj_clean(s_list);
     memset(s_forget, 0, sizeof s_forget);
+    memset(s_pair, 0, sizeof s_pair);
     s_rows = 0;
+    s_found_rows = 0;
     for (int i = 0; i < st.count && i < BT_PAIRING_MAX; i++) {
-        btp_row(i, &st.devices[i]);
+        btp_device_row(i, &st.devices[i]);
         s_rows++;
     }
     if (st.count == 0) {
         btp_text(s_list, st.listed ? locstr("Nothing is registered on this TV.")
                                    : locstr("Asking the TV for its devices..."),
                  BTP_COL_SUB, lv_theme_get_font_small(s_list), true);
+    }
+    if (st.found_count > 0) {
+        btp_text(s_list, locstr("Found by the search"), BTP_COL_SUB, lv_theme_get_font_small(s_list), false);
+        for (int i = 0; i < st.found_count && i < BT_PAIRING_MAX; i++) {
+            btp_found_row(i, &st.found[i]);
+            s_found_rows++;
+        }
     }
 
     char count[80];
@@ -256,17 +306,30 @@ static void btp_refresh(void) {
     for (int i = 0; i < s_rows; i++) {
         lv_group_add_obj(s_group, s_forget[i]);
     }
+    for (int i = 0; i < s_found_rows; i++) {
+        lv_group_add_obj(s_group, s_pair[i]);
+    }
     lv_group_add_obj(s_group, s_all);
     lv_group_add_obj(s_group, s_search);
 
     lv_obj_t *target = NULL;
     if (was_row >= 0) {
+        /* The same device, wherever it is now: a found one that paired is a
+         * registered one. */
         for (int i = 0; i < s_rows && target == NULL; i++) {
             if (strcmp(s_addr[i], was_addr) == 0) {
                 target = s_forget[i];
             }
         }
-        if (target == NULL) {
+        for (int i = 0; i < s_found_rows && target == NULL; i++) {
+            if (strcmp(s_found_addr[i], was_addr) == 0) {
+                target = s_pair[i];
+            }
+        }
+        if (target == NULL && was_found) {
+            target = was_row < s_found_rows ? s_pair[was_row]
+                                            : (s_found_rows > 0 ? s_pair[s_found_rows - 1] : s_search);
+        } else if (target == NULL) {
             target = was_row < s_rows ? s_forget[was_row] : (s_rows > 0 ? s_forget[s_rows - 1] : s_search);
         }
     } else if (focused == s_close || focused == s_all || focused == s_search) {
@@ -306,6 +369,7 @@ void bt_panel_close(void) {
         s_group = NULL;
     }
     s_rows = 0;
+    s_found_rows = 0;
 }
 
 void bt_panel_open(bool over_stream) {
@@ -313,7 +377,9 @@ void bt_panel_open(bool over_stream) {
         return;
     }
     s_rows = 0;
+    s_found_rows = 0;
     memset(s_forget, 0, sizeof s_forget);
+    memset(s_pair, 0, sizeof s_pair);
     s_group = lv_group_create();
 
     /* ⓘ On the top layer, so it sits over the dashboard or the overlay without

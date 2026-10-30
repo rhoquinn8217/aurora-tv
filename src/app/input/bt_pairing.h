@@ -39,10 +39,21 @@ typedef struct {
     bool connected;
 } bt_pairing_device_t;
 
+/* A device the search found that is not registered and did not pair by itself:
+ * the panel offers to pair it. */
+typedef struct {
+    char name[96];
+    char addr[24];
+    bool gamepad;
+    bool pairing;       /* asked to pair, no answer yet */
+} bt_pairing_found_t;
+
 /* What the panel draws, copied out in one piece. */
 typedef struct {
     bt_pairing_device_t devices[BT_PAIRING_MAX];
     int count;
+    bt_pairing_found_t found[BT_PAIRING_MAX];
+    int found_count;
     bool listed;        /* the TV has answered with a list at least once */
     bool searching;     /* the search switch */
     char status[200];   /* one line: what is happening, or what went wrong */
@@ -67,7 +78,15 @@ void bt_pairing_refresh(void);
 /* Forget one device by its address, or every device in the list with NULL. */
 void bt_pairing_forget(const char *addr);
 
-/* The search switch. On, the TV searches until a device it does not already
- * have pairs, which turns the switch off again; it searches again each time a
- * round ends without one, for up to three minutes. */
+/* The search switch. On, the TV searches, a round after another, for up to
+ * three minutes.
+ * ⭐⭐ ONLY A DUALSENSE OR A DS4 PAIRS BY ITSELF (rhoquinn8217, 2026-10-29,
+ * after an ESP32 nearby paired on its own: "DS5 and DS4 should be the only thing
+ * that is automatically paired. For any other devices found when search is
+ * running should show those devices in the list with an option to pair."):
+ * anything else it finds goes in the state's `found` list for bt_pairing_pair().
+ * A pairing, either way, turns the switch off. */
 void bt_pairing_search(bool on);
+
+/* Pair a device from the `found` list, by its address. */
+void bt_pairing_pair(const char *addr);

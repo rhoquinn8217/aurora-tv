@@ -263,7 +263,8 @@ typedef enum {
     JOB_SEARCH_ON,
     JOB_SEARCH_OFF,
     JOB_SEARCH_DONE,   /* paired: the switch goes off, the list is read again */
-    JOB_CONNECT,       /* name, addr */
+    JOB_CONNECT,       /* name, addr: one the search found that pairs by itself */
+    JOB_PAIR,          /* name, addr: one from the found list, asked for */
     JOB_REDISCOVER,    /* a round of the search ended without a device */
 } job_kind_t;
 
@@ -326,6 +327,74 @@ static bool call_ok(const char *method, const char *payload, char *why, size_t w
     return ok;
 }
 
+/* ---------------------------------------------------------------------------
+ * What the search found and did not pair by itself.
+ * ------------------------------------------------------------------------- */
+
+/* ⭐ A DualSense (an Edge too) or a DS4, by the name it gives: a DS4 calls
+ * itself "Wireless Controller" over Bluetooth. Nothing else pairs unasked. */
+static bool pairs_by_itself(const char *name) {
+    return strcasestr(name, "dualsense") != NULL || strcasecmp(name, "Wireless Controller") == 0;
+}
+
+static int found_index(const char *addr) {
+    for (int i = 0; i < s_state.found_count; i++) {
+        if (strcasecmp(s_state.found[i].addr, addr) == 0) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+static void found_add(const char *addr, const char *name, bool gamepad) {
+    SDL_LockMutex(s_lock);
+    if (found_index(addr) < 0 && s_state.found_count < BT_PAIRING_MAX) {
+        bt_pairing_found_t *f = &s_state.found[s_state.found_count++];
+        memset(f, 0, sizeof *f);
+        snprintf(f->addr, sizeof f->addr, "%s", addr);
+        snprintf(f->name, sizeof f->name, "%s", name[0] != '\0' ? name : addr);
+        f->gamepad = gamepad;
+    }
+    SDL_UnlockMutex(s_lock);
+}
+
+static void found_remove(const char *addr) {
+    SDL_LockMutex(s_lock);
+    const int i = found_index(addr);
+    if (i >= 0) {
+        memmove(&s_state.found[i], &s_state.found[i + 1],
+                (size_t) (s_state.found_count - i - 1) * sizeof s_state.found[0]);
+        s_state.found_count--;
+    }
+    SDL_UnlockMutex(s_lock);
+}
+
+static void found_set_pairing(const char *addr, bool pairing) {
+    SDL_LockMutex(s_lock);
+    const int i = found_index(addr);
+    if (i >= 0) {
+        s_state.found[i].pairing = pairing;
+    }
+    SDL_UnlockMutex(s_lock);
+}
+
+/* ⭐ READ AGAIN AFTER A PAIRING, more than once (2026-10-29, the C1): the TV says
+ * "paired" a few seconds before its list has the device, and a list read at
+ * once came back without it twice, so a new controller showed only once the
+ * panel was opened again. */
+static Uint32 refresh_later_cb(Uint32 interval, void *param) {
+    (void) interval;
+    (void) param;
+    enqueue(JOB_REFRESH, NULL, NULL);
+    return 0;
+}
+
+static void refresh_later(void) {
+    SDL_AddTimer(2000, refresh_later_cb, NULL);
+    SDL_AddTimer(5000, refresh_later_cb, NULL);
+    SDL_AddTimer(10000, refresh_later_cb, NULL);
+}
+
 static void do_refresh(void) {
     char *reply = bt_pairing_call("getPairedDeviceLists", "{}");
     jdomparser_ref parser = NULL;
@@ -364,6 +433,10 @@ static void do_refresh(void) {
         s_state.count = fresh.count;
         s_state.listed = true;
         SDL_UnlockMutex(s_lock);
+        /* A found device the TV now lists is registered, not found. */
+        for (int i = 0; i < fresh.count; i++) {
+            found_remove(fresh.devices[i].addr);
+        }
     }
     if (parser != NULL) {
         jdomparser_release(&parser);
@@ -432,12 +505,13 @@ static bool discovery_cb(LSHandle *sh, LSMessage *reply, void *ctx) {
     bt_log("subscribeDiscovery: %s", text != NULL ? text : "(none)");
     jdomparser_ref parser = NULL;
     jvalue_ref root = parse_reply(text, &parser);
-    char status[32] = "", addr[24] = "", name[96] = "";
+    char status[32] = "", addr[24] = "", name[96] = "", type[24] = "";
     string_member(root, "status", status, sizeof status);
     const bool device = string_member(root, "address", addr, sizeof addr);
     if (!string_member(root, "name", name, sizeof name)) {
         string_member(root, "deviceName", name, sizeof name);
     }
+    string_member(root, "type", type, sizeof type);
     if (parser != NULL) {
         jdomparser_release(&parser);
     }
@@ -447,6 +521,11 @@ static bool discovery_cb(LSHandle *sh, LSMessage *reply, void *ctx) {
     if (strcmp(status, "endDiscovery") == 0) {
         enqueue(JOB_REDISCOVER, NULL, NULL);
     } else if (device && addr[0] != '\0' && !registered(addr)) {
+        if (!pairs_by_itself(name)) {
+            found_add(addr, name, strcmp(type, "gamepad") == 0);
+            notify();
+            return true;
+        }
         SDL_LockMutex(s_lock);
         const bool idle = s_pairing_addr[0] == '\0';
         if (idle) {
@@ -469,28 +548,37 @@ static bool status_cb(LSHandle *sh, LSMessage *reply, void *ctx) {
     bt_log("subscribeDevicesStatus: %s", text != NULL ? text : "(none)");
     jdomparser_ref parser = NULL;
     jvalue_ref root = parse_reply(text, &parser);
-    char status[32] = "";
+    char status[32] = "", device[24] = "";
     string_member(root, "status", status, sizeof status);
+    string_member(root, "deviceAddr", device, sizeof device);
     if (parser != NULL) {
         jdomparser_release(&parser);
     }
     SDL_LockMutex(s_lock);
     const bool pairing = s_pairing_addr[0] != '\0';
-    char name[96];
+    char name[96], addr[24];
     snprintf(name, sizeof name, "%s", s_pairing_name);
+    snprintf(addr, sizeof addr, "%s", s_pairing_addr);
     SDL_UnlockMutex(s_lock);
-    if (!pairing || !searching()) {
+    /* ⓘ Only what is said of the device being paired: the first answer after
+     * subscribing speaks of every device connected, and some of nobody. */
+    if (!pairing || (device[0] != '\0' && strcasecmp(device, addr) != 0)) {
         return true;
     }
     if (strcmp(status, "paired") == 0 || strcmp(status, "connected") == 0) {
-        enqueue(JOB_SEARCH_DONE, NULL, name);
+        enqueue(JOB_SEARCH_DONE, addr, name);
     } else if (strcmp(status, "fail") == 0) {
-        set_status("Pairing %s failed. Still searching: put it in pairing mode again.", name);
+        const bool still = searching();
+        set_status(still ? "Pairing %s failed. Still searching: put it in pairing mode again."
+                         : "Pairing %s failed: put it in pairing mode and press Pair again.", name);
+        found_set_pairing(addr, false);
         SDL_LockMutex(s_lock);
         s_pairing_addr[0] = '\0';
         SDL_UnlockMutex(s_lock);
         notify();
-        enqueue(JOB_REDISCOVER, NULL, NULL);
+        if (still) {
+            enqueue(JOB_REDISCOVER, NULL, NULL);
+        }
     }
     return true;
 }
@@ -537,6 +625,7 @@ static void do_search_on(void) {
     }
     SDL_LockMutex(s_lock);
     s_state.searching = true;
+    s_state.found_count = 0;
     s_pairing_addr[0] = '\0';
     SDL_UnlockMutex(s_lock);
     s_search_since = SDL_GetTicks();
@@ -575,23 +664,54 @@ static void do_rediscover(void) {
     }
 }
 
+/* The pairing itself: the device already stands in s_pairing_addr. Its answer
+ * comes by subscribeDevicesStatus, which a press of Pair after the search went
+ * off has to start again. */
 static void do_connect(const char *addr, const char *name) {
-    if (!searching()) {
+    SDL_LockMutex(s_lock);
+    const bool current = strcasecmp(s_pairing_addr, addr) == 0;
+    SDL_UnlockMutex(s_lock);
+    if (!current) {
         return;
     }
+    subscribe(&s_status_ctx, &s_status_on, BT_SERVICE "subscribeDevicesStatus", status_cb);
+    found_set_pairing(addr, true);
     set_status("Pairing %s...", name);
     notify();
     char payload[200];
     snprintf(payload, sizeof payload, "{\"name\":\"%s\",\"address\":\"%s\"}", name, addr);
     char why[120];
     if (!call_ok("requestConnect", payload, why, sizeof why)) {
-        set_status("Pairing %s failed: %s. Still searching.", name, why);
+        const bool still = searching();
+        set_status(still ? "Pairing %s failed: %s. Still searching." : "Pairing %s failed: %s.", name, why);
+        found_set_pairing(addr, false);
         SDL_LockMutex(s_lock);
         s_pairing_addr[0] = '\0';
         SDL_UnlockMutex(s_lock);
         notify();
-        enqueue(JOB_REDISCOVER, NULL, NULL);
+        if (still) {
+            enqueue(JOB_REDISCOVER, NULL, NULL);
+        }
     }
+}
+
+/* Pair, from the found list: one at a time. */
+static void do_pair(const char *addr, const char *name) {
+    SDL_LockMutex(s_lock);
+    const bool busy = s_pairing_addr[0] != '\0';
+    char other[96];
+    snprintf(other, sizeof other, "%s", s_pairing_name);
+    if (!busy) {
+        snprintf(s_pairing_addr, sizeof s_pairing_addr, "%s", addr);
+        snprintf(s_pairing_name, sizeof s_pairing_name, "%s", name[0] != '\0' ? name : addr);
+    }
+    SDL_UnlockMutex(s_lock);
+    if (busy) {
+        set_status("Still pairing %s: one at a time.", other);
+        notify();
+        return;
+    }
+    do_connect(addr, name[0] != '\0' ? name : addr);
 }
 
 static int worker_main(void *data) {
@@ -619,11 +739,16 @@ static int worker_main(void *data) {
                     char line[200];
                     snprintf(line, sizeof line, "Paired %s. Search is off.", job.name);
                     search_stop(line);
+                    found_remove(job.addr);
                     do_refresh();
+                    refresh_later();
                     break;
                 }
                 case JOB_CONNECT:
                     do_connect(job.addr, job.name);
+                    break;
+                case JOB_PAIR:
+                    do_pair(job.addr, job.name);
                     break;
                 case JOB_REDISCOVER:
                     do_rediscover();
@@ -691,6 +816,20 @@ void bt_pairing_search(bool on) {
     }
 }
 
+void bt_pairing_pair(const char *addr) {
+    if (addr == NULL || !ensure_worker()) {
+        return;
+    }
+    char name[96] = "";
+    SDL_LockMutex(s_lock);
+    const int i = found_index(addr);
+    if (i >= 0) {
+        snprintf(name, sizeof name, "%s", s_state.found[i].name);
+    }
+    SDL_UnlockMutex(s_lock);
+    enqueue(JOB_PAIR, addr, name);
+}
+
 #else
 
 char *bt_pairing_call(const char *method, const char *payload) {
@@ -716,6 +855,10 @@ void bt_pairing_forget(const char *addr) {
 
 void bt_pairing_search(bool on) {
     (void) on;
+}
+
+void bt_pairing_pair(const char *addr) {
+    (void) addr;
 }
 
 #endif
