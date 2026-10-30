@@ -64,6 +64,18 @@ static void btp_close_cb(lv_event_t *e) {
     bt_panel_close();
 }
 
+/* ⭐ A CLICK OUTSIDE THE PANEL CLOSES IT (rhoquinn8217, 2026-10-29: "When
+ * clicking outside of the panel, the panel should close like the USB Bridge
+ * panel"), as its X does: over a stream the overlay stays. Only a click on the
+ * backdrop itself; one on the panel lands on the panel, as ctm_panel.c's
+ * ctm_backdrop_clicked has it. */
+static void btp_backdrop_cb(lv_event_t *e) {
+    if (lv_event_get_target(e) != lv_event_get_current_target(e)) {
+        return;
+    }
+    bt_panel_close();
+}
+
 /* ⭐ LEFT AND RIGHT MOVE TOO, as in the Auto Bridge window: Forget all and the
  * Search switch sit side by side, and the key that points that way should go
  * there. */
@@ -470,7 +482,8 @@ void bt_panel_open(bool over_stream) {
     lv_obj_set_style_bg_color(s_win, lv_color_black(), 0);
     lv_obj_set_style_bg_opa(s_win, over_stream ? LV_OPA_TRANSP : LV_OPA_50, 0);
     lv_obj_clear_flag(s_win, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_add_flag(s_win, LV_OBJ_FLAG_CLICKABLE);   /* swallow clicks behind it */
+    lv_obj_add_flag(s_win, LV_OBJ_FLAG_CLICKABLE);   /* nothing behind it is clicked */
+    lv_obj_add_event_cb(s_win, btp_backdrop_cb, LV_EVENT_CLICKED, NULL);
 
     lv_obj_t *card = lv_obj_create(s_win);
     s_card = card;
