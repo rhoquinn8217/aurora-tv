@@ -24,12 +24,17 @@
 
 /* What happened, where it can be read over SSH (tv_cursor.c says why). */
 #define BT_PAIRING_LOG "bt-pairing.log"
+/* Started again past this, rather than left to grow: a search restarts every
+ * few seconds, and each restart writes a few lines. */
+#define BT_PAIRING_LOG_MAX_BYTES (256 * 1024)
 FILE *ctm_log_open(const char *name, const char *mode);
 
 #define BT_SERVICE "luna://com.webos.service.bthidmanager/"
 #define BT_WAIT_MS 5000
 /* How long the switch keeps searching, round after round, before it gives up. */
 #define BT_SEARCH_MS (3 * 60 * 1000)
+/* How often the TV's search is started afresh while the switch is on. */
+#define BT_RESTART_MS 6000
 
 /* Only the service's own methods, so the control port cannot be pointed at
  * anything else on the TV. */
@@ -42,6 +47,13 @@ static void bt_log(const char *fmt, ...) {
     FILE *f = ctm_log_open(BT_PAIRING_LOG, "a");
     if (f == NULL) {
         return;
+    }
+    if (fseek(f, 0, SEEK_END) == 0 && ftell(f) > BT_PAIRING_LOG_MAX_BYTES) {
+        fclose(f);
+        f = ctm_log_open(BT_PAIRING_LOG, "w");
+        if (f == NULL) {
+            return;
+        }
     }
     struct timespec ts;
     clock_gettime(CLOCK_REALTIME, &ts);
@@ -216,6 +228,11 @@ static SDL_atomic_t s_notify_queued;
 static char s_pairing_addr[24];
 static char s_pairing_name[96];
 static Uint32 s_search_since;
+/* The restart timer, which search it belongs to (a search switched off and on
+ * again within a period is a new one), and whether a restart already waits. */
+static SDL_TimerID s_restart_timer;
+static int s_search_gen;
+static bool s_restart_queued;
 
 static void set_status(const char *fmt, ...) {
     char line[sizeof s_state.status];
@@ -266,7 +283,7 @@ typedef enum {
     JOB_SEARCH_DONE,   /* paired: the switch goes off, the list is read again */
     JOB_CONNECT,       /* name, addr: one the search found that pairs by itself */
     JOB_PAIR,          /* name, addr: one from the found list, asked for */
-    JOB_REDISCOVER,    /* a round of the search ended without a device */
+    JOB_RESTART,       /* the TV's search afresh: every BT_RESTART_MS, and after a failed pairing */
 } job_kind_t;
 
 typedef struct {
@@ -505,6 +522,31 @@ static bool registered(const char *addr) {
     return found;
 }
 
+/* A restart, unless one waits already: the timer and a failed pairing can both
+ * ask for one. */
+static void enqueue_restart(void) {
+    SDL_LockMutex(s_lock);
+    const bool queued = s_restart_queued;
+    s_restart_queued = true;
+    SDL_UnlockMutex(s_lock);
+    if (!queued) {
+        enqueue(JOB_RESTART, NULL, NULL);
+    }
+}
+
+/* On SDL's timer thread, every BT_RESTART_MS while the search that set it is
+ * on; it ends itself with the search. */
+static Uint32 restart_tick(Uint32 interval, void *param) {
+    SDL_LockMutex(s_lock);
+    const bool current = s_state.searching && s_search_gen == (int) (intptr_t) param;
+    SDL_UnlockMutex(s_lock);
+    if (!current) {
+        return 0;
+    }
+    enqueue_restart();
+    return interval;
+}
+
 /* On the helper library's thread: what the search found, or that a round
  * ended. */
 static bool discovery_cb(LSHandle *sh, LSMessage *reply, void *ctx) {
@@ -524,12 +566,14 @@ static bool discovery_cb(LSHandle *sh, LSMessage *reply, void *ctx) {
     if (parser != NULL) {
         jdomparser_release(&parser);
     }
-    if (!searching()) {
+    /* ⛔ A ROUND THAT ENDS IS NOT STARTED AGAIN FROM HERE: the restart does it
+     * within BT_RESTART_MS, and a cancel ends a round with this same
+     * "endDiscovery" (the C1, 2026-10-29), so answering it would restart the
+     * restart, round after round. */
+    if (!searching() || strcmp(status, "endDiscovery") == 0) {
         return true;
     }
-    if (strcmp(status, "endDiscovery") == 0) {
-        enqueue(JOB_REDISCOVER, NULL, NULL);
-    } else if (device && addr[0] != '\0' && !registered(addr)) {
+    if (device && addr[0] != '\0' && !registered(addr)) {
         if (!pairs_by_itself(name)) {
             found_add(addr, name, strcmp(type, "gamepad") == 0);
             notify();
@@ -586,7 +630,7 @@ static bool status_cb(LSHandle *sh, LSMessage *reply, void *ctx) {
         SDL_UnlockMutex(s_lock);
         notify();
         if (still) {
-            enqueue(JOB_REDISCOVER, NULL, NULL);
+            enqueue_restart();
         }
     }
     return true;
@@ -615,6 +659,10 @@ static void unsubscribe(HContext *ctx, bool *on, const char *what) {
 }
 
 static void search_stop(const char *why_status) {
+    if (s_restart_timer != 0) {
+        SDL_RemoveTimer(s_restart_timer);
+        s_restart_timer = 0;
+    }
     call_ok("cancelDiscovery", "{}", NULL, 0);
     unsubscribe(&s_disc_ctx, &s_disc_on, "subscribeDiscovery");
     unsubscribe(&s_status_ctx, &s_status_on, "subscribeDevicesStatus");
@@ -636,6 +684,7 @@ static void do_search_on(void) {
     s_state.searching = true;
     s_state.found_count = 0;
     s_pairing_addr[0] = '\0';
+    const int gen = ++s_search_gen;
     SDL_UnlockMutex(s_lock);
     s_search_since = SDL_GetTicks();
     /* ⓘ One plain line (rhoquinn8217, 2026-10-29: "Your instruction to put
@@ -650,23 +699,34 @@ static void do_search_on(void) {
         char line[200];
         snprintf(line, sizeof line, "The TV would not search: %s", why);
         search_stop(line);
-    }
-}
-
-static void do_rediscover(void) {
-    if (!searching()) {
         return;
     }
+    s_restart_timer = SDL_AddTimer(BT_RESTART_MS, restart_tick, (void *) (intptr_t) gen);
+}
+
+/* ⭐ THE SEARCH STARTS AFRESH EVERY SIX SECONDS (rhoquinn8217, 2026-10-29:
+ * "Sometimes searching doesn't find a controller and needs to be restarted ...
+ * restart the search in the background every 6 seconds"). On the C1 a round
+ * ran 26 and 39 s without seeing a DS4 in pairing mode, and a fresh one found
+ * it 1.4 to 2.2 s in (logs/bt-pairing.log). It does what switching the search
+ * off and on does, a new discovery subscription and a new round, and keeps
+ * what was found. ⓘ Not while a pairing waits for its answer; the three
+ * minutes count from the switch, not from the round. */
+static void do_restart(void) {
     SDL_LockMutex(s_lock);
+    s_restart_queued = false;
     const bool pairing = s_pairing_addr[0] != '\0';
     SDL_UnlockMutex(s_lock);
-    if (pairing) {
+    if (!searching() || pairing) {
         return;
     }
     if (SDL_TICKS_PASSED(SDL_GetTicks(), s_search_since + BT_SEARCH_MS)) {
         search_stop("Nothing paired in three minutes.");
         return;
     }
+    unsubscribe(&s_disc_ctx, &s_disc_on, "subscribeDiscovery");
+    call_ok("cancelDiscovery", "{}", NULL, 0);
+    subscribe(&s_disc_ctx, &s_disc_on, BT_SERVICE "subscribeDiscovery", discovery_cb);
     char why[120];
     if (!call_ok("requestDiscovery", "{}", why, sizeof why)) {
         char line[200];
@@ -701,7 +761,7 @@ static void do_connect(const char *addr, const char *name) {
         SDL_UnlockMutex(s_lock);
         notify();
         if (still) {
-            enqueue(JOB_REDISCOVER, NULL, NULL);
+            enqueue_restart();
         }
     }
 }
@@ -767,8 +827,8 @@ static int worker_main(void *data) {
                 case JOB_PAIR:
                     do_pair(job.addr, job.name);
                     break;
-                case JOB_REDISCOVER:
-                    do_rediscover();
+                case JOB_RESTART:
+                    do_restart();
                     break;
             }
         }

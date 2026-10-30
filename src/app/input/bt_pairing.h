@@ -80,8 +80,9 @@ void bt_pairing_refresh(void);
  * every device. */
 void bt_pairing_forget(const char *addr);
 
-/* The search switch. On, the TV searches, a round after another, for up to
- * three minutes.
+/* The search switch. On, the TV searches for up to three minutes, its search
+ * started afresh every six seconds (a round can run on without seeing a pad in
+ * pairing mode that a fresh one finds at once).
  * ⭐⭐ ONLY A DUALSENSE OR AN EDGE PAIRS BY ITSELF, and only while the panel's
  * check box "Automatically pair DualSense/DualSense Edge Controllers" is ticked
  * (bridge_settings.h, bt_auto_pair). rhoquinn8217, 2026-10-29, after an ESP32
