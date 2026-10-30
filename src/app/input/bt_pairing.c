@@ -664,7 +664,7 @@ static void do_rediscover(void) {
         return;
     }
     if (SDL_TICKS_PASSED(SDL_GetTicks(), s_search_since + BT_SEARCH_MS)) {
-        search_stop("Nothing paired in three minutes. Search is off.");
+        search_stop("Nothing paired in three minutes.");
         return;
     }
     char why[120];
@@ -744,14 +744,17 @@ static int worker_main(void *data) {
                 case JOB_SEARCH_ON:
                     do_search_on();
                     break;
+                /* ⓘ NO "Search is off." ANYWHERE (rhoquinn8217, 2026-10-29: "No
+                 * text and a off colored toggle means the same"): switched off,
+                 * the line goes; by itself, it says only why. */
                 case JOB_SEARCH_OFF:
                     if (searching()) {
-                        search_stop("Search is off.");
+                        search_stop("");
                     }
                     break;
                 case JOB_SEARCH_DONE: {
                     char line[200];
-                    snprintf(line, sizeof line, "Paired %s. Search is off.", job.name);
+                    snprintf(line, sizeof line, "Paired %s.", job.name);
                     search_stop(line);
                     found_remove(job.addr);
                     do_refresh();
