@@ -263,6 +263,13 @@ int ctm_bridge_signal_refused_answer(const char *node);
  * separates two otherwise identical controllers. Returns true if it plugged. */
 bool ctm_bridge_plug_node(const char *node);
 
+/* The same plug on a thread of its own, so the app's loop goes on (2026-10-28):
+ * a plug scans every device and a DS4's plays its handover tone first.
+ * _begin says whether it started; _answer says -1 while it runs, then once
+ * 1 (plugged), 0 (refused) or 2 (refused: the listener was not reached). */
+bool ctm_bridge_plug_node_begin(const char *node);
+int ctm_bridge_plug_node_answer(const char *node);
+
 /* Manually plug / unplug the device a row from ctm_bridge_list() names, found
  * again by its node (by name for the TV's remote, which has none). */
 bool ctm_bridge_plug_row(const ctm_bridge_dev_t *row);
