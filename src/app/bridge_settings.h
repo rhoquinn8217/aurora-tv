@@ -137,6 +137,12 @@ typedef struct bridge_settings_t {
      * showed this picture, found its tip on the C1 by eye (2026-10-11). */
     int tv_cursor_regular_x;
     int tv_cursor_regular_y;
+    /* ⭐ "Automatically pair DualSense/DualSense Edge Controllers", the check box
+     * at the foot of the Bluetooth controllers panel (rhoquinn8217, 2026-10-29;
+     * ui/common/bt_panel.h). On, a DualSense or an Edge the search finds pairs
+     * by itself; off, it waits for its Pair button like everything else. On by
+     * default, as every feature is. */
+    bool bt_auto_pair;
 } bridge_settings_t;
 
 /* The values a fresh install starts with. settings_initialize calls it after

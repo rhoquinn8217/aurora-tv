@@ -39,6 +39,7 @@ void bridge_settings_defaults(bridge_settings_t *settings) {
     settings->tv_cursor_regular = false;
     settings->tv_cursor_regular_x = 5;
     settings->tv_cursor_regular_y = -1;
+    settings->bt_auto_pair = true;
 }
 
 void bridge_settings_write(FILE *fp, const bridge_settings_t *settings) {
@@ -63,6 +64,7 @@ void bridge_settings_write(FILE *fp, const bridge_settings_t *settings) {
     ini_write_string(fp, "tv_cursor_look", settings->tv_cursor_regular ? "regular" : "sharp");
     ini_write_int(fp, "tv_cursor_regular_shift_x", settings->tv_cursor_regular_x);
     ini_write_int(fp, "tv_cursor_regular_shift_y", settings->tv_cursor_regular_y);
+    ini_write_bool(fp, "bt_auto_pair_dualsense", settings->bt_auto_pair);
 }
 
 bool bridge_settings_parse(bridge_settings_t *settings, const char *name, const char *value) {
@@ -103,6 +105,8 @@ bool bridge_settings_parse(bridge_settings_t *settings, const char *name, const 
         settings->tv_cursor_regular_x = atoi(value);
     } else if (INI_NAME_MATCH("tv_cursor_regular_shift_y")) {
         settings->tv_cursor_regular_y = atoi(value);
+    } else if (INI_NAME_MATCH("bt_auto_pair_dualsense")) {
+        settings->bt_auto_pair = INI_IS_TRUE(value);
     } else {
         return false;
     }

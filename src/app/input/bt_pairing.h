@@ -80,12 +80,14 @@ void bt_pairing_forget(const char *addr);
 
 /* The search switch. On, the TV searches, a round after another, for up to
  * three minutes.
- * ⭐⭐ ONLY A DUALSENSE OR A DS4 PAIRS BY ITSELF (rhoquinn8217, 2026-10-29,
- * after an ESP32 nearby paired on its own: "DS5 and DS4 should be the only thing
- * that is automatically paired. For any other devices found when search is
- * running should show those devices in the list with an option to pair."):
- * anything else it finds goes in the state's `found` list for bt_pairing_pair().
- * A pairing, either way, turns the switch off. */
+ * ⭐⭐ ONLY A DUALSENSE OR AN EDGE PAIRS BY ITSELF, and only while the panel's
+ * check box "Automatically pair DualSense/DualSense Edge Controllers" is ticked
+ * (bridge_settings.h, bt_auto_pair). rhoquinn8217, 2026-10-29, after an ESP32
+ * nearby paired on its own: "For any other devices found when search is running
+ * should show those devices in the list with an option to pair"; then the check
+ * box, named for the DualSense and the Edge alone. Everything else it finds,
+ * a DS4 included, goes in the state's `found` list for bt_pairing_pair(). A
+ * pairing, either way, turns the switch off. */
 void bt_pairing_search(bool on);
 
 /* Pair a device from the `found` list, by its address. */

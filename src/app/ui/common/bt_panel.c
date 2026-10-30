@@ -8,6 +8,7 @@
 #include <string.h>
 
 #include "app.h"
+#include "app_settings.h"   /* the check box's setting, saved at once */
 #include "ui/ui_input.h"
 #include "util/i18n.h"
 #include "input/bt_pairing.h"
@@ -44,6 +45,8 @@ static lv_obj_t   *s_search;
 static lv_obj_t   *s_switch;
 static lv_obj_t   *s_knob;
 static lv_obj_t   *s_status;
+static lv_obj_t   *s_auto_row;
+static lv_obj_t   *s_auto_box;
 /* The registered devices' Forget buttons, and the found ones' Pair buttons. */
 static lv_obj_t   *s_forget[BT_PAIRING_MAX];
 static char        s_addr[BT_PAIRING_MAX][24];
@@ -99,6 +102,23 @@ static void btp_forget_all_cb(lv_event_t *e) {
 static void btp_search_cb(lv_event_t *e) {
     LV_UNUSED(e);
     bt_pairing_search(!lv_obj_has_state(s_switch, LV_STATE_CHECKED));
+}
+
+static void btp_auto_look(void) {
+    if (app_configuration->bridge.bt_auto_pair) {
+        lv_obj_add_state(s_auto_box, LV_STATE_CHECKED);
+    } else {
+        lv_obj_clear_state(s_auto_box, LV_STATE_CHECKED);
+    }
+}
+
+/* Saved at once, as Bridge Override's answer was: a TV that closes the app
+ * without leaving Settings would otherwise forget it. */
+static void btp_auto_cb(lv_event_t *e) {
+    LV_UNUSED(e);
+    app_configuration->bridge.bt_auto_pair = !app_configuration->bridge.bt_auto_pair;
+    settings_save(app_configuration);
+    btp_auto_look();
 }
 
 static lv_obj_t *btp_text(lv_obj_t *parent, const char *text, lv_color_t color, const lv_font_t *font, bool wrap) {
@@ -311,6 +331,8 @@ static void btp_refresh(void) {
     }
     lv_group_add_obj(s_group, s_all);
     lv_group_add_obj(s_group, s_search);
+    lv_group_add_obj(s_group, s_auto_row);
+    btp_auto_look();
 
     lv_obj_t *target = NULL;
     if (was_row >= 0) {
@@ -332,7 +354,7 @@ static void btp_refresh(void) {
         } else if (target == NULL) {
             target = was_row < s_rows ? s_forget[was_row] : (s_rows > 0 ? s_forget[s_rows - 1] : s_search);
         }
-    } else if (focused == s_close || focused == s_all || focused == s_search) {
+    } else if (focused == s_close || focused == s_all || focused == s_search || focused == s_auto_row) {
         target = focused;
     } else {
         target = s_search;
@@ -501,6 +523,40 @@ void bt_panel_open(bool over_stream) {
         btp_text(card, locstr("Forgetting a bridged controller ends its bridge."), BTP_COL_SUB,
                  lv_theme_get_font_small(card), true);
     }
+
+    /* ⭐ THE CHECK BOX AT THE FOOT (rhoquinn8217, 2026-10-29): "Automatically pair
+     * DualSense/DualSense Edge Controllers", on by default. A row with the box,
+     * as the Auto Bridge window's are: ⛔ not checkable, its state set by hand,
+     * since a checkable one ticks itself as the selection moves onto it. */
+    s_auto_row = lv_obj_create(card);
+    lv_obj_remove_style_all(s_auto_row);
+    lv_obj_set_size(s_auto_row, LV_PCT(100), LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(s_auto_row, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(s_auto_row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_all(s_auto_row, LV_DPX(8), 0);
+    lv_obj_set_style_pad_gap(s_auto_row, LV_DPX(8), 0);
+    lv_obj_set_style_radius(s_auto_row, LV_DPX(6), 0);
+    lv_obj_set_style_bg_color(s_auto_row, BTP_COL_ROW, 0);
+    lv_obj_set_style_bg_opa(s_auto_row, LV_OPA_COVER, 0);
+    lv_obj_set_style_bg_color(s_auto_row, BTP_COL_FOCUS, LV_STATE_FOCUS_KEY);
+    lv_obj_set_style_border_width(s_auto_row, LV_DPX(1), 0);
+    lv_obj_set_style_border_color(s_auto_row, BTP_COL_BORDER, 0);
+    lv_obj_clear_flag(s_auto_row, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(s_auto_row, LV_OBJ_FLAG_CLICKABLE);
+    s_auto_box = lv_checkbox_create(s_auto_row);
+    lv_checkbox_set_text(s_auto_box, "");
+    lv_obj_clear_flag(s_auto_box, LV_OBJ_FLAG_CHECKABLE);
+    lv_obj_clear_flag(s_auto_box, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_style_bg_color(s_auto_box, lv_palette_main(LV_PALETTE_PURPLE), LV_PART_INDICATOR | LV_STATE_CHECKED);
+    lv_obj_set_style_border_color(s_auto_box, BTP_COL_SUB, LV_PART_INDICATOR);
+    lv_obj_t *auto_text = lv_label_create(s_auto_row);
+    lv_label_set_text(auto_text, locstr("Automatically pair DualSense/DualSense Edge Controllers"));
+    lv_label_set_long_mode(auto_text, LV_LABEL_LONG_WRAP);
+    lv_obj_set_width(auto_text, 1);
+    lv_obj_set_flex_grow(auto_text, 1);
+    lv_obj_set_style_text_color(auto_text, BTP_COL_TXT, 0);
+    lv_obj_add_event_cb(s_auto_row, btp_auto_cb, LV_EVENT_CLICKED, NULL);
+    btp_keys(s_auto_row);
 
     /* ⛔⛔ A MODAL GROUP, pushed, as the Auto Bridge window's is: the stack is
      * what decides where the keys go, over the dashboard and over the overlay. */

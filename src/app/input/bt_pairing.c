@@ -331,10 +331,13 @@ static bool call_ok(const char *method, const char *payload, char *why, size_t w
  * What the search found and did not pair by itself.
  * ------------------------------------------------------------------------- */
 
-/* ⭐ A DualSense (an Edge too) or a DS4, by the name it gives: a DS4 calls
- * itself "Wireless Controller" over Bluetooth. Nothing else pairs unasked. */
+/* ⭐ A DualSense or an Edge, by the name it gives, while the panel's check box
+ * "Automatically pair DualSense/DualSense Edge Controllers" is ticked
+ * (rhoquinn8217, 2026-10-29). Nothing else pairs unasked: a DS4 waits for its
+ * Pair button as an Xbox controller does. */
 static bool pairs_by_itself(const char *name) {
-    return strcasestr(name, "dualsense") != NULL || strcasecmp(name, "Wireless Controller") == 0;
+    return app_configuration != NULL && app_configuration->bridge.bt_auto_pair &&
+           strcasestr(name, "dualsense") != NULL;
 }
 
 static int found_index(const char *addr) {
