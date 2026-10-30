@@ -39,6 +39,8 @@
 #include "input/bridge_override.h"
 #include "input/bridge_keyboard.h"
 #include "input/tv_cursor.h"
+#include "input/bt_pairing.h"
+#include "ui/common/bt_panel.h"
 #include "ui/streaming/cursor_align.h"
 
 #if defined(TARGET_WEBOS)
@@ -155,6 +157,11 @@ static void cmd_help(control_job_t *job)
                "shot [name]             the app's own screen (never the stream's picture) to logs/, as a .bmp\n"
                "crash                   the crash recorder: armed or not, and where its record goes\n"
                "crash test|thread       crash the app on purpose, on its own loop or on a thread, to prove it\n"
+               "bt <method> [json]      one call to the TV's Bluetooth controller service, and its answer\n"
+               "                        (getPairedDeviceLists, requestDiscovery, cancelDiscovery and the rest)\n"
+               "bt panel [stream|close] the Bluetooth controllers panel: in the middle, on the right, or closed\n"
+               "bt state                what the panel shows: the TV's devices, the search, the status line\n"
+               "bt refresh | search on|off | forget <address>|all   what the panel's buttons do\n"
                "<device> is its number, its node, its vid:pid, or part of its name; <n> is from groups\n");
 }
 
@@ -1519,6 +1526,73 @@ static void send_text(int fd, const char *text)
     send_all(fd, text, strlen(text));
 }
 
+/* The panel's own words for `bt`, ahead of the service's methods: panel [stream|close],
+ * state, refresh, search on|off, forget <address>|all. The panel opens and closes
+ * on the UI thread; the rest only queue work for the pairing thread. */
+static void bt_panel_open_ui(void *data)
+{
+    if (data == (void *) 2) {
+        bt_panel_close();
+    } else {
+        bt_panel_open(data == (void *) 1);
+    }
+}
+
+static void bt_panel_post(void *data)
+{
+    if (lv_async_call(bt_panel_open_ui, data) != LV_RES_OK) {
+        bt_panel_open_ui(data);
+    }
+}
+
+static bool bt_panel_command(int fd, const char *word, const char *arg)
+{
+    char line[400];
+    if (strcasecmp(word, "panel") == 0) {
+        void *how = strcasecmp(arg, "close") == 0 ? (void *) 2 : strcasecmp(arg, "stream") == 0 ? (void *) 1 : NULL;
+        if (!app_bus_post(s_app, bt_panel_post, how)) {
+            send_text(fd, "ERR the app did not accept the command\n");
+        } else {
+            send_text(fd, how == (void *) 2 ? "OK closing the panel\n" : "OK opening the panel\n");
+        }
+        return true;
+    }
+    if (strcasecmp(word, "state") == 0) {
+        bt_pairing_state_t st;
+        bt_pairing_state(&st);
+        snprintf(line, sizeof line, "OK listed=%d searching=%d count=%d status=\"%s\"\n", st.listed ? 1 : 0,
+                 st.searching ? 1 : 0, st.count, st.status);
+        send_text(fd, line);
+        for (int i = 0; i < st.count; i++) {
+            snprintf(line, sizeof line, "%d %s gamepad=%d connected=%d name=\"%s\"\n", i, st.devices[i].addr,
+                     st.devices[i].gamepad ? 1 : 0, st.devices[i].connected ? 1 : 0, st.devices[i].name);
+            send_text(fd, line);
+        }
+        return true;
+    }
+    if (strcasecmp(word, "refresh") == 0) {
+        bt_pairing_refresh();
+        send_text(fd, "OK asked the TV for its list\n");
+        return true;
+    }
+    if (strcasecmp(word, "search") == 0) {
+        const bool on = strcasecmp(arg, "off") != 0;
+        bt_pairing_search(on);
+        send_text(fd, on ? "OK search on\n" : "OK search off\n");
+        return true;
+    }
+    if (strcasecmp(word, "forget") == 0) {
+        if (arg[0] == '\0') {
+            send_text(fd, "ERR bt forget <address>|all\n");
+            return true;
+        }
+        bt_pairing_forget(strcasecmp(arg, "all") == 0 ? NULL : arg);
+        send_text(fd, "OK forgetting\n");
+        return true;
+    }
+    return false;
+}
+
 static void handle_client(int fd)
 {
     const struct timeval timeout = {.tv_sec = 3, .tv_usec = 0};
@@ -1539,6 +1613,45 @@ static void handle_client(int fd)
     }
     if (len == 0) {
         send_text(fd, "ERR empty command; try help\n");
+        return;
+    }
+
+    /* The TV's Bluetooth controller service needs nothing of the app's, so it
+     * is asked from this thread: the screens never wait on the TV, which can
+     * take up to five seconds to answer (input/bt_pairing.h). */
+    if (strncasecmp(line, "bt", 2) == 0 && (line[2] == ' ' || line[2] == '\0')) {
+        const char *p = line + 2;
+        while (*p == ' ') {
+            ++p;
+        }
+        char method[40] = "";
+        size_t m = 0;
+        while (*p != '\0' && *p != ' ' && m + 1 < sizeof method) {
+            method[m++] = *p++;
+        }
+        method[m] = '\0';
+        while (*p == ' ') {
+            ++p;
+        }
+        if (method[0] == '\0') {
+            send_text(fd, "ERR bt <method> [json]; try help\n");
+            return;
+        }
+        if (bt_panel_command(fd, method, p)) {
+            return;
+        }
+        char *answer = bt_pairing_call(method, *p != '\0' ? p : "{}");
+        if (answer == NULL) {
+            send_text(fd, "ERR no answer: not a method of the service, the call could not be made, "
+                          "or nothing came back in five seconds (logs/bt-pairing.log)\n");
+            return;
+        }
+        send_text(fd, "OK ");
+        send_text(fd, method);
+        send_text(fd, " ");
+        send_text(fd, answer);
+        send_text(fd, "\n");
+        free(answer);
         return;
     }
 

@@ -1,4 +1,4 @@
-/* The streaming overlay's two buttons of this fork's. The why is in the header. */
+/* The streaming overlay's buttons of this fork's. The why is in the header. */
 
 #include "bridge_overlay.h"
 
@@ -12,8 +12,10 @@
 #include "ctm_panel.h"
 #include "bridge_prompt.h"
 #include "stream/bridge_session.h"   /* is Virtual Mouse on */
+#include "ui/common/bt_panel.h"
 
 static void open_listener_config(lv_event_t *event);
+static void open_controllers(lv_event_t *event);
 static void vmouse_badge_look(void);
 
 /* ⭐ DS5-USBIP IS GREYED OUT WHILE NOTHING IS BRIDGED, AND STILL SELECTABLE
@@ -205,6 +207,13 @@ void bridge_overlay_buttons_create(streaming_controller_t *controller, lv_obj_t 
     lv_obj_t *ds5usbip = overlay_button(controller, actions, locstr("DS5-USBIP"), LV_PALETTE_DEEP_PURPLE);
     lv_obj_add_event_cb(ds5usbip, open_listener_config, LV_EVENT_CLICKED, NULL);
 
+    /* ⭐ Controllers, after DS5-USBIP: the Bluetooth controllers panel
+     * (ui/common/bt_panel.h). ⓘ Shown whether device bridging is on or not:
+     * pairing a controller to the TV has nothing to do with the bridge. */
+    lv_obj_t *controllers = overlay_button(controller, actions, locstr("Controllers"), LV_PALETTE_TEAL);
+    lv_obj_clear_flag(controllers, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_event_cb(controllers, open_controllers, LV_EVENT_CLICKED, NULL);
+
     /* Its look follows whether anything is bridged. ⓘ A timer left by a screen
      * that went without its delete event is replaced rather than trusted. */
     if (s_ds5usbip_timer != NULL) {
@@ -241,6 +250,16 @@ static void open_listener_config(lv_event_t *event) {
     lv_event_stop_bubbling(event);
     commons_log_info("Streaming", "DS5-USBIP: nothing is bridged, so nothing was asked");
     bridge_prompt_note(locstr("Bridge a device to use DS5-USBIP"));
+}
+
+/* ⭐ THE OVERLAY STAYS OPEN BEHIND THE PANEL (rhoquinn8217, 2026-10-29: "keep
+ * it open"): the click goes no further, so the view does not hide the overlay,
+ * and while the overlay is up a bridged controller's presses stay out of the
+ * game. Closing the panel lands back on this button. */
+static void open_controllers(lv_event_t *event) {
+    lv_event_stop_bubbling(event);
+    commons_log_info("Streaming", "Controllers: the Bluetooth controllers panel");
+    bt_panel_open(true);
 }
 
 /* ⭐⭐ THE STATS' PIN BY KEYS (rhoquinn8217, 2026-10-20: "in the streaming

@@ -18,6 +18,7 @@ target_sources(moonlight-lib PRIVATE
         ${CMAKE_SOURCE_DIR}/src/app/input/bridge_keyboard.c
         ${CMAKE_SOURCE_DIR}/src/app/input/bridge_override.c
         ${CMAKE_SOURCE_DIR}/src/app/input/bridge_request.c
+        ${CMAKE_SOURCE_DIR}/src/app/input/bt_pairing.c
         ${CMAKE_SOURCE_DIR}/src/app/input/ctm_bridge_gesture.c
         ${CMAKE_SOURCE_DIR}/src/app/input/device_groups.c
         ${CMAKE_SOURCE_DIR}/src/app/input/mouse_seen.c
@@ -30,6 +31,7 @@ target_sources(moonlight-lib PRIVATE
         ${CMAKE_SOURCE_DIR}/src/app/stream/bridge_session.c
         ${CMAKE_SOURCE_DIR}/src/app/stream/connect_cancel.c
         ${CMAKE_SOURCE_DIR}/src/app/stream/input/bridge_switch_hold.c
+        ${CMAKE_SOURCE_DIR}/src/app/ui/common/bt_panel.c
         ${CMAKE_SOURCE_DIR}/src/app/ui/common/click_away.c
         ${CMAKE_SOURCE_DIR}/src/app/ui/common/type_into_box.c
         ${CMAKE_SOURCE_DIR}/src/app/ui/launcher/server_cards.c
