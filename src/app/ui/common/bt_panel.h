@@ -1,4 +1,5 @@
-/* The Bluetooth controllers panel: what the TV has registered, Forget on each
+/* The Bluetooth Devices panel (its title since 2026-10-29): what the TV has
+ * registered, Forget on each
  * and Forget all, and a Search switch that pairs a fresh device and turns
  * itself off (input/bt_pairing.h has the why and the TV's calls).
  *

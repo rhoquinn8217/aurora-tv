@@ -424,7 +424,9 @@ void bt_panel_open(bool over_stream) {
     lv_obj_t *card = lv_obj_create(s_win);
     s_card = card;
     lv_obj_remove_style_all(card);
-    lv_obj_set_width(card, over_stream ? LV_PCT(44) : LV_PCT(56));
+    /* ⓘ Wide enough for "DualSense Edge Wireless Controller" beside its Forget
+     * (rhoquinn8217, 2026-10-29: "widen the panel for longer controller names"). */
+    lv_obj_set_width(card, over_stream ? LV_PCT(52) : LV_PCT(62));
     lv_obj_set_height(card, LV_SIZE_CONTENT);
     lv_obj_set_style_max_height(card, over_stream ? LV_PCT(82) : LV_PCT(80), 0);
     if (over_stream) {
@@ -451,7 +453,7 @@ void bt_panel_open(bool over_stream) {
     lv_obj_set_flex_align(titlerow, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_clear_flag(titlerow, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_t *title = lv_label_create(titlerow);
-    lv_label_set_text(title, locstr("Bluetooth controllers"));
+    lv_label_set_text(title, locstr("Bluetooth Devices"));
     lv_obj_set_style_text_color(title, BTP_COL_TXT, 0);
     lv_obj_set_style_text_font(title, lv_theme_get_font_large(titlerow), 0);
 
@@ -493,6 +495,20 @@ void bt_panel_open(bool over_stream) {
     s_all = btp_button(foot, BTP_COL_ALL, BTP_COL_TXT, locstr("Forget all"));
     lv_obj_add_event_cb(s_all, btp_forget_all_cb, LV_EVENT_CLICKED, NULL);
 
+    /* ⭐ Over a stream, the note stands between the two buttons (rhoquinn8217,
+     * 2026-10-29). Nothing is bridged on the dashboard, so nothing stands there. */
+    if (over_stream) {
+        lv_obj_t *note = lv_label_create(foot);
+        lv_label_set_text(note, locstr("Forgetting a bridged device releases it."));
+        lv_label_set_long_mode(note, LV_LABEL_LONG_WRAP);
+        lv_obj_set_width(note, 1);
+        lv_obj_set_flex_grow(note, 1);
+        lv_obj_set_style_text_align(note, LV_TEXT_ALIGN_CENTER, 0);
+        lv_obj_set_style_text_color(note, BTP_COL_SUB, 0);
+        lv_obj_set_style_text_font(note, lv_theme_get_font_small(foot), 0);
+        lv_obj_set_style_pad_hor(note, LV_DPX(8), 0);
+    }
+
     s_search = btp_button(foot, BTP_COL_ROW, BTP_COL_TXT, NULL);
     lv_obj_set_style_border_width(s_search, LV_DPX(1), 0);
     lv_obj_set_style_border_color(s_search, BTP_COL_BORDER, 0);
@@ -525,10 +541,6 @@ void bt_panel_open(bool over_stream) {
     lv_obj_add_event_cb(s_search, btp_search_cb, LV_EVENT_CLICKED, NULL);
 
     s_status = btp_text(card, "", BTP_COL_SUB, lv_theme_get_font_small(card), true);
-    if (over_stream) {
-        btp_text(card, locstr("Forgetting a bridged device releases it."), BTP_COL_SUB,
-                 lv_theme_get_font_small(card), true);
-    }
 
     /* ⭐ THE CHECK BOX AT THE FOOT (rhoquinn8217, 2026-10-29): "Automatically pair
      * DualSense/DualSense Edge Controllers", on by default. A row with the box,
