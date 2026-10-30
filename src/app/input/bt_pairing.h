@@ -75,7 +75,9 @@ void bt_pairing_state(bt_pairing_state_t *out);
 /* Ask the TV for its list again. */
 void bt_pairing_refresh(void);
 
-/* Forget one device by its address, or every device in the list with NULL. */
+/* Forget one device by its address, or every device in the list with NULL.
+ * An empty address is a device's own (a record the TV left without one), never
+ * every device. */
 void bt_pairing_forget(const char *addr);
 
 /* The search switch. On, the TV searches, a round after another, for up to

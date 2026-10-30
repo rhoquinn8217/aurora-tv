@@ -199,9 +199,12 @@ static lv_obj_t *btp_row(const char *name, bool gamepad, const char *line, lv_co
     return btp_button(row, bg, fg, button);
 }
 
-/* A registered device: whether it is connected, and Forget. */
+/* A registered device: whether it is connected, and Forget. ⓘ A record with no
+ * name and no address reads "Unnamed device": the C1 left one a second after an
+ * install closed the app (2026-10-29), and its Forget removes it. */
 static void btp_device_row(int i, const bt_pairing_device_t *dev) {
-    lv_obj_t *forget = btp_row(dev->name, dev->gamepad, dev->connected ? locstr("Connected") : locstr("Not connected"),
+    const char *name = dev->name[0] != '\0' ? dev->name : locstr("Unnamed device");
+    lv_obj_t *forget = btp_row(name, dev->gamepad, dev->connected ? locstr("Connected") : locstr("Not connected"),
                                dev->connected ? BTP_COL_ON : BTP_COL_SUB, BTP_COL_FORGET, BTP_COL_FORGET_TXT,
                                locstr("Forget"));
     lv_obj_add_event_cb(forget, btp_forget_cb, LV_EVENT_CLICKED, (void *) (intptr_t) i);

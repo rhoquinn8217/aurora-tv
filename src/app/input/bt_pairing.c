@@ -259,7 +259,8 @@ static void notify(void) {
 
 typedef enum {
     JOB_REFRESH,
-    JOB_FORGET,        /* addr, or "" for every device in the list */
+    JOB_FORGET,        /* addr: the devices with that address, an empty one included */
+    JOB_FORGET_ALL,    /* every device in the list */
     JOB_SEARCH_ON,
     JOB_SEARCH_OFF,
     JOB_SEARCH_DONE,   /* paired: the switch goes off, the list is read again */
@@ -448,13 +449,18 @@ static void do_refresh(void) {
     notify();
 }
 
+/* Forget the devices with the address `addr`, or every device with NULL.
+ * ⛔ AN EMPTY ADDRESS IS ONE DEVICE'S, NEVER EVERY DEVICE'S (2026-10-29, the C1):
+ * the TV listed a paired record with no name and no address, and an empty
+ * address used to mean "all" here, so that row's Forget would have been Forget
+ * all. requestDelete with the empty address removed that record alone. */
 static void do_forget(const char *addr) {
     bt_pairing_state_t now;
     bt_pairing_state(&now);
     int asked = 0, forgotten = 0;
     char why[120] = "";
     for (int i = 0; i < now.count; i++) {
-        if (addr[0] != '\0' && strcmp(addr, now.devices[i].addr) != 0) {
+        if (addr != NULL && strcmp(addr, now.devices[i].addr) != 0) {
             continue;
         }
         char payload[80];
@@ -730,6 +736,9 @@ static int worker_main(void *data) {
                 case JOB_FORGET:
                     do_forget(job.addr);
                     break;
+                case JOB_FORGET_ALL:
+                    do_forget(NULL);
+                    break;
                 case JOB_SEARCH_ON:
                     do_search_on();
                     break;
@@ -809,7 +818,7 @@ void bt_pairing_refresh(void) {
 
 void bt_pairing_forget(const char *addr) {
     if (ensure_worker()) {
-        enqueue(JOB_FORGET, addr != NULL ? addr : "", NULL);
+        enqueue(addr != NULL ? JOB_FORGET : JOB_FORGET_ALL, addr, NULL);
     }
 }
 
