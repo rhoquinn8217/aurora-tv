@@ -38,7 +38,7 @@ to bridge controllers.
 | **DualSense** | Your controller |
 | **Windows** | Your host machine's operating system |
 | **Moonlight-compatible host** | Streaming software on that Windows machine:<br>[Sunshine](https://github.com/LizardByte/Sunshine), [Apollo](https://github.com/ClassicOldSong/Apollo), [Vibepollo](https://github.com/Nonary/Vibepollo), [Vibeshine](https://github.com/Nonary/vibeshine), etc. |
-| **[rhoquinn8217/aurora-tv](https://github.com/rhoquinn8217/aurora-tv/releases)** | Install the ipk on your webOS TV |
+| **rhoquinn8217/aurora-tv** | Download the `.ipk` from the [releases page](https://github.com/rhoquinn8217/aurora-tv/releases) and install it on your webOS TV/monitor. |
 
 **Set up DS5-USBIP**
 
@@ -53,11 +53,10 @@ to bridge controllers.
 
 1. Connect a DualSense to the television: via Bluetooth or USB port.
 2. Start rhoquinn8217/aurora-tv on the television.
-3. Turn on **Enable Device Bridging** in **Settings (⚙️) → USB Bridge**.
-4. Start the stream to the host.
-5. Press and hold the touchpad with two fingers for a second.
-6. DS5-USBIP will open showing that the DualSense is natively connected.<br>
-   *Optional (Recommended): Create and set a new "touchpad-to-mouse (DS5|DS4)"
+3. Start the stream to the host.
+4. DualSense controllers will bridge automatically when the stream starts.<br>
+   *Note: Press and hold touchpad with two fingers for 1 second to bridge, 4 seconds to release.*
+5. *Optional (Recommended): Create and set a new "touchpad-to-mouse (DS5|DS4)"
    pre-set and try it out.*
 
 **Start using the DualSense with gyro, touchpad, audio-based rumble and
@@ -71,10 +70,11 @@ Located at **Settings (⚙️) → USB Bridge**.
 
 | Setting | &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; What it does |
 |:---|:---|
-| **Enable Device Bridging** | The master switch, off by default. All USB Bridge settings are disabled until it is turned on. Turn it on before streaming to use the USB Bridge panel in the streaming overlay |
-| **Auto Bridge** | A list of the currently connected devices, where specific devices or all devices can be marked to bridge on stream start. The selection is kept between sessions |
+| **Enable Device Bridging** | The master switch for bridging. On by default |
+| **Auto Bridge** | A list of the connected devices to mark for bridging. Only DualSenses are set to bridge on stream start by default |
 | **Enable Gesture Bridging** | Enable DualSense bridging gestures. A two finger hold on the touchpad: one second bridges, four seconds releases |
-| **Enable Wired Microphone** | Enables the microphone on a DualSense connected to a USB port. The controller draws on its battery while the microphone is on, whether or not anything is listening |
+| **Enable DualSense touchpad as mouse in dashboard and streaming overlay** | One finger moves the TV's pointer and a press of the touchpad clicks |
+| **Enable Wired Microphone** | Enables the microphone on a DualSense connected to a USB port |
 | **Enable BT Microphone (Unavailable)** | Disabled. A bug in webOS makes a Bluetooth DualSense's microphone unusable |
 | **Disable Lightbar Bridge/Release/Refusal Signals** | Turns off the lightbar on a bridge, a release and a refusal |
 | **Disable Rumble Bridge/Release/Refusal Signals** | Turns off the rumble on a bridge, a release and a refusal |
@@ -109,12 +109,20 @@ time make bridging easy and robust.
 | **DualSense bridge gesture** | DualSense only: a two finger press and hold on the touchpad. One second for quick bridging, four seconds for releasing, without opening the USB Bridge panel. |
 | **DualSense confirmation signals** | DualSense only: bridging, releasing and refusal events are accompanied by controller lightbar, rumble and speaker confirmation signals. |
 
+## Reporting problems
+
+Report a bug in [Issues](https://github.com/rhoquinn8217/aurora-tv/issues), with the
+form there. Questions, setup help and ideas go to
+[Discussions](https://github.com/rhoquinn8217/aurora-tv/discussions).
+
 ## Build
 
 The webOS package is built in Docker, so the toolchain does not have to be
 installed on the host:
 
 ```sh
+git clone --recursive https://github.com/rhoquinn8217/aurora-tv.git
+cd aurora-tv
 scripts/build-ipk.sh
 ```
 
@@ -149,4 +157,3 @@ repo.
 
 Copyright (C) 2026 GuiDev1994 and contributors. Fork additions copyright (C) 2026
 rhoquinn8217, under the same license.
-
