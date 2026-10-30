@@ -302,9 +302,15 @@ static void btp_refresh(void) {
     char count[80];
     snprintf(count, sizeof count, "%s %d", locstr("Registered on this TV:"), st.count);
     lv_label_set_text(s_count, count);
-    lv_label_set_text(s_status, st.status[0] != '\0' ? st.status
-                                : locstr("Forget a controller that will not pair, switch Search on, then put "
-                                         "the controller in pairing mode."));
+    /* ⓘ Hidden while there is nothing to say, so it leaves no empty line. No
+     * standing hint in its place (rhoquinn8217, 2026-10-29: "Remove the
+     * 'Forget a controller that will not pair...' sentences"). */
+    lv_label_set_text(s_status, st.status);
+    if (st.status[0] == '\0') {
+        lv_obj_add_flag(s_status, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        lv_obj_clear_flag(s_status, LV_OBJ_FLAG_HIDDEN);
+    }
     btp_fit();
 
     if (st.searching) {
@@ -520,7 +526,7 @@ void bt_panel_open(bool over_stream) {
 
     s_status = btp_text(card, "", BTP_COL_SUB, lv_theme_get_font_small(card), true);
     if (over_stream) {
-        btp_text(card, locstr("Forgetting a bridged controller ends its bridge."), BTP_COL_SUB,
+        btp_text(card, locstr("Forgetting a bridged device releases it."), BTP_COL_SUB,
                  lv_theme_get_font_small(card), true);
     }
 
