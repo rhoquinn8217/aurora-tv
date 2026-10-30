@@ -31,6 +31,7 @@ target_sources(moonlight-lib PRIVATE
         ${CMAKE_SOURCE_DIR}/src/app/stream/bridge_session.c
         ${CMAKE_SOURCE_DIR}/src/app/stream/connect_cancel.c
         ${CMAKE_SOURCE_DIR}/src/app/stream/input/bridge_switch_hold.c
+        ${CMAKE_SOURCE_DIR}/src/app/ui/common/bt_panel.c
         ${CMAKE_SOURCE_DIR}/src/app/ui/common/click_away.c
         ${CMAKE_SOURCE_DIR}/src/app/ui/common/type_into_box.c
         ${CMAKE_SOURCE_DIR}/src/app/ui/launcher/server_cards.c

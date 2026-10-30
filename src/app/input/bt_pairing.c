@@ -2,17 +2,25 @@
 
 #include "bt_pairing.h"
 
+#include <string.h>
+
 #if defined(TARGET_WEBOS)
 
 #include <stdarg.h>
-#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
+#include <strings.h>
+#include <sys/types.h>
 #include <time.h>
 
 #include <SDL.h>
+#include <pbnjson.h>
+#include <webos-helpers/libhelpers.h>   /* calls that answer more than once */
 #include "lunasynccall.h"   /* the TV's Bluetooth controller service */
+#include "lvgl.h"
+
+#include "app.h"
+#include "util/bus.h"
 
 /* What happened, where it can be read over SSH (tv_cursor.c says why). */
 #define BT_PAIRING_LOG "bt-pairing.log"
@@ -20,6 +28,8 @@ FILE *ctm_log_open(const char *name, const char *mode);
 
 #define BT_SERVICE "luna://com.webos.service.bthidmanager/"
 #define BT_WAIT_MS 5000
+/* How long the switch keeps searching, round after round, before it gives up. */
+#define BT_SEARCH_MS (3 * 60 * 1000)
 
 /* Only the service's own methods, so the control port cannot be pointed at
  * anything else on the TV. */
@@ -44,8 +54,12 @@ static void bt_log(const char *fmt, ...) {
     fclose(f);
 }
 
-/* One call, made on a thread of its own so the caller can stop waiting. The
- * call is not cancelled then: whichever side is last to let go frees it. */
+/* ---------------------------------------------------------------------------
+ * One call, waited for: the control port's, and the worker's.
+ * ------------------------------------------------------------------------- */
+
+/* Made on a thread of its own so the caller can stop waiting. The call is not
+ * cancelled then: whichever side is last to let go frees it. */
 typedef struct {
     char uri[96];
     char *payload;
@@ -144,12 +158,559 @@ char *bt_pairing_call(const char *method, const char *payload) {
     return reply;
 }
 
+/* ---------------------------------------------------------------------------
+ * The TV's answers, read.
+ * ------------------------------------------------------------------------- */
+
+static jvalue_ref parse_reply(const char *reply, jdomparser_ref *parser) {
+    *parser = NULL;
+    if (reply == NULL) {
+        return NULL;
+    }
+    JSchemaInfo schema;
+    jschema_info_init(&schema, jschema_all(), NULL, NULL);
+    *parser = jdomparser_create(&schema, 0);
+    if (*parser == NULL || !jdomparser_feed(*parser, reply, (int) strlen(reply)) || !jdomparser_end(*parser)) {
+        return NULL;
+    }
+    return jdomparser_get_result(*parser);
+}
+
+/* A string member into `out`, or false when there is none. */
+static bool string_member(jvalue_ref object, const char *name, char *out, size_t size) {
+    if (!jis_object(object)) {
+        return false;
+    }
+    jvalue_ref v = jobject_get(object, j_cstr_to_buffer(name));
+    if (v == NULL || !jis_string(v)) {
+        return false;
+    }
+    raw_buffer buf = jstring_get_fast(v);
+    snprintf(out, size, "%.*s", (int) buf.m_len, buf.m_str);
+    return true;
+}
+
+/* A boolean member, or -1 when there is none. */
+static int bool_member(jvalue_ref object, const char *name) {
+    if (!jis_object(object)) {
+        return -1;
+    }
+    jvalue_ref v = jobject_get(object, j_cstr_to_buffer(name));
+    bool b = false;
+    if (v == NULL || !jis_boolean(v) || jboolean_get(v, &b) != CONV_OK) {
+        return -1;
+    }
+    return b ? 1 : 0;
+}
+
+/* ---------------------------------------------------------------------------
+ * The state, and whom to tell.
+ * ------------------------------------------------------------------------- */
+
+static SDL_mutex *s_lock;
+static bt_pairing_state_t s_state;
+static void (*s_listener)(void);
+static SDL_atomic_t s_notify_queued;
+
+/* The device being paired, while it is: one at a time. */
+static char s_pairing_addr[24];
+static char s_pairing_name[96];
+static Uint32 s_search_since;
+
+static void set_status(const char *fmt, ...) {
+    char line[sizeof s_state.status];
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(line, sizeof line, fmt, ap);
+    va_end(ap);
+    SDL_LockMutex(s_lock);
+    snprintf(s_state.status, sizeof s_state.status, "%s", line);
+    SDL_UnlockMutex(s_lock);
+    bt_log("status: %s", line);
+}
+
+static void call_listener(void *data) {
+    (void) data;
+    SDL_AtomicSet(&s_notify_queued, 0);
+    if (s_listener != NULL) {
+        s_listener();
+    }
+}
+
+/* ⛔ The bus runs its actions while it holds SDL's event queue, so the panel's
+ * rebuild is handed on to LVGL from there, as the control port's commands are. */
+static void notify_on_bus(void *data) {
+    if (lv_async_call(call_listener, data) != LV_RES_OK) {
+        call_listener(data);
+    }
+}
+
+static void notify(void) {
+    if (SDL_AtomicCAS(&s_notify_queued, 0, 1) && global != NULL) {
+        if (!app_bus_post(global, notify_on_bus, NULL)) {
+            SDL_AtomicSet(&s_notify_queued, 0);
+        }
+    }
+}
+
+/* ---------------------------------------------------------------------------
+ * The worker: every call to the TV is made here, in the order asked.
+ * ------------------------------------------------------------------------- */
+
+typedef enum {
+    JOB_REFRESH,
+    JOB_FORGET,        /* addr, or "" for every device in the list */
+    JOB_SEARCH_ON,
+    JOB_SEARCH_OFF,
+    JOB_SEARCH_DONE,   /* paired: the switch goes off, the list is read again */
+    JOB_CONNECT,       /* name, addr */
+    JOB_REDISCOVER,    /* a round of the search ended without a device */
+} job_kind_t;
+
+typedef struct {
+    job_kind_t kind;
+    char addr[24];
+    char name[96];
+} job_t;
+
+#define JOB_QUEUE 16
+static job_t s_jobs[JOB_QUEUE];
+static int s_job_head, s_job_count;
+static SDL_sem *s_wake;
+static SDL_Thread *s_worker;
+
+static void enqueue(job_kind_t kind, const char *addr, const char *name) {
+    SDL_LockMutex(s_lock);
+    if (s_job_count < JOB_QUEUE) {
+        job_t *job = &s_jobs[(s_job_head + s_job_count) % JOB_QUEUE];
+        memset(job, 0, sizeof *job);
+        job->kind = kind;
+        snprintf(job->addr, sizeof job->addr, "%s", addr != NULL ? addr : "");
+        snprintf(job->name, sizeof job->name, "%s", name != NULL ? name : "");
+        s_job_count++;
+    } else {
+        bt_log("queue full: job %d dropped", (int) kind);
+    }
+    SDL_UnlockMutex(s_lock);
+    SDL_SemPost(s_wake);
+}
+
+static bool dequeue(job_t *out) {
+    SDL_LockMutex(s_lock);
+    const bool have = s_job_count > 0;
+    if (have) {
+        *out = s_jobs[s_job_head];
+        s_job_head = (s_job_head + 1) % JOB_QUEUE;
+        s_job_count--;
+    }
+    SDL_UnlockMutex(s_lock);
+    return have;
+}
+
+/* A call whose answer only matters as returnValue; its errorText into `why`. */
+static bool call_ok(const char *method, const char *payload, char *why, size_t why_size) {
+    char *reply = bt_pairing_call(method, payload);
+    jdomparser_ref parser = NULL;
+    jvalue_ref root = parse_reply(reply, &parser);
+    const bool ok = bool_member(root, "returnValue") == 1;
+    if (why != NULL && why_size > 0) {
+        why[0] = '\0';
+        if (!ok && !string_member(root, "errorText", why, why_size)) {
+            snprintf(why, why_size, "%s", reply == NULL ? "no answer" : "refused");
+        }
+    }
+    if (parser != NULL) {
+        jdomparser_release(&parser);
+    }
+    free(reply);
+    return ok;
+}
+
+static void do_refresh(void) {
+    char *reply = bt_pairing_call("getPairedDeviceLists", "{}");
+    jdomparser_ref parser = NULL;
+    jvalue_ref root = parse_reply(reply, &parser);
+    if (bool_member(root, "returnValue") != 1) {
+        char why[120] = "no answer";
+        string_member(root, "errorText", why, sizeof why);
+        set_status("The TV did not give Aurora its Bluetooth devices: %s", why);
+    } else {
+        bt_pairing_state_t fresh;
+        memset(&fresh, 0, sizeof fresh);
+        jvalue_ref list = jobject_get(root, j_cstr_to_buffer("deviceLists"));
+        const ssize_t n = jis_array(list) ? jarray_size(list) : 0;
+        for (ssize_t i = 0; i < n && fresh.count < BT_PAIRING_MAX; i++) {
+            jvalue_ref d = jarray_get(list, i);
+            bt_pairing_device_t *dev = &fresh.devices[fresh.count];
+            if (!string_member(d, "deviceAddr", dev->addr, sizeof dev->addr)) {
+                continue;
+            }
+            if (!string_member(d, "deviceName", dev->name, sizeof dev->name) || dev->name[0] == '\0') {
+                snprintf(dev->name, sizeof dev->name, "%s", dev->addr);
+            }
+            char type[24] = "";
+            string_member(d, "deviceType", type, sizeof type);
+            dev->gamepad = strcmp(type, "gamepad") == 0;
+            dev->connected = bool_member(d, "isConnected") == 1;
+            fresh.count++;
+        }
+        SDL_LockMutex(s_lock);
+        memcpy(s_state.devices, fresh.devices, sizeof s_state.devices);
+        s_state.count = fresh.count;
+        s_state.listed = true;
+        SDL_UnlockMutex(s_lock);
+    }
+    if (parser != NULL) {
+        jdomparser_release(&parser);
+    }
+    free(reply);
+    notify();
+}
+
+static void do_forget(const char *addr) {
+    bt_pairing_state_t now;
+    bt_pairing_state(&now);
+    int asked = 0, forgotten = 0;
+    char why[120] = "";
+    for (int i = 0; i < now.count; i++) {
+        if (addr[0] != '\0' && strcmp(addr, now.devices[i].addr) != 0) {
+            continue;
+        }
+        char payload[80];
+        snprintf(payload, sizeof payload, "{\"deviceAddr\":\"%s\"}", now.devices[i].addr);
+        asked++;
+        if (call_ok("requestDelete", payload, why, sizeof why)) {
+            forgotten++;
+        }
+    }
+    if (asked == 0) {
+        set_status("There was nothing to forget.");
+    } else if (forgotten == asked) {
+        set_status(asked == 1 ? "Forgot 1 device." : "Forgot %d devices.", asked);
+    } else {
+        set_status("Forgot %d of %d: %s", forgotten, asked, why);
+    }
+    do_refresh();
+}
+
+/* ---------------------------------------------------------------------------
+ * The search: two subscriptions, and a round at a time.
+ * ------------------------------------------------------------------------- */
+
+static HContext s_disc_ctx;
+static HContext s_status_ctx;
+static bool s_disc_on, s_status_on;
+
+static bool searching(void) {
+    SDL_LockMutex(s_lock);
+    const bool on = s_state.searching;
+    SDL_UnlockMutex(s_lock);
+    return on;
+}
+
+static bool registered(const char *addr) {
+    bool found = false;
+    SDL_LockMutex(s_lock);
+    for (int i = 0; i < s_state.count && !found; i++) {
+        found = strcasecmp(s_state.devices[i].addr, addr) == 0;
+    }
+    SDL_UnlockMutex(s_lock);
+    return found;
+}
+
+/* On the helper library's thread: what the search found, or that a round
+ * ended. */
+static bool discovery_cb(LSHandle *sh, LSMessage *reply, void *ctx) {
+    (void) sh;
+    (void) ctx;
+    const char *text = HLunaServiceMessage(reply);
+    bt_log("subscribeDiscovery: %s", text != NULL ? text : "(none)");
+    jdomparser_ref parser = NULL;
+    jvalue_ref root = parse_reply(text, &parser);
+    char status[32] = "", addr[24] = "", name[96] = "";
+    string_member(root, "status", status, sizeof status);
+    const bool device = string_member(root, "address", addr, sizeof addr);
+    if (!string_member(root, "name", name, sizeof name)) {
+        string_member(root, "deviceName", name, sizeof name);
+    }
+    if (parser != NULL) {
+        jdomparser_release(&parser);
+    }
+    if (!searching()) {
+        return true;
+    }
+    if (strcmp(status, "endDiscovery") == 0) {
+        enqueue(JOB_REDISCOVER, NULL, NULL);
+    } else if (device && addr[0] != '\0' && !registered(addr)) {
+        SDL_LockMutex(s_lock);
+        const bool idle = s_pairing_addr[0] == '\0';
+        if (idle) {
+            snprintf(s_pairing_addr, sizeof s_pairing_addr, "%s", addr);
+            snprintf(s_pairing_name, sizeof s_pairing_name, "%s", name[0] != '\0' ? name : addr);
+        }
+        SDL_UnlockMutex(s_lock);
+        if (idle) {
+            enqueue(JOB_CONNECT, addr, name[0] != '\0' ? name : addr);
+        }
+    }
+    return true;
+}
+
+/* On the helper library's thread: a device paired, connected, or failed. */
+static bool status_cb(LSHandle *sh, LSMessage *reply, void *ctx) {
+    (void) sh;
+    (void) ctx;
+    const char *text = HLunaServiceMessage(reply);
+    bt_log("subscribeDevicesStatus: %s", text != NULL ? text : "(none)");
+    jdomparser_ref parser = NULL;
+    jvalue_ref root = parse_reply(text, &parser);
+    char status[32] = "";
+    string_member(root, "status", status, sizeof status);
+    if (parser != NULL) {
+        jdomparser_release(&parser);
+    }
+    SDL_LockMutex(s_lock);
+    const bool pairing = s_pairing_addr[0] != '\0';
+    char name[96];
+    snprintf(name, sizeof name, "%s", s_pairing_name);
+    SDL_UnlockMutex(s_lock);
+    if (!pairing || !searching()) {
+        return true;
+    }
+    if (strcmp(status, "paired") == 0 || strcmp(status, "connected") == 0) {
+        enqueue(JOB_SEARCH_DONE, NULL, name);
+    } else if (strcmp(status, "fail") == 0) {
+        set_status("Pairing %s failed. Still searching: put it in pairing mode again.", name);
+        SDL_LockMutex(s_lock);
+        s_pairing_addr[0] = '\0';
+        SDL_UnlockMutex(s_lock);
+        notify();
+        enqueue(JOB_REDISCOVER, NULL, NULL);
+    }
+    return true;
+}
+
+static void subscribe(HContext *ctx, bool *on, const char *method, LSFilterFunc cb) {
+    if (*on) {
+        return;
+    }
+    memset(ctx, 0, sizeof *ctx);
+    ctx->callback = cb;
+    ctx->multiple = 1;
+    ctx->pub = 1;
+    const int rc = HLunaServiceCall(method, "{\"subscribe\":true}", ctx);
+    *on = rc == 0;
+    bt_log("%s: subscribed=%d", method, *on ? 1 : 0);
+}
+
+static void unsubscribe(HContext *ctx, bool *on, const char *what) {
+    if (!*on) {
+        return;
+    }
+    const int rc = HUnregisterServiceCallback(ctx);
+    *on = false;
+    bt_log("%s: unsubscribed (%d)", what, rc);
+}
+
+static void search_stop(const char *why_status) {
+    call_ok("cancelDiscovery", "{}", NULL, 0);
+    unsubscribe(&s_disc_ctx, &s_disc_on, "subscribeDiscovery");
+    unsubscribe(&s_status_ctx, &s_status_on, "subscribeDevicesStatus");
+    SDL_LockMutex(s_lock);
+    s_state.searching = false;
+    s_pairing_addr[0] = '\0';
+    SDL_UnlockMutex(s_lock);
+    if (why_status != NULL) {
+        set_status("%s", why_status);
+    }
+    notify();
+}
+
+static void do_search_on(void) {
+    if (searching()) {
+        return;
+    }
+    SDL_LockMutex(s_lock);
+    s_state.searching = true;
+    s_pairing_addr[0] = '\0';
+    SDL_UnlockMutex(s_lock);
+    s_search_since = SDL_GetTicks();
+    set_status("Searching. Put your controller in pairing mode: on a DualSense, hold Create and PS until "
+               "the light flashes; on a DS4, Share and PS; on an Xbox controller, its pair button.");
+    notify();
+    subscribe(&s_status_ctx, &s_status_on, BT_SERVICE "subscribeDevicesStatus", status_cb);
+    subscribe(&s_disc_ctx, &s_disc_on, BT_SERVICE "subscribeDiscovery", discovery_cb);
+    char why[120];
+    if (!call_ok("requestDiscovery", "{}", why, sizeof why)) {
+        char line[200];
+        snprintf(line, sizeof line, "The TV would not search: %s", why);
+        search_stop(line);
+    }
+}
+
+static void do_rediscover(void) {
+    if (!searching()) {
+        return;
+    }
+    SDL_LockMutex(s_lock);
+    const bool pairing = s_pairing_addr[0] != '\0';
+    SDL_UnlockMutex(s_lock);
+    if (pairing) {
+        return;
+    }
+    if (SDL_TICKS_PASSED(SDL_GetTicks(), s_search_since + BT_SEARCH_MS)) {
+        search_stop("Nothing paired in three minutes. Search is off.");
+        return;
+    }
+    char why[120];
+    if (!call_ok("requestDiscovery", "{}", why, sizeof why)) {
+        char line[200];
+        snprintf(line, sizeof line, "The TV stopped searching: %s", why);
+        search_stop(line);
+    }
+}
+
+static void do_connect(const char *addr, const char *name) {
+    if (!searching()) {
+        return;
+    }
+    set_status("Pairing %s...", name);
+    notify();
+    char payload[200];
+    snprintf(payload, sizeof payload, "{\"name\":\"%s\",\"address\":\"%s\"}", name, addr);
+    char why[120];
+    if (!call_ok("requestConnect", payload, why, sizeof why)) {
+        set_status("Pairing %s failed: %s. Still searching.", name, why);
+        SDL_LockMutex(s_lock);
+        s_pairing_addr[0] = '\0';
+        SDL_UnlockMutex(s_lock);
+        notify();
+        enqueue(JOB_REDISCOVER, NULL, NULL);
+    }
+}
+
+static int worker_main(void *data) {
+    (void) data;
+    for (;;) {
+        SDL_SemWait(s_wake);
+        job_t job;
+        while (dequeue(&job)) {
+            switch (job.kind) {
+                case JOB_REFRESH:
+                    do_refresh();
+                    break;
+                case JOB_FORGET:
+                    do_forget(job.addr);
+                    break;
+                case JOB_SEARCH_ON:
+                    do_search_on();
+                    break;
+                case JOB_SEARCH_OFF:
+                    if (searching()) {
+                        search_stop("Search is off.");
+                    }
+                    break;
+                case JOB_SEARCH_DONE: {
+                    char line[200];
+                    snprintf(line, sizeof line, "Paired %s. Search is off.", job.name);
+                    search_stop(line);
+                    do_refresh();
+                    break;
+                }
+                case JOB_CONNECT:
+                    do_connect(job.addr, job.name);
+                    break;
+                case JOB_REDISCOVER:
+                    do_rediscover();
+                    break;
+            }
+        }
+    }
+    return 0;
+}
+
+/* Started at the first use, and left running: it sleeps on its semaphore. */
+static bool ensure_worker(void) {
+    if (s_worker != NULL) {
+        return true;
+    }
+    if (s_lock == NULL) {
+        s_lock = SDL_CreateMutex();
+    }
+    if (s_wake == NULL) {
+        s_wake = SDL_CreateSemaphore(0);
+    }
+    if (s_lock == NULL || s_wake == NULL) {
+        return false;
+    }
+    s_worker = SDL_CreateThread(worker_main, "bt-pairing-worker", NULL);
+    if (s_worker != NULL) {
+        SDL_DetachThread(s_worker);
+    }
+    return s_worker != NULL;
+}
+
+/* ---------------------------------------------------------------------------
+ * The panel's calls.
+ * ------------------------------------------------------------------------- */
+
+void bt_pairing_set_listener(void (*changed)(void)) {
+    s_listener = changed;
+}
+
+void bt_pairing_state(bt_pairing_state_t *out) {
+    if (!ensure_worker()) {
+        memset(out, 0, sizeof *out);
+        return;
+    }
+    SDL_LockMutex(s_lock);
+    *out = s_state;
+    SDL_UnlockMutex(s_lock);
+}
+
+void bt_pairing_refresh(void) {
+    if (ensure_worker()) {
+        enqueue(JOB_REFRESH, NULL, NULL);
+    }
+}
+
+void bt_pairing_forget(const char *addr) {
+    if (ensure_worker()) {
+        enqueue(JOB_FORGET, addr != NULL ? addr : "", NULL);
+    }
+}
+
+void bt_pairing_search(bool on) {
+    if (ensure_worker()) {
+        enqueue(on ? JOB_SEARCH_ON : JOB_SEARCH_OFF, NULL, NULL);
+    }
+}
+
 #else
 
 char *bt_pairing_call(const char *method, const char *payload) {
     (void) method;
     (void) payload;
     return NULL;
+}
+
+void bt_pairing_set_listener(void (*changed)(void)) {
+    (void) changed;
+}
+
+void bt_pairing_state(bt_pairing_state_t *out) {
+    memset(out, 0, sizeof *out);
+}
+
+void bt_pairing_refresh(void) {
+}
+
+void bt_pairing_forget(const char *addr) {
+    (void) addr;
+}
+
+void bt_pairing_search(bool on) {
+    (void) on;
 }
 
 #endif
