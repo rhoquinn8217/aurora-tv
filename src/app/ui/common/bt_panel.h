@@ -7,10 +7,10 @@
  *   - the dashboard: a button in the top bar, after Stream actions and before
  *     Add, Help, Settings and Close, drawn as a Bluetooth mark since
  *     2026-10-29; the panel in the middle;
- *   - the streaming overlay: a BT Devices button in the overlay's row, after
- *     DS5-USBIP; the panel on the right, where the USB Bridge panel opens, with
- *     the overlay left open behind it, so a bridged controller's presses stay
- *     out of the game.
+ *   - the streaming overlay: a button in the overlay's row, after DS5-USBIP, drawn
+ *     as the same mark since 2026-10-30; the panel on the right, where the USB
+ *     Bridge panel opens, with the overlay left open behind it, so a bridged
+ *     controller's presses stay out of the game.
  * ⓘ Closing the panel turns the search off. */
 
 #pragma once
@@ -23,6 +23,10 @@
 /* The dashboard's button, made in the top bar `topbar` in its own place, and
  * styled as the icons beside it. When: as the launcher builds its top bar. */
 void bt_panel_topbar_button(launcher_fragment_t *launcher, lv_obj_t *topbar);
+
+/* The Bluetooth mark, drawn in the middle of `parent`, `box` wide and high.
+ * `points` is six points the line goes on reading, so it must outlive the mark. */
+lv_obj_t *bt_panel_mark(lv_obj_t *parent, lv_point_t *points, lv_coord_t box, lv_color_t colour);
 
 /* Open the panel: in the middle of the screen, or on the right over a stream.
  * Nothing happens if it is open already. */

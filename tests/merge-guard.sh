@@ -540,7 +540,7 @@ in_order "the Stream actions button sits right after the host button" \
      "lv_label_set_text_static(srv_chevron, MAT_SYMBOL_ARROW_DROP_DOWN);" "stream_actions_button(controller, topbar);"
 # ⓘ Taking upstream's back compiles, and the controller button that opens the
 # Bluetooth controllers panel is gone from the top bar (ui/common/bt_panel.h,
-# 2026-10-29). The overlay's BT Devices button is in bridge_overlay.c, ours.
+# 2026-10-29). The overlay's Bluetooth button is in bridge_overlay.c, ours.
 in_order "the Bluetooth controllers button sits right after Stream actions" \
      src/app/ui/launcher/launcher.view.c "lv_obj_t *launcher_win_create" \
      "stream_actions_button(controller, topbar);" "bt_panel_topbar_button(controller, topbar);"

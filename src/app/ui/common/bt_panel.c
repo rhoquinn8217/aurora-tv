@@ -2,6 +2,39 @@
 
 #include "bt_panel.h"
 
+/* ⭐ THE BUTTONS ARE A BLUETOOTH MARK, DRAWN (rhoquinn8217, 2026-10-29: "change the
+ * controller icon that opens the panel to just a bluetooth symbol"; and the
+ * overlay's, 2026-10-30: "replace the button name with just the bluetooth
+ * symbol"). The icon font holds only the glyphs upstream chose, and one more
+ * means regenerating upstream's font files, so the mark is drawn as the Search
+ * switch is: the middle line of Material's "bluetooth" picture, two units wide
+ * on its 24 grid. Each point is its distance from the middle in hundredths of a
+ * unit, rounded the same way on both sides so it stays symmetrical: arm,
+ * bottom-right corner, foot, head, top-right corner, arm. */
+static const int16_t BTP_RUNE[6][2] = {
+        {-629, -629}, {429, 429}, {0, 859}, {0, -859}, {429, -429}, {-629, 629},
+};
+
+static lv_coord_t btp_rune_at(lv_coord_t box, int hundredths) {
+    const int scaled = (box * (hundredths < 0 ? -hundredths : hundredths) + 1200) / 2400;
+    return (lv_coord_t) (box / 2 + (hundredths < 0 ? -scaled : scaled));
+}
+
+lv_obj_t *bt_panel_mark(lv_obj_t *parent, lv_point_t *points, lv_coord_t box, lv_color_t colour) {
+    for (int i = 0; i < 6; i++) {
+        points[i] = (lv_point_t) {btp_rune_at(box, BTP_RUNE[i][0]), btp_rune_at(box, BTP_RUNE[i][1])};
+    }
+    lv_obj_t *rune = lv_line_create(parent);
+    lv_line_set_points(rune, points, 6);
+    lv_obj_set_size(rune, box, box);
+    lv_obj_set_style_line_width(rune, LV_MAX(2, box / 12), 0);
+    lv_obj_set_style_line_color(rune, colour, 0);
+    lv_obj_set_style_line_rounded(rune, true, 0);
+    lv_obj_center(rune);
+    lv_obj_clear_flag(rune, LV_OBJ_FLAG_CLICKABLE);
+    return rune;
+}
+
 #if defined(TARGET_WEBOS)
 
 #include <stdio.h>
@@ -668,23 +701,7 @@ static void btp_topbar_clicked(lv_event_t *e) {
     bt_panel_open(false);
 }
 
-/* ⭐ THE BUTTON IS A BLUETOOTH MARK, DRAWN (rhoquinn8217, 2026-10-29: "change the
- * controller icon that opens the panel to just a bluetooth symbol"). The icon
- * font holds only the glyphs upstream chose, and one more means regenerating
- * upstream's font files, so the mark is drawn as the Search switch is: the
- * middle line of Material's "bluetooth" picture, two units wide on its 24 grid,
- * at the icon font's size. Each point is its distance from the middle in
- * hundredths of a unit, rounded the same way on both sides so it stays
- * symmetrical: arm, bottom-right corner, foot, head, top-right corner, arm. */
-static const int16_t BTP_RUNE[6][2] = {
-        {-629, -629}, {429, 429}, {0, 859}, {0, -859}, {429, -429}, {-629, 629},
-};
 static lv_point_t s_rune[6];
-
-static lv_coord_t btp_rune_at(lv_coord_t box, int hundredths) {
-    const int scaled = (box * (hundredths < 0 ? -hundredths : hundredths) + 1200) / 2400;
-    return (lv_coord_t) (box / 2 + (hundredths < 0 ? -scaled : scaled));
-}
 
 void bt_panel_topbar_button(launcher_fragment_t *launcher, lv_obj_t *topbar) {
     /* Styled as the icons after it (launcher.view.c, create_topbar_icon_btn). A
@@ -695,18 +712,8 @@ void bt_panel_topbar_button(launcher_fragment_t *launcher, lv_obj_t *topbar) {
     lv_obj_set_size(btn, LV_DPX(TOPBAR_BTN_SIZE), LV_DPX(TOPBAR_BTN_SIZE));
     lv_obj_add_style(btn, &launcher->topbar_btn_style, 0);
     lv_obj_set_style_bg_opa(btn, LV_OPA_70, 0);
-    const lv_coord_t box = LV_DPX(14);     /* the icon font's small size, util/font.c */
-    for (int i = 0; i < 6; i++) {
-        s_rune[i] = (lv_point_t) {btp_rune_at(box, BTP_RUNE[i][0]), btp_rune_at(box, BTP_RUNE[i][1])};
-    }
-    lv_obj_t *rune = lv_line_create(btn);
-    lv_line_set_points(rune, s_rune, 6);
-    lv_obj_set_size(rune, box, box);
-    lv_obj_set_style_line_width(rune, LV_MAX(2, box / 12), 0);
-    lv_obj_set_style_line_color(rune, ml_color_hex(ML_COLOR_TEXT), 0);
-    lv_obj_set_style_line_rounded(rune, true, 0);
-    lv_obj_center(rune);
-    lv_obj_clear_flag(rune, LV_OBJ_FLAG_CLICKABLE);
+    /* At the icon font's small size, util/font.c. */
+    bt_panel_mark(btn, s_rune, LV_DPX(14), ml_color_hex(ML_COLOR_TEXT));
     lv_obj_add_event_cb(btn, btp_topbar_clicked, LV_EVENT_CLICKED, NULL);
 }
 
