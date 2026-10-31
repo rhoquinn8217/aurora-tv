@@ -457,6 +457,14 @@ static void btp_refresh(void) {
     } else {
         target = s_search;
     }
+    /* ⛔ Never back onto a greyed button (code review, 2026-10-31). Forget all
+     * greys itself once the list is empty, and a greyed object with the focus
+     * takes no key, Back included (lv_indev.c, "!dis"): the arrows, OK and Back
+     * all stopped until a pointer clicked something. Search is where the panel
+     * opens, and it is never greyed. */
+    if (lv_obj_has_state(target, LV_STATE_DISABLED)) {
+        target = s_search;
+    }
     lv_group_focus_obj(target);
 }
 
