@@ -81,23 +81,6 @@ Located at **Settings (⚙️) → USB Bridge**.
 | **Disable Rumble Bridge/Release/Refusal Signals** | Turns off the rumble on a bridge, a release and a refusal |
 | **Disable Audio Tone Bridge/Release/Refusal Signals** | Turns off the tone on a bridge, a release and a refusal |
 
-## Why this exists
-
-A DualSense connected to a webOS TV over Bluetooth already reached a PC with its
-speaker, rumble and adaptive triggers through ciprianmisaila's bridge. A
-DualSense connected to a USB port on the webOS TV did not bring its audio
-features.
-
-The difference between Bluetooth and the USB port is where the audio lives. Over
-Bluetooth the controller's audio travels inside the same report stream as its
-buttons and sticks, so forwarding the reports carries everything at once. Over
-the USB port the controller is a composite device whose audio arrives as a sound
-card owned by webOS rather than by the rhoquinn8217/aurora-tv app reading the
-DualSense.
-
-This fork's goal is to cover this gap for DualSense controllers and at the same
-time make bridging easy and robust.
-
 ## What this fork adds
 
 | Addition | &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; What it does |
@@ -120,7 +103,24 @@ time make bridging easy and robust.
 | **In-stream cursor options** | • **Ctrl+Alt+Shift+M**: Turns the TV's cursor on or off; off is for games where the mouse moves past the edge of the screen.<br>• **Ctrl+Alt+Shift+C**: Switches between Aurora's small, sharp cursor and the TV's regular one.<br>• **Ctrl+Alt+Shift+A**: Opens manual cursor alignment that you control with a controller d-pad or keyboard arrow keys. |
 | **Bluetooth Devices panel** | A more convenient way to manage Bluetooth devices than webOS's buried Bluetooth menu. |
 | **Cancel pairing and connecting** | Connecting and PIN pairing processes can be cancelled mid run. |
-| **Cosmetic changes** | • The running app's tile wears see-through purple Play and Stop buttons that react under a pointer.<br>• Added streaming menu that shows the running app's small tile and full name and expands to show Vibepollo stream functions.<br>• The profile box is hidden while there is only one profile. |
+| **Cosmetic changes** | • Purple highlight selector with Play and Stop buttons on streaming app that react under a pointer.<br>• The profile box is hidden when there is only one profile. |
+
+## Why this exists
+
+A DualSense connected to a webOS TV over Bluetooth already reached a PC with its
+speaker, rumble and adaptive triggers through ciprianmisaila's bridge. A
+DualSense connected to a USB port on the webOS TV did not bring its audio
+features.
+
+The difference between Bluetooth and the USB port is where the audio lives. Over
+Bluetooth the controller's audio travels inside the same report stream as its
+buttons and sticks, so forwarding the reports carries everything at once. Over
+the USB port the controller is a composite device whose audio arrives as a sound
+card owned by webOS rather than by the rhoquinn8217/aurora-tv app reading the
+DualSense.
+
+This fork's goal is to cover this gap for DualSense controllers and at the same
+time make bridging easy and robust.
 
 ## Reporting problems
 
