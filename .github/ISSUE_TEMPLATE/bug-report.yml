@@ -92,3 +92,8 @@ body:
     attributes:
       label: Screenshots or photos
       description: Optional. A photo of the TV or a screenshot of DS5-USBIP often helps.
+  - type: textarea
+    attributes:
+      label: Logs
+      description: |
+        Optional. In Files in webOS Dev Manager, go to `/media/developer/apps/usr/palm/applications/com.aurora.gamestream.rhqn/logs`, download the `.log` files modified around the time of the problem, and drag them here. Logs can contain IP addresses and controller MAC addresses, and this page is public, so check them first.
