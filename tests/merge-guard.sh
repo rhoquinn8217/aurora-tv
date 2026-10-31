@@ -387,6 +387,9 @@ need "the stream boost setting is read before the connection starts" \
 in_order "rounded pictures keep their corners: the drawing is wrapped once the display exists" \
      src/app/ui/root.c "void app_ui_open(" \
      "lv_disp_t *disp = lv_disp_drv_register(driver);" "image_corners_install(disp);"
+in_order "a line draws with the argument LVGL reads: the drawing is wrapped once the display exists" \
+     src/app/ui/root.c "void app_ui_open(" \
+     "lv_disp_t *disp = lv_disp_drv_register(driver);" "draw_line_fix_install(disp);"
 
 # ⓘ The notes and the code stay in step: every "This fork:" line names a section
 # that exists, and every section is named by at least one such line.
@@ -540,7 +543,7 @@ in_order "the Stream actions button sits right after the host button" \
      "lv_label_set_text_static(srv_chevron, MAT_SYMBOL_ARROW_DROP_DOWN);" "stream_actions_button(controller, topbar);"
 # ⓘ Taking upstream's back compiles, and the controller button that opens the
 # Bluetooth controllers panel is gone from the top bar (ui/common/bt_panel.h,
-# 2026-10-29). The overlay's Controllers button is in bridge_overlay.c, ours.
+# 2026-10-29). The overlay's Bluetooth button is in bridge_overlay.c, ours.
 in_order "the Bluetooth controllers button sits right after Stream actions" \
      src/app/ui/launcher/launcher.view.c "lv_obj_t *launcher_win_create" \
      "stream_actions_button(controller, topbar);" "bt_panel_topbar_button(controller, topbar);"
