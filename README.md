@@ -128,6 +128,11 @@ Report a bug in [Issues](https://github.com/rhoquinn8217/aurora-tv/issues), with
 form there. Questions, setup help and ideas go to
 [Discussions](https://github.com/rhoquinn8217/aurora-tv/discussions).
 
+To attach the app's logs, use [webOS Dev Manager](https://github.com/webosbrew/dev-manager-desktop):
+in Files, go to `/media/developer/apps/usr/palm/applications/com.aurora.gamestream.rhqn/logs` and download the `.log` files modified
+around the time of the problem. Logs can contain IP addresses and controller MAC addresses, and
+issues are public, so check them first.
+
 ## Build
 
 The webOS package is built in Docker, so the toolchain does not have to be
