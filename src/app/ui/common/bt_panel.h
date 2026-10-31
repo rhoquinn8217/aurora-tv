@@ -7,7 +7,7 @@
  *   - the dashboard: a button in the top bar, after Stream actions and before
  *     Add, Help, Settings and Close, drawn as a Bluetooth mark since
  *     2026-10-29; the panel in the middle;
- *   - the streaming overlay: a Controllers button in the overlay's row, after
+ *   - the streaming overlay: a BT Devices button in the overlay's row, after
  *     DS5-USBIP; the panel on the right, where the USB Bridge panel opens, with
  *     the overlay left open behind it, so a bridged controller's presses stay
  *     out of the game.
