@@ -387,6 +387,9 @@ need "the stream boost setting is read before the connection starts" \
 in_order "rounded pictures keep their corners: the drawing is wrapped once the display exists" \
      src/app/ui/root.c "void app_ui_open(" \
      "lv_disp_t *disp = lv_disp_drv_register(driver);" "image_corners_install(disp);"
+in_order "a line draws with the argument LVGL reads: the drawing is wrapped once the display exists" \
+     src/app/ui/root.c "void app_ui_open(" \
+     "lv_disp_t *disp = lv_disp_drv_register(driver);" "draw_line_fix_install(disp);"
 
 # ⓘ The notes and the code stay in step: every "This fork:" line names a section
 # that exists, and every section is named by at least one such line.

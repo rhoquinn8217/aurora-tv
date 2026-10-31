@@ -324,3 +324,20 @@ to plain white and fully opaque (2026-10-26).
 
 **Merge guard:** "rounded pictures keep their corners: the drawing is wrapped
 once the display exists".
+
+## Drawing a line
+
+**Where:** `src/app/ui/root.c`, `app_ui_open()`, right after the display is
+registered; the fix is `src/app/lvgl/draw_line_fix.c`.
+
+LVGL's SDL renderer defines `lv_draw_sdl_draw_line` with five arguments and
+calls it with four, so the last, a `bool *` it writes whenever a line has no
+texture yet, is whatever the stack holds. The overlay's Bluetooth mark crashed
+the app on it (the lab, 2026-10-30); the top bar's mark and the Virtual Mouse
+tick wrote through the same pointer and got away with it. LVGL is a submodule
+of someone else's, so the display draws through a function that passes a real
+one.
+
+**Merge guard:** "a line draws with the argument LVGL reads: the drawing is
+wrapped once the display exists". Taking upstream's `root.c` back compiles, and
+any line in the app can write through a stray pointer again.
