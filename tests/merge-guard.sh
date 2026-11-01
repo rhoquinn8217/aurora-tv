@@ -218,7 +218,7 @@ need "input hold handed to the core" \
 
 # --- the calls app.c makes into bridge_app.c --------------------------------
 # ⓘ app.c is upstream's application file and edited in most releases. The
-# fork's code there is five one-line calls into src/app/bridge_app.c, and a
+# fork's code there is six one-line calls into src/app/bridge_app.c, and a
 # merge that takes upstream's side of app.c drops them without a sound.
 need "app.c disarms a microphone left streaming, at start" \
      src/app/app.c "bridge_app_before_sdl();"
@@ -231,7 +231,7 @@ need "app.c starts the command port" \
 need "app.c stops the command port" \
      src/app/app.c "bridge_app_stopping();"
 in_order "app.c runs the bridge's turn after SDL's events are filtered" \
-     src/app/app.c "void app_process_events" "SDL_FilterEvents(app_event_filter, app);" "bridge_app_events(app);"
+     src/app/app.c "void app_process_events" "bridge_app_filter_events(app_event_filter, app);" "bridge_app_events(app);"
 
 # --- the calls the stream files make into files of ours ------------------------
 # ⓘ session.c and session_events.c are upstream's stream files. The bridge's
@@ -343,6 +343,25 @@ need "the pad scan's flush waits until SDL's walk of its event queue is over" \
      src/app/input/input_gamepad.c "ctm_bridge_gesture_flush_device_added();"
 absent "the pad scan does NOT flush SDL's event queue itself (inside the walk, it tangles the queue)" \
      src/app/input/input_gamepad.c "SDL_FlushEvent(SDL_JOYDEVICEADDED)"
+need "SDL's walk of its event queue goes through ours" \
+     src/app/app.c "bridge_app_filter_events(app_event_filter, app);"
+absent "app.c does NOT start SDL's walk itself (a change of the mouse's mode during it tangles the queue)" \
+     src/app/app.c "SDL_FilterEvents("
+in_order "a change of the mouse's mode asked during SDL's walk waits until it is over" \
+     src/app/input/app_input.c "void app_set_mouse_grab(" \
+     "bridge_app_mouse_grab_later(input, grab)" "SDL_SetRelativeMouseMode("
+in_order "... and runs as the walk ends" \
+     src/app/bridge_app.c "void bridge_app_filter_events(" \
+     "SDL_FilterEvents(filter, userdata);" "app_set_mouse_grab("
+# ⓘ Any other caller would flush from inside the walk with nothing to stop it.
+other_mode_callers=$(grep -rl "SDL_SetRelativeMouseMode(" src/app --include='*.c' 2>/dev/null | grep -v '^src/app/input/app_input\.c$')
+if [ -z "$other_mode_callers" ] && [ -f src/app/input/app_input.c ]; then
+    pass=$((pass + 1))
+else
+    echo "⛔ LOST: only app_set_mouse_grab changes the mouse's mode"
+    echo "   also called from: $other_mode_callers"
+    fail=$((fail + 1))
+fi
 in_order "Connecting... closes an older box first" \
      src/app/ui/streaming/streaming.controller.c "static bool on_event(lv_fragment_t *self, int code, void *userdata) {" \
      "/* This fork: an older box goes first." "progress_dialog_create(locstr(\"Connecting...\"));"
