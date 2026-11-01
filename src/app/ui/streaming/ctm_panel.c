@@ -324,9 +324,16 @@ static lv_group_t *s_ctm_dead_nav    = NULL;
 #define CTM_PENDING_MS 6000
 /* ⓘ How often the watcher below looks while a bridge or a release is in flight. */
 #define CTM_PENDING_POLL_MS 400
-static char     s_ctm_pending_group[96];   /* "" while nothing is pending */
-static bool     s_ctm_pending_want = false;
-static uint32_t s_ctm_pending_until = 0;
+/* ⭐ ONE FOR EACH ROW ASKED ABOUT (code review, 2026-10-31). There was one, and
+ * Bridge All wrote over it device by device, so only the last device was
+ * watched: with a keyboard last, whose plug lands at once, the watching stopped
+ * while the pads were still pulsing, and they stayed BASIC. */
+typedef struct {
+    char group[96];   /* "" while free */
+    bool want;
+    uint32_t until;
+} pending_row_t;
+static pending_row_t s_pending_rows[DEVICE_GROUPS_MAX];
 static lv_timer_t *s_ctm_pending_timer = NULL;
 
 /* ⭐ Remember what we asked for, so the row can grey until it happens.
@@ -353,13 +360,44 @@ static void ctm_pending_watch_stop(void) {
     }
 }
 
-static void ctm_set_pending(const device_group_t *g, bool want) {
-    snprintf(s_ctm_pending_group, sizeof s_ctm_pending_group, "%s", s_ctm_devs[g->part[0]].group);
-    s_ctm_pending_want = want;
-    s_ctm_pending_until = lv_tick_get() + CTM_PENDING_MS;
+static pending_row_t *pending_row_find(const char *group) {
+    for (int i = 0; i < DEVICE_GROUPS_MAX; ++i) {
+        if (s_pending_rows[i].group[0] != '\0' && strcmp(s_pending_rows[i].group, group) == 0) {
+            return &s_pending_rows[i];
+        }
+    }
+    return NULL;
+}
+
+static bool pending_rows_any(void) {
+    for (int i = 0; i < DEVICE_GROUPS_MAX; ++i) {
+        if (s_pending_rows[i].group[0] != '\0') {
+            return true;
+        }
+    }
+    return false;
+}
+
+static void pending_watch_start(void) {
     if (s_ctm_pending_timer == NULL) {
         s_ctm_pending_timer = lv_timer_create(ctm_pending_watch_cb, CTM_PENDING_POLL_MS, NULL);
     }
+}
+
+static void ctm_set_pending(const device_group_t *g, bool want) {
+    const char *group = s_ctm_devs[g->part[0]].group;
+    pending_row_t *row = pending_row_find(group);
+    for (int i = 0; i < DEVICE_GROUPS_MAX && row == NULL; ++i) {
+        if (s_pending_rows[i].group[0] == '\0') {
+            row = &s_pending_rows[i];
+        }
+    }
+    if (row != NULL) {
+        snprintf(row->group, sizeof row->group, "%s", group);
+        row->want = want;
+        row->until = lv_tick_get() + CTM_PENDING_MS;
+    }
+    pending_watch_start();
 }
 
 /* Has the change asked for on the pending row landed, by the session table?
@@ -367,18 +405,18 @@ static void ctm_set_pending(const device_group_t *g, bool want) {
  * scans nothing for a device still in it. A part with no node (the TV remote's
  * row) cannot be asked this way, and is answered "yes", which refreshes as
  * before. */
-static bool ctm_pending_landed(void) {
+static bool ctm_pending_landed(const pending_row_t *row) {
     bool any = false;
     for (int i = 0; i < s_ctm_ndev; ++i) {
         const ctm_bridge_dev_t *d = &s_ctm_devs[i];
-        if (strcmp(d->group, s_ctm_pending_group) != 0) {
+        if (strcmp(d->group, row->group) != 0) {
             continue;
         }
         if (d->node[0] == '\0') {
             return true;
         }
         any = true;
-        if (ctm_bridge_node_is_plugged(d->node) != s_ctm_pending_want) {
+        if (ctm_bridge_node_is_plugged(d->node) != row->want) {
             return false;
         }
     }
@@ -399,13 +437,28 @@ static void ctm_pending_watch_cb(lv_timer_t *t) {
         ctm_pending_watch_stop();
         return;
     }
-    const bool done = s_ctm_pending_group[0] == '\0' ||
-                      lv_tick_get() > s_ctm_pending_until;
-    if (done || ctm_pending_landed()) {
-        ctm_request_refresh();  /* ⭐ Always one more at the end, so the last state is drawn. */
+    const uint32_t now = lv_tick_get();
+    bool refresh = false;
+    bool waiting = false;
+    for (int i = 0; i < DEVICE_GROUPS_MAX; ++i) {
+        pending_row_t *row = &s_pending_rows[i];
+        if (row->group[0] == '\0') {
+            continue;
+        }
+        if (now > row->until) {
+            row->group[0] = '\0';   /* out of time, or its device left the list */
+            refresh = true;
+            continue;
+        }
+        waiting = true;
+        refresh = refresh || ctm_pending_landed(row);
     }
-    if (done) {
+    if (!waiting) {
+        refresh = true;  /* ⭐ Always one more at the end, so the last state is drawn. */
         ctm_pending_watch_stop();
+    }
+    if (refresh) {
+        ctm_request_refresh();
     }
 }
 /* Bridge every part of the device on this row that is not bridged already:
@@ -458,7 +511,10 @@ static void ctm_bridge_device(int row) {
     if (asked > 0 && failed == asked) {
         /* ⓘ Every plug refused: nothing is on its way, so the row should not
          * grey for six seconds waiting for it. */
-        s_ctm_pending_group[0] = '\0';
+        pending_row_t *pending = pending_row_find(s_ctm_devs[g->part[0]].group);
+        if (pending != NULL) {
+            pending->group[0] = '\0';
+        }
     }
     /* ⛔ ASKING IS NOT BRIDGING. The gesture takes over and the plug happens on
      * a later tick, so a refresh now reads the OLD state and the row still says
@@ -532,10 +588,16 @@ static void ctm_bridge_all(void) {
  * apart, per device -- the overlay froze long enough to look like a crash.
  * Measured 2026-08-18.
  *
- * ⚠️ This still runs on the UI thread and still blocks; it just has far less to
- * do, and it does the same thing pressing each row would. Getting these calls
- * off the UI thread is a bigger change than this. */
+ * ⭐ EVERY ROW WATCHED, AS A ROW'S OWN RELEASE IS (code review, 2026-10-31).
+ * Nothing watched this one, and the refresh after it read sessions still
+ * stopping, which count as bridged, so every row stayed FULL until the next
+ * press. ⓘ Each release runs on a thread of its own since 2026-10-05. */
 static void ctm_release_all(void) {
+    for (int k = 0; k < s_ctm_ngroup; ++k) {
+        if (s_ctm_groups[k].plugged > 0) {
+            ctm_set_pending(&s_ctm_groups[k], false);
+        }
+    }
     for (int i = 0; i < s_ctm_ndev; ++i) {
         if (s_ctm_devs[i].plugged) {
             bridge_release_device(&s_ctm_devs[i]);
@@ -1090,11 +1152,11 @@ static lv_obj_t *ctm_make_dev_row(const device_group_t *g, int idx) {
         lv_obj_set_style_opa(row, LV_OPA_30, 0);
     }
 
-    if (s_ctm_pending_group[0] != '\0' &&
-        strcmp(s_ctm_pending_group, s_ctm_devs[g->part[0]].group) == 0) {
-        const bool landed = s_ctm_pending_want ? state_full : (g->plugged == 0);
-        if (landed || lv_tick_get() > s_ctm_pending_until) {
-            s_ctm_pending_group[0] = '\0';
+    pending_row_t *pending = pending_row_find(s_ctm_devs[g->part[0]].group);
+    if (pending != NULL) {
+        const bool landed = pending->want ? state_full : (g->plugged == 0);
+        if (landed || lv_tick_get() > pending->until) {
+            pending->group[0] = '\0';
         } else {
             lv_obj_set_style_opa(row, LV_OPA_50, 0);
         }
@@ -1655,6 +1717,11 @@ static void open_ctm_panel(lv_event_t *event) {
 
     app_input_set_group(&controller->global->ui.input, s_ctm_nav_group);
     ctm_panel_refresh();
+    /* ⓘ A row asked about before the panel last closed may still be on its way,
+     * and the watcher stopped with the panel: left alone, that row stays grey. */
+    if (pending_rows_any()) {
+        pending_watch_start();
+    }
 }
 
 /* ---- the seam ---------------------------------------------------------- */
