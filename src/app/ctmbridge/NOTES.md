@@ -88,6 +88,11 @@ none; the crash's address, `pc` and `lr`; and glibc's double free when SDL's eve
 loop stopped afterwards, the C1's abort at quit on 2026-10-21. Moving the
 request past the walk cured all three.
 
+Proven on a real set on 2026-11-01, the rooted monitor, by a test-only probe on
+two branches never merged, one run each: without this change the flush ran inside
+the walk and 13 of 16 old events were delivered again; with it the flush waited
+for the walk's end and none were.
+
 `bridge_app_filter_events()` (bridge_app.c) runs the walk and marks it, and
 `bridge_app_mouse_grab_later()` keeps a request made during it for the walk's end,
 the last one winning. The moves still waiting then are dropped, as upstream
