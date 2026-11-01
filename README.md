@@ -105,6 +105,29 @@ Located at **Settings (⚙️) → USB Bridge**.
 | **Cancel pairing and connecting** | Connecting and PIN pairing processes can be cancelled mid run. |
 | **Cosmetic changes** | • Purple highlight selector with Play and Stop buttons on streaming app that react under a pointer.<br>• The profile box is hidden when there is only one profile. |
 
+## Screenshots
+
+### USB Bridge
+
+<p>
+<a href="docs/images/aurora-usb-bridge-panel.png"><img src="docs/images/aurora-usb-bridge-panel.png" alt="USB Bridge panel" width="49%"></a>
+<a href="docs/images/aurora-usb-bridge-settings.png"><img src="docs/images/aurora-usb-bridge-settings.png" alt="USB Bridge settings" width="49%"></a>
+</p>
+
+### Streaming Menu and Cursor features
+
+<p>
+<a href="docs/images/aurora-streaming-menu.jpg"><img src="docs/images/aurora-streaming-menu.jpg" alt="Streaming menu" width="49%"></a>
+<a href="docs/images/aurora-cursor-alignment.png"><img src="docs/images/aurora-cursor-alignment.png" alt="Cursor alignment bar" width="49%"></a>
+</p>
+
+### Bluetooth manager
+
+<p>
+<a href="docs/images/aurora-bluetooth-overlay.png"><img src="docs/images/aurora-bluetooth-overlay.png" alt="Bluetooth Devices panel over the streaming overlay" width="49%"></a>
+<a href="docs/images/aurora-bluetooth-dashboard.jpg"><img src="docs/images/aurora-bluetooth-dashboard.jpg" alt="Bluetooth Devices panel in the dashboard" width="49%"></a>
+</p>
+
 ## Why this exists
 
 A DualSense connected to a webOS TV over Bluetooth already reached a PC with its
