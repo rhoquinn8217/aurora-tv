@@ -61,6 +61,48 @@ The merge guard keeps the call and checks that upstream's two `SDL_FlushEvent`
 lines do not come back there. If an upstream release drops the flush, drop the
 call with it.
 
+## The mouse mode's flush
+
+**Where:** `src/app/app.c`, `app_process_events()`, and
+`src/app/input/app_input.c`, `app_set_mouse_grab()`.
+
+When the mouse's mode really changes, `SDL_SetRelativeMouseMode` ends by
+dropping the mouse moves waiting in SDL's queue. Upstream changes it while
+handling a stream's open and close, the overlay opening and the on-screen
+keyboard, all inside `SDL_FilterEvents`. If the pointer is moving, the next entry
+SDL has already taken can be one of those moves, and the walk goes on through
+its spent entries, as in "The scan's flush" above. With "Absolute mouse mode" (the
+TV cursor) or "Use mouse hardware" on, the mode never changes and SDL flushes
+nothing.
+
+Seen on 2026-10-31 on the C1 (603), TV cursor off, as a stream opened: SIGSEGV
+at address 0xd, locking the mutex of a sync post delivered a second time, whose
+struct lay on a stack that had moved on (`app_bus_post_sync`). The next stream's
+main loop stopped at the same moment, which fits and is not proven; a stale
+callback stopped the same way in the lab's probe on 2026-10-21. No log says
+whether the pointer moved at that instant.
+
+Proven on 603's own SDL with the C1's own C library, under emulation, five runs
+each: an old event delivered twice with a move behind the request and once with
+none; the crash's address, `pc` and `lr`; and glibc's double free when SDL's event
+loop stopped afterwards, the C1's abort at quit on 2026-10-21. Moving the
+request past the walk cured all three.
+
+`bridge_app_filter_events()` (bridge_app.c) runs the walk and marks it, and
+`bridge_app_mouse_grab_later()` keeps a request made during it for the walk's end,
+the last one winning. The moves still waiting then are dropped, as upstream
+intends. Outside the walk nothing changes: `session_mouse.c` sends a pointer event
+read in the old mode to the host as an absolute position, so a request from the
+interface's own timers must not wait.
+
+⛔ Nothing inside the walk may make SDL drop queued events. In build 603 this was
+the last call that did: `SDL_StopTextInput` also flushes, and runs from an LVGL
+async call, after the walk.
+
+**Merge guard:** "SDL's walk of its event queue goes through ours", "a change of
+the mouse's mode asked during SDL's walk waits until it is over", "only
+app_set_mouse_grab changes the mouse's mode".
+
 ## One box at a time
 
 **Where:** `src/app/ui/streaming/streaming.controller.c`, `on_event()`, the

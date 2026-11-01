@@ -298,7 +298,7 @@ static int app_event_filter(void *userdata, SDL_Event *event) {
 
 void app_process_events(app_t *app) {
     SDL_PumpEvents();
-    SDL_FilterEvents(app_event_filter, app);
+    bridge_app_filter_events(app_event_filter, app);   /* This fork: SDL's walk of its queue, and a change of the mouse's mode held until it ends. Why: ctmbridge/NOTES.md, "The mouse mode's flush". */
     bridge_app_events(app);
     if (app->session != NULL) {
         session_update_touchpad_tap_hold(app->session);

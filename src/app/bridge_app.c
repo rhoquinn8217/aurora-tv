@@ -209,6 +209,45 @@ void bridge_app_stopping(void) {
     overlay_volume_deinit();
 }
 
+/* ⛔⛔ NOT INSIDE SDL'S WALK OF ITS QUEUE (2026-10-31). A change of the mouse's
+ * mode ends with SDL dropping the mouse moves it has queued, and upstream asks
+ * for one while it handles a stream's open and close, the overlay and the
+ * on-screen keyboard, all inside SDL_FilterEvents. The next entry SDL has
+ * already taken can be one of those moves: the walk then goes on through SDL's
+ * spent entries, delivering old events again. Why, and what that did on the C1:
+ * ctmbridge/NOTES.md, "The mouse mode's flush".
+ * ➡️ So a request made during the walk is kept, the last one winning, and runs
+ * as the walk ends, before anything reads the mode in that pass.
+ * ⛔ Only during the walk: a pointer event read in the old mode reaches the host
+ * as an absolute position (session_mouse.c), so a request from anywhere else
+ * still takes effect at once. */
+static SDL_threadID s_walking;   /* the thread inside the walk, 0 when none is */
+static struct {
+    bool due;
+    bool grab;
+    app_input_t *input;
+} s_grab_later;
+
+void bridge_app_filter_events(SDL_EventFilter filter, void *userdata) {
+    s_walking = SDL_ThreadID();
+    SDL_FilterEvents(filter, userdata);
+    s_walking = 0;
+    if (s_grab_later.due) {
+        s_grab_later.due = false;
+        app_set_mouse_grab(s_grab_later.input, s_grab_later.grab);
+    }
+}
+
+bool bridge_app_mouse_grab_later(app_input_t *input, bool grab) {
+    if (SDL_ThreadID() != s_walking) {
+        return false;
+    }
+    s_grab_later.due = true;
+    s_grab_later.grab = grab;
+    s_grab_later.input = input;
+    return true;
+}
+
 void bridge_app_events(app_t *app) {
     /* A crash asked for on purpose, from the control port's `crash test`. */
     crash_recorder_tick();

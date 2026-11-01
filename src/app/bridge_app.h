@@ -28,6 +28,15 @@ void bridge_app_started(app_t *app);
  * rest bridge_app_started brought up taken down. */
 void bridge_app_stopping(void);
 
+/* In app_process_events(), in place of SDL_FilterEvents: SDL's walk of its
+ * event queue, then a change of the mouse's mode that was asked for during it. */
+void bridge_app_filter_events(SDL_EventFilter filter, void *userdata);
+
+/* ⓘ The one call here that is not from app.c: first thing in
+ * app_set_mouse_grab() (input/app_input.c). True means the request came inside
+ * that walk and is kept for its end; false, that the caller goes on. */
+bool bridge_app_mouse_grab_later(app_input_t *input, bool grab);
+
 /* In app_process_events(), after SDL's events are filtered: the bridge's
  * gesture and the TV's keyboard grab take their turn. */
 void bridge_app_events(app_t *app);
