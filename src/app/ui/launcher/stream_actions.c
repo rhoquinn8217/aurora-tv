@@ -17,6 +17,7 @@
 #include "backend/pcmanager.h"
 #include "coverloader.h"
 #include "profile/profile_manager.h"   /* the profile box: hidden with one profile */
+#include "res.h"   /* Aurora's default cover */
 #include "util/path.h"
 #include "ui/common/click_away.h"
 #include "ui/common/progress_dialog.h"
@@ -303,6 +304,42 @@ static void bar_laid_out(lv_event_t *event) {
     }
 }
 
+/* ⭐ NO PICTURE FROM THE HOST: AURORA'S OWN DEFAULT (rhoquinn8217, 2026-11-01: "Why not use
+ * the default image of the Desktop as the icon?"). A tile in the grid falls back to it by
+ * itself, but the loader leaves these small pictures as it finds them, so with no cover
+ * they were an empty gap. So each starts on the default, and a cover replaces it.
+ * One description per size, kept for the life of the app: a picture holds on to it. */
+static const lv_img_dsc_t *default_picture(lv_coord_t width, lv_coord_t height) {
+    static lv_img_dsc_t sizes[3];
+    for (size_t i = 0; i < sizeof(sizes) / sizeof(sizes[0]); i++) {
+        lv_img_dsc_t *size = &sizes[i];
+        if (size->data == NULL) {
+            size->header.w = width;
+            size->header.h = height;
+            size->header.cf = LV_IMG_CF_TRUE_COLOR_ALPHA;
+            size->data_size = sizeof(lv_sdl_img_data_t);
+            size->data = (const uint8_t *) &lv_sdl_img_data_defcover;
+        }
+        if (size->header.w == width && size->header.h == height) {
+            return size;
+        }
+    }
+    return NULL;
+}
+
+/* The tile's own picture, small, in the tile's shape. ⚠️ No user data: the cover loader
+ * reads an object with some as a game tile. */
+static lv_obj_t *button_picture_new(lv_obj_t *btn) {
+    lv_obj_t *picture = lv_img_create(btn);
+    lv_obj_clear_flag(picture, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_size(picture, LV_DPX(22), LV_DPX(30));
+    lv_obj_set_style_radius(picture, LV_DPX(3), 0);
+    lv_obj_set_style_clip_corner(picture, true, 0);
+    lv_img_set_antialias(picture, true);
+    lv_img_set_src(picture, default_picture(LV_DPX(22), LV_DPX(30)));
+    return picture;
+}
+
 static void update_button(void) {
     if (s_btn == NULL || s_btn_name == NULL) {
         return;
@@ -327,7 +364,13 @@ static void update_button(void) {
         return;
     }
     lv_obj_add_flag(s_btn_word, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_clear_flag(s_btn_picture, LV_OBJ_FLAG_HIDDEN);
+    /* ⛔ A new object, not the default set on the old one: a picture that has held a cover
+     * lets go of it in its DELETE by reading its source as a cover. It also means a tile
+     * with no cover does not keep the last tile's. */
+    const uint32_t place = lv_obj_get_index(s_btn_picture);
+    lv_obj_del(s_btn_picture);
+    s_btn_picture = button_picture_new(s_btn);
+    lv_obj_move_to_index(s_btn_picture, (int32_t) place);
     fit_button_name();
     if (s_btn_covers == NULL) {
         s_btn_covers = coverloader_new(s_app);
@@ -686,14 +729,7 @@ void stream_actions_button(launcher_fragment_t *launcher, lv_obj_t *topbar) {
     lv_label_set_text_static(label, locstr("Streaming:"));
     lv_obj_clear_flag(label, LV_OBJ_FLAG_CLICKABLE);
 
-    /* The tile's own picture, small, in the tile's shape. ⚠️ No user data:
-     * the cover loader reads an object with some as a game tile. */
-    lv_obj_t *picture = lv_img_create(btn);
-    lv_obj_clear_flag(picture, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_set_size(picture, LV_DPX(22), LV_DPX(30));
-    lv_obj_set_style_radius(picture, LV_DPX(3), 0);
-    lv_obj_set_style_clip_corner(picture, true, 0);
-    lv_img_set_antialias(picture, true);
+    lv_obj_t *picture = button_picture_new(btn);
     lv_obj_add_flag(picture, LV_OBJ_FLAG_HIDDEN);
 
     /* Its width is the room the bar leaves it: fit_button_name. */
@@ -826,6 +862,7 @@ static lv_obj_t *add_picture(lv_obj_t *parent, int picture_id, lv_coord_t width,
     lv_obj_set_style_radius(picture, LV_DPX(4), 0);
     lv_obj_set_style_clip_corner(picture, true, 0);
     lv_img_set_antialias(picture, true);
+    lv_img_set_src(picture, default_picture(width, height));
     if (s_app != NULL) {
         if (s_menu_covers == NULL) {
             s_menu_covers = coverloader_new(s_app);
