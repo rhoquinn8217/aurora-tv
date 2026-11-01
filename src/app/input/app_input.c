@@ -1,6 +1,7 @@
 #include "app_input.h"
 #include "logging.h"
 #include "app.h"
+#include "bridge_app.h"
 #include "input_gamepad_mapping.h"
 #include "input_gamepad.h"
 
@@ -46,6 +47,7 @@ void app_input_deinit(app_input_t *input) {
 }
 
 void app_set_mouse_grab(app_input_t *input, bool grab) {
+    if (bridge_app_mouse_grab_later(input, grab)) { return; }   /* This fork: never inside SDL's walk of its queue. Why: ctmbridge/NOTES.md, "The mouse mode's flush". */
     if (!app_configuration->hardware_mouse) {
         SDL_SetRelativeMouseMode(grab && !app_configuration->absmouse ? SDL_TRUE : SDL_FALSE);
     }
