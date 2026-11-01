@@ -354,8 +354,9 @@ static void cmd_status(control_job_t *job)
                          : compat == CTM_BRIDGE_COMPAT_UPDATE_PC   ? "update-pc"
                          : compat == CTM_BRIDGE_COMPAT_UPDATE_TV   ? "update-tv"
                                                                    : "unknown";
-    reply(job, " bridge=%s listener=%s protocol=%s agent=\"%s\" core=%s",
-          ctm_bridge_active() ? "running" : "stopped", listener, protocol, agent, bridge_core_commit());
+    reply(job, " bridge=%s listener=%s protocol=%s agent=\"%s\" core=%s locked=%s",
+          ctm_bridge_active() ? "running" : "stopped", listener, protocol, agent, bridge_core_commit(),
+          ctm_bridge_agent_locked() ? "yes" : "no");
 #endif
     reply(job, "\n");
 }
@@ -1165,6 +1166,11 @@ static bool bridge_possible(control_job_t *job)
          * later meets a listener that has just started. */
         ctm_bridge_agent_recheck();
         reply(job, "ERR the listener is offline (checking again now)\n");
+        return false;
+    }
+    if (ctm_bridge_agent_locked()) {
+        ctm_bridge_agent_recheck();
+        reply(job, "ERR Windows is locked on the PC (checking again now)\n");
         return false;
     }
     /* ⓘ And as the panel does for a side that needs an update. */

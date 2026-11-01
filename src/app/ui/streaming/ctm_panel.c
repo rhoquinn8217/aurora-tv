@@ -119,12 +119,14 @@ static bool        s_ctm_server_known = false;
  * for it, can no more bridge than an offline one. The label says which side to
  * update, and a press is refused as an offline server's is, by flashing it. */
 static ctm_bridge_compat_t s_ctm_server_compat = CTM_BRIDGE_COMPAT_UNKNOWN;
+/* Windows is locked on the PC, and it takes no new bridge until it is unlocked. */
+static bool s_ctm_server_locked = false;
 
-/* Nothing can be bridged: the server is known to be offline, or to need an
- * update on one side. */
+/* Nothing can be bridged: the server is known to be offline, to need an update
+ * on one side, or to have Windows locked. */
 static bool ctm_server_refuses(void) {
     return s_ctm_server_known &&
-           (!s_ctm_server_online || s_ctm_server_compat == CTM_BRIDGE_COMPAT_UPDATE_PC ||
+           (!s_ctm_server_online || s_ctm_server_locked || s_ctm_server_compat == CTM_BRIDGE_COMPAT_UPDATE_PC ||
             s_ctm_server_compat == CTM_BRIDGE_COMPAT_UPDATE_TV);
 }
 
@@ -140,6 +142,7 @@ static void ctm_paint_state(void) {
         return;
     }
     const char *state = !s_ctm_server_online ? "- OFFLINE"
+                      : s_ctm_server_locked ? "- Windows is locked"
                       : s_ctm_server_compat == CTM_BRIDGE_COMPAT_UPDATE_PC ? "- Update DS5-USBIP on the PC"
                       : s_ctm_server_compat == CTM_BRIDGE_COMPAT_UPDATE_TV ? "- Update the TV app"
                       : "- ONLINE";
@@ -218,12 +221,15 @@ static void ctm_online_tick(lv_timer_t *t) {
     const bool known = ctm_bridge_agent_probed();
     const bool now = ctm_bridge_agent_online();
     const ctm_bridge_compat_t compat = ctm_bridge_agent_compat();
-    if (known == s_ctm_server_known && now == s_ctm_server_online && compat == s_ctm_server_compat) {
+    const bool locked = ctm_bridge_agent_locked();
+    if (known == s_ctm_server_known && now == s_ctm_server_online && compat == s_ctm_server_compat &&
+        locked == s_ctm_server_locked) {
         return;
     }
     s_ctm_server_known = known;
     s_ctm_server_online = now;
     s_ctm_server_compat = compat;
+    s_ctm_server_locked = locked;
     ctm_paint_state();
     /* ⓘ The rows and Bridge All are drawn from this state, so a change has to
      * rebuild them -- but only on a CHANGE, which is rare. */
@@ -248,10 +254,10 @@ static void ctm_flash_tick(lv_timer_t *t) {
 }
 
 static void ctm_flash_offline(void) {
-    /* ⭐ And in words (rhoquinn8217, 2026-11-01). Only for offline: the tag
-     * itself says which side needs an update. */
-    if (!s_ctm_server_online) {
-        bridge_prompt_note_bridge_refused();
+    /* ⭐ And in words (rhoquinn8217, 2026-11-01). Not for an update: the tag itself
+     * says which side needs it. */
+    if (!s_ctm_server_online || s_ctm_server_locked) {
+        bridge_prompt_note_bridge_refused(s_ctm_server_online);
     }
     if (!s_ctm_state_lbl) {
         return;
@@ -1308,6 +1314,7 @@ static void ctm_panel_refresh(void) {
         s_ctm_server_known = ctm_bridge_agent_probed();
         s_ctm_server_online = ctm_bridge_agent_online();
         s_ctm_server_compat = ctm_bridge_agent_compat();
+        s_ctm_server_locked = ctm_bridge_agent_locked();
         lv_label_set_text_fmt(s_ctm_status_lbl, "USB Server: %s", listener);
         ctm_paint_state();
     }

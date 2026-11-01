@@ -1496,6 +1496,11 @@ ctm_bridge_compat_t ctm_bridge_agent_compat(void)
                                                                   : CTM_BRIDGE_COMPAT_UNKNOWN;
 }
 
+bool ctm_bridge_agent_locked(void)
+{
+    return g_agent_locked != 0;
+}
+
 const char *ctm_bridge_agent_update_advice(void)
 {
     return protocol_advice((protocol_compat_t) ctm_bridge_agent_compat());

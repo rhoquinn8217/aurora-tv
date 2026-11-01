@@ -389,6 +389,7 @@ int auto_bridge_run(const bridge_settings_t *s)
 static SDL_atomic_t s_start_armed;      /* set by a stream's start, from its thread */
 static uint32_t s_start_since;          /* when the loop first saw it armed */
 static bool s_start_said;               /* its long wait is in the log */
+static bool s_waiting_said;             /* the message for a ticked device has been up */
 static bool s_offline_said;             /* the message for nothing ticked has been up */
 static uint32_t s_note_looked;          /* when the wait last looked for what to say */
 static uint32_t s_last_recheck;
@@ -449,14 +450,21 @@ static bool ab_appeared(const char *node)
     return false;
 }
 
-/* Does DS5-USBIP answer? ⓘ With `ask`, asks again every two seconds while it does
- * not: at a stream's start it may be starting with the stream. */
+/* Does DS5-USBIP answer, and take bridges? It takes none while Windows is locked. */
+static bool ab_bridges_taken(void)
+{
+    return ctm_bridge_agent_probed() && ctm_bridge_agent_online() && !ctm_bridge_agent_locked();
+}
+
+/* ⓘ With `ask`, asks again every two seconds while it does not: at a stream's
+ * start it may be starting with the stream. And always while Windows is locked:
+ * this PC has DS5-USBIP, and the bridge is wanted as soon as it is unlocked. */
 static bool ab_listener_ready(uint32_t now, bool ask)
 {
-    if (ctm_bridge_agent_probed() && ctm_bridge_agent_online()) {
+    if (ab_bridges_taken()) {
         return true;
     }
-    if (ask && now - s_last_recheck >= AB_RECHECK_MS) {
+    if ((ask || ctm_bridge_agent_locked()) && now - s_last_recheck >= AB_RECHECK_MS) {
         s_last_recheck = now;
         ctm_bridge_agent_recheck();
     }
@@ -485,31 +493,35 @@ static bool ab_ticked_connected(void)
 /* Is a stream's start still waiting? Asked by the message it raises. */
 static bool ab_start_waiting(void)
 {
-    return SDL_AtomicGet(&s_start_armed) && !(ctm_bridge_agent_probed() && ctm_bridge_agent_online());
+    return SDL_AtomicGet(&s_start_armed) && !ab_bridges_taken();
 }
 
 /* ⭐ WHAT THE SCREEN SAYS WHILE A STREAM'S START WAITS (rhoquinn8217, 2026-11-01).
- * With a ticked device connected, for as long as the wait lasts, so nobody is
- * left not knowing it waits; with none, once and for the usual time.
+ * With a ticked device connected, that Auto Bridge waits; with none, that
+ * DS5-USBIP is offline, and nothing if it only has Windows locked. Each once in a
+ * stream, for the usual time, and the wait goes on without it.
  * ⓘ The TV cannot tell a PC at its sign-in screen from one with DS5-USBIP not
  * running: neither answers, and Vibepollo tells no client about a held launch.
  * So the words cover both. */
 static void ab_say_waiting(uint32_t now)
 {
-    if (now - s_start_since < AB_NOTE_AFTER_MS || !ctm_bridge_agent_probed() ||
+    if (s_waiting_said || now - s_start_since < AB_NOTE_AFTER_MS || !ctm_bridge_agent_probed() ||
         now - s_note_looked < AB_RECHECK_MS || bridge_prompt_note_up() || bridge_prompt_shown()) {
         return;
     }
     s_note_looked = now;
+    const bool locked = ctm_bridge_agent_locked();
     if (ab_ticked_connected()) {
-        bridge_prompt_note_while(locstr("Auto Bridge is waiting on DS5-USBIP. If you are at the sign-in screen, "
-                                        "please sign in. Otherwise, start DS5-USBIP."),
-                                 ab_start_waiting, false);
-    } else if (!s_offline_said) {
+        s_waiting_said = true;
+        bridge_prompt_note_while(locked ? locstr("Auto Bridge is waiting for Windows to be unlocked.")
+                                        : locstr("Auto Bridge is waiting on DS5-USBIP. If you are at the sign-in "
+                                                 "screen, please sign in. Otherwise, start DS5-USBIP."),
+                                 ab_start_waiting);
+    } else if (!locked && !s_offline_said) {
         s_offline_said = true;
         bridge_prompt_note_while(locstr("DS5-USBIP is offline. If you are at the sign-in screen, please sign in. "
                                         "Otherwise, start DS5-USBIP."),
-                                 ab_start_waiting, true);
+                                 ab_start_waiting);
     }
 }
 
@@ -604,6 +616,7 @@ void auto_bridge_poll(bool streaming)
         if (s_start_since == 0) {
             s_start_since = now;
             s_start_said = false;
+            s_waiting_said = false;
             s_offline_said = false;
             s_note_looked = 0;
         }
@@ -648,7 +661,8 @@ void auto_bridge_poll(bool streaming)
         return;
     }
     if (!ab_listener_ready(now, true)) {
-        if (now - s_last_appeared >= AB_NODE_WAIT_MS) {
+        /* ⓘ Not while Windows is locked: it bridges at the unlock. */
+        if (now - s_last_appeared >= AB_NODE_WAIT_MS && !ctm_bridge_agent_locked()) {
             ctm_bridge_gesture_note("auto bridge: DS5-USBIP does not answer -- %d new node(s) left with the TV",
                                     s_appeared_count);
             s_appeared_count = 0;
