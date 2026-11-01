@@ -117,6 +117,18 @@ void bridge_prompt_stream_ended(void);
  * at the top left). */
 void bridge_prompt_note(const char *text);
 
+/* The same message for as long as `still_true`, asked four times a second, says;
+ * and, with `timed`, no longer than the usual time. */
+void bridge_prompt_note_while(const char *text, bool (*still_true)(void), bool timed);
+
+/* Is a message up in the pop-up's place? */
+bool bridge_prompt_note_up(void);
+
+/* A bridge somebody asked for did not reach DS5-USBIP, said on the screen
+ * (rhoquinn8217, 2026-11-01). The TV cannot tell a PC at its sign-in screen from
+ * one with DS5-USBIP not running, so the words cover both. */
+void bridge_prompt_note_bridge_refused(void);
+
 /* For the control port: the seconds left on the count, 0 when it is not up;
  * and its first button, the one that turns it off, pressed without a hand.
  * False when it is not up. ⓘ Its second button does what a dismissal does. */
@@ -149,5 +161,11 @@ bool bridge_prompt_measure(bridge_prompt_measure_t *out);
 /* The same for the message a pressed button leaves. Returns the milliseconds
  * it has left, or -1 when it is not on the screen. */
 int bridge_prompt_note_measure(bridge_prompt_measure_t *out);
+
+/* What the measure above reads for a message with no time of its own. */
+#define PROMPT_NOTE_UNTIMED 999999
+
+/* The message's words, for the control port; empty when none is up. */
+const char *bridge_prompt_note_words(void);
 
 #endif /* BRIDGE_PROMPT_H */

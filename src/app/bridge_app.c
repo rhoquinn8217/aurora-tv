@@ -300,6 +300,9 @@ void bridge_app_events(app_t *app) {
      * device that arrived then was bridged to the last stream's PC, with
      * nothing to release it until the next stream ended. */
     auto_bridge_poll(app->session != NULL && ctm_bridge_active());
+    if (ctm_bridge_gesture_take_refused_offline()) {
+        bridge_prompt_note_bridge_refused();
+    }
     if (app->session == NULL) {
         s_asked_at_bridge = 0;
     }

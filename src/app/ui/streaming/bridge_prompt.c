@@ -62,9 +62,10 @@
  * went off and where to bring it back. Only that button raises it: the other
  * button, the count running out and a dismissal change nothing, so they say
  * nothing.
- * ⓘ It stays this long, the time the app's other timed notice has for two
- * sentences, and takes no input: the game has the controller back at once. */
-#define PROMPT_NOTE_MS 7000
+ * ⓘ Four seconds, as for every message that asks for no choice (rhoquinn8217,
+ * 2026-11-01: "7 seconds is too long"), and it takes no input: the game has the
+ * controller back at once. */
+#define PROMPT_NOTE_MS 4000
 /* How often it asks whether it is still true. */
 #define PROMPT_NOTE_TICK_MS 250
 
@@ -126,6 +127,8 @@ static const char *s_done = "";
 static lv_obj_t *s_note = NULL;
 static lv_timer_t *s_note_timer = NULL;
 static uint32_t s_note_since = 0;
+/* How long this one stays: 0 for as long as what it says is true. */
+static uint32_t s_note_ms = PROMPT_NOTE_MS;
 /* Which message is up, for the log, and what has to stay so for it to stay:
  * NULL when only its time and the stream decide. */
 static const char *s_note_what = "";
@@ -256,7 +259,7 @@ static void note_remove(void) {
  * button down with them; the stream ending takes down either message. */
 static void note_tick(lv_timer_t *timer) {
     (void) timer;
-    if (lv_tick_elaps(s_note_since) >= PROMPT_NOTE_MS || (s_note_true != NULL && !s_note_true()) ||
+    if ((s_note_ms != 0 && lv_tick_elaps(s_note_since) >= s_note_ms) || (s_note_true != NULL && !s_note_true()) ||
         global == NULL || global->session == NULL) {
         note_remove();
     }
@@ -290,8 +293,10 @@ static void dialogue_dim(lv_obj_t *parent, lv_opa_t *opa, lv_color_t *color) {
  * `backdrop` is the dim behind the pop-up it follows; NULL for a message that
  * follows no pop-up, which takes the theme's dim for a dialogue, so that both
  * messages look the same. `what` names it in the log, and `still_true`, when
- * not NULL, is asked four times a second whether it may stay. */
-static void note_show(const char *text, const char *what, bool (*still_true)(void), const lv_obj_t *backdrop) {
+ * not NULL, is asked four times a second whether it may stay. `lasts_ms` is how
+ * long it stays, 0 for as long as `still_true` says. */
+static void note_show(const char *text, const char *what, bool (*still_true)(void), const lv_obj_t *backdrop,
+                      uint32_t lasts_ms) {
     note_remove();
     if (text == NULL || text[0] == '\0') {
         return;
@@ -334,8 +339,9 @@ static void note_show(const char *text, const char *what, bool (*still_true)(voi
     s_note_what = what;
     s_note_true = still_true;
     s_note_since = lv_tick_get();
+    s_note_ms = lasts_ms;
     s_note_timer = lv_timer_create(note_tick, PROMPT_NOTE_TICK_MS, NULL);
-    commons_log_info("Streaming", "bridge prompt: %s is up for %d ms", what, PROMPT_NOTE_MS);
+    commons_log_info("Streaming", "bridge prompt: %s is up for %d ms (0: while it is true)", what, (int) lasts_ms);
 }
 
 /* The theme's message box, made compact and see-through. ⓘ Everything here is
@@ -446,7 +452,8 @@ static void switch_off(const char *by) {
         if (!tv_cursor_set_mode(false) || s_mbox == NULL) {
             return;
         }
-        note_show(s_done, "the message after the TV cursor's button", tv_cursor_off, lv_obj_get_parent(s_mbox));
+        note_show(s_done, "the message after the TV cursor's button", tv_cursor_off, lv_obj_get_parent(s_mbox),
+                  PROMPT_NOTE_MS);
         return;
     }
     commons_log_info("Streaming", "bridge prompt: accepted, %s -- the TV's mouse controls go off", by);
@@ -455,7 +462,7 @@ static void switch_off(const char *by) {
     if (!mouse_controls_off() || s_mbox == NULL) {
         return;
     }
-    note_show(s_done, "the message after the button", mouse_controls_off, lv_obj_get_parent(s_mbox));
+    note_show(s_done, "the message after the button", mouse_controls_off, lv_obj_get_parent(s_mbox), PROMPT_NOTE_MS);
 }
 
 static void on_button(lv_event_t *event) {
@@ -632,7 +639,24 @@ void bridge_prompt_note(const char *text) {
     if (s_mbox != NULL) {
         return;
     }
-    note_show(text, "a message in its place", NULL, NULL);
+    note_show(text, "a message in its place", NULL, NULL, PROMPT_NOTE_MS);
+}
+
+void bridge_prompt_note_while(const char *text, bool (*still_true)(void), bool timed) {
+    /* ⓘ Not while the pop-up is up, as above. */
+    if (s_mbox != NULL) {
+        return;
+    }
+    note_show(text, "a message while it is true", still_true, NULL, timed ? PROMPT_NOTE_MS : 0);
+}
+
+bool bridge_prompt_note_up(void) {
+    return s_note != NULL;
+}
+
+void bridge_prompt_note_bridge_refused(void) {
+    bridge_prompt_note(locstr("Unable to bridge device. DS5-USBIP is offline. "
+                              "If you are at the sign-in screen, please sign in first."));
 }
 
 static void measure(const lv_obj_t *box, const lv_obj_t *label, bridge_prompt_measure_t *out) {
@@ -681,6 +705,13 @@ int bridge_prompt_note_measure(bridge_prompt_measure_t *out) {
         return -1;
     }
     measure(s_note, lv_obj_get_child(s_note, 0), out);
+    if (s_note_ms == 0) {
+        return PROMPT_NOTE_UNTIMED;
+    }
     const uint32_t shown = lv_tick_elaps(s_note_since);
-    return shown >= PROMPT_NOTE_MS ? 0 : (int) (PROMPT_NOTE_MS - shown);
+    return shown >= s_note_ms ? 0 : (int) (s_note_ms - shown);
+}
+
+const char *bridge_prompt_note_words(void) {
+    return s_note != NULL ? lv_label_get_text(lv_obj_get_child(s_note, 0)) : "";
 }

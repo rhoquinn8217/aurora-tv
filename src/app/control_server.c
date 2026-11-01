@@ -298,8 +298,10 @@ static void cmd_prompt(control_job_t *job, const char *args)
         bridge_prompt_measure_t m;
         const int note_ms = bridge_prompt_note_measure(&m);
         if (note_ms >= 0) {
-            reply(job, "OK prompt=down note=up ms_left=%d size=%dx%d at=%d,%d bottom=%d buttons_top=%d lines=%d\n",
-                  note_ms, m.width, m.height, m.x, m.y, m.y + m.height, m.buttons_top, m.text_lines);
+            reply(job, "OK prompt=down note=up ms_left=%d size=%dx%d at=%d,%d bottom=%d buttons_top=%d lines=%d "
+                       "words=\"%s\"\n",
+                  note_ms, m.width, m.height, m.x, m.y, m.y + m.height, m.buttons_top, m.text_lines,
+                  bridge_prompt_note_words());
         } else {
             reply(job, "OK prompt=down note=down\n");
         }

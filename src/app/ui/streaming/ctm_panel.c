@@ -29,6 +29,7 @@
 #include "input/ctm_bridge_gesture.h"
 #include "input/bridge_request.h"
 #include "input/device_groups.h"
+#include "bridge_prompt.h"
 #include "lvgl/font/material_icons_regular_symbols.h"
 #include "lvgl/theme/lv_theme_moonlight.h"
 
@@ -247,6 +248,11 @@ static void ctm_flash_tick(lv_timer_t *t) {
 }
 
 static void ctm_flash_offline(void) {
+    /* ⭐ And in words (rhoquinn8217, 2026-11-01). Only for offline: the tag
+     * itself says which side needs an update. */
+    if (!s_ctm_server_online) {
+        bridge_prompt_note_bridge_refused();
+    }
     if (!s_ctm_state_lbl) {
         return;
     }
