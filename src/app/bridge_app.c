@@ -304,6 +304,10 @@ void bridge_app_events(app_t *app) {
     if (refused != CTM_BRIDGE_REFUSED_NONE) {
         bridge_prompt_note_bridge_refused(refused == CTM_BRIDGE_REFUSED_LOCKED);
     }
+    /* A lock newer than the last probe's answer: what is ticked bridges at the unlock. */
+    if (refused == CTM_BRIDGE_REFUSED_LOCKED) {
+        auto_bridge_stream_started();
+    }
     if (app->session == NULL) {
         s_asked_at_bridge = 0;
     }
