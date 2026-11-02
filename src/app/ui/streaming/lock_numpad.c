@@ -7,6 +7,9 @@
 #include "ui/common/pad_marks.h"
 #include "ui/root.h"
 #include "util/i18n.h"
+#if defined(TARGET_WEBOS)
+#include "input/auto_bridge.h"
+#endif
 
 /* The keyboard's own colours (soft_keyboard.c), as this gives way to it. */
 #define NUMPAD_PANEL_BG lv_color_hex(0x1B1B1B)
@@ -37,7 +40,11 @@
  * down, which puts its foot about level with "Sign-in options". */
 #define NUMPAD_AT_X 625
 #define NUMPAD_AT_Y 234
+/* Where the line about Auto Bridge goes: below the list, with the numpad open as well,
+ * so that it does not move. */
+#define NUMPAD_AFTER_Y (NUMPAD_MARGIN_Y + LV_DPX(285))
 
+static lv_obj_t *s_after;
 static lv_obj_t *s_up;
 static bool s_up_open;
 static pad_family_t s_shown_family;
@@ -115,7 +122,7 @@ static lv_obj_t *numpad_create(pad_family_t family) {
                                         (lv_coord_t) (lv_disp_get_ver_res(NULL) * NUMPAD_AT_Y / 1000));
     lv_obj_set_style_pad_row(panel, LV_DPX(8), 0);
 
-    words_create(panel, locstr("Type your PIN."), lv_theme_get_font_small(panel));
+    words_create(panel, locstr("Controller to numpad input."), lv_theme_get_font_small(panel));
 
     lv_obj_t *grid = box_create(panel);
     lv_obj_set_size(grid, 3 * NUMPAD_KEY_W + 2 * NUMPAD_GAP, LV_SIZE_CONTENT);
@@ -135,7 +142,7 @@ static lv_obj_t *numpad_create(pad_family_t family) {
     key_create(grid, "0", true, PAD_MARK_WEST, family);
     key_create(grid, locstr("Bksp"), false, PAD_MARK_VIEW, family);
 
-    mark_row_create(panel, PAD_MARK_EAST, family, locstr("- closes the numpad"));
+    mark_row_create(panel, PAD_MARK_EAST, family, locstr("- close numpad"));
     return panel;
 }
 
@@ -146,8 +153,17 @@ static lv_obj_t *list_create(pad_family_t family) {
     lv_obj_set_style_pad_row(panel, NUMPAD_LIST_GAP, 0);
     const lv_font_t *font = lv_theme_get_font_small(panel);
 
-    lv_obj_t *title = words_create(panel, locstr("Controller"), font);
-    lv_obj_set_style_pad_bottom(title, LV_DPX(6), 0);
+    /* A line under the heading, to set it off from the rebinds. ⓘ The heading's own
+     * border: it is the list's widest line, so the rule runs the list's width. A box of
+     * 100% would come out with no width at all in a panel sized by its content. */
+    lv_obj_t *title = words_create(panel, locstr("Windows Sign In: Controller"), font);
+    lv_obj_set_style_pad_bottom(title, LV_DPX(4), 0);
+    lv_obj_set_style_border_side(title, LV_BORDER_SIDE_BOTTOM, 0);
+    lv_obj_set_style_border_width(title, LV_DPX(1), 0);
+    lv_obj_set_style_border_color(title, NUMPAD_MARK, 0);
+    lv_obj_set_style_border_opa(title, LV_OPA_COVER, 0);
+    lv_obj_t *gap = box_create(panel);
+    lv_obj_set_size(gap, 1, LV_DPX(2));
     words_create(panel, locstr("Right stick - mouse"), font);
     words_create(panel, locstr("Touchpad - mouse"), font);
     words_create(panel, locstr("1 finger tap - left click"), font);
@@ -157,8 +173,8 @@ static lv_obj_t *list_create(pad_family_t family) {
     mark_row_create(panel, PAD_MARK_DPAD, family, locstr("- arrow keys"));
     mark_row_create(panel, PAD_MARK_SOUTH, family, locstr("- Enter"));
     mark_row_create(panel, PAD_MARK_EAST, family, locstr("- Esc"));
-    mark_row_create(panel, PAD_MARK_NORTH, family, locstr("- keyboard"));
-    mark_row_create(panel, PAD_MARK_WEST, family, locstr("- numpad"));
+    mark_row_create(panel, PAD_MARK_WEST, family, locstr("- keyboard"));
+    mark_row_create(panel, PAD_MARK_NORTH, family, locstr("- numpad"));
     return panel;
 }
 
@@ -169,8 +185,28 @@ static void take_down(void) {
     }
 }
 
+static bool after_sign_in(void) {
+#if defined(TARGET_WEBOS)
+    return auto_bridge_after_sign_in();
+#else
+    return false;
+#endif
+}
+
+static void after_show(bool show) {
+    if (show && s_after == NULL) {
+        s_after = dark_panel_create(NUMPAD_MARGIN_X, NUMPAD_AFTER_Y);
+        words_create(s_after, locstr("Devices will be auto bridged after sign in."), lv_theme_get_font_small(s_after));
+    } else if (!show && s_after != NULL) {
+        lv_obj_del(s_after);
+        s_after = NULL;
+    }
+}
+
 void lock_numpad_tick(void) {
-    if (!lock_keys_active() || ui_should_block_input() || !lock_keys_pad_on_stream()) {
+    const bool showing = lock_keys_active() && !ui_should_block_input();
+    after_show(showing && after_sign_in());
+    if (!showing || !lock_keys_pad_on_stream()) {
         take_down();
         return;
     }
@@ -183,6 +219,10 @@ void lock_numpad_tick(void) {
     s_up = open ? numpad_create(family) : list_create(family);
     s_up_open = open;
     s_shown_family = family;
+}
+
+bool lock_numpad_after_up(void) {
+    return s_after != NULL;
 }
 
 const char *lock_numpad_state(void) {

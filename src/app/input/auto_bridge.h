@@ -107,6 +107,10 @@ void auto_bridge_note_node(const char *path);
 /* Once per pass of the app's loop. */
 void auto_bridge_poll(bool streaming);
 
+/* Is a ticked device waiting for Windows to be unlocked? The screen says so for as long
+ * as it is (ui/streaming/lock_numpad.h). */
+bool auto_bridge_after_sign_in(void);
+
 #else
 #define auto_bridge_stream_started() ((void) 0)
 #define auto_bridge_stream_stopped() ((void) 0)

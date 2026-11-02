@@ -228,9 +228,9 @@ static lock_act_t action_for(uint8_t what, bool numpad_open, short *key) {
             *key = VK_ESCAPE;
             break;
         case SDL_CONTROLLER_BUTTON_X:
-            return LOCK_ACT_NUMPAD_OPEN;
-        case SDL_CONTROLLER_BUTTON_Y:
             return LOCK_ACT_KEYBOARD;
+        case SDL_CONTROLLER_BUTTON_Y:
+            return LOCK_ACT_NUMPAD_OPEN;
         default:
             return LOCK_ACT_NONE;
     }

@@ -12,12 +12,13 @@
  * ⭐ THE NUMPAD CLOSED, HOW A LOCK STARTS: the controller is a mouse. Virtual Mouse
  * as GuiDev1994 made it, turned on for the lock: the right stick moves the mouse; the
  * touchpad is the mouse, a one-finger tap a left click and a two-finger tap a right
- * click; Triangle opens the on-screen keyboard. The triggers are held as long as they
- * are, so a drag works, and they are NOT his: R2 is the left button and L2 the right,
- * as DS5-USBIP's own configs have them (their word, after a real lock: "Switch R2 and
- * L2 mouse buttons to match ours"). His stay his outside a lock. Beside his, as keys,
- * since the lock screen often ignores a controller: Cross is Enter, Circle is Esc, the
- * d-pad the arrow keys. Square opens the numpad.
+ * click. The triggers are held as long as they are, so a drag works, and they are NOT
+ * his: R2 is the left button and L2 the right, as DS5-USBIP's own configs have them
+ * (their word, after a real lock: "Switch R2 and L2 mouse buttons to match ours"). His
+ * stay his outside a lock. Beside his, as keys, since the lock screen often ignores a
+ * controller: Cross is Enter, Circle is Esc, the d-pad the arrow keys. Square opens the
+ * on-screen keyboard and Triangle the numpad ("Switch square and triangle functions"),
+ * the other way from his Triangle.
  *
  * ⭐ THE NUMPAD OPEN: the buttons type (their word: "When it is open, that's when
  * the numpad works"). On Windows' own map, so one layout holds at every lock.

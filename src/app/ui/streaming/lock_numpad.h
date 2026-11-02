@@ -10,7 +10,14 @@
  * as Windows is locked. It asks for no choice and it is not timed: the four seconds of
  * every other message do not fit something read while using it. ⓘ It takes no input, on
  * the system layer as the notices are. It goes while the overlay or the keyboard has
- * the input, and comes back as they close, as it was. */
+ * the input, and comes back as they close, as it was.
+ *
+ * ⭐ AND ONE LINE UNDER THE LIST, UP THE SAME WAY, while something ticked waits for the
+ * unlock (rhoquinn8217, 2026-11-01: "Since we now have a word that can be read from
+ * DS5-USBIP, replace "Auto Bridge is waiting for Windows to be unlocked" to "Devices will
+ * be auto bridged after sign in."  Leave this up like the login controller legend and the
+ * numpad until the user logs in"). Under the list and not in the notices' corner: that
+ * corner is where a sign-in screen lists its other users. */
 
 #pragma once
 
@@ -24,6 +31,9 @@ void lock_numpad_tick(void);
 /* What it shows, for the control port: "off", "open" (the numpad) or "closed" (the
  * list of what the buttons do). */
 const char *lock_numpad_state(void);
+
+/* Is the line about Auto Bridge up? For the control port. */
+bool lock_numpad_after_up(void);
 
 /* Where it is, on the screen. False when nothing is up. */
 bool lock_numpad_area(lv_area_t *out);

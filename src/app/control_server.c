@@ -348,8 +348,9 @@ static void cmd_numpad(control_job_t *job, const char *args)
     }
     lv_area_t area = {0, 0, 0, 0};
     const bool up = lock_numpad_area(&area);
-    reply(job, "OK numpad=%s locked=%s pad=%s marks=%s typed=%u size=%dx%d at=%d,%d kbd_place=%s\n",
-          lock_numpad_state(), lock_keys_active() ? "yes" : "no", lock_keys_pad_on_stream() ? "yes" : "no",
+    reply(job, "OK numpad=%s after_sign_in=%s locked=%s pad=%s marks=%s typed=%u size=%dx%d at=%d,%d kbd_place=%s\n",
+          lock_numpad_state(), lock_numpad_after_up() ? "yes" : "no", lock_keys_active() ? "yes" : "no",
+          lock_keys_pad_on_stream() ? "yes" : "no",
           pad_family_current() == PAD_FAMILY_XBOX ? "xbox" : "ps", lock_keys_typed(),
           up ? (int) lv_area_get_width(&area) : 0, up ? (int) lv_area_get_height(&area) : 0,
           (int) area.x1, (int) area.y1, keyboard_place_name());
