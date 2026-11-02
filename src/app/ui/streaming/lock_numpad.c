@@ -18,19 +18,25 @@
 /* ⓘ LV_DPX(n) is 2n pixels on a 1920-wide interface. */
 #define NUMPAD_MARGIN_X LV_DPX(30)
 #define NUMPAD_MARGIN_Y LV_DPX(20)
-#define NUMPAD_PAD LV_DPX(12)
-#define NUMPAD_GAP LV_DPX(6)
-#define NUMPAD_KEY_W LV_DPX(75)
-#define NUMPAD_KEY_H LV_DPX(50)
-#define NUMPAD_KEY_MARK LV_DPX(22)
+#define NUMPAD_PAD LV_DPX(10)
+#define NUMPAD_GAP LV_DPX(5)
+#define NUMPAD_KEY_W LV_DPX(64)
+#define NUMPAD_KEY_H LV_DPX(42)
+#define NUMPAD_KEY_MARK LV_DPX(19)
 #define NUMPAD_KEY_INSET LV_DPX(3)
 #define NUMPAD_LEGEND_MARK LV_DPX(18)
 #define NUMPAD_LIST_GAP LV_DPX(3)
 /* A digit sits a little left of the middle and below it: the mark has the corner.
  * A word is wider, so it sits along the foot of the key, under the mark. */
-#define NUMPAD_DIGIT_LEFT LV_DPX(12)
-#define NUMPAD_DIGIT_DROP LV_DPX(6)
-#define NUMPAD_WORD_LIFT LV_DPX(4)
+#define NUMPAD_DIGIT_LEFT LV_DPX(10)
+#define NUMPAD_DIGIT_DROP LV_DPX(5)
+#define NUMPAD_WORD_LIFT LV_DPX(3)
+/* ⭐ WHERE THE NUMPAD GOES, in thousandths of the screen, read off their photo of the
+ * lock screen on a 4K stream (2026-11-01). The PIN box ends 599 across, so this starts
+ * a little past it; and it starts level with the top of the picture of the user, 234
+ * down, which puts its foot about level with "Sign-in options". */
+#define NUMPAD_AT_X 625
+#define NUMPAD_AT_Y 234
 
 static lv_obj_t *s_up;
 static bool s_up_open;
@@ -92,23 +98,24 @@ static void mark_row_create(lv_obj_t *parent, pad_mark_t mark, pad_family_t fami
     words_create(row, words, lv_theme_get_font_small(parent));
 }
 
-static lv_obj_t *dark_panel_create(void) {
+static lv_obj_t *dark_panel_create(lv_coord_t x, lv_coord_t y) {
     lv_obj_t *panel = box_create(lv_layer_sys());
     lv_obj_set_style_bg_color(panel, NUMPAD_PANEL_BG, 0);
     lv_obj_set_style_bg_opa(panel, LV_OPA_90, 0);
     lv_obj_set_style_radius(panel, LV_DPX(10), 0);
     lv_obj_set_style_pad_all(panel, NUMPAD_PAD, 0);
     lv_obj_set_size(panel, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
-    lv_obj_align(panel, LV_ALIGN_TOP_LEFT, NUMPAD_MARGIN_X, NUMPAD_MARGIN_Y);
+    lv_obj_align(panel, LV_ALIGN_TOP_LEFT, x, y);
     lv_obj_set_flex_flow(panel, LV_FLEX_FLOW_COLUMN);
     return panel;
 }
 
 static lv_obj_t *numpad_create(pad_family_t family) {
-    lv_obj_t *panel = dark_panel_create();
+    lv_obj_t *panel = dark_panel_create((lv_coord_t) (lv_disp_get_hor_res(NULL) * NUMPAD_AT_X / 1000),
+                                        (lv_coord_t) (lv_disp_get_ver_res(NULL) * NUMPAD_AT_Y / 1000));
     lv_obj_set_style_pad_row(panel, LV_DPX(8), 0);
 
-    words_create(panel, locstr("Windows is locked. Type your PIN."), lv_theme_get_font_small(panel));
+    words_create(panel, locstr("Type your PIN."), lv_theme_get_font_small(panel));
 
     lv_obj_t *grid = box_create(panel);
     lv_obj_set_size(grid, 3 * NUMPAD_KEY_W + 2 * NUMPAD_GAP, LV_SIZE_CONTENT);
@@ -135,17 +142,18 @@ static lv_obj_t *numpad_create(pad_family_t family) {
 /* The numpad closed: every button that does something, as the configs window's rows
  * read: a mark, a plain hyphen, what it does. */
 static lv_obj_t *list_create(pad_family_t family) {
-    lv_obj_t *panel = dark_panel_create();
+    lv_obj_t *panel = dark_panel_create(NUMPAD_MARGIN_X, NUMPAD_MARGIN_Y);
     lv_obj_set_style_pad_row(panel, NUMPAD_LIST_GAP, 0);
     const lv_font_t *font = lv_theme_get_font_small(panel);
 
-    words_create(panel, locstr("Windows is locked. Click to sign in."), font);
+    lv_obj_t *title = words_create(panel, locstr("Controller"), font);
+    lv_obj_set_style_pad_bottom(title, LV_DPX(6), 0);
     words_create(panel, locstr("Right stick - mouse"), font);
     words_create(panel, locstr("Touchpad - mouse"), font);
     words_create(panel, locstr("1 finger tap - left click"), font);
     words_create(panel, locstr("2 finger tap - right click"), font);
-    mark_row_create(panel, PAD_MARK_L2, family, locstr("- left click"));
-    mark_row_create(panel, PAD_MARK_R2, family, locstr("- right click"));
+    mark_row_create(panel, PAD_MARK_R2, family, locstr("- left click"));
+    mark_row_create(panel, PAD_MARK_L2, family, locstr("- right click"));
     mark_row_create(panel, PAD_MARK_DPAD, family, locstr("- arrow keys"));
     mark_row_create(panel, PAD_MARK_SOUTH, family, locstr("- Enter"));
     mark_row_create(panel, PAD_MARK_EAST, family, locstr("- Esc"));

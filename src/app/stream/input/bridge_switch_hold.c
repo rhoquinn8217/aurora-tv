@@ -212,6 +212,11 @@ bridge_switch_axes_t bridge_switch_hold_axes(const app_gamepad_state_t *gamepad)
     if (lock_keys_triggers_type()) {
         out.lt = 0;
         out.rt = 0;
+    } else if (lock_keys_triggers_swapped()) {
+        /* At a lock R2 is the left button and L2 the right, the other way from Virtual Mouse's own. */
+        const unsigned char l2 = out.lt;
+        out.lt = out.rt;
+        out.rt = l2;
     }
     if (held_for(gamepad) == NULL) {
         return out;

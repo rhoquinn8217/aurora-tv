@@ -10,13 +10,14 @@
  * reach that screen. So the TV makes them out of the pad's buttons, in two states.
  *
  * ⭐ THE NUMPAD CLOSED, HOW A LOCK STARTS: the controller is a mouse. Virtual Mouse
- * as GuiDev1994 made it, turned on for the lock (their word: "This matches gui's
- * original button rebindings which is intentional"): the right stick moves the
- * mouse, L2 is the left button and R2 the right, held as long as they are, so a drag
- * works; the touchpad is the mouse, a one-finger tap a left click and a two-finger
- * tap a right click; Triangle opens the on-screen keyboard. Beside his, as keys,
- * since the lock screen often ignores a controller: Cross is Enter, Circle is Esc,
- * the d-pad the arrow keys. Square opens the numpad.
+ * as GuiDev1994 made it, turned on for the lock: the right stick moves the mouse; the
+ * touchpad is the mouse, a one-finger tap a left click and a two-finger tap a right
+ * click; Triangle opens the on-screen keyboard. The triggers are held as long as they
+ * are, so a drag works, and they are NOT his: R2 is the left button and L2 the right,
+ * as DS5-USBIP's own configs have them (their word, after a real lock: "Switch R2 and
+ * L2 mouse buttons to match ours"). His stay his outside a lock. Beside his, as keys,
+ * since the lock screen often ignores a controller: Cross is Enter, Circle is Esc, the
+ * d-pad the arrow keys. Square opens the numpad.
  *
  * ⭐ THE NUMPAD OPEN: the buttons type (their word: "When it is open, that's when
  * the numpad works"). On Windows' own map, so one layout holds at every lock.
@@ -78,6 +79,10 @@ void lock_keys_axis(stream_input_t *input, app_gamepad_state_t *gamepad, const S
 
 /* Are the triggers typing? Virtual Mouse then sees them at rest. */
 bool lock_keys_triggers_type(void);
+
+/* Are the triggers the mouse's buttons, R2 the left and L2 the right? Virtual Mouse
+ * then sees them the other way about from its own. */
+bool lock_keys_triggers_swapped(void);
 
 /* Is a pad connected that can do this? The screen is about nothing without one. */
 bool lock_keys_pad_on_stream(void);

@@ -97,6 +97,10 @@ bool lock_keys_triggers_type(void) {
     return lock_keys_numpad_open();
 }
 
+bool lock_keys_triggers_swapped(void) {
+    return s_active && !s_numpad_open;
+}
+
 unsigned lock_keys_typed(void) {
     return s_typed;
 }
@@ -370,8 +374,8 @@ void lock_keys_axis(stream_input_t *input, app_gamepad_state_t *gamepad, const S
     }
     if (!s_numpad_open) {
         /* ⛔ And a trigger dropping straight to rest would leave the mouse's button
-         * down on the host. */
-        vmouse_set_trigger(&input->vmouse, gamepad->leftTrigger, gamepad->rightTrigger);
+         * down on the host. ⓘ Its first is the left button: R2's, at a lock. */
+        vmouse_set_trigger(&input->vmouse, gamepad->rightTrigger, gamepad->leftTrigger);
         return;
     }
     lock_pad_t *pad = pad_for(gamepad);

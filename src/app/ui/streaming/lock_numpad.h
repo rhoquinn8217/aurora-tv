@@ -4,12 +4,13 @@
  * starts; and "showing the numpad with the symbols that switch base on the controller
  * you are using like the DS5-USBIP button symbols", for it open.
  *
- * Top left, off the middle of the picture where Windows' box is, each button in its
- * mark (ui/common/pad_marks.h), up for as long as Windows is locked. It asks for no
- * choice and it is not timed: the four seconds of every other message do not fit
- * something read while using it. ⓘ It takes no input, on the system layer as the
- * notices are. It goes while the overlay or the keyboard has the input, and comes
- * back as they close, as it was. */
+ * The list at the top left, the numpad to the right of Windows' login prompt, off the
+ * prompt either way (their photo of the lock screen, 2026-11-01: "place it to the right
+ * of the login prompt"), each button in its mark (ui/common/pad_marks.h), up for as long
+ * as Windows is locked. It asks for no choice and it is not timed: the four seconds of
+ * every other message do not fit something read while using it. ⓘ It takes no input, on
+ * the system layer as the notices are. It goes while the overlay or the keyboard has
+ * the input, and comes back as they close, as it was. */
 
 #pragma once
 
