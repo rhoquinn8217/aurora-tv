@@ -62,9 +62,10 @@
  * went off and where to bring it back. Only that button raises it: the other
  * button, the count running out and a dismissal change nothing, so they say
  * nothing.
- * ⓘ It stays this long, the time the app's other timed notice has for two
- * sentences, and takes no input: the game has the controller back at once. */
-#define PROMPT_NOTE_MS 7000
+ * ⓘ Four seconds, as for every message that asks for no choice (rhoquinn8217,
+ * 2026-11-01: "7 seconds is too long"), and it takes no input: the game has the
+ * controller back at once. */
+#define PROMPT_NOTE_MS 4000
 /* How often it asks whether it is still true. */
 #define PROMPT_NOTE_TICK_MS 250
 
@@ -635,6 +636,24 @@ void bridge_prompt_note(const char *text) {
     note_show(text, "a message in its place", NULL, NULL);
 }
 
+void bridge_prompt_note_while(const char *text, bool (*still_true)(void)) {
+    /* ⓘ Not while the pop-up is up, as above. */
+    if (s_mbox != NULL) {
+        return;
+    }
+    note_show(text, "a message while it is true", still_true, NULL);
+}
+
+bool bridge_prompt_note_up(void) {
+    return s_note != NULL;
+}
+
+void bridge_prompt_note_bridge_refused(bool locked) {
+    bridge_prompt_note(locked ? locstr("Unable to bridge device. Windows is locked. Please unlock it first.")
+                              : locstr("Unable to bridge device. DS5-USBIP is offline. "
+                                       "If you are at the sign-in screen, please sign in first."));
+}
+
 static void measure(const lv_obj_t *box, const lv_obj_t *label, bridge_prompt_measure_t *out) {
     /* ⓘ Laid out now rather than at the next redraw, so a reading taken the
      * moment it is raised is of the box as it will be drawn. */
@@ -683,4 +702,8 @@ int bridge_prompt_note_measure(bridge_prompt_measure_t *out) {
     measure(s_note, lv_obj_get_child(s_note, 0), out);
     const uint32_t shown = lv_tick_elaps(s_note_since);
     return shown >= PROMPT_NOTE_MS ? 0 : (int) (PROMPT_NOTE_MS - shown);
+}
+
+const char *bridge_prompt_note_words(void) {
+    return s_note != NULL ? lv_label_get_text(lv_obj_get_child(s_note, 0)) : "";
 }

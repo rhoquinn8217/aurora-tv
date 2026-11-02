@@ -197,6 +197,9 @@ typedef struct {
 
 #define PAINTED_NEVER (-100)
 
+/* A bridge just refused, and why, for the app's loop to say on the screen. */
+static ctm_bridge_refused_t s_refused = CTM_BRIDGE_REFUSED_NONE;
+
 /* How long before the one more try: long enough for a stream's start to
  * settle, short enough to still feel like the same press. */
 #define PLUG_RETRY_MS 2000
@@ -1051,6 +1054,12 @@ static void gesture_moonlight_forget_leaving(watched_t *w) {
     w->excluded_slot1 = 0;
 }
 
+ctm_bridge_refused_t ctm_bridge_gesture_take_refused(void) {
+    const ctm_bridge_refused_t refused = s_refused;
+    s_refused = CTM_BRIDGE_REFUSED_NONE;
+    return refused;
+}
+
 /* ⭐ START A BRIDGE REQUEST. The chord and the panel both arm the pulse that
  * hands a pad over, and this is the one place it is armed (code review,
  * 2026-10-05: it was written out twice).
@@ -1155,6 +1164,14 @@ static bool plug_answered(watched_t *w, SDL_GameController *controller, bool ok,
         gesture_log("listener not reached from %s: one more try in %d ms",
                     w->prep_node, PLUG_RETRY_MS);
         return false;
+    }
+    /* ⭐ NOT REACHED THE SECOND TIME, OR WINDOWS LOCKED: said on the screen as well
+     * as in the hand (rhoquinn8217, 2026-11-01). Taken by the app's loop, since
+     * this file includes no UI headers. */
+    if (!ok && unreachable) {
+        s_refused = CTM_BRIDGE_REFUSED_OFFLINE;
+    } else if (!ok && ctm_bridge_agent_locked()) {
+        s_refused = CTM_BRIDGE_REFUSED_LOCKED;
     }
     if (ok) {
         /* Bridged. Say so in the hand holding the controller.

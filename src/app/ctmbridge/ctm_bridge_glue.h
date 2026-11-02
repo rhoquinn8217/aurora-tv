@@ -143,6 +143,10 @@ bool ctm_bridge_agent_probed(void);
  * whether or not it is. */
 bool ctm_bridge_agent_online(void);
 
+/* ⭐ Is Windows locked on the PC, as DS5-USBIP says (rhoquinn8217, 2026-11-01)? It
+ * takes no new bridge while it is. False when it has not said, or is offline. */
+bool ctm_bridge_agent_locked(void);
+
 /* ⭐ Can this TV app and DS5-USBIP on the PC work together (rhoquinn8217,
  * 2026-10-08)? Read from the listener's answers by the core
  * (protocol_level.inl); not known until one has come, nor while it is offline.
