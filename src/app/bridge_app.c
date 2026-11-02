@@ -27,6 +27,8 @@
 #include "input/overlay_volume.h"   /* the TV's volume from the right stick */
 #include "input/bridge_override.h"  /* the touchpad follows Virtual Mouse */
 #include "input/auto_bridge.h"      /* a ticked device that connects, bridged */
+#include "stream/input/lock_keys.h" /* a controller's buttons type at a lock */
+#include "ui/streaming/lock_numpad.h"
 #include "ui/streaming/cursor_align.h"   /* cursor_align_shown */
 
 #if defined(TARGET_WEBOS)
@@ -326,6 +328,10 @@ void bridge_app_events(app_t *app) {
 #else
     (void) interface_has_input;
 #endif
+    /* ⭐ While Windows is locked a controller's buttons type, with the numpad on
+     * the screen (stream/input/lock_keys.h, ui/streaming/lock_numpad.h). */
+    lock_keys_tick(app);
+    lock_numpad_tick();
     /* The TV's cursor, put back if the window has the screen again. */
     tv_cursor_tick();
     /* ⭐ The touchpad as the TV's mouse while Aurora's own screens have the

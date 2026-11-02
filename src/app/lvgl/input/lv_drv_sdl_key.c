@@ -17,6 +17,8 @@
 #include "stream/session_events.h"
 #include "input/bridge_keyboard.h"
 #include "ui/common/type_into_box.h"
+#include "ui/streaming/keyboard_place.h"
+#include "stream/input/lock_keys.h"
 
 #if TARGET_WEBOS
 
@@ -270,6 +272,8 @@ static void sdl_input_read(lv_indev_drv_t *drv, lv_indev_data_t *data) {
                 stream_input_t *si = session_get_input(app->session);
                 short vk = 0;
                 bool close_kbd = false;
+                /* This fork: Create moves it, top or bottom (ui/streaming/keyboard_place.h). */
+                if (keyboard_place_button(e.cbutton.which, e.cbutton.button, pressed)) { handled_modal = true; } else
                 /* LB / RB → Left / Right (Windows OSK badges) */
                 if (e.cbutton.button == SDL_CONTROLLER_BUTTON_LEFTSHOULDER) {
                     soft_keyboard_gamepad_shortcut(SOFT_KBD_GP_ARROW_LEFT, pressed);
@@ -303,6 +307,8 @@ static void sdl_input_read(lv_indev_drv_t *drv, lv_indev_data_t *data) {
                     default:
                         break;
                 }
+                /* This fork: while Windows is locked Circle only closes it: Esc can clear what was typed. */
+                if (vk == VK_ESCAPE && lock_keys_active()) { vk = 0; if (pressed) { bus_pushevent(USER_CLOSE_SOFT_KEYBOARD, NULL, NULL); } handled_modal = true; }
                 if (vk != 0) {
                     stream_input_send_key_event(si, vk, pressed, 0);
                     if (close_kbd) {

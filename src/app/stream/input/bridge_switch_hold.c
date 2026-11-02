@@ -9,6 +9,7 @@
 #include "app_settings.h"
 #include "input/app_input.h"
 #include "logging.h"
+#include "stream/input/lock_keys.h"
 #include "stream/input/session_input.h"
 
 /* What bridge_switch_hold.h says, per Moonlight slot. */
@@ -118,9 +119,10 @@ static bool live_stick_moved(const stream_input_t *input, SDL_GameController *co
     return magnitude_pow2 >= threshold * threshold;
 }
 
-void bridge_switch_hold_begin(const stream_input_t *input, const app_gamepad_state_t *gamepad) {
+/* False when this pad has no slot. */
+static bool hold_take(const stream_input_t *input, const app_gamepad_state_t *gamepad) {
     if (held_for(gamepad) == NULL) {
-        return;
+        return false;
     }
     const int slot = gamepad->gs_id;
     uint8_t axes = 0;
@@ -158,6 +160,20 @@ void bridge_switch_hold_begin(const stream_input_t *input, const app_gamepad_sta
     }
 #endif
     s_held[slot].fingers = fingers;
+    return true;
+}
+
+void bridge_switch_hold_keep_quiet(const stream_input_t *input, const app_gamepad_state_t *gamepad) {
+    (void) hold_take(input, gamepad);
+}
+
+void bridge_switch_hold_begin(const stream_input_t *input, const app_gamepad_state_t *gamepad) {
+    if (!hold_take(input, gamepad)) {
+        return;
+    }
+    const int slot = gamepad->gs_id;
+    const unsigned axes = s_held[slot].axes;
+    const unsigned fingers = s_held[slot].fingers;
     if (s_held[slot].buttons != 0 || axes != 0 || fingers != 0) {
         commons_log_info("Input", "Controller %d back from the bridge holding buttons 0x%x, axes 0x%x, "
                                   "fingers 0x%x: the stream sees them released until they are let go",
@@ -192,6 +208,11 @@ bridge_switch_axes_t bridge_switch_hold_axes(const app_gamepad_state_t *gamepad)
         (unsigned char) gamepad->leftTrigger, (unsigned char) gamepad->rightTrigger,
         gamepad->leftStickX, gamepad->leftStickY, gamepad->rightStickX, gamepad->rightStickY,
     };
+    /* While Windows is locked the triggers type, and click nothing for Virtual Mouse. */
+    if (lock_keys_active()) {
+        out.lt = 0;
+        out.rt = 0;
+    }
     if (held_for(gamepad) == NULL) {
         return out;
     }
@@ -218,6 +239,10 @@ bool bridge_switch_hold_skips_finger(const app_gamepad_state_t *gamepad, int fin
 }
 
 void bridge_switch_hold_send(const app_gamepad_state_t *gamepad, short active_mask, bool buttons_only) {
+    /* While Windows is locked nothing goes as a controller (lock_keys.h). */
+    if (lock_keys_active()) {
+        return;
+    }
     int buttons = gamepad->buttons;
     if (held_for(gamepad) != NULL) {
         buttons &= ~s_held[gamepad->gs_id].buttons;

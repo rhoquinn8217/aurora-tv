@@ -11,6 +11,7 @@
 #include "stream/session.h"
 #include "stream/input/session_virt_mouse.h"
 #include "stream/input/bridge_switch_hold.h"
+#include "stream/input/lock_keys.h"
 #include "input/bridge_override.h"
 #include "input/touchpad_pointer.h"
 #include "logging.h"
@@ -169,6 +170,9 @@ void stream_input_handle_cbutton(stream_input_t *input, const SDL_ControllerButt
     if (gamepad == NULL) {
         return;
     }
+
+    /* This fork: while Windows is locked the buttons type the PIN (stream/input/lock_keys.h). */
+    if (lock_keys_button(input, gamepad, event)) { return; }
 
     /* Physical Y/Triangle opens the soft keyboard only while virtual mouse is active. */
     if (event->type == SDL_CONTROLLERBUTTONDOWN && event->button == SDL_CONTROLLER_BUTTON_Y
@@ -370,6 +374,8 @@ void stream_input_handle_caxis(stream_input_t *input, const SDL_ControllerAxisEv
     }
     filter_deadzone_2axis(input, &gamepad->leftStickX, &gamepad->leftStickY);
     filter_deadzone_2axis(input, &gamepad->rightStickX, &gamepad->rightStickY);
+    /* This fork: while Windows is locked the triggers type too (stream/input/lock_keys.h). */
+    lock_keys_axis(input, gamepad, event);
     /* This fork: a stick or trigger held as the pad came back from a bridge stays at rest until let go (bridge_switch_hold.c). */
     bridge_switch_hold_note_axes(gamepad);
     const bridge_switch_axes_t held_axes = bridge_switch_hold_axes(gamepad);
