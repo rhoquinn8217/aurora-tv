@@ -23,6 +23,10 @@ typedef struct stream_input_t stream_input_t;
  * open; `input` gives the stream's dead zone and touchpad mode. */
 void bridge_switch_hold_begin(const stream_input_t *input, const app_gamepad_state_t *gamepad);
 
+/* The same as the buttons stop typing at a lock (lock_keys.h), and with nothing in
+ * the log: what is held then can be the last digit of a PIN. */
+void bridge_switch_hold_keep_quiet(const stream_input_t *input, const app_gamepad_state_t *gamepad);
+
 /* Nothing held, at a stream's start and end. */
 void bridge_switch_hold_reset(void);
 

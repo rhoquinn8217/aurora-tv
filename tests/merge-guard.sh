@@ -485,6 +485,38 @@ need "a stick or trigger held at the switch works again once at rest" \
 need "a finger down at the switch stays off the stream until lifted" \
      src/app/stream/input/session_gamepad.c "bridge_switch_hold_skips_finger(gamepad, event->finger"
 
+# --- a controller's buttons type while Windows is locked (rhoquinn8217, 2026-11-01) ---
+# Windows ignores the pad at a lock reached by a new stream, so the TV turns its
+# buttons into keys (stream/input/lock_keys.h), with a numpad on the screen and
+# Create moving the on-screen keyboard. Losing any of these compiles: the buttons
+# go on being a controller, and nothing unlocks without a keyboard.
+in_order "while Windows is locked the buttons type, before the stream's own handling" \
+     src/app/stream/input/session_gamepad.c "void stream_input_handle_cbutton" \
+     "if (lock_keys_button(input, gamepad, event)) { return; }" "Physical Y/Triangle opens the soft keyboard"
+in_order "... and the triggers" \
+     src/app/stream/input/session_gamepad.c "void stream_input_handle_caxis" \
+     "lock_keys_axis(input, gamepad, event);" "bridge_switch_hold_note_axes(gamepad);"
+need "nothing goes as a controller meanwhile, or a PIN types twice" \
+     src/app/stream/input/bridge_switch_hold.c "if (lock_keys_active()) {"
+need "the on-screen keyboard's Circle does not send Esc at a lock" \
+     src/app/lvgl/input/lv_drv_sdl_key.c "if (vk == VK_ESCAPE && lock_keys_active())"
+need "Create moves the on-screen keyboard" \
+     src/app/lvgl/input/lv_drv_sdl_key.c "keyboard_place_button(e.cbutton.which, e.cbutton.button, pressed)"
+need "... from where it was put, with the line that says so" \
+     src/app/ui/streaming/soft_keyboard.c "keyboard_place_attach(kbd_content);"
+need "the buttons type, and the numpad shows, from the app's loop" \
+     src/app/bridge_app.c "lock_keys_tick(app);"
+need "... the numpad" \
+     src/app/bridge_app.c "lock_numpad_tick();"
+need "the typing is built" \
+     src/app/ctmbridge/app_sources.cmake "src/app/stream/input/lock_keys.c"
+need "the numpad is built" \
+     src/app/ctmbridge/app_sources.cmake "src/app/ui/streaming/lock_numpad.c"
+need "the keyboard's place is built" \
+     src/app/ctmbridge/app_sources.cmake "src/app/ui/streaming/keyboard_place.c"
+need "the marks are built" \
+     src/app/ctmbridge/app_sources.cmake "src/app/ui/common/pad_marks.c"
+
 # --- the touchpad follows Virtual Mouse (rhoquinn8217, 2026-10-20) ---
 # While Virtual Mouse lends the touchpad, two fingers pressed are the bridge
 # gesture, not upstream's right click (input/bridge_override.h). Losing either

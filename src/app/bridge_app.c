@@ -27,6 +27,8 @@
 #include "input/overlay_volume.h"   /* the TV's volume from the right stick */
 #include "input/bridge_override.h"  /* the touchpad follows Virtual Mouse */
 #include "input/auto_bridge.h"      /* a ticked device that connects, bridged */
+#include "stream/input/lock_keys.h" /* a controller's buttons type at a lock */
+#include "ui/streaming/lock_numpad.h"
 #include "ui/streaming/cursor_align.h"   /* cursor_align_shown */
 
 #if defined(TARGET_WEBOS)
@@ -255,6 +257,10 @@ void bridge_app_events(app_t *app) {
      * SDL's event filter, now that the filter has let go of the event lock
      * (bridge_session.c). The tick below then sees the bridge as it is. */
     bridge_session_run_pending();
+    /* ⭐ While Windows is locked a controller is a mouse, or types
+     * (stream/input/lock_keys.h). ⓘ Before Auto Bridge below and the touchpad's tick:
+     * at the unlock Virtual Mouse is back as it was before either reads it. */
+    lock_keys_tick(app);
     /* ⛔⛔ streaming_overlay_shown(), NOT app_ui_is_opened(). Third attempt, and
      * this one has evidence rather than reasoning behind it.
      *
@@ -326,6 +332,9 @@ void bridge_app_events(app_t *app) {
 #else
     (void) interface_has_input;
 #endif
+    /* ⭐ What a controller does over a locked Windows, on the screen
+     * (ui/streaming/lock_numpad.h). */
+    lock_numpad_tick();
     /* The TV's cursor, put back if the window has the screen again. */
     tv_cursor_tick();
     /* ⭐ The touchpad as the TV's mouse while Aurora's own screens have the

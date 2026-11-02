@@ -391,6 +391,7 @@ static uint32_t s_start_since;          /* when the loop first saw it armed */
 static bool s_start_said;               /* its long wait is in the log */
 static bool s_waiting_said;             /* the message for a ticked device has been up */
 static bool s_offline_said;             /* the message for nothing ticked has been up */
+static bool s_after_sign_in;            /* a ticked device waits for the unlock */
 static uint32_t s_note_looked;          /* when the wait last looked for what to say */
 static uint32_t s_last_recheck;
 static bool s_streaming;                /* the loop's own view: a stream, with bridging on */
@@ -497,27 +498,36 @@ static bool ab_start_waiting(void)
 }
 
 /* ⭐ WHAT THE SCREEN SAYS WHILE A STREAM'S START WAITS (rhoquinn8217, 2026-11-01).
- * With a ticked device connected, that Auto Bridge waits; with none, that
- * DS5-USBIP is offline, and nothing if it only has Windows locked. Each once in a
- * stream, for the usual time, and the wait goes on without it.
+ * Windows locked, with a ticked device connected: that it bridges after the sign in,
+ * up until then, with the list of what the buttons do (ui/streaming/lock_numpad.h).
+ * Otherwise, with a ticked device connected, that Auto Bridge waits; with none, that
+ * DS5-USBIP is offline. Those each once in a stream, for the usual time, and the wait
+ * goes on without them.
  * ⓘ The TV cannot tell a PC at its sign-in screen from one with DS5-USBIP not
  * running: neither answers, and Vibepollo tells no client about a held launch.
  * So the words cover both. */
 static void ab_say_waiting(uint32_t now)
 {
+    const bool locked = ctm_bridge_agent_locked();
+    if (locked) {
+        if (now - s_note_looked >= AB_RECHECK_MS) {
+            s_note_looked = now;
+            s_after_sign_in = ab_ticked_connected();
+        }
+        return;
+    }
+    s_after_sign_in = false;
     if (s_waiting_said || now - s_start_since < AB_NOTE_AFTER_MS || !ctm_bridge_agent_probed() ||
         now - s_note_looked < AB_RECHECK_MS || bridge_prompt_note_up() || bridge_prompt_shown()) {
         return;
     }
     s_note_looked = now;
-    const bool locked = ctm_bridge_agent_locked();
     if (ab_ticked_connected()) {
         s_waiting_said = true;
-        bridge_prompt_note_while(locked ? locstr("Auto Bridge is waiting for Windows to be unlocked.")
-                                        : locstr("Auto Bridge is waiting on DS5-USBIP. If you are at the sign-in "
-                                                 "screen, please sign in. Otherwise, start DS5-USBIP."),
+        bridge_prompt_note_while(locstr("Auto Bridge is waiting on DS5-USBIP. If you are at the sign-in "
+                                        "screen, please sign in. Otherwise, start DS5-USBIP."),
                                  ab_start_waiting);
-    } else if (!locked && !s_offline_said) {
+    } else if (!s_offline_said) {
         s_offline_said = true;
         bridge_prompt_note_while(locstr("DS5-USBIP is offline. If you are at the sign-in screen, please sign in. "
                                         "Otherwise, start DS5-USBIP."),
@@ -587,6 +597,11 @@ static void ab_look(uint32_t now)
     free(devs);
 }
 
+bool auto_bridge_after_sign_in(void)
+{
+    return s_after_sign_in;
+}
+
 void auto_bridge_poll(bool streaming)
 {
     const bool on = streaming && app_configuration != NULL && app_configuration->bridge.enable;
@@ -596,6 +611,7 @@ void auto_bridge_poll(bool streaming)
         }
         s_streaming = false;
         s_start_since = 0;
+        s_after_sign_in = false;
         return;   /* ⓘ Armed stays armed: only the stream's stop disarms it */
     }
     s_streaming = true;
@@ -630,6 +646,7 @@ void auto_bridge_poll(bool streaming)
             ab_say_waiting(now);
             return;
         }
+        s_after_sign_in = false;
         SDL_AtomicSet(&s_start_armed, 0);
         const uint32_t waited = now - s_start_since;
         s_start_since = 0;
@@ -639,6 +656,8 @@ void auto_bridge_poll(bool streaming)
                                 "answered after %u ms", n, (unsigned) waited);
         return;
     }
+
+    s_after_sign_in = false;   /* only a stream's start, or a refused bridge's, waits for the sign in */
 
     /* 2. Controllers that connected, once SDL has opened them: cheap, no list. */
     for (int i = 0; i < s_waiting_count;) {
