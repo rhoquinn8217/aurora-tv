@@ -10,6 +10,7 @@
 #include "logging.h"
 #include "stream/session.h"
 #include "stream/session_priv.h"
+#include "stream/input/lock_keys.h"
 #include "stream/input/session_input.h"
 #include "stream/input/session_virt_mouse.h"
 
@@ -71,7 +72,8 @@ void bridge_override_touchpad_tick(session_t *session) {
     /* Virtual Mouse as it was left: the next stream starts from it. Saved at
      * once, as the TV cursor's shift is: a toggle is rare, and an app that
      * dies on its way out saves nothing after. */
-    if (app_configuration != NULL && app_configuration->virtual_mouse != vmouse) {
+    /* ⓘ Not while Windows is locked, which turns it on for the lock (lock_keys.h). */
+    if (app_configuration != NULL && app_configuration->virtual_mouse != vmouse && !lock_keys_active()) {
         app_configuration->virtual_mouse = vmouse;
         settings_save(app_configuration);
         commons_log_info("Input", "Virtual Mouse %s: kept for the next stream", vmouse ? "on" : "off");

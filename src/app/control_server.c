@@ -144,7 +144,7 @@ static void cmd_help(control_job_t *job)
                "set <name> <on|off>     a switch, without the remote: boost, light, rumble, tone, vmouse\n"
                "prompt [ok|dismiss]     the question a bridge raises: is it up, or answer it without a hand\n"
                "ui                      what is open on the screen: overlay, its keyboard, the panel, the align bar\n"
-               "numpad [ps|xbox|auto]   the numpad over a locked Windows: up or not, where, whose marks, keys typed (a count)\n"
+               "numpad [ps|xbox|auto]   the controller at a locked Windows: numpad open or closed, where, whose marks, keys typed (a count)\n"
                "press <key>[:ms] ...    keys into aurora-tv's own screens, as a keyboard types them; not once a stream is up\n"
                "                        keys: up down left right enter esc home end backspace; :ms holds it (a long press)\n"
                "type <text>             characters into aurora-tv's own screens, a key each, as a keyboard types them\n"
@@ -331,8 +331,8 @@ static void cmd_ui(control_job_t *job)
           s_app->session != NULL ? "active" : "idle");
 }
 
-/* The numpad over a locked Windows (ui/streaming/lock_numpad.h): how it stands, and
- * a count of what was typed, never what. `ps`, `xbox` or `auto` sets whose marks it
+/* What the screen shows over a locked Windows (ui/streaming/lock_numpad.h), and a
+ * count of what was typed, never what. `ps`, `xbox` or `auto` sets whose marks it
  * draws, for a picture of the set not in hand; not saved. */
 static void cmd_numpad(control_job_t *job, const char *args)
 {
@@ -348,7 +348,7 @@ static void cmd_numpad(control_job_t *job, const char *args)
     }
     lv_area_t area = {0, 0, 0, 0};
     const bool up = lock_numpad_area(&area);
-    reply(job, "OK numpad=%s typing=%s pad=%s marks=%s typed=%u size=%dx%d at=%d,%d kbd_place=%s\n",
+    reply(job, "OK numpad=%s locked=%s pad=%s marks=%s typed=%u size=%dx%d at=%d,%d kbd_place=%s\n",
           lock_numpad_state(), lock_keys_active() ? "yes" : "no", lock_keys_pad_on_stream() ? "yes" : "no",
           pad_family_current() == PAD_FAMILY_XBOX ? "xbox" : "ps", lock_keys_typed(),
           up ? (int) lv_area_get_width(&area) : 0, up ? (int) lv_area_get_height(&area) : 0,

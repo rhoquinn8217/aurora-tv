@@ -33,6 +33,7 @@ typedef enum {
     PAD_MARK_DOWN,
     PAD_MARK_LEFT,
     PAD_MARK_RIGHT,
+    PAD_MARK_DPAD,    /* the whole d-pad, no arm filled */
     PAD_MARK_SOUTH,   /* Cross, A */
     PAD_MARK_EAST,    /* Circle, B */
     PAD_MARK_WEST,    /* Square, X */

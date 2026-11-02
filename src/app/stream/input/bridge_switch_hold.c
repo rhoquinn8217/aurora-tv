@@ -208,8 +208,8 @@ bridge_switch_axes_t bridge_switch_hold_axes(const app_gamepad_state_t *gamepad)
         (unsigned char) gamepad->leftTrigger, (unsigned char) gamepad->rightTrigger,
         gamepad->leftStickX, gamepad->leftStickY, gamepad->rightStickX, gamepad->rightStickY,
     };
-    /* While Windows is locked the triggers type, and click nothing for Virtual Mouse. */
-    if (lock_keys_active()) {
+    /* While the numpad is open at a lock the triggers type, and click nothing for Virtual Mouse. */
+    if (lock_keys_triggers_type()) {
         out.lt = 0;
         out.rt = 0;
     }

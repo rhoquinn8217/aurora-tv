@@ -113,8 +113,10 @@ static void draw_dpad(const pen_t *pen, pad_mark_t mark) {
         case PAD_MARK_LEFT:
             pen_fill(pen, 320, 760, 760, 1240);
             break;
-        default:
+        case PAD_MARK_RIGHT:
             pen_fill(pen, 1240, 760, 1680, 1240);
+            break;
+        default:
             break;
     }
 }
@@ -198,7 +200,8 @@ static bool mark_is_shoulder(pad_mark_t mark) {
 }
 
 static bool mark_is_dpad(pad_mark_t mark) {
-    return mark == PAD_MARK_UP || mark == PAD_MARK_DOWN || mark == PAD_MARK_LEFT || mark == PAD_MARK_RIGHT;
+    return mark == PAD_MARK_UP || mark == PAD_MARK_DOWN || mark == PAD_MARK_LEFT || mark == PAD_MARK_RIGHT ||
+           mark == PAD_MARK_DPAD;
 }
 
 static void mark_draw(lv_event_t *event) {
