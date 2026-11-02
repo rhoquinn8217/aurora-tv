@@ -24,8 +24,11 @@
 #define NUMPAD_KEY_MARK LV_DPX(22)
 #define NUMPAD_KEY_INSET LV_DPX(3)
 #define NUMPAD_LEGEND_MARK LV_DPX(18)
-/* A key's digit or word sits a little below the middle: the mark has the corner. */
-#define NUMPAD_WORD_DROP LV_DPX(4)
+/* A digit sits a little left of the middle and below it: the mark has the corner.
+ * A word is wider, so it sits along the foot of the key, under the mark. */
+#define NUMPAD_DIGIT_LEFT LV_DPX(12)
+#define NUMPAD_DIGIT_DROP LV_DPX(6)
+#define NUMPAD_WORD_LIFT LV_DPX(4)
 
 static lv_obj_t *s_panel;
 static lv_obj_t *s_message;
@@ -57,7 +60,11 @@ static void key_create(lv_obj_t *parent, const char *words, bool digit, pad_mark
     lv_obj_set_style_radius(key, LV_DPX(8), 0);
 
     lv_obj_t *label = words_create(key, words, digit ? lv_theme_get_font_large(parent) : lv_theme_get_font_small(parent));
-    lv_obj_align(label, LV_ALIGN_CENTER, 0, NUMPAD_WORD_DROP);
+    if (digit) {
+        lv_obj_align(label, LV_ALIGN_CENTER, -NUMPAD_DIGIT_LEFT, NUMPAD_DIGIT_DROP);
+    } else {
+        lv_obj_align(label, LV_ALIGN_BOTTOM_MID, 0, -NUMPAD_WORD_LIFT);
+    }
 
     lv_obj_t *drawn = pad_mark_create(key, mark, family, NUMPAD_KEY_MARK, NUMPAD_MARK);
     lv_obj_align(drawn, LV_ALIGN_TOP_RIGHT, -NUMPAD_KEY_INSET, NUMPAD_KEY_INSET);

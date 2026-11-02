@@ -73,20 +73,6 @@ static void pen_fill(const pen_t *pen, int x1, int y1, int x2, int y2) {
     lv_draw_rect(pen->ctx, &dsc, &area);
 }
 
-/* A quarter of a circle, for a shoulder button's top corners. */
-static void pen_arc(const pen_t *pen, int cx, int cy, int r, uint16_t from, uint16_t to) {
-    const lv_point_t centre = pen_at(pen, cx, cy);
-    lv_draw_arc_dsc_t dsc;
-    lv_draw_arc_dsc_init(&dsc);
-    dsc.color = pen->color;
-    dsc.width = pen->stroke;
-    dsc.opa = LV_OPA_COVER;
-    const lv_coord_t h = lv_area_get_height(&pen->box);
-    /* The stroke is centred on the line; LVGL's arc grows inward from its radius. */
-    const lv_coord_t radius = (lv_coord_t) ((r * h + GRID_HIGH / 2) / GRID_HIGH + pen->stroke / 2);
-    lv_draw_arc(pen->ctx, &dsc, &centre, (uint16_t) radius, from, to);
-}
-
 /* Words in the middle of the mark. */
 static void pen_words(const pen_t *pen, const lv_font_t *font, const char *words) {
     lv_draw_label_dsc_t dsc;
@@ -109,6 +95,11 @@ static const int16_t DPAD[12][2] = {{760, 320}, {1240, 320}, {1240, 760}, {1680,
                                     {1240, 1680}, {760, 1680}, {760, 1240}, {320, 1240}, {320, 760}, {760, 760}};
 static const int16_t VIEW_BACK[5][2] = {{800, 870}, {800, 610}, {1440, 610}, {1440, 1130}, {1200, 1130}};
 static const int16_t VIEW_FRONT[4][2] = {{560, 870}, {1200, 870}, {1200, 1390}, {560, 1390}};
+/* A shoulder button, on its 24-wide grid: square at the foot, its top corners on a
+ * radius of 6. ⓘ In short straight strokes: the first pictures on the monitor, drawn
+ * with LVGL's arc, showed a step where each corner met the top line. */
+static const int16_t SHOULDER[12][2] = {{110, 1890}, {110, 710}, {156, 480}, {286, 286}, {480, 156}, {710, 110},
+                                        {1690, 110}, {1920, 156}, {2114, 286}, {2244, 480}, {2290, 710}, {2290, 1890}};
 
 static void draw_dpad(const pen_t *pen, pad_mark_t mark) {
     pen_path(pen, DPAD, 12, true);
@@ -129,12 +120,7 @@ static void draw_dpad(const pen_t *pen, pad_mark_t mark) {
 }
 
 static void draw_shoulder(const pen_t *pen, const lv_font_t *font, const char *name) {
-    pen_line(pen, 110, 1890, 110, 710);
-    pen_arc(pen, 710, 710, 600, 180, 270);
-    pen_line(pen, 710, 110, 1690, 110);
-    pen_arc(pen, 1690, 710, 600, 270, 360);
-    pen_line(pen, 2290, 710, 2290, 1890);
-    pen_line(pen, 2290, 1890, 110, 1890);
+    pen_path(pen, SHOULDER, 12, true);
     pen_words(pen, font, name);
 }
 
