@@ -361,12 +361,16 @@ void lock_keys_axis(stream_input_t *input, app_gamepad_state_t *gamepad, const S
     } else if (event->axis == SDL_CONTROLLER_AXIS_TRIGGERRIGHT) {
         what = LOCK_R2;
     } else {
+        /* ⛔ Asked here as well as by the stream's handling, which asks only while a
+         * stick or trigger is off rest: a stick dropping straight to rest would leave
+         * the mouse moving. */
+        vmouse_set_vector(&input->vmouse, gamepad->rightStickX, gamepad->rightStickY);
+        vmouse_set_scroll(&input->vmouse, gamepad->leftStickX, gamepad->leftStickY);
         return;
     }
     if (!s_numpad_open) {
-        /* ⛔ Asked here as well as by the stream's handling, which asks only while a
-         * stick or trigger is off rest: a trigger dropping straight to rest would
-         * leave the mouse's button down on the host. */
+        /* ⛔ And a trigger dropping straight to rest would leave the mouse's button
+         * down on the host. */
         vmouse_set_trigger(&input->vmouse, gamepad->leftTrigger, gamepad->rightTrigger);
         return;
     }
@@ -463,6 +467,9 @@ void lock_keys_tick(app_t *app) {
     if (interface_has_input != s_interface_had_input) {
         s_interface_had_input = interface_has_input;
         pads_forget(input);
+        /* Nor does the mouse go on moving, or stay down, behind them. */
+        vmouse_set_vector(&input->vmouse, 0, 0);
+        vmouse_set_scroll(&input->vmouse, 0, 0);
         vmouse_set_trigger(&input->vmouse, 0, 0);
     }
 }
