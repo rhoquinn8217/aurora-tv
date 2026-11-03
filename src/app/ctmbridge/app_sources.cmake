@@ -57,7 +57,9 @@ target_link_libraries(moonlight-lib PRIVATE ${MBEDX509_LIBRARY} ${MBEDCRYPTO_LIB
 
 # A command port on 127.0.0.1 that lets a terminal on the TV launch a stream
 # and bridge devices without the remote. Loopback only; see
-# src/app/control_server.h.
+# src/app/control_server.h. ⛔ Not in a build people download: anything running
+# on a TV could use it, as it has no password. AURORA_RELEASE_BUILD=1 in
+# scripts/webos/docker_build_inner.sh turns it off (2026-11-02).
 option(AURORA_TERMINAL_CONTROL "Listen on 127.0.0.1 for commands from a terminal on the TV" ON)
 if (AURORA_TERMINAL_CONTROL)
     target_compile_definitions(moonlight-lib PUBLIC AURORA_TERMINAL_CONTROL=1)

@@ -68,7 +68,14 @@ if [ "${DOCKER_CLEAN_BUILD:-0}" = "1" ]; then
     rm -rf "${CMAKE_BINARY_DIR}"
 fi
 export CI=1
-sed 's/\r$//' ./scripts/webos/easy_build.sh | bash -s -- -DCMAKE_BUILD_TYPE=Release
+# A test build keeps the command port (src/app/control_server.h). A build for people to download,
+# AURORA_RELEASE_BUILD=1, leaves it out and puts its debug symbols beside the package
+# (cmake/ArchiveDebugSymbols.cmake). The SDK compiles both at -O2: the build type only adds -g.
+AURORA_BUILD_OPTIONS="-DCMAKE_BUILD_TYPE=Release -DAURORA_TERMINAL_CONTROL=ON"
+if [ "${AURORA_RELEASE_BUILD:-0}" = "1" ]; then
+    AURORA_BUILD_OPTIONS="-DCMAKE_BUILD_TYPE=RelWithDebInfo -DAURORA_TERMINAL_CONTROL=OFF"
+fi
+sed 's/\r$//' ./scripts/webos/easy_build.sh | bash -s -- ${AURORA_BUILD_OPTIONS}
 
 mkdir -p dist
 find "${CMAKE_BINARY_DIR}" -maxdepth 3 -name '*.ipk' -exec cp -f {} dist/ \;

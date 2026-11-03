@@ -7,7 +7,8 @@
  *
  * ⛔ LOOPBACK ONLY. It listens on 127.0.0.1 and nowhere else, so only something
  * already running on the TV -- an SSH session, in practice -- can reach it.
- * Nothing on the network can. Built only with AURORA_TERMINAL_CONTROL.
+ * Nothing on the network can. Built only with AURORA_TERMINAL_CONTROL, which a
+ * build people download leaves out: anything running on the TV could use it.
  *
  * ⓘ One line in, one reply out, then the connection closes. From an SSH
  * session on the TV:
