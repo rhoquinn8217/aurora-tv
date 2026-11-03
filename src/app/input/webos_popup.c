@@ -16,6 +16,8 @@
 #include <time.h>
 #include <unistd.h>
 
+#include "stream/input/vk.h"
+
 #define WEBOS_POPUP_LOG "webos-popup.log"
 FILE *ctm_log_open(const char *name, const char *mode);
 
@@ -73,6 +75,15 @@ static struct {
     int held[2];                          /* the left stick across and down: -1, 0, 1 or STICK_UNSEEN */
 } s_sticks[PADS_MAX];
 static int s_sticks_n = 0;
+/* ⓘ A keyboard's reader is a thread of its own: it reads whether a pop-up is
+ * up from here, and leaves its keys here for the tick. */
+static SDL_atomic_t s_up_flag;
+static SDL_SpinLock s_keys_lock = 0;
+static struct {
+    int key;
+    const char *from;
+} s_keys[PENDING_MAX];
+static int s_keys_n = 0;
 static int s_sent = 0;                    /* keys sent in this pop-up */
 static int s_sent_all = 0;                /* and since the app started */
 static int s_last_key = 0;
@@ -269,6 +280,54 @@ static void stick_as_arrow(const SDL_ControllerAxisEvent *axis) {
     }
 }
 
+bool webos_popup_take_key(short vk, bool down) {
+    if (!down || SDL_AtomicGet(&s_up_flag) == 0) {
+        return false;
+    }
+    int key = 0;
+    const char *from = NULL;
+    switch (vk) {
+        case VK_UP:
+            key = REMOTE_UP;
+            from = "the keyboard's up";
+            break;
+        case VK_DOWN:
+            key = REMOTE_DOWN;
+            from = "the keyboard's down";
+            break;
+        case VK_LEFT:
+            key = REMOTE_LEFT;
+            from = "the keyboard's left";
+            break;
+        case VK_RIGHT:
+            key = REMOTE_RIGHT;
+            from = "the keyboard's right";
+            break;
+        case VK_RETURN:
+            key = REMOTE_OK;
+            from = "the keyboard's Enter";
+            break;
+        case VK_ESCAPE:
+            key = REMOTE_BACK;
+            from = "the keyboard's Esc";
+            break;
+        case VK_BACK:
+            key = REMOTE_BACK;
+            from = "the keyboard's Backspace";
+            break;
+        default:
+            return true;
+    }
+    SDL_AtomicLock(&s_keys_lock);
+    if (s_keys_n < PENDING_MAX) {
+        s_keys[s_keys_n].key = key;
+        s_keys[s_keys_n].from = from;
+        s_keys_n++;
+    }
+    SDL_AtomicUnlock(&s_keys_lock);
+    return true;
+}
+
 void webos_popup_init(SDL_Window *window) {
     s_window = window;
     s_state = WINDOW_FOCUSED;
@@ -350,8 +409,14 @@ void webos_popup_tick(void) {
         s_had_focus = true;
     }
     const window_state_t state = window_state();
-    /* ⓘ Kept by the filter in this same pass. ⛔ Not once the pop-up has gone:
-     * the key would reach the app. */
+    SDL_AtomicLock(&s_keys_lock);
+    for (int i = 0; i < s_keys_n; i++) {
+        keep(s_keys[i].key, s_keys[i].from);
+    }
+    s_keys_n = 0;
+    SDL_AtomicUnlock(&s_keys_lock);
+    /* ⓘ Kept by the filter in this same pass, and by a keyboard's reader since
+     * the last. ⛔ Not once the pop-up has gone: the key would reach the app. */
     for (int i = 0; i < s_pending_n; i++) {
         if (state != WINDOW_POPUP) {
             popup_log("%s: %s not sent, the pop-up had gone", s_pending[i].from, key_name(s_pending[i].key));
@@ -371,6 +436,7 @@ void webos_popup_tick(void) {
     s_state = state;
     s_since = now;
     s_sticks_n = 0;   /* each pop-up sees every stick at rest first */
+    SDL_AtomicSet(&s_up_flag, state == WINDOW_POPUP ? 1 : 0);
     /* ⭐ SDL keeps a controller's presses without the focus for exactly as long
      * as a pop-up has it: in the background they stay dropped, as ever. */
     SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, state == WINDOW_POPUP ? "1" : "0");
@@ -453,6 +519,12 @@ bool webos_popup_take(const SDL_Event *event) {
 }
 
 void webos_popup_tick(void) {
+}
+
+bool webos_popup_take_key(short vk, bool down) {
+    (void) vk;
+    (void) down;
+    return false;
 }
 
 bool webos_popup_send(const char *key, char *said, size_t len) {

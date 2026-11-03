@@ -23,6 +23,7 @@
 #include "ctm_bridge_glue.h"
 #include "ctm_bridge_gesture.h"
 #include "tv_cursor.h"
+#include "webos_popup.h"
 #include "ui/streaming/cursor_align.h"
 #include "stream/session.h"
 #include "stream/session_priv.h"
@@ -473,6 +474,16 @@ static void read_bridged_nodes(void) {
             if (slot < 0 || down == s_bridged_down[slot]) {
                 continue;
             }
+            /* ⭐ Not to the overlay behind a webOS pop-up: webOS reads this
+             * keyboard itself while the core has let it go, and answers with
+             * it. Unless the align bar holds it: then the key is the remote's
+             * (input/webos_popup.h). */
+            if (down && webos_popup_up()) {
+                if (s_bridged_taken[i]) {
+                    (void) webos_popup_take_key(k_nav[slot].vk, true);
+                }
+                continue;
+            }
             s_bridged_down[slot] = down;
             feed_overlay_from(slot, down, 0, true);
         }
@@ -516,6 +527,13 @@ void bridge_keyboard_take_bridged(bool take) {
 
 bool bridge_keyboard_evdev_key(stream_input_t *input, short vk, bool down, char modifiers) {
     SDL_AtomicAdd(&s_evdev_keys, 1);
+    /* ⭐ A webOS pop-up has the focus: a key going down is the pop-up's, sent
+     * on as the remote's or nowhere, and never to the host or the overlay
+     * behind it (input/webos_popup.h). A key let go goes on below, so the
+     * host lets go of one it was holding. */
+    if (webos_popup_take_key(vk, down)) {
+        return true;
+    }
     const bool overlay = s_overlay_open;
     if (overlay && !s_reader_in_overlay) {
         /* ⛔ The first key since the overlay opened: whatever the host still

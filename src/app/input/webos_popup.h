@@ -29,11 +29,21 @@
  * and Back is 412, linux's KEY_PREVIOUS; the Magic Remote's nodes list both.
  * Each press is the key going down and up at once: a key left down in webOS's
  * view, when the pop-up closes on the press, would repeat.
+ * ⭐ A KEYBOARD ANSWERS TOO (rhoquinn8217, the same day: "can you route mouse
+ * and keyboard to remote inputs the same way?"). One the TV holds in a stream
+ * is upstream's, grabbed and read on its own thread, and its keys went to the
+ * PC, or to the overlay behind the pop-up. While a pop-up has the focus its
+ * arrows, Enter, and Esc or Backspace (as Back) are the remote's keys, and no
+ * key goes down anywhere else (input/bridge_keyboard.c asks here first). With
+ * no stream webOS reads a keyboard itself, and a bridged one the core has let
+ * go for the overlay too: those it answers by itself.
+ * ⓘ A mouse is a pointer, and webOS points with its own: one the TV holds is
+ * never taken from it.
  * ⚠️ A BRIDGED controller does not answer: its reports go to the PC and SDL
  * never sees them, so it plays on in the game as before.
  * ⓘ In the background (the window hidden or minimized: another app in front)
  * nothing changes, and SDL drops the presses as it always did. Logged in
- * logs/webos-popup.log. App's loop only. */
+ * logs/webos-popup.log. App's loop only, but for webos_popup_take_key. */
 
 #ifndef WEBOS_POPUP_H
 #define WEBOS_POPUP_H
@@ -58,6 +68,13 @@ bool webos_popup_take(const SDL_Event *event);
 /* Once per pass of the app's loop, after the filter: the keys kept sent on, and
  * SDL's hint and the log as a pop-up comes and goes. */
 void webos_popup_tick(void);
+
+/* A keyboard's key, from whichever thread reads it: true when a webOS pop-up
+ * has the focus and the key goes down, and so is the pop-up's. Its arrows,
+ * Enter, and Esc or Backspace are kept to be sent on as the remote's by the
+ * tick; any other goes nowhere. A key let go is not taken: it goes on as
+ * before. `vk` is Windows' key code, as the stream's keyboard reader has it. */
+bool webos_popup_take_key(short vk, bool down);
 
 /* For the control port: a remote key by its name (up, down, left, right, ok,
  * back) or by its number, sent only while a pop-up has the focus, so it can
