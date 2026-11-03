@@ -120,6 +120,15 @@ need "the build number is in our file" \
 absent "the build number is NOT back in upstream's build file" \
        CMakeLists.txt "CTM_BUILD_NUMBER"
 
+# ⓘ A build people download has no command port and carries its debug symbols.
+# Both lines are in upstream's files, and losing either still builds.
+need "a release build leaves the command port out" \
+     scripts/webos/docker_build_inner.sh "AURORA_RELEASE_BUILD.*\|AURORA_TERMINAL_CONTROL=OFF"
+need_count "a test build and a release build each say what the port does" \
+     scripts/webos/docker_build_inner.sh "AURORA_TERMINAL_CONTROL=" 2
+need "the debug symbols' strip leaves the crash record its function names" \
+     cmake/ArchiveDebugSymbols.cmake "strip-debug"
+
 # Every source file our list names is in the tree.
 for f in $(grep -o 'src/app/[A-Za-z0-9_./]*\.c' src/app/ctmbridge/app_sources.cmake 2>/dev/null); do
     if [ -f "$f" ]; then

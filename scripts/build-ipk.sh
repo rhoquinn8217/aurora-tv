@@ -17,11 +17,13 @@
 #
 # fetches it. Nothing has to sit next to this checkout.
 #
-# ⓘ THE APP REPORTS THE CORE IT WAS BUILT FROM: `core=` in the reply to
-# `status` on its command port (src/app/control_server.h). The folder is
-# compiled as it stands, so a folder that is not at the commit this checkout
-# records, or that holds changes in no commit, is named as such here and in
-# what the app reports.
+# ⓘ THE FOLDER IS COMPILED AS IT STANDS, so a folder that is not at the commit
+# this checkout records, or that holds changes in no commit, is named as such
+# here.
+#
+# ⭐ THIS IS THE BUILD PEOPLE DOWNLOAD (AURORA_RELEASE_BUILD=1): no command port,
+# and its debug symbols beside the package in dist/, which turn a crash's
+# addresses into files and lines for that build alone.
 #
 # ═══════════════════════════════════════════════════════════════════════════
 # MOUNTS
@@ -88,10 +90,10 @@ docker run --rm --platform linux/amd64 \
   -v "$ROOT/scripts/webos/docker_build_inner.sh:/docker_build.sh" \
   -v "$ROOT/temp/build-cache/tmp:/tmp" \
   -w /build -e CI=1 -e DOCKER_SKIP_SUBMODULES=1 \
-  -e BRIDGE_CORE_COMMIT="$CORE_COMMIT" \
+  -e BRIDGE_CORE_COMMIT="$CORE_COMMIT" -e AURORA_RELEASE_BUILD=1 \
   ubuntu:22.04 \
   bash -c "sed 's/\r\$//' /docker_build.sh | bash"
 
 echo
-echo "Package:"
-ls -la "$ROOT"/dist/*_arm.ipk
+echo "Package and its debug symbols:"
+ls -la "$ROOT"/dist/*_arm.ipk "$ROOT"/dist/*_dbgsym.tar.gz
