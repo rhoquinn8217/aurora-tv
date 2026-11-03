@@ -412,7 +412,7 @@ void touchpad_pointer_tick(struct app_input_t *input, bool ui_has_input) {
         if (s_active) {
             s_active = false;
             stand_down();
-            tp_log("off: %s", ui_has_input ? "the setting is off" : "a stream has the input");
+            tp_log("off: %s", ui_has_input ? "the setting is off" : "a stream or a webOS pop-up has the input");
         }
         /* The stream's cursor (touchpad_pointer_stream_move) goes 4 seconds
          * after its last movement, or as the TV cursor is switched off. */

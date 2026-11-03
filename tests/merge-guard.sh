@@ -361,7 +361,7 @@ in_order "a change of the mouse's mode asked during SDL's walk waits until it is
      "bridge_app_mouse_grab_later(input, grab)" "SDL_SetRelativeMouseMode("
 in_order "... and runs as the walk ends" \
      src/app/bridge_app.c "void bridge_app_filter_events(" \
-     "SDL_FilterEvents(filter, userdata);" "app_set_mouse_grab("
+     "SDL_FilterEvents(popup_first, userdata);" "app_set_mouse_grab("
 # ⓘ Any other caller would flush from inside the walk with nothing to stop it.
 other_mode_callers=$(grep -rl "SDL_SetRelativeMouseMode(" src/app --include='*.c' 2>/dev/null | grep -v '^src/app/input/app_input\.c$')
 if [ -z "$other_mode_callers" ] && [ -f src/app/input/app_input.c ]; then
