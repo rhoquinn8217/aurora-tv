@@ -156,6 +156,7 @@ static void cmd_help(control_job_t *job)
                "popup                   a webOS pop-up over the app: is one up, the remote's node, keys sent as the remote\n"
                "remote <key>            a remote key into a webOS pop-up: up down left right ok back, or its number;\n"
                "                        refused unless a pop-up has the focus, so it never reaches the app\n"
+               "popup test | close      a webOS pop-up the app raises itself (OK and Cancel), or closes\n"
                "set settle <ms>         how long to let the link settle before a DS4 handback tone\n"
                "signal refuse <n>       play a device's refusal signal; no plug has to fail\n"
                "cursor [<right> <down> [<thin>]]  Aurora's TV pointer: what stands, or a shift and a\n"
@@ -361,9 +362,16 @@ static void cmd_numpad(control_job_t *job, const char *args)
 }
 
 /* A webOS pop-up over the app (input/webos_popup.h): whether one has the
- * focus, the remote's node its keys go to, and how many went. */
-static void cmd_popup(control_job_t *job)
+ * focus, the remote's node its keys go to, and how many went; or with `test`
+ * a pop-up the app raises itself, and with `close` that one closed. */
+static void cmd_popup(control_job_t *job, const char *args)
 {
+    if (args != NULL && args[0] != '\0') {
+        char said[192];
+        (void) webos_popup_test(args, said, sizeof said);
+        reply(job, "%s\n", said);
+        return;
+    }
     char line[256];
     webos_popup_describe(line, sizeof line);
     reply(job, "OK %s\n", line);
@@ -1496,7 +1504,7 @@ static void run_command(control_job_t *job)
     } else if (strcasecmp(verb, "numpad") == 0) {
         cmd_numpad(job, args);
     } else if (strcasecmp(verb, "popup") == 0) {
-        cmd_popup(job);
+        cmd_popup(job, args);
     } else if (strcasecmp(verb, "remote") == 0) {
         cmd_remote(job, args);
     } else if (strcasecmp(verb, "press") == 0) {

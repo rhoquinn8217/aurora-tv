@@ -19,6 +19,7 @@
 #include "device_identity.inl" /* the identity rules, shared with the core */
 #include "protocol_level.inl"   /* whether this app and the listener can work together */
 #include "held_touch.inl"       /* a bridged pad's touchpad, for the TV's pointer */
+#include "held_nav.inl"         /* a bridged pad's d-pad and buttons, for a webOS pop-up */
 
 static bool s_active = false;
 
@@ -1290,6 +1291,39 @@ int ctm_bridge_held_touches(ctm_bridge_touch_t *out, int max)
         out[count].x = HELD_TOUCH_X(w);
         out[count].y = HELD_TOUCH_Y(w);
         out[count].click = st.held_touch && HELD_TOUCH_CLICK(w);
+        ++count;
+    }
+    pthread_mutex_unlock(&g_sessions_mutex);
+    pthread_mutex_unlock(&s_dev_mutex);
+    return count;
+}
+
+/* ⓘ The same walk, for a webOS pop-up while input is held. */
+int ctm_bridge_held_navs(ctm_bridge_nav_t *out, int max)
+{
+    int count = 0;
+    if (out == NULL || max <= 0) {
+        return 0;
+    }
+    pthread_mutex_lock(&s_dev_mutex);
+    pthread_mutex_lock(&g_sessions_mutex);
+    for (int i = 0; i < g_session_count && count < max; ++i) {
+        ctm_controller_t *c = g_sessions[i].controller;
+        if (!c || g_sessions[i].stopping) continue;
+        ctm_controller_status_t st;
+        ctm_controller_get_status(c, &st);
+        const uint32_t w = st.held_nav ? st.held_nav_word : held_nav_word(0, 128, 128);
+        const unsigned keys = HELD_NAV_KEYS(w);
+        snprintf(out[count].node, sizeof(out[count].node), "%s", g_sessions[i].node);
+        out[count].reading = st.held_nav;
+        out[count].up = (keys & HELD_NAV_UP) != 0;
+        out[count].down = (keys & HELD_NAV_DOWN) != 0;
+        out[count].left = (keys & HELD_NAV_LEFT) != 0;
+        out[count].right = (keys & HELD_NAV_RIGHT) != 0;
+        out[count].south = (keys & HELD_NAV_SOUTH) != 0;
+        out[count].east = (keys & HELD_NAV_EAST) != 0;
+        out[count].lx = ((int) HELD_NAV_LX(w) - 128) * 256;
+        out[count].ly = ((int) HELD_NAV_LY(w) - 128) * 256;
         ++count;
     }
     pthread_mutex_unlock(&g_sessions_mutex);

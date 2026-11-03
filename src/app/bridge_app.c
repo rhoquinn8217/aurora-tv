@@ -301,7 +301,11 @@ void bridge_app_events(app_t *app) {
      * here: a bridged controller is held while any is up, and a keyboard
      * works any. */
     const bool interface_has_input = streaming_overlay_shown() || bridge_prompt_shown() || cursor_align_shown();
-    ctm_bridge_gesture_tick(&app->input, app->session, interface_has_input);
+    /* ⭐ A webOS pop-up holds them too (input/webos_popup.h): a bridged keyboard
+     * and mouse go back to webOS, which answers with them, and the core reads a
+     * bridged pad's keys for it. ⓘ Not for the keyboard's tick below: that
+     * would feed the overlay behind the pop-up. */
+    ctm_bridge_gesture_tick(&app->input, app->session, interface_has_input || webos_popup_up());
     /* ⭐ The TV's volume from the right stick while the overlay is up, from a
      * pad the TV holds or a bridged one (input/overlay_volume.h). After the
      * tick above, which is what holds a bridged pad's input for the overlay.

@@ -17,6 +17,9 @@
 #include <unistd.h>
 
 #include "stream/input/vk.h"
+#include "ctm_bridge_glue.h"   /* a bridged pad, read by the core while input is held */
+#include "ctm_bridge_gesture.h"   /* which pad of SDL's is a bridged one */
+#include "lunasynccall.h"     /* a test pop-up, raised by the app itself */
 
 #define WEBOS_POPUP_LOG "webos-popup.log"
 FILE *ctm_log_open(const char *name, const char *mode);
@@ -75,6 +78,24 @@ static struct {
     int held[2];                          /* the left stick across and down: -1, 0, 1 or STICK_UNSEEN */
 } s_sticks[PADS_MAX];
 static int s_sticks_n = 0;
+/* A bridged pad, read by the bridge core while input is held: what it held at
+ * the last reading, by its node. ⓘ Forgotten as each pop-up comes, so the first
+ * reading in one only says what is held already. */
+static struct {
+    char node[64];
+    bool keys[6];                         /* up, down, left, right, Cross (A), Circle (B) */
+    int held[2];                          /* its left stick, as s_sticks */
+} s_bridged[PADS_MAX];
+static int s_bridged_n = 0;
+/* ⛔ A BRIDGED PAD ANSWERS FROM THE CORE ONLY. SDL can still read one (the Edge
+ * on its DS5Dongle, bridged on the C1: overlay_volume.c), and each press would
+ * be sent twice. So a pad of SDL's at a node the core reads is left out of the
+ * filter. ⓘ Matched as that list changes and every quarter second, not every
+ * pass: the match can look in /sys. */
+static SDL_JoystickID s_core_ids[PADS_MAX];
+static int s_core_ids_n = 0;
+static unsigned s_core_ids_sig = 0;
+static Uint32 s_core_ids_at = 0;
 /* ⓘ A keyboard's reader is a thread of its own: it reads whether a pop-up is
  * up from here, and leaves its keys here for the tick. */
 static SDL_atomic_t s_up_flag;
@@ -235,16 +256,41 @@ static void keep(int key, const char *from) {
     }
 }
 
-/* The left stick as the d-pad, as Aurora's own screens take it
+/* One axis of a left stick as the d-pad, as Aurora's own screens take it
  * (lv_drv_sdl_key.c): an arrow each time it is pushed past half way. ⓘ Only
  * once it has been seen short of that in this pop-up, so a stick already held
  * as the pop-up comes moves nothing. */
+static void stick_step(int *held, int value, bool across, bool bridged) {
+    static const int k_keys[4] = {REMOTE_LEFT, REMOTE_RIGHT, REMOTE_UP, REMOTE_DOWN};
+    static const char *const k_from[2][4] = {
+            {"the left stick's left", "the left stick's right", "the left stick's up", "the left stick's down"},
+            {"a bridged pad's left stick, left", "a bridged pad's left stick, right",
+             "a bridged pad's left stick, up", "a bridged pad's left stick, down"},
+    };
+    const int dir = value <= -STICK_PUSH ? -1 : (value >= STICK_PUSH ? 1 : 0);
+    if (*held == STICK_UNSEEN) {
+        if (dir == 0) {
+            *held = 0;
+        }
+        return;
+    }
+    if (dir == *held) {
+        return;
+    }
+    *held = dir;
+    if (dir != 0) {
+        const int which = (across ? 0 : 2) + (dir > 0 ? 1 : 0);
+        keep(k_keys[which], k_from[bridged ? 1 : 0][which]);
+    }
+}
+
+/* A pad of SDL's: its left stick, from the filter. */
 static void stick_as_arrow(const SDL_ControllerAxisEvent *axis) {
-    int across;
+    bool across;
     if (axis->axis == SDL_CONTROLLER_AXIS_LEFTX) {
-        across = 1;
+        across = true;
     } else if (axis->axis == SDL_CONTROLLER_AXIS_LEFTY) {
-        across = 0;
+        across = false;
     } else {
         return;
     }
@@ -261,22 +307,71 @@ static void stick_as_arrow(const SDL_ControllerAxisEvent *axis) {
         s_sticks[i].held[1] = STICK_UNSEEN;
         s_sticks_n++;
     }
-    int *held = &s_sticks[i].held[across ? 0 : 1];
-    const int dir = axis->value <= -STICK_PUSH ? -1 : (axis->value >= STICK_PUSH ? 1 : 0);
-    if (*held == STICK_UNSEEN) {
-        if (dir == 0) {
-            *held = 0;
+    stick_step(&s_sticks[i].held[across ? 0 : 1], axis->value, across, false);
+}
+
+/* ⭐ A BRIDGED PAD ANSWERS TOO. While a pop-up is up the bridge core holds a
+ * bridged pad's input, as for the overlay (bridge_app.c), and reads its d-pad,
+ * Cross and Circle and its left stick from the pad's own reports (the core's
+ * held_nav.inl): a key down now and not at the last reading is the pop-up's, as
+ * a pad of SDL's is in the filter. */
+static void bridged_pads_answer(void) {
+    static const int k_keys[6] = {REMOTE_UP, REMOTE_DOWN, REMOTE_LEFT, REMOTE_RIGHT, REMOTE_OK, REMOTE_BACK};
+    static const char *const k_from[6] = {
+            "a bridged pad's d-pad up", "a bridged pad's d-pad down", "a bridged pad's d-pad left",
+            "a bridged pad's d-pad right", "a bridged pad's Cross (A)", "a bridged pad's Circle (B)",
+    };
+    ctm_bridge_nav_t navs[PADS_MAX];
+    const int n = ctm_bridge_held_navs(navs, PADS_MAX);
+    unsigned sig = (unsigned) n + 1u;
+    for (int i = 0; i < n; i++) {
+        sig = sig * 31u + (navs[i].reading ? (unsigned) i + 1u : 0u);
+    }
+    const Uint32 ticks = SDL_GetTicks();
+    if (sig != s_core_ids_sig || SDL_TICKS_PASSED(ticks, s_core_ids_at + 250u)) {
+        s_core_ids_sig = sig;
+        s_core_ids_at = ticks;
+        s_core_ids_n = 0;
+        const int joysticks = SDL_NumJoysticks();
+        for (int j = 0; j < joysticks && s_core_ids_n < PADS_MAX; j++) {
+            const SDL_JoystickID id = SDL_JoystickGetDeviceInstanceID(j);
+            SDL_GameController *controller = SDL_GameControllerFromInstanceID(id);
+            const char *path = controller != NULL ? SDL_GameControllerPath(controller) : NULL;
+            for (int b = 0; path != NULL && b < n; b++) {
+                if (navs[b].reading && ctm_bridge_gesture_path_is_node(path, navs[b].node)) {
+                    s_core_ids[s_core_ids_n++] = id;
+                    break;
+                }
+            }
         }
-        return;
     }
-    if (dir == *held) {
-        return;
-    }
-    *held = dir;
-    if (dir < 0) {
-        keep(across ? REMOTE_LEFT : REMOTE_UP, across ? "the left stick's left" : "the left stick's up");
-    } else if (dir > 0) {
-        keep(across ? REMOTE_RIGHT : REMOTE_DOWN, across ? "the left stick's right" : "the left stick's down");
+    for (int i = 0; i < n; i++) {
+        if (!navs[i].reading) {
+            continue;
+        }
+        const bool now[6] = {navs[i].up, navs[i].down, navs[i].left, navs[i].right, navs[i].south, navs[i].east};
+        int j = 0;
+        while (j < s_bridged_n && strcmp(s_bridged[j].node, navs[i].node) != 0) {
+            j++;
+        }
+        if (j == s_bridged_n) {
+            if (s_bridged_n >= PADS_MAX) {
+                continue;
+            }
+            snprintf(s_bridged[j].node, sizeof(s_bridged[j].node), "%s", navs[i].node);
+            s_bridged[j].held[0] = STICK_UNSEEN;
+            s_bridged[j].held[1] = STICK_UNSEEN;
+            s_bridged_n++;
+        } else {
+            for (int k = 0; k < 6; k++) {
+                if (now[k] && !s_bridged[j].keys[k]) {
+                    keep(k_keys[k], k_from[k]);
+                }
+            }
+        }
+        memcpy(s_bridged[j].keys, now, sizeof(now));
+        stick_step(&s_bridged[j].held[0], navs[i].lx, true, true);
+        stick_step(&s_bridged[j].held[1], navs[i].ly, false, true);
     }
 }
 
@@ -339,6 +434,16 @@ bool webos_popup_up(void) {
     return window_state() == WINDOW_POPUP;
 }
 
+/* Is this pad of SDL's a bridged one the core reads? Then the core answers. */
+static bool read_by_core(SDL_JoystickID which) {
+    for (int i = 0; i < s_core_ids_n; i++) {
+        if (s_core_ids[i] == which) {
+            return true;
+        }
+    }
+    return false;
+}
+
 bool webos_popup_take(const SDL_Event *event) {
     switch (event->type) {
         case SDL_CONTROLLERBUTTONDOWN:
@@ -358,13 +463,13 @@ bool webos_popup_take(const SDL_Event *event) {
         return false;
     }
     if (event->type == SDL_CONTROLLERAXISMOTION) {
-        if (state == WINDOW_POPUP) {
+        if (state == WINDOW_POPUP && !read_by_core(event->caxis.which)) {
             stick_as_arrow(&event->caxis);
         }
         /* A stick or trigger back at rest goes on, as SDL let it through. */
         return event->caxis.value <= -AXIS_REST || event->caxis.value >= AXIS_REST;
     }
-    if (event->type != SDL_CONTROLLERBUTTONDOWN || state != WINDOW_POPUP) {
+    if (event->type != SDL_CONTROLLERBUTTONDOWN || state != WINDOW_POPUP || read_by_core(event->cbutton.which)) {
         return true;
     }
     int key = 0;
@@ -409,14 +514,46 @@ void webos_popup_tick(void) {
         s_had_focus = true;
     }
     const window_state_t state = window_state();
+    if (state != s_state) {
+        const Uint32 now = SDL_GetTicks();
+        const Uint32 lasted = now - s_since;
+        const window_state_t was = s_state;
+        s_state = state;
+        s_since = now;
+        s_sticks_n = 0;    /* each pop-up sees every stick at rest first */
+        s_bridged_n = 0;   /* and a bridged pad's first reading only says what is held */
+        s_core_ids_n = 0;
+        s_core_ids_sig = 0;
+        SDL_AtomicSet(&s_up_flag, state == WINDOW_POPUP ? 1 : 0);
+        /* ⭐ SDL keeps a controller's presses without the focus for exactly as long
+         * as a pop-up has it: in the background they stay dropped, as ever. */
+        SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, state == WINDOW_POPUP ? "1" : "0");
+        if (was == WINDOW_POPUP) {
+            popup_log("the pop-up went after %u ms, %d key(s) sent as the remote; the app %s", lasted, s_sent,
+                      state == WINDOW_FOCUSED ? "has the focus again" : "is in the background");
+        }
+        if (state == WINDOW_POPUP) {
+            s_sent = 0;
+            popup_log("a webOS pop-up has the focus%s: a controller answers it as the remote",
+                      was == WINDOW_AWAY ? ", as the app came back" : "");
+        } else if (state == WINDOW_AWAY && was == WINDOW_FOCUSED) {
+            popup_log("the app is in the background");
+        } else if (state == WINDOW_FOCUSED && was == WINDOW_AWAY) {
+            popup_log("the app is back with the focus, after %u ms", lasted);
+        }
+    }
+    if (state == WINDOW_POPUP) {
+        bridged_pads_answer();
+    }
     SDL_AtomicLock(&s_keys_lock);
     for (int i = 0; i < s_keys_n; i++) {
         keep(s_keys[i].key, s_keys[i].from);
     }
     s_keys_n = 0;
     SDL_AtomicUnlock(&s_keys_lock);
-    /* ⓘ Kept by the filter in this same pass, and by a keyboard's reader since
-     * the last. ⛔ Not once the pop-up has gone: the key would reach the app. */
+    /* ⓘ Kept by the filter in this same pass, by a keyboard's reader since the
+     * last, and from a bridged pad just now. ⛔ Not once the pop-up has gone: the
+     * key would reach the app. */
     for (int i = 0; i < s_pending_n; i++) {
         if (state != WINDOW_POPUP) {
             popup_log("%s: %s not sent, the pop-up had gone", s_pending[i].from, key_name(s_pending[i].key));
@@ -427,32 +564,69 @@ void webos_popup_tick(void) {
         }
     }
     s_pending_n = 0;
-    if (state == s_state) {
-        return;
+}
+
+/* ⓘ A test pop-up's call, on a thread of its own: webOS answers in its own
+ * time, and the control port's commands run inside SDL's walk of its queue. */
+static SDL_SpinLock s_alert_lock = 0;
+static char s_alert_id[96] = "";
+
+static int alert_call(void *data) {
+    char *payload = data;
+    const bool closing = strncmp(payload, "{\"alertId\"", 10) == 0;
+    char *reply = NULL;
+    const bool called = HLunaServiceCallSync(closing ? "luna://com.webos.notification/closeAlert"
+                                                     : "luna://com.webos.notification/createAlert",
+                                             payload, true, &reply);
+    popup_log("%s: %s", closing ? "the test pop-up, closed from the control port" : "a test pop-up, from the control port",
+              called && reply != NULL ? reply : "no answer");
+    const char *id = !closing && reply != NULL ? strstr(reply, "\"alertId\"") : NULL;
+    const char *colon = id != NULL ? strchr(id + 9, ':') : NULL;
+    const char *open = colon != NULL ? strchr(colon, '"') : NULL;
+    const char *close = open != NULL ? strchr(open + 1, '"') : NULL;
+    if (close != NULL && (size_t) (close - open - 1) < sizeof(s_alert_id)) {
+        SDL_AtomicLock(&s_alert_lock);
+        memcpy(s_alert_id, open + 1, (size_t) (close - open - 1));
+        s_alert_id[close - open - 1] = '\0';
+        SDL_AtomicUnlock(&s_alert_lock);
     }
-    const Uint32 now = SDL_GetTicks();
-    const Uint32 lasted = now - s_since;
-    const window_state_t was = s_state;
-    s_state = state;
-    s_since = now;
-    s_sticks_n = 0;   /* each pop-up sees every stick at rest first */
-    SDL_AtomicSet(&s_up_flag, state == WINDOW_POPUP ? 1 : 0);
-    /* ⭐ SDL keeps a controller's presses without the focus for exactly as long
-     * as a pop-up has it: in the background they stay dropped, as ever. */
-    SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, state == WINDOW_POPUP ? "1" : "0");
-    if (was == WINDOW_POPUP) {
-        popup_log("the pop-up went after %u ms, %d key(s) sent as the remote; the app %s", lasted, s_sent,
-                  state == WINDOW_FOCUSED ? "has the focus again" : "is in the background");
+    free(reply);
+    free(payload);
+    return 0;
+}
+
+bool webos_popup_test(const char *what, char *said, size_t len) {
+    char *payload = NULL;
+    if (what != NULL && strcasecmp(what, "test") == 0) {
+        payload = strdup("{\"sourceId\":\"com.aurora.gamestream.rhqn\","
+                         "\"message\":\"Aurora's test pop-up: answer it with a controller, a keyboard or the remote.\","
+                         "\"buttons\":[{\"label\":\"OK\"},{\"label\":\"Cancel\"}]}");
+    } else if (what != NULL && strcasecmp(what, "close") == 0) {
+        char id[96];
+        SDL_AtomicLock(&s_alert_lock);
+        snprintf(id, sizeof(id), "%s", s_alert_id);
+        s_alert_id[0] = '\0';
+        SDL_AtomicUnlock(&s_alert_lock);
+        if (id[0] == '\0') {
+            snprintf(said, len, "ERR no test pop-up from the control port to close");
+            return false;
+        }
+        char buf[160];
+        snprintf(buf, sizeof(buf), "{\"alertId\":\"%s\"}", id);
+        payload = strdup(buf);
+    } else {
+        snprintf(said, len, "ERR popup [test|close]");
+        return false;
     }
-    if (state == WINDOW_POPUP) {
-        s_sent = 0;
-        popup_log("a webOS pop-up has the focus%s: a controller answers it as the remote",
-                  was == WINDOW_AWAY ? ", as the app came back" : "");
-    } else if (state == WINDOW_AWAY && was == WINDOW_FOCUSED) {
-        popup_log("the app is in the background");
-    } else if (state == WINDOW_FOCUSED && was == WINDOW_AWAY) {
-        popup_log("the app is back with the focus, after %u ms", lasted);
+    SDL_Thread *thread = payload != NULL ? SDL_CreateThread(alert_call, "popup-test", payload) : NULL;
+    if (thread == NULL) {
+        free(payload);
+        snprintf(said, len, "ERR the call could not be started");
+        return false;
     }
+    SDL_DetachThread(thread);
+    snprintf(said, len, "OK asked webOS; its answer goes to logs/webos-popup.log");
+    return true;
 }
 
 bool webos_popup_send(const char *key, char *said, size_t len) {
@@ -535,6 +709,12 @@ bool webos_popup_send(const char *key, char *said, size_t len) {
 
 void webos_popup_describe(char *out, size_t len) {
     snprintf(out, len, "popup=no (not webOS)");
+}
+
+bool webos_popup_test(const char *what, char *said, size_t len) {
+    (void) what;
+    snprintf(said, len, "ERR only on webOS");
+    return false;
 }
 
 #endif

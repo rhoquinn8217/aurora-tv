@@ -39,8 +39,13 @@
  * go for the overlay too: those it answers by itself.
  * ⓘ A mouse is a pointer, and webOS points with its own: one the TV holds is
  * never taken from it.
- * ⚠️ A BRIDGED controller does not answer: its reports go to the PC and SDL
- * never sees them, so it plays on in the game as before.
+ * ⭐ A BRIDGED DEVICE ANSWERS TOO (the same day, asked whether it should: "yes,
+ * do it now"). Its reports go to the PC and SDL never sees them, so while a
+ * pop-up is up the bridge holds them as it does for the overlay (bridge_app.c):
+ * a bridged keyboard and mouse go back to webOS, which answers with them
+ * itself, and a bridged pad's d-pad, Cross and Circle and its left stick are
+ * read by the core from the pad's own reports (its held_nav.inl) and sent on
+ * here. The game sees nothing pressed from them meanwhile, as with the overlay.
  * ⓘ In the background (the window hidden or minimized: another app in front)
  * nothing changes, and SDL drops the presses as it always did. Logged in
  * logs/webos-popup.log. App's loop only, but for webos_popup_take_key. */
@@ -83,5 +88,12 @@ bool webos_popup_send(const char *key, char *said, size_t len);
 
 /* For the control port: the state, one line without its end. */
 void webos_popup_describe(char *out, size_t len);
+
+/* For the control port: `test` has the app raise a webOS pop-up of its own,
+ * with OK and Cancel, to answer by hand or with `remote`; `close` closes the
+ * last one it raised. webOS answers in its own time: the answer goes to the log.
+ * ⓘ A terminal on the TV cannot raise one: luna-send-pub's call to the
+ * notification service gets no answer (the C1, 2026-11-03). */
+bool webos_popup_test(const char *what, char *said, size_t len);
 
 #endif /* WEBOS_POPUP_H */
