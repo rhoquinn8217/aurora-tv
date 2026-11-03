@@ -747,6 +747,13 @@ need "... and a JSON post waits too" \
 need "libgamestream builds the gate" \
      core/libgamestream/src/CMakeLists.txt "host_gate.c"
 
+# --- The launch does not ask for continuous audio (2026-11-02) ---
+# ⓘ Vibepollo 2.0.3 and 2.0.4 honour the request by placing each captured packet
+# at its timestamp, and every stream's sound comes out scratchy (Vibepollo issue
+# #703). Upstream's line, back from a merge, still compiles.
+absent "the launch does NOT ask for continuous audio" \
+     core/libgamestream/src/client.c '"continuousAudio"'
+
 echo
 if [ "$fail" -eq 0 ]; then
     echo "⭐ merge guard: $pass checks, nothing lost"
