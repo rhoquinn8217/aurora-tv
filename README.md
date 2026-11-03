@@ -65,7 +65,7 @@ speaker audio (microphone on USB only).**
 
 *Note: DS5-USBIP can be set up, stopped and started through the same stream.*
 
-## USB Bridge Settings
+## USB Bridge Settings <sup>[[1]](#1-usb-bridge)</sup>
 
 Located at **Settings (⚙️) → USB Bridge**.
 
@@ -83,49 +83,57 @@ Located at **Settings (⚙️) → USB Bridge**.
 
 ## What this fork adds
 
-| Addition | &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; What it does |
+| Feature | &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; What it does |
 |:---|:---|
 | **DualSense audio over the TV's USB port** | A wired DualSense presents a sound card to webOS alongside its input device. This fork works out which card belongs to which controller, opens it, and carries the speaker and rumble audio out and the microphone in beside the input reports. More than one wired controller can be bridged at a time, each holding its own card. |
 | **DualSense Edge support** | An Edge's reports are shaped exactly like a DualSense's, so it shares the same handling rather than duplicating it. What it needed was its own identity: it is claimed as an Edge rather than folded into the DualSense, and reported as one, which is what lets DS5-USBIP rebuild it with the Edge's own descriptor. |
 | **DS5Dongle support** | A [DS5Dongle](https://github.com/awalol/DS5Dongle) presents over USB as the controller you've paired it to, so it uses the USB path like a wired pad. Identity comes from the controller's MAC address rather than the adapter's serial number, so when set to auto bridge, the app sees the same controller whether it's connected via Bluetooth, USB or with the DS5Dongle. |
-| **Easier bridging** | The original bridging panel is replaced by the USB Bridge panel, which presents a simple list of connected devices with quick bridge and release controls. Per DualSense settings for audio mode, headset and speaker volume, latency and haptics gain have moved to the DS5-USBIP config, and a DS5-USBIP button beside the panel opens the **Controller Configs** window on the host for whichever device is bridged. |
+| **Easier bridging** | The original bridging panel is replaced by the USB Bridge panel, which presents a simple list of connected devices with quick bridge and release controls. Per DualSense settings for audio mode, headset and speaker volume, latency and haptics gain have moved to the DS5-USBIP config, and a DS5-USBIP button in the streaming overlay opens the **Controller Configs** window on the host for whichever device is bridged. |
 | **Auto bridge control** | New setting allows you to select specific devices or all devices to auto bridge on stream start. |
 | **DualSense bridge gesture** | DualSense only: a two finger press and hold on the DualSense touchpad. One second for quick bridging, four seconds for releasing, without opening the USB Bridge panel. |
 | **DualSense confirmation signals** | DualSense only: bridging, releasing and refusal events are accompanied by controller lightbar, rumble and speaker confirmation signals. |
 
 ## Additional QoL Features
 
-| Addition | &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; What it does |
+| Feature | &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; What it does |
 |:---|:---|
-| **Streaming menu** | Vibepollo's host controls (Resume, Terminate, Remote Input, Remote Monitor) leave the game grid for one **Streaming** button in the launcher's top bar, which also says what is streaming. Terminate asks first. |
+| **Streaming menu**<sup>[[2]](#2-streaming-menu-and-cursor-features)</sup> | Vibepollo's host controls (Resume, Terminate, Remote Input, Remote Monitor) leave the game grid for one **Streaming** button in the launcher's top bar, which also says what is streaming. Terminate asks first. |
 | **Global DualSense touchpad as mouse** | Use DualSense touchpad as mouse in Dashboard and Streaming Overlay. |
 | **Volume controls** | Control webOS volume with right controller stick in the app dashboard and streaming overlay.<br>• **R-stick up**: volume up<br>• **R-stick down**: volume down<br>• **R-stick press**: mute/unmute |
-| **In-stream cursor options** | • **Ctrl+Alt+Shift+M**: Turns the TV's cursor on or off; off is for games where the mouse moves past the edge of the screen.<br>• **Ctrl+Alt+Shift+C**: Switches between Aurora's small, sharp cursor and the TV's regular one.<br>• **Ctrl+Alt+Shift+A**: Opens manual cursor alignment that you control with a controller d-pad or keyboard arrow keys. |
-| **Bluetooth Devices panel** | A more convenient way to manage Bluetooth devices than webOS's buried Bluetooth menu. |
+| **In-stream cursor options**<sup>[[2]](#2-streaming-menu-and-cursor-features)</sup> | • **Ctrl+Alt+Shift+M**: Turns the TV's cursor on or off; off is for games where the mouse moves past the edge of the screen.<br>• **Ctrl+Alt+Shift+C**: Switches between Aurora's small, sharp cursor and the TV's regular one.<br>• **Ctrl+Alt+Shift+A**: Opens manual cursor alignment that you control with a controller d-pad or keyboard arrow keys. |
+| **Bluetooth Devices panel**<sup>[[3]](#3-bluetooth-manager)</sup> | A more convenient way to manage Bluetooth devices than webOS's buried Bluetooth menu. |
 | **Cancel pairing and connecting** | Connecting and PIN pairing processes can be cancelled mid run. |
+| **Windows Sign In controller rebinds**<sup>[[4]](#4-windows-sign-in)</sup> | If DS5-USBIP has started on the host while your Windows system is locked, aurora-tv will know to provide special controller functionality and present it over the stream so you can sign in without keyboard, mouse or remote. |
 | **Cosmetic changes** | • Purple highlight selector with Play and Stop buttons on streaming app that react under a pointer.<br>• The profile box is hidden when there is only one profile. |
 
 ## Screenshots
 
-### USB Bridge
+### [1] USB Bridge
 
 <p>
 <a href="docs/images/aurora-usb-bridge-panel.png"><img src="docs/images/aurora-usb-bridge-panel.png" alt="USB Bridge panel" width="49%"></a>
 <a href="docs/images/aurora-usb-bridge-settings.png"><img src="docs/images/aurora-usb-bridge-settings.png" alt="USB Bridge settings" width="49%"></a>
 </p>
 
-### Streaming Menu and Cursor features
+### [2] Streaming Menu and Cursor features
 
 <p>
 <a href="docs/images/aurora-streaming-menu.jpg"><img src="docs/images/aurora-streaming-menu.jpg" alt="Streaming menu" width="49%"></a>
 <a href="docs/images/aurora-cursor-alignment.png"><img src="docs/images/aurora-cursor-alignment.png" alt="Cursor alignment bar" width="49%"></a>
 </p>
 
-### Bluetooth manager
+### [3] Bluetooth manager
 
 <p>
 <a href="docs/images/aurora-bluetooth-overlay.png"><img src="docs/images/aurora-bluetooth-overlay.png" alt="Bluetooth Devices panel over the streaming overlay" width="49%"></a>
 <a href="docs/images/aurora-bluetooth-dashboard.jpg"><img src="docs/images/aurora-bluetooth-dashboard.jpg" alt="Bluetooth Devices panel in the dashboard" width="49%"></a>
+</p>
+
+### [4] Windows Sign In
+
+<p>
+<a href="docs/images/aurora-windows-sign-in-list.png"><img src="docs/images/aurora-windows-sign-in-list.png" alt="Windows Sign In controller list" width="49%"></a>
+<a href="docs/images/aurora-windows-sign-in-numpad.png"><img src="docs/images/aurora-windows-sign-in-numpad.png" alt="Controller to numpad input" width="49%"></a>
 </p>
 
 ## Why this exists
