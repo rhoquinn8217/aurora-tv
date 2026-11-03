@@ -1600,8 +1600,8 @@ static bool bt_panel_command(int fd, const char *word, const char *arg)
     if (strcasecmp(word, "state") == 0) {
         bt_pairing_state_t st;
         bt_pairing_state(&st);
-        snprintf(line, sizeof line, "OK listed=%d searching=%d count=%d status=\"%s\"\n", st.listed ? 1 : 0,
-                 st.searching ? 1 : 0, st.count, st.status);
+        snprintf(line, sizeof line, "OK listed=%d searching=%d count=%d full=%d status=\"%s\"\n", st.listed ? 1 : 0,
+                 st.searching ? 1 : 0, st.count, bt_pairing_full(&st) ? 1 : 0, st.status);
         send_text(fd, line);
         for (int i = 0; i < st.count; i++) {
             snprintf(line, sizeof line, "%d %s gamepad=%d connected=%d name=\"%s\"\n", i, st.devices[i].addr,

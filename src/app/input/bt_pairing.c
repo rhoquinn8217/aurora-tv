@@ -416,6 +416,9 @@ static void refresh_later(void) {
     SDL_AddTimer(10000, refresh_later_cb, NULL);
 }
 
+static bool searching(void);
+static void search_stop(const char *why_status);
+
 static void do_refresh(void) {
     char *reply = bt_pairing_call("getPairedDeviceLists", "{}");
     jdomparser_ref parser = NULL;
@@ -453,10 +456,16 @@ static void do_refresh(void) {
         memcpy(s_state.devices, fresh.devices, sizeof s_state.devices);
         s_state.count = fresh.count;
         s_state.listed = true;
+        const bool full = bt_pairing_full(&s_state);
         SDL_UnlockMutex(s_lock);
         /* A found device the TV now lists is registered, not found. */
         for (int i = 0; i < fresh.count; i++) {
             found_remove(fresh.devices[i].addr);
+        }
+        /* At four a search stops, whoever paired the fourth (the TV's own
+         * Settings, say): bt_pairing.h, BT_PAIRING_LIMIT. */
+        if (full && searching()) {
+            search_stop("");
         }
     }
     if (parser != NULL) {
@@ -680,6 +689,15 @@ static void do_search_on(void) {
     if (searching()) {
         return;
     }
+    /* ⭐ Not at four: forget one first (bt_pairing.h, BT_PAIRING_LIMIT). The
+     * panel's Search is greyed then; this holds for the control port too. */
+    bt_pairing_state_t now;
+    bt_pairing_state(&now);
+    if (bt_pairing_full(&now)) {
+        bt_log("search not started: %d devices paired, the most there may be", now.count);
+        notify();
+        return;
+    }
     SDL_LockMutex(s_lock);
     s_state.searching = true;
     s_state.found_count = 0;
@@ -768,6 +786,14 @@ static void do_connect(const char *addr, const char *name) {
 
 /* Pair, from the found list: one at a time. */
 static void do_pair(const char *addr, const char *name) {
+    /* ⭐ Nor a Pair at four (bt_pairing.h, BT_PAIRING_LIMIT). */
+    bt_pairing_state_t now;
+    bt_pairing_state(&now);
+    if (bt_pairing_full(&now)) {
+        bt_log("pair not started: %d devices paired, the most there may be", now.count);
+        notify();
+        return;
+    }
     SDL_LockMutex(s_lock);
     const bool busy = s_pairing_addr[0] != '\0';
     char other[96];

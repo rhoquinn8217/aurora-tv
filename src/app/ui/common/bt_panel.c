@@ -82,6 +82,7 @@ static int         s_dot_count;
 static lv_obj_t   *s_switch;
 static lv_obj_t   *s_knob;
 static lv_obj_t   *s_status;
+static lv_obj_t   *s_full;            /* the line that says why Search is greyed */
 static lv_obj_t   *s_auto_row;
 static lv_obj_t   *s_auto_box;
 /* The registered devices' Forget buttons, and the found ones' Pair buttons. */
@@ -411,6 +412,26 @@ static void btp_refresh(void) {
         lv_obj_align(s_knob, LV_ALIGN_LEFT_MID, LV_DPX(3), 0);
     }
     btp_dots(st.searching);
+    /* ⭐ AT FOUR, SEARCH AND EVERY PAIR GREY, and a line says why
+     * (bt_pairing.h, BT_PAIRING_LIMIT). A search already running stays
+     * reachable, to switch off. */
+    const bool full = bt_pairing_full(&st);
+    const bool can_search = st.searching || !full;
+    lv_obj_set_style_opa(s_search, can_search ? LV_OPA_COVER : LV_OPA_40, 0);
+    if (can_search) {
+        lv_obj_clear_state(s_search, LV_STATE_DISABLED);
+    } else {
+        lv_obj_add_state(s_search, LV_STATE_DISABLED);
+    }
+    for (int i = 0; i < s_found_rows && full; i++) {
+        lv_obj_set_style_opa(s_pair[i], LV_OPA_40, 0);
+        lv_obj_add_state(s_pair[i], LV_STATE_DISABLED);
+    }
+    if (full) {
+        lv_obj_clear_flag(s_full, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        lv_obj_add_flag(s_full, LV_OBJ_FLAG_HIDDEN);
+    }
     btp_fit();
     const bool can_forget = st.count > 0 && !st.searching;
     lv_obj_set_style_opa(s_all, can_forget ? LV_OPA_COVER : LV_OPA_40, 0);
@@ -461,9 +482,9 @@ static void btp_refresh(void) {
      * greys itself once the list is empty, and a greyed object with the focus
      * takes no key, Back included (lv_indev.c, "!dis"): the arrows, OK and Back
      * all stopped until a pointer clicked something. Search is where the panel
-     * opens, and it is never greyed. */
+     * opens; at four devices it greys too (BT_PAIRING_LIMIT), and then the X. */
     if (lv_obj_has_state(target, LV_STATE_DISABLED)) {
-        target = s_search;
+        target = lv_obj_has_state(s_search, LV_STATE_DISABLED) ? s_close : s_search;
     }
     lv_group_focus_obj(target);
 }
@@ -648,6 +669,10 @@ void bt_panel_open(bool over_stream) {
     s_all = btp_button(foot, BTP_COL_ALL, BTP_COL_TXT, locstr("Forget all"));
     lv_obj_add_event_cb(s_all, btp_forget_all_cb, LV_EVENT_CLICKED, NULL);
 
+    s_full = btp_text(card, locstr("4 devices are paired. You can't pair another until you forget one or more."),
+                      BTP_COL_SUB, lv_theme_get_font_small(card), true);
+    lv_obj_add_flag(s_full, LV_OBJ_FLAG_HIDDEN);
+
     s_status = btp_text(card, "", BTP_COL_SUB, lv_theme_get_font_small(card), true);
 
     /* ⭐ THE CHECK BOX AT THE FOOT (rhoquinn8217, 2026-10-29): "Automatically pair
@@ -695,8 +720,9 @@ void bt_panel_open(bool over_stream) {
     btp_refresh();
     /* ⛔ OPENS ON SEARCH, never on a Forget (2026-10-29, the C1): over the
      * overlay it opened on the second row's Forget, one Enter from forgetting a
-     * controller. Forget all is one step away. */
-    lv_group_focus_obj(s_search);
+     * controller. Forget all is one step away. At four devices Search is
+     * greyed, and it opens on the X. */
+    lv_group_focus_obj(lv_obj_has_state(s_search, LV_STATE_DISABLED) ? s_close : s_search);
     bt_pairing_refresh();
 }
 

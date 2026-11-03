@@ -59,6 +59,18 @@ typedef struct {
     char status[200];   /* one line: what is happening, or what went wrong */
 } bt_pairing_state_t;
 
+/* ⭐ FOUR PAIRED DEVICES AT MOST (rhoquinn8217, 2026-11-02: "For the bluetooth
+ * manage, disable search if there are already 4 devices paired. Add a note saying
+ * you can't pair unless you forgot 1 or more."). At four the search does not
+ * start and Pair does nothing; the panel greys its Search and says why, with the
+ * number in its words. */
+#define BT_PAIRING_LIMIT 4
+
+/* True once the TV has listed BT_PAIRING_LIMIT devices or more. */
+static inline bool bt_pairing_full(const bt_pairing_state_t *st) {
+    return st->listed && st->count >= BT_PAIRING_LIMIT;
+}
+
 /* One call to the service, waited for up to five seconds. Returns the TV's
  * answer, for the caller to free, or NULL when the method is not one of the
  * service's above, the call could not be made, or nothing came back in time.
