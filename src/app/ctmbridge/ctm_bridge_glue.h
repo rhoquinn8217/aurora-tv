@@ -233,6 +233,21 @@ typedef struct {
 } ctm_bridge_touch_t;
 int ctm_bridge_held_touches(ctm_bridge_touch_t *out, int max);
 
+/* ⭐ A webOS pop-up (input/webos_popup.h): every bridged device's node, and
+ * for a pad whose layout the core reads, its d-pad, Cross (A) and Circle (B)
+ * and its left stick, as read from the pad's own report while input is held
+ * (the core's held_nav.inl). The stick runs -32768 to 32767, Y down, as SDL
+ * gives one. `reading` false: nothing read since the hold began, or a pad
+ * whose layout the core does not read. Returns how many. */
+typedef struct {
+    char node[64];
+    bool reading;
+    bool up, down, left, right;
+    bool south, east;
+    int lx, ly;
+} ctm_bridge_nav_t;
+int ctm_bridge_held_navs(ctm_bridge_nav_t *out, int max);
+
 /* True for a Bluetooth DualSense. */
 bool ctm_bridge_node_is_bluetooth(const char *node);
 

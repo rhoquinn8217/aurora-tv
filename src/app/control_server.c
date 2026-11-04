@@ -43,6 +43,7 @@
 #include "input/bridge_override.h"
 #include "input/bridge_keyboard.h"
 #include "input/tv_cursor.h"
+#include "input/webos_popup.h"
 #include "input/bt_pairing.h"
 #include "ui/common/bt_panel.h"
 #include "ui/streaming/cursor_align.h"
@@ -152,6 +153,10 @@ static void cmd_help(control_job_t *job)
                "host [<host>]           the launcher's host: which it shows, or pick one (a uuid or part of its name)\n"
                "input                   the stream's live input state: Virtual Mouse, the touchpad and the rest\n"
                "keys                    key events counted since the app started: the TV's keyboard grab, and webOS\n"
+               "popup                   a webOS pop-up over the app: is one up, the remote's node, keys sent as the remote\n"
+               "remote <key>            a remote key into a webOS pop-up: up down left right ok back, or its number;\n"
+               "                        refused unless a pop-up has the focus, so it never reaches the app\n"
+               "popup test | close      a webOS pop-up the app raises itself (OK and Cancel), or closes\n"
                "set settle <ms>         how long to let the link settle before a DS4 handback tone\n"
                "signal refuse <n>       play a device's refusal signal; no plug has to fail\n"
                "cursor [<right> <down> [<thin>]]  Aurora's TV pointer: what stands, or a shift and a\n"
@@ -354,6 +359,31 @@ static void cmd_numpad(control_job_t *job, const char *args)
           pad_family_current() == PAD_FAMILY_XBOX ? "xbox" : "ps", lock_keys_typed(),
           up ? (int) lv_area_get_width(&area) : 0, up ? (int) lv_area_get_height(&area) : 0,
           (int) area.x1, (int) area.y1, keyboard_place_name());
+}
+
+/* A webOS pop-up over the app (input/webos_popup.h): whether one has the
+ * focus, the remote's node its keys go to, and how many went; or with `test`
+ * a pop-up the app raises itself, and with `close` that one closed. */
+static void cmd_popup(control_job_t *job, const char *args)
+{
+    if (args != NULL && args[0] != '\0') {
+        char said[192];
+        (void) webos_popup_test(args, said, sizeof said);
+        reply(job, "%s\n", said);
+        return;
+    }
+    char line[256];
+    webos_popup_describe(line, sizeof line);
+    reply(job, "OK %s\n", line);
+}
+
+/* A key into a webOS pop-up as the remote presses it, without a hand. Refused
+ * unless a pop-up has the focus, so it can never reach the app. */
+static void cmd_remote(control_job_t *job, const char *args)
+{
+    char said[192];
+    (void) webos_popup_send(args, said, sizeof said);
+    reply(job, "%s\n", said);
 }
 
 static void cmd_status(control_job_t *job)
@@ -1473,6 +1503,10 @@ static void run_command(control_job_t *job)
         cmd_ui(job);
     } else if (strcasecmp(verb, "numpad") == 0) {
         cmd_numpad(job, args);
+    } else if (strcasecmp(verb, "popup") == 0) {
+        cmd_popup(job, args);
+    } else if (strcasecmp(verb, "remote") == 0) {
+        cmd_remote(job, args);
     } else if (strcasecmp(verb, "press") == 0) {
         cmd_press(job, args);
     } else if (strcasecmp(verb, "type") == 0) {
@@ -1600,8 +1634,8 @@ static bool bt_panel_command(int fd, const char *word, const char *arg)
     if (strcasecmp(word, "state") == 0) {
         bt_pairing_state_t st;
         bt_pairing_state(&st);
-        snprintf(line, sizeof line, "OK listed=%d searching=%d count=%d status=\"%s\"\n", st.listed ? 1 : 0,
-                 st.searching ? 1 : 0, st.count, st.status);
+        snprintf(line, sizeof line, "OK listed=%d searching=%d count=%d full=%d status=\"%s\"\n", st.listed ? 1 : 0,
+                 st.searching ? 1 : 0, st.count, bt_pairing_full(&st) ? 1 : 0, st.status);
         send_text(fd, line);
         for (int i = 0; i < st.count; i++) {
             snprintf(line, sizeof line, "%d %s gamepad=%d connected=%d name=\"%s\"\n", i, st.devices[i].addr,

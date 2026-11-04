@@ -27,6 +27,7 @@
 #include "input/overlay_volume.h"   /* the TV's volume from the right stick */
 #include "input/bridge_override.h"  /* the touchpad follows Virtual Mouse */
 #include "input/auto_bridge.h"      /* a ticked device that connects, bridged */
+#include "input/webos_popup.h"      /* a webOS pop-up answered from a controller */
 #include "stream/input/lock_keys.h" /* a controller's buttons type at a lock */
 #include "ui/streaming/lock_numpad.h"
 #include "ui/streaming/cursor_align.h"   /* cursor_align_shown */
@@ -161,6 +162,9 @@ void bridge_app_started(app_t *app) {
     /* ⓘ Once the window is up: the TV's pointer with its tip on the point the
      * host is told, the cursor and the place this TV keeps (input/tv_cursor.h). */
     tv_cursor_init(app->ui.window);
+    /* ⓘ Once the window is up too: a webOS pop-up over it, answered from a
+     * controller (input/webos_popup.h). */
+    webos_popup_init(app->ui.window);
     /* ⓘ Only its log: the pointer itself comes with the interface's display
      * (input/touchpad_pointer.h). */
     touchpad_pointer_init(app);
@@ -230,9 +234,22 @@ static struct {
     app_input_t *input;
 } s_grab_later;
 
+/* ⭐ A WEBOS POP-UP SEES A CONTROLLER FIRST (2026-11-03): while one has the
+ * focus, a controller's press is the remote's and goes no further
+ * (input/webos_popup.h); every other event reaches upstream's filter as ever. */
+static SDL_EventFilter s_upstream_filter;
+
+static int SDLCALL popup_first(void *userdata, SDL_Event *event) {
+    if (webos_popup_take(event)) {
+        return 0;
+    }
+    return s_upstream_filter(userdata, event);
+}
+
 void bridge_app_filter_events(SDL_EventFilter filter, void *userdata) {
     s_walking = SDL_ThreadID();
-    SDL_FilterEvents(filter, userdata);
+    s_upstream_filter = filter;
+    SDL_FilterEvents(popup_first, userdata);
     s_walking = 0;
     if (s_grab_later.due) {
         s_grab_later.due = false;
@@ -257,6 +274,10 @@ void bridge_app_events(app_t *app) {
      * SDL's event filter, now that the filter has let go of the event lock
      * (bridge_session.c). The tick below then sees the bridge as it is. */
     bridge_session_run_pending();
+    /* ⭐ A webOS pop-up over the app, come or gone, and the presses kept for it
+     * sent on as the remote's, now that SDL's walk is over
+     * (input/webos_popup.h). Before the ticks below that read the pads. */
+    webos_popup_tick();
     /* ⭐ While Windows is locked a controller is a mouse, or types
      * (stream/input/lock_keys.h). ⓘ Before Auto Bridge below and the touchpad's tick:
      * at the unlock Virtual Mouse is back as it was before either reads it. */
@@ -280,15 +301,20 @@ void bridge_app_events(app_t *app) {
      * here: a bridged controller is held while any is up, and a keyboard
      * works any. */
     const bool interface_has_input = streaming_overlay_shown() || bridge_prompt_shown() || cursor_align_shown();
-    ctm_bridge_gesture_tick(&app->input, app->session, interface_has_input);
+    /* ⭐ A webOS pop-up holds them too (input/webos_popup.h): a bridged keyboard
+     * and mouse go back to webOS, which answers with them, and the core reads a
+     * bridged pad's keys for it. ⓘ Not for the keyboard's tick below: that
+     * would feed the overlay behind the pop-up. */
+    ctm_bridge_gesture_tick(&app->input, app->session, interface_has_input || webos_popup_up());
     /* ⭐ The TV's volume from the right stick while the overlay is up, from a
      * pad the TV holds or a bridged one (input/overlay_volume.h). After the
      * tick above, which is what holds a bridged pad's input for the overlay.
      * ⭐ And on Aurora's own screens with no stream (rhoquinn8217, 2026-10-20:
      * "In the dashboard, stick up/down and press controls volume up/down and
      * mute like it does in the streaming overlay"): they read neither the
-     * right stick nor its click. */
-    overlay_volume_tick(&app->input, app->session == NULL || streaming_overlay_shown());
+     * right stick nor its click. ⓘ Not while a webOS pop-up has the focus:
+     * the pads answer that (input/webos_popup.h). */
+    overlay_volume_tick(&app->input, (app->session == NULL || streaming_overlay_shown()) && !webos_popup_up());
     /* ⭐ The touchpad as the host's mouse while Virtual Mouse is on
      * (input/bridge_override.h). */
     bridge_override_touchpad_tick(app->session);
@@ -339,8 +365,11 @@ void bridge_app_events(app_t *app) {
     tv_cursor_tick();
     /* ⭐ The touchpad as the TV's mouse while Aurora's own screens have the
      * input: no stream, or the overlay or a bridge's question up
-     * (input/touchpad_pointer.h). */
-    touchpad_pointer_tick(&app->input, app->session == NULL || streaming_overlay_shown() || bridge_prompt_shown());
+     * (input/touchpad_pointer.h). ⓘ Not while a webOS pop-up has the focus:
+     * a click would land on Aurora's screen under it. */
+    touchpad_pointer_tick(&app->input,
+                          (app->session == NULL || streaming_overlay_shown() || bridge_prompt_shown()) &&
+                          !webos_popup_up());
     /* ⓘ Upstream v1.2.9's touchpad tap-hold, for its touchpad mouse mode, runs
      * in app.c right after this. It reads the same SDL touchpad state the
      * gesture polls here; neither consumes events, so the two coexist.
