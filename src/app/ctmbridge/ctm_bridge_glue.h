@@ -147,6 +147,11 @@ bool ctm_bridge_agent_online(void);
  * takes no new bridge while it is. False when it has not said, or is offline. */
 bool ctm_bridge_agent_locked(void);
 
+/* ⭐ Is this device one the PC just restarted (a DS4Dongle whose settings it
+ * changed), so it is to be bridged again as it comes back? True once per
+ * restart, within seconds of it. */
+bool ctm_bridge_expected_back(const ctm_bridge_dev_t *d);
+
 /* ⭐ Can this TV app and DS5-USBIP on the PC work together (rhoquinn8217,
  * 2026-10-08)? Read from the listener's answers by the core
  * (protocol_level.inl); not known until one has come, nor while it is offline.

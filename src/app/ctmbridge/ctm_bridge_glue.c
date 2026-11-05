@@ -11,6 +11,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -244,6 +245,9 @@ void ctm_bridge_set_input_held(bool held)
     ctm_input_set_held(held ? 1 : 0);
 }
 
+/* Defined below, with the pads that come straight back. */
+static void glue_pad_will_return(const ctm_controller_dev_t *dev);
+
 bool ctm_bridge_start(void)
 {
     if (s_active) {
@@ -255,6 +259,8 @@ bool ctm_bridge_start(void)
         return true;
     }
     ctm_glue_ensure_core();
+    /* A DS4Dongle the PC restarts is taken again when it returns. */
+    ctm_controller_set_return_cb(glue_pad_will_return);
 
     /* ⭐⭐ START THE AGENT PROBE WHEN THE BRIDGE COMES UP, not when something is
      * first plugged.
@@ -1533,6 +1539,85 @@ ctm_bridge_compat_t ctm_bridge_agent_compat(void)
 bool ctm_bridge_agent_locked(void)
 {
     return g_agent_locked != 0;
+}
+
+/* ---------------------------------------------- a pad that comes straight back --
+ *
+ * ⭐ A DS4DONGLE RESTARTED BY THE PC (2026-11-04). DS5-USBIP changes a DS4Dongle's
+ * "speaker without headphones" by restarting it, which takes the pad off USB and
+ * ends its bridge; rhoquinn8217 asked for the bridge to come back by itself. The
+ * core says so just before the restart (ctm_controller_set_return_cb), and Auto
+ * Bridge takes the pad again when it reappears, as if it were ticked.
+ * ⓘ Matched on its vendor and product, and on its MAC where both sides know it:
+ * the window is seconds, and nothing else of a DS4Dongle's ids comes back then. */
+#define RETURN_SLOTS      4
+#define RETURN_WINDOW_MS  15000u
+
+typedef struct {
+    char vid[8];
+    char pid[8];
+    char mac[64];
+    uint32_t until_ms;   /* glue_now_ms(), which wraps: compared by difference */
+    bool live;
+} glue_return_t;
+
+static glue_return_t s_returning[RETURN_SLOTS];
+static pthread_mutex_t s_returning_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+static bool glue_return_live(const glue_return_t *r, uint32_t now)
+{
+    return r->live && (int32_t) (r->until_ms - now) > 0;
+}
+
+/* On the pad's session thread: note it, nothing more. */
+static void glue_pad_will_return(const ctm_controller_dev_t *dev)
+{
+    if (dev == NULL) {
+        return;
+    }
+    const uint32_t now = glue_now_ms();
+    pthread_mutex_lock(&s_returning_mutex);
+    int slot = 0;
+    for (int i = 0; i < RETURN_SLOTS; ++i) {
+        if (!glue_return_live(&s_returning[i], now)) {
+            slot = i;
+            break;
+        }
+        if ((int32_t) (s_returning[i].until_ms - s_returning[slot].until_ms) < 0) {
+            slot = i;
+        }
+    }
+    glue_return_t *r = &s_returning[slot];
+    snprintf(r->vid, sizeof r->vid, "%s", dev->vid);
+    snprintf(r->pid, sizeof r->pid, "%s", dev->pid);
+    /* ⓘ A DS4's serial is the pad's MAC once the core has read it (0x12). */
+    snprintf(r->mac, sizeof r->mac, "%s", dev->serial);
+    r->until_ms = now + RETURN_WINDOW_MS;
+    r->live = true;
+    pthread_mutex_unlock(&s_returning_mutex);
+}
+
+bool ctm_bridge_expected_back(const ctm_bridge_dev_t *d)
+{
+    if (d == NULL) {
+        return false;
+    }
+    const uint32_t now = glue_now_ms();
+    bool back = false;
+    pthread_mutex_lock(&s_returning_mutex);
+    for (int i = 0; i < RETURN_SLOTS && !back; ++i) {
+        glue_return_t *r = &s_returning[i];
+        if (!glue_return_live(r, now) || strcasecmp(r->vid, d->vid) != 0 || strcasecmp(r->pid, d->pid) != 0) {
+            continue;
+        }
+        if (r->mac[0] != '\0' && d->serial[0] != '\0' && !identity_same(r->mac, d->serial)) {
+            continue;
+        }
+        r->live = false;   /* once */
+        back = true;
+    }
+    pthread_mutex_unlock(&s_returning_mutex);
+    return back;
 }
 
 const char *ctm_bridge_agent_update_advice(void)
