@@ -568,8 +568,19 @@ static void ab_look(uint32_t now)
             continue;
         }
         if (!s->auto_all && !auto_bridge_ticked(s, devs, g)) {
-            ctm_bridge_gesture_note("auto bridge: %s connected, not ticked -- left with the TV", g->name);
-            continue;
+            /* ⭐ BACK FROM A RESTART THE PC ASKED FOR (2026-11-04): a DS4Dongle
+             * whose settings DS5-USBIP changed. Taken again as if ticked, so
+             * the bridge it ended comes back by itself (ctm_bridge_expected_back). */
+            bool back = false;
+            for (int p = 0; p < g->part_count && !back; ++p) {
+                back = ctm_bridge_expected_back(&devs[g->part[p]]);
+            }
+            if (!back) {
+                ctm_bridge_gesture_note("auto bridge: %s connected, not ticked -- left with the TV", g->name);
+                continue;
+            }
+            ctm_bridge_gesture_note("auto bridge: %s is back from the restart the PC asked for -- bridging it again",
+                                    g->name);
         }
         for (int p = 0; p < g->part_count; ++p) {
             const ctm_bridge_dev_t *d = &devs[g->part[p]];
