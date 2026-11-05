@@ -1118,6 +1118,89 @@ static bool release_soon(const char *key)
     return true;
 }
 
+/* ------------------------------------------ what the PC dropped as it went --
+ *
+ * ⭐ DS5-USBIP STOPPED ANSWERING IN THE MIDDLE OF A STREAM (rhoquinn8217,
+ * 2026-11-05: "Can aurora-tv trigger autobridge when the DS5-USBIP is detected
+ * to be on?"). It quit, crashed, or was restarted by its own setup, and the
+ * reaper below released what it held. Those devices are still connected to
+ * the TV, at the same nodes, so a node is all that is kept: Auto Bridge
+ * bridges each again once DS5-USBIP answers (input/auto_bridge.c), ticked or
+ * not, since the PC ended those bridges and the person did not. A device
+ * released by hand is never on this list.
+ * ⓘ Matched on the node alone. A device that left and came back meanwhile
+ * has a new connection, which Auto Bridge's own look at arrivals takes when
+ * it is ticked. Kept for the rest of the stream at most. */
+static char s_lost[MAX_SESSIONS][64];
+static int s_lost_count;
+static pthread_mutex_t s_lost_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+static void glue_lost_note(const char *node)
+{
+    if (node == NULL || node[0] == '\0') {
+        return;
+    }
+    pthread_mutex_lock(&s_lost_mutex);
+    bool known = false;
+    for (int i = 0; i < s_lost_count && !known; ++i) {
+        known = strcmp(s_lost[i], node) == 0;
+    }
+    if (!known && s_lost_count < MAX_SESSIONS) {
+        snprintf(s_lost[s_lost_count], sizeof s_lost[0], "%s", node);
+        ++s_lost_count;
+    }
+    pthread_mutex_unlock(&s_lost_mutex);
+}
+
+bool ctm_bridge_lost_pending(void)
+{
+    pthread_mutex_lock(&s_lost_mutex);
+    const bool any = s_lost_count > 0;
+    pthread_mutex_unlock(&s_lost_mutex);
+    return any;
+}
+
+bool ctm_bridge_lost_has(const ctm_bridge_dev_t *d)
+{
+    if (d == NULL || d->node[0] == '\0') {
+        return false;
+    }
+    bool found = false;
+    pthread_mutex_lock(&s_lost_mutex);
+    for (int i = 0; i < s_lost_count && !found; ++i) {
+        found = strcmp(s_lost[i], d->node) == 0;
+    }
+    pthread_mutex_unlock(&s_lost_mutex);
+    return found;
+}
+
+bool ctm_bridge_lost_take(const ctm_bridge_dev_t *d)
+{
+    if (d == NULL || d->node[0] == '\0') {
+        return false;
+    }
+    bool found = false;
+    pthread_mutex_lock(&s_lost_mutex);
+    for (int i = 0; i < s_lost_count && !found; ++i) {
+        if (strcmp(s_lost[i], d->node) == 0) {
+            --s_lost_count;
+            if (i != s_lost_count) {
+                memcpy(s_lost[i], s_lost[s_lost_count], sizeof s_lost[0]);
+            }
+            found = true;
+        }
+    }
+    pthread_mutex_unlock(&s_lost_mutex);
+    return found;
+}
+
+void ctm_bridge_lost_forget(void)
+{
+    pthread_mutex_lock(&s_lost_mutex);
+    s_lost_count = 0;
+    pthread_mutex_unlock(&s_lost_mutex);
+}
+
 /* ⭐⭐ RELEASE A CONTROLLER WHOSE HOST HAS GONE. T-127, 2026-08-23.
  *
  * ⛔ THE FAULT: close the listener's window and the controller stayed claimed by
@@ -1151,6 +1234,7 @@ int ctm_bridge_reap_gone_hosts(void)
 {
     int reaped = 0;
     char gone[MAX_SESSIONS][96];
+    char gone_node[MAX_SESSIONS][64];
     int gone_count = 0;
 
     pthread_mutex_lock(&s_dev_mutex);
@@ -1165,6 +1249,7 @@ int ctm_bridge_reap_gone_hosts(void)
         ctm_controller_get_status(c, &st);
         if (!st.host_gone) continue;
         snprintf(gone[gone_count], sizeof(gone[gone_count]), "%s", g_sessions[i].key);
+        snprintf(gone_node[gone_count], sizeof(gone_node[gone_count]), "%s", g_sessions[i].node);
         ++gone_count;
     }
     pthread_mutex_unlock(&g_sessions_mutex);
@@ -1174,7 +1259,18 @@ int ctm_bridge_reap_gone_hosts(void)
     for (int i = 0; i < gone_count; ++i) {
         if (!release_soon(gone[i])) continue;
         log_append("ctm glue: host gone -- releasing '%s'", gone[i]);
+        /* ⭐ And noted, so it bridges again when DS5-USBIP is back. */
+        glue_lost_note(gone_node[i]);
         ++reaped;
+    }
+    /* ⭐ WHAT THE PROBE READ BEFORE IS NOT AN ANSWER NOW (2026-11-05). The core
+     * gives up after three seconds without one, and the probe asks every ten,
+     * so its last ONLINE can be from before the PC went. Auto Bridge would take
+     * that for DS5-USBIP back, ask at once, be refused, and the pad would stay
+     * with the TV. Unknown until the probe asks again, which it does now. */
+    if (reaped > 0) {
+        g_agent_probed = false;
+        ctm_agent_probe_soon();
     }
     pthread_mutex_unlock(&s_dev_mutex);
     return reaped;

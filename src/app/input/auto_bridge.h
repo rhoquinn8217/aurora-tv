@@ -35,7 +35,13 @@
  *
  * ⭐ AND NEVER BEFORE DS5-USBIP ANSWERS. Vibepollo starts it with the stream,
  * so at a stream's start it may not be there yet: both wait until it answers,
- * and a PC without it gets no attempt and no refusal signal. */
+ * and a PC without it gets no attempt and no refusal signal.
+ *
+ * ⭐ AND AGAIN WHEN IT COMES BACK (2026-11-05). When DS5-USBIP stops answering
+ * mid-stream (it quit, crashed, or its setup restarted it), what it held is
+ * released and noted (ctm_bridge_reap_gone_hosts), and bridged again once it
+ * answers, ticked or not; a device released by hand is not. What connects
+ * meanwhile waits for it the same way. */
 #ifndef AUTO_BRIDGE_H
 #define AUTO_BRIDGE_H
 

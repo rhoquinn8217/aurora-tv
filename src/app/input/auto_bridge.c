@@ -378,8 +378,10 @@ int auto_bridge_run(const bridge_settings_t *s)
 /* ---------------------------------------------------- by themselves, when -- */
 
 #define AB_START_ASK_MS  60000   /* how long a stream's start asks for DS5-USBIP every two seconds */
-#define AB_NODE_WAIT_MS  20000   /* how long what connects during a stream waits for it */
+#define AB_NODE_WAIT_MS  20000   /* when what connects during a stream says, once, that it waits for it */
 #define AB_RECHECK_MS     2000   /* how often it asks again meanwhile */
+#define AB_LOST_SETTLE_MS 1500   /* what DS5-USBIP dropped finishes its release before it is asked for again */
+#define AB_RELEASE_WAIT_MS 8000  /* the longest such a release is waited for: after it, bridged by someone */
 #define AB_NOTE_AFTER_MS  3000   /* when the screen says so: a normal start has its answer long before */
 #define AB_SETTLE_MS      1000   /* after a connection's last node appears */
 #define AB_SDL_WAIT_MS    6000   /* the longest a controller waits for SDL to open it */
@@ -395,6 +397,9 @@ static bool s_after_sign_in;            /* a ticked device waits for the unlock 
 static uint32_t s_note_looked;          /* when the wait last looked for what to say */
 static uint32_t s_last_recheck;
 static bool s_streaming;                /* the loop's own view: a stream, with bridging on */
+static uint32_t s_lost_since;           /* when the loop first saw what DS5-USBIP dropped */
+static uint32_t s_lost_looked;          /* when it last looked to bridge that again */
+static bool s_appeared_said;            /* arrivals waiting for DS5-USBIP are in the log */
 
 /* Nodes that appeared during the stream and have not been looked at. */
 static char s_appeared[AB_APPEARED_MAX][64];
@@ -436,6 +441,7 @@ static void ab_forget(void)
 {
     s_appeared_count = 0;
     s_waiting_count = 0;
+    s_appeared_said = false;
 }
 
 static bool ab_appeared(const char *node)
@@ -608,6 +614,53 @@ static void ab_look(uint32_t now)
     free(devs);
 }
 
+/* ⭐ WHAT DS5-USBIP DROPPED AS IT WENT, BRIDGED AGAIN NOW IT ANSWERS: each part
+ * the glue noted (ctm_bridge_lost_take) that is still connected and not
+ * bridged. True when one is still being released, to be looked at again. The
+ * rest is forgotten: a device that left has a new connection when it comes
+ * back, which the look at arrivals takes when it is ticked.
+ * ⓘ The quiet list, no scan: the devices did not change, the PC did. Its
+ * `plugged` is read off the live session table. */
+static bool ab_take_back(uint32_t waited)
+{
+    ctm_bridge_dev_t *devs = calloc(DEVICE_PARTS_MAX, sizeof *devs);
+    if (devs == NULL) {
+        return true;   /* the next look tries again */
+    }
+    const int n = ctm_bridge_list_known(devs, DEVICE_PARTS_MAX);
+    bool again = false;
+    int asked = 0;
+    for (int i = 0; i < n; ++i) {
+        const ctm_bridge_dev_t *d = &devs[i];
+        if (!ctm_bridge_lost_has(d)) {
+            continue;
+        }
+        if (d->plugged) {
+            /* Its release is still under way; after a while, it is bridged
+             * again already, by hand or by a run of Auto Bridge. */
+            if (waited < AB_LOST_SETTLE_MS + AB_RELEASE_WAIT_MS) {
+                again = true;
+            } else {
+                (void) ctm_bridge_lost_take(d);
+            }
+            continue;
+        }
+        (void) ctm_bridge_lost_take(d);
+        ctm_bridge_gesture_note("auto bridge: DS5-USBIP answers again -- bridging %s %s again", d->name, d->node);
+        (void) bridge_request_device(d);
+        asked++;
+    }
+    if (!again) {
+        ctm_bridge_lost_forget();
+    }
+    if (asked > 0 || !again) {
+        ctm_bridge_gesture_note("auto bridge: DS5-USBIP answered %u ms after it stopped; asked for %d part(s) "
+                                "again%s", (unsigned) waited, asked, again ? ", one still releasing" : "");
+    }
+    free(devs);
+    return again;
+}
+
 bool auto_bridge_after_sign_in(void)
 {
     return s_after_sign_in;
@@ -619,11 +672,17 @@ void auto_bridge_poll(bool streaming)
     if (!on) {
         if (s_streaming) {
             ab_forget();
+            ctm_bridge_lost_forget();   /* a bridge never outlives its stream */
         }
         s_streaming = false;
         s_start_since = 0;
+        s_lost_since = 0;
         s_after_sign_in = false;
         return;   /* ⓘ Armed stays armed: only the stream's stop disarms it */
+    }
+    if (!s_streaming) {
+        /* What DS5-USBIP dropped as the last stream ended is not this one's. */
+        ctm_bridge_lost_forget();
     }
     s_streaming = true;
     const uint32_t now = SDL_GetTicks();
@@ -670,6 +729,30 @@ void auto_bridge_poll(bool streaming)
 
     s_after_sign_in = false;   /* only a stream's start, or a refused bridge's, waits for the sign in */
 
+    /* ⭐ 1b. WHAT DS5-USBIP DROPPED, BRIDGED AGAIN ONCE IT ANSWERS (rhoquinn8217,
+     * 2026-11-05: "Can aurora-tv trigger autobridge when the DS5-USBIP is detected
+     * to be on?"). It stopped answering in the middle of the stream: it quit,
+     * crashed, or its own setup restarted it, and the glue released what it held
+     * and noted those devices (ctm_bridge_reap_gone_hosts). However long it takes,
+     * as at a stream's start: asked every two seconds for a minute, then on the
+     * probe's own ten seconds. ⓘ Ticked or not, and never what was released by
+     * hand: only what the PC dropped is on that list. */
+    if (ctm_bridge_lost_pending()) {
+        if (s_lost_since == 0) {
+            s_lost_since = now;
+            s_lost_looked = 0;
+            ctm_bridge_gesture_note("auto bridge: DS5-USBIP stopped answering -- what it held bridges again once "
+                                    "it answers");
+        }
+        if (now - s_lost_since >= AB_LOST_SETTLE_MS && now - s_lost_looked >= AB_RECHECK_MS &&
+            ab_listener_ready(now, now - s_lost_since < AB_START_ASK_MS)) {
+            s_lost_looked = now;
+            if (!ab_take_back(now - s_lost_since)) {
+                s_lost_since = 0;
+            }
+        }
+    }
+
     /* 2. Controllers that connected, once SDL has opened them: cheap, no list. */
     for (int i = 0; i < s_waiting_count;) {
         const ctm_bridge_dev_t *d = &s_waiting[i];
@@ -690,15 +773,19 @@ void auto_bridge_poll(bool streaming)
     if (s_appeared_count == 0 || now - s_last_appeared < AB_SETTLE_MS) {
         return;
     }
-    if (!ab_listener_ready(now, true)) {
-        /* ⓘ Not while Windows is locked: it bridges at the unlock. */
-        if (now - s_last_appeared >= AB_NODE_WAIT_MS && !ctm_bridge_agent_locked()) {
-            ctm_bridge_gesture_note("auto bridge: DS5-USBIP does not answer -- %d new node(s) left with the TV",
+    if (!ab_listener_ready(now, now - s_last_appeared < AB_START_ASK_MS)) {
+        /* ⭐ KEPT UNTIL DS5-USBIP ANSWERS (2026-11-05), however long that takes, as
+         * what it dropped is (1b above). They were let go after twenty seconds, so
+         * a ticked pad connected while DS5-USBIP restarted stayed with the TV.
+         * ⓘ Said once; and not while Windows is locked: it bridges at the unlock. */
+        if (!s_appeared_said && now - s_last_appeared >= AB_NODE_WAIT_MS && !ctm_bridge_agent_locked()) {
+            s_appeared_said = true;
+            ctm_bridge_gesture_note("auto bridge: DS5-USBIP does not answer -- %d new node(s) wait for it",
                                     s_appeared_count);
-            s_appeared_count = 0;
         }
         return;
     }
+    s_appeared_said = false;
     ab_look(now);
 }
 
