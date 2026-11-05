@@ -152,6 +152,18 @@ bool ctm_bridge_agent_locked(void);
  * restart, within seconds of it. */
 bool ctm_bridge_expected_back(const ctm_bridge_dev_t *d);
 
+/* ⭐ What the PC dropped when DS5-USBIP stopped answering mid-stream
+ * (ctm_bridge_reap_gone_hosts notes it), for Auto Bridge to bridge again once
+ * DS5-USBIP answers: ticked or not, and never what was released by hand.
+ * Is anything noted? */
+bool ctm_bridge_lost_pending(void);
+/* Is this device one of them? `has` only looks; `take` is true once, as it
+ * comes off the list. */
+bool ctm_bridge_lost_has(const ctm_bridge_dev_t *d);
+bool ctm_bridge_lost_take(const ctm_bridge_dev_t *d);
+/* Forget them all: at a stream's end, and after Auto Bridge has looked. */
+void ctm_bridge_lost_forget(void);
+
 /* ⭐ Can this TV app and DS5-USBIP on the PC work together (rhoquinn8217,
  * 2026-10-08)? Read from the listener's answers by the core
  * (protocol_level.inl); not known until one has come, nor while it is offline.
