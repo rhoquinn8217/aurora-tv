@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Set the DualSense badge on the webOS app icons.
+"""Set the DS5-USBIP badge on the webOS app icons.
 
     python3 scripts/gen_icon_badge.py            writes deploy/webos/icon*.png
     python3 scripts/gen_icon_badge.py --check    writes nothing, exit 1 if their pixels differ
@@ -23,7 +23,9 @@ sizes and run THIS.
 THE SOURCES, in scripts/bridge_badge/:
     icon_base.png        80 px   the Aurora icon with no badge on it
     icon_large_base.png  130 px  the same, large
-    ds5_badge.png        512 px  the badge: a DualSense on a flat-panel TV
+    ds5_badge_30.png     30 px   the badge for the 80 px icon: DS5-USBIP's own
+                                 icon, a DualSense on a television
+    ds5_badge_49.png     49 px   the same, for the 130 px icon
 
 ⓘ The base icons are the app icons as they stood before a badge was first
 added. An existing badge is baked into the pixels and cannot be lifted back
@@ -32,16 +34,28 @@ out, so the badge is always set on the clean art, never painted over an old one.
 ⚠️ THE FOLDER IS STILL CALLED bridge_badge AND bridge_master.png IS STILL IN
 IT. Nothing reads that file any more: the badge used to be Ciprian's bridge,
 recoloured black with a white glow so it would show on near-black art, and it
-is now the DualSense mark instead. The master is kept because it is his
+is now DS5-USBIP's icon instead. The master is kept because it is his
 artwork and the decision is reversible; the folder keeps its name because
 renaming it would churn paths for no gain. Neither is a source of these icons.
 
-⭐ THE BADGE IS NOT DRAWN HERE, it is a committed master, the same arrangement
-bridge_master.png had. ds5_badge.png comes from the DS5-USBIP listener, where
-installer/trace-silhouette.py traces the controller outline and
-installer/build-icon.ps1 composes it on the television; the 512 px master is
-that composition rendered once and dropped in here. Regenerating it needs that
-repo, which is why it is committed rather than built.
+⭐ THE BADGE IS NOT DRAWN HERE. Each size is DS5-USBIP's icon as the listener
+draws it, at exactly that size: its installer/build-icon.ps1 run with
+-Png <folder> -PngSize 30, then 49, and the file it writes dropped in here
+under the name above. Drawing it needs that repo, which is why the pictures
+are committed rather than built.
+
+⛔ ONE PICTURE PER SIZE, NOT ONE LARGE ONE SHRUNK. The icon is drawn in lines,
+and the listener's script keeps every line at least a pixel wide at whatever
+size it draws. A 512 px picture shrunk to 49 px turns the same lines into
+faint grey half-pixels, and the controller all but disappears (2026-11-05,
+compared side by side). So a new BADGE_SCALE, or a base icon of a new size,
+needs a picture drawn at the new size, and this script names it.
+
+⭐ SEE-THROUGH. The listener draws a dark television with the controller in
+white lines on it. Here the television's dark colour is taken out: every pixel
+becomes white, as opaque as it was light, so the lines and the glare stay and
+the Aurora art shows through the screen. rhoquinn8217 chose that, 2026-11-05,
+over the whole badge at half strength.
 
 ⭐ THE AURORA ART IS NOT TOUCHED. The badge is composited into a square at the
 bottom right and nothing outside that square changes -- not scaled, not moved,
@@ -67,17 +81,27 @@ TARGETS = (
     (SOURCES / "icon_base.png", WEBOS / "icon.png"),
     (SOURCES / "icon_large_base.png", WEBOS / "icon_large.png"),
 )
-BADGE_MASTER = SOURCES / "ds5_badge.png"
+
+
+def badge_source(size: int) -> Path:
+    """DS5-USBIP's icon as the listener draws it at `size` px square."""
+    return SOURCES / f"ds5_badge_{size}.png"
+
 
 # ⭐ THE LOOK, as chosen by eye against the shipped sizes. Change these and
 # rerun; nothing else in the file is a matter of taste.
 #
-# 0.19 is a floor rather than a preference. The controller sits at 0.78 of the
-# badge's width, so at this scale it is 19 x 12 px on the 130 icon and 15 x 9
-# on the 80. Go smaller and the grips and the notch between them stop
-# resolving, and the badge reads as a white tile with a smudge in it.
-BADGE_SCALE = 0.19        # badge width as a share of the icon's width
+# 0.38 is rhoquinn8217's "make the DS5-USBIP image 2x large" (2026-11-05),
+# from 0.19, the smallest at which the old badge, a filled silhouette, still
+# showed its grips. At 0.38 the badge is 49 px on the 130 icon and 30 on the
+# 80, and it covers the foot of the A, which shows through the screen.
+# ⚠️ A new scale is a new size: draw the badge again at it (see above).
+BADGE_SCALE = 0.38        # badge width as a share of the icon's width
 INSET = 0.03              # inset from the bottom-right corner, same share
+
+# The listener's dark colour (build-icon.ps1's $DARK, #111827): the television's
+# screen, edge and stand, which the see-through badge leaves out.
+TV_DARK = (17, 24, 39)
 
 
 # ---------------------------------------------------------------- PNG, by hand
@@ -181,40 +205,34 @@ def to_rgba(w: int, h: int, bpp: int, pix: bytearray) -> bytearray:
 
 # ------------------------------------------------------------------- the image
 
-def rgba_down(pix: bytearray, w: int, h: int, nw: int, nh: int) -> bytearray:
-    """Area average. ⚠️ Colour is weighted by alpha: a plain average drags the
-    colour of fully transparent pixels into every edge."""
-    out = bytearray(nw * nh * 4)
-    for y in range(nh):
-        y0, y1 = y * h // nh, max(y * h // nh + 1, (y + 1) * h // nh)
-        for x in range(nw):
-            x0, x1 = x * w // nw, max(x * w // nw + 1, (x + 1) * w // nw)
-            r = g = b = a = n = 0
-            for yy in range(y0, y1):
-                base = yy * w
-                for xx in range(x0, x1):
-                    i = (base + xx) * 4
-                    al = pix[i + 3]
-                    r += pix[i] * al
-                    g += pix[i + 1] * al
-                    b += pix[i + 2] * al
-                    a += al
-                    n += 1
-            o = (y * nw + x) * 4
-            if a > 0:
-                out[o] = min(255, r // a)
-                out[o + 1] = min(255, g // a)
-                out[o + 2] = min(255, b // a)
-            out[o + 3] = a // n if n else 0
+def _lum(r: int, g: int, b: int) -> float:
+    return 0.299 * r + 0.587 * g + 0.114 * b
+
+
+def see_through(w: int, h: int, pix: bytearray) -> bytearray:
+    """The television's dark colour taken out. Every pixel becomes white, its
+    alpha scaled by how far its colour lies from TV_DARK towards white: the
+    white lines stay whole, the glare keeps its fade, the dark fill goes, and
+    an edge pixel between the two keeps its share of the line."""
+    dark = _lum(*TV_DARK)
+    out = bytearray(pix)
+    for i in range(w * h):
+        o = i * 4
+        t = (_lum(pix[o], pix[o + 1], pix[o + 2]) - dark) / (255.0 - dark)
+        t = 0.0 if t < 0 else 1.0 if t > 1 else t
+        out[o] = out[o + 1] = out[o + 2] = 255
+        out[o + 3] = int(pix[o + 3] * t + 0.5)
     return out
 
 
 def badge_at(size: int) -> bytearray:
-    """The badge master, area-averaged down to `size` square."""
-    w, h, bpp, pix = load(BADGE_MASTER)
-    if w != h:
-        raise ValueError(f"{BADGE_MASTER.name}: expected a square master")
-    return rgba_down(to_rgba(w, h, bpp, pix), w, h, size, size)
+    """DS5-USBIP's icon drawn at `size` px, see-through. Never scaled here:
+    see ONE PICTURE PER SIZE above."""
+    path = badge_source(size)
+    w, h, bpp, pix = load(path)
+    if (w, h) != (size, size):
+        raise ValueError(f"{path.name}: expected {size}x{size} px, found {w}x{h}")
+    return see_through(w, h, to_rgba(w, h, bpp, pix))
 
 
 def badged_icon(base_path: Path) -> tuple[int, int, bytearray]:
@@ -254,10 +272,17 @@ def shows_the_same(target: Path, w: int, h: int, pix: bytearray) -> bool:
 
 def main() -> int:
     check = "--check" in sys.argv[1:]
-    missing = [p for p in (BADGE_MASTER, *(b for b, _ in TARGETS)) if not p.is_file()]
+    missing = [b for b, _ in TARGETS if not b.is_file()]
+    if not missing:
+        badges = [badge_source(int(load(b)[0] * BADGE_SCALE)) for b, _ in TARGETS]
+        missing = [p for p in badges if not p.is_file()]
     if missing:
         for p in missing:
             print(f"missing source: {p}", file=sys.stderr)
+        if any(p.name.startswith("ds5_badge_") for p in missing):
+            print("  draw it with the DS5-USBIP listener's installer/build-icon.ps1 "
+                  "-Png <folder> -PngSize <size> and copy the file it writes here "
+                  "under that name", file=sys.stderr)
         return 2
 
     stale = 0
