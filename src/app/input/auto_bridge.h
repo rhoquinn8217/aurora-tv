@@ -5,7 +5,9 @@
  * when it is ticked in the Auto Bridge window; ⭐ a DualSense or an Edge is
  * ticked until someone unticks it (rhoquinn8217, 2026-10-15: "DS5 and DS5
  * edges are just ticked by default and can be untick"), to make a DualSense's
- * setup as seamless as possible.
+ * setup as seamless as possible. ⭐ And since 2026-11-05 a DS4 with a sound card
+ * of its own, which an imitation of one does not have (rhoquinn8217: "Only
+ * ones with sound card."): auto_bridge_ticked_by_default.
  *
  * ⛔⛔ NOT THE AUTO-PLUG THAT WAS REMOVED. That bridged EVERYTHING on every
  * change and took working devices away from the TV without being asked. This
@@ -81,17 +83,20 @@ bool auto_bridge_marked(const char *csv, const ctm_bridge_dev_t *devs, const dev
 void auto_bridge_mark_set(const char *csv, const ctm_bridge_dev_t *devs, const device_group_t *g,
                           bool on, char *out, size_t out_len);
 
-/* A DualSense or an Edge: a part whose kind starts "ds5" ("ds5", "ds5_usb",
- * "ds5e", "ds5e_usb"). */
-bool auto_bridge_is_dualsense(const ctm_bridge_dev_t *devs, const device_group_t *g);
+/* Ticked until someone unticks it: a DualSense or an Edge, a part whose kind
+ * starts "ds5" ("ds5", "ds5_usb", "ds5e", "ds5e_usb"), and since 2026-11-05 a
+ * DS4 with a sound card of its own (a part of kind "ds4..." with `own_card`):
+ * a second-model DS4 on a cable, or the DS4Dongle. */
+bool auto_bridge_ticked_by_default(const ctm_bridge_dev_t *devs, const device_group_t *g);
 
-/* Is this device ticked in the Auto Bridge window? A DualSense unless it is in
- * the unticked list (auto_skip); any other device when it is in the marks
- * (auto_macs). "Bridge all" is apart from it. */
+/* Is this device ticked in the Auto Bridge window? One ticked by default
+ * unless it is in the unticked list (auto_skip); any other device when it is
+ * in the marks (auto_macs). "Bridge all" is apart from it. */
 bool auto_bridge_ticked(const bridge_settings_t *s, const ctm_bridge_dev_t *devs, const device_group_t *g);
 
-/* Tick or untick a device: a DualSense out of or into the unticked list, any
- * other into or out of the marks. */
+/* Tick or untick a device: one ticked by default out of or into the unticked
+ * list (and an untick out of the marks too), any other into or out of the
+ * marks. */
 void auto_bridge_set_ticked(bridge_settings_t *s, const ctm_bridge_dev_t *devs, const device_group_t *g,
                             bool on);
 

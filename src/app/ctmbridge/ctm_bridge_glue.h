@@ -112,6 +112,11 @@ typedef struct {
     char device_name[128];   /* the USB device's maker and product, or "" */
     char usb_serial[64];     /* the USB device's own serial, zeros and all, or "" */
     int iface;               /* the USB interface number, -1 when unknown */
+    /* ⭐ A SOUND CARD OF ITS OWN, on its own USB device (2026-11-05), as a
+     * second-model DS4 on a cable and the DS4Dongle have. Asked only for a DS4
+     * on a cable, the one kind whose Auto Bridge tick waits on it
+     * (input/auto_bridge.c); false for every other device. */
+    bool own_card;
 } ctm_bridge_dev_t;
 
 /* ⭐ Identity strings, answered by the core's own rules so the TV and the bridge

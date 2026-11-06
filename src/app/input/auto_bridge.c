@@ -286,13 +286,27 @@ void auto_bridge_mark_set(const char *csv, const ctm_bridge_dev_t *devs, const d
     }
 }
 
-bool auto_bridge_is_dualsense(const ctm_bridge_dev_t *devs, const device_group_t *g)
+bool auto_bridge_ticked_by_default(const ctm_bridge_dev_t *devs, const device_group_t *g)
 {
     if (devs == NULL || g == NULL) {
         return false;
     }
     for (int p = 0; p < g->part_count; ++p) {
-        if (strncmp(devs[g->part[p]].kind, "ds5", 3) == 0) {
+        const ctm_bridge_dev_t *d = &devs[g->part[p]];
+        if (strncmp(d->kind, "ds5", 3) == 0) {
+            return true;
+        }
+        /* ⭐⭐ A DS4 WITH A SOUND CARD OF ITS OWN (2026-11-05). rhoquinn8217,
+         * asked to tick a DS4 by default: "A lot of 3rd party controller look
+         * like a ds4 but aren't", and of the two ways offered to tell them
+         * apart, "Only ones with sound card." Nothing a TV reads proves a pad
+         * is Sony's. A card on its own USB device is what the imitation here
+         * does not copy: a GameSir in PlayStation mode answers as a
+         * second-model DS4, with Sony's id, Sony's name and a MAC, and has no
+         * card. ⓘ So a second-model DS4 on a cable and the DS4Dongle are
+         * ticked until unticked; a first-model DS4, which has no card over
+         * USB, and any DS4 on Bluetooth are ticked by hand, as before. */
+        if (strncmp(d->kind, "ds4", 3) == 0 && d->own_card) {
             return true;
         }
     }
@@ -304,7 +318,7 @@ bool auto_bridge_ticked(const bridge_settings_t *s, const ctm_bridge_dev_t *devs
     if (s == NULL || devs == NULL || g == NULL) {
         return false;
     }
-    if (auto_bridge_is_dualsense(devs, g)) {
+    if (auto_bridge_ticked_by_default(devs, g)) {
         return !auto_bridge_marked(s->auto_skip, devs, g);
     }
     return auto_bridge_marked(s->auto_macs, devs, g);
@@ -317,9 +331,16 @@ void auto_bridge_set_ticked(bridge_settings_t *s, const ctm_bridge_dev_t *devs, 
         return;
     }
     char out[AUTO_BRIDGE_LIST_MAX];
-    if (auto_bridge_is_dualsense(devs, g)) {
+    if (auto_bridge_ticked_by_default(devs, g)) {
         auto_bridge_mark_set(s->auto_skip, devs, g, !on, out, sizeof out);
         bridge_settings_set_auto_skip(s, out);
+        /* ⓘ An untick takes back a tick by hand as well. A DS4 ticked on
+         * Bluetooth, then unticked on a cable, where it is ticked by default,
+         * would otherwise still bridge by itself on Bluetooth. */
+        if (!on) {
+            auto_bridge_mark_set(s->auto_macs, devs, g, false, out, sizeof out);
+            bridge_settings_set_auto_macs(s, out);
+        }
         return;
     }
     auto_bridge_mark_set(s->auto_macs, devs, g, on, out, sizeof out);

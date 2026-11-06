@@ -76,8 +76,9 @@ static void abw_mark(int idx, bool on) {
     if (idx < 0 || idx >= s_count || s_box[idx] == NULL) {
         return;
     }
-    /* ⭐ A DualSense is ticked until someone unticks it (input/auto_bridge.h),
-     * so its box goes into or out of the unticked list, not the marks. */
+    /* ⭐ A DualSense, and a DS4 with a sound card of its own, is ticked until
+     * someone unticks it (input/auto_bridge.h), so its box goes into or out of
+     * the unticked list, not the marks. */
     auto_bridge_set_ticked(&app_configuration->bridge, s_parts, &s_groups[idx], on);
     abw_refresh_boxes();
 }
