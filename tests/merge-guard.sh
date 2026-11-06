@@ -511,7 +511,7 @@ need "the on-screen keyboard's Circle does not send Esc at a lock" \
      src/app/lvgl/input/lv_drv_sdl_key.c "if (vk == VK_ESCAPE && lock_keys_active())"
 need "Create moves the on-screen keyboard" \
      src/app/lvgl/input/lv_drv_sdl_key.c "keyboard_place_button(e.cbutton.which, e.cbutton.button, pressed)"
-need "... from where it was put, with the line that says so" \
+need "... from where it was put" \
      src/app/ui/streaming/soft_keyboard.c "keyboard_place_attach(kbd_content);"
 need "the buttons type, and the numpad shows, from the app's loop" \
      src/app/bridge_app.c "lock_keys_tick(app);"
@@ -755,17 +755,21 @@ absent "the launch does NOT ask for continuous audio" \
      core/libgamestream/src/client.c '"continuousAudio"'
 
 # --- The add-a-computer box opens filled in, with a clear button; the stream's
-# keyboard has a Close tab (rhoquinn8217, 2026-10-23) ---
+# keyboard has Move and Close tabs (rhoquinn8217, 2026-10-23 and 2026-11-06) ---
 # ⓘ A line of ours in each of two upstream files. Taking upstream's back
 # compiles, and the box opens empty with nothing to empty it in one click, or
-# the keyboard has nothing a pointer can close it with
-# (src/app/ui/launcher/add_server_box.c, src/app/ui/streaming/soft_keyboard_close.c).
+# the keyboard has nothing a pointer can move or close it with
+# (src/app/ui/launcher/add_server_box.c, src/app/ui/streaming/keyboard_tabs.c).
 in_order "the add-a-computer box opens with the TV's own network, and a clear button" \
      src/app/ui/launcher/add.dialog.c "static lv_obj_t *create_dialog" \
      "type_into_box(dialog, ip_input, btns, 1);" "add_server_box(ip_input, btns, 1);"
-in_order "the stream's keyboard has a Close tab" \
+in_order "the stream's keyboard has its Move and Close tabs" \
      src/app/ui/streaming/soft_keyboard.c "lv_obj_t *soft_keyboard_create(lv_obj_t *parent, session_t *session," \
-     "lv_obj_add_event_cb(cont, container_delete_cb, LV_EVENT_DELETE, kbd);" "soft_keyboard_close_tab(cont, kbd_content);"
+     "lv_obj_add_event_cb(cont, container_delete_cb, LV_EVENT_DELETE, kbd);" "keyboard_tabs_create(cont, kbd_content);"
+need "the box's filling is built" \
+     src/app/ctmbridge/app_sources.cmake "src/app/ui/launcher/add_server_box.c"
+need "the tabs are built" \
+     src/app/ctmbridge/app_sources.cmake "src/app/ui/streaming/keyboard_tabs.c"
 
 echo
 if [ "$fail" -eq 0 ]; then

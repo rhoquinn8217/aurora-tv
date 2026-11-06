@@ -12,7 +12,7 @@
 #include "stream/input/vk.h"
 #include "stream/session.h"
 #include "lvgl/theme/lv_theme_moonlight_colors.h"
-#include "soft_keyboard_close.h"
+#include "keyboard_tabs.h"
 
 #include <Limelight.h>
 #include <stdlib.h>
@@ -598,7 +598,7 @@ lv_obj_t *soft_keyboard_create(lv_obj_t *parent, session_t *session,
     lv_obj_add_event_cb(btnm, kbd_data_delete_cb, LV_EVENT_DELETE, kd);
     lv_group_focus_obj(btnm);
     lv_obj_add_event_cb(cont, container_delete_cb, LV_EVENT_DELETE, kbd);
-    soft_keyboard_close_tab(cont, kbd_content);   /* This fork: a Close tab for a pointer. */
+    keyboard_tabs_create(cont, kbd_content);   /* This fork: Move and Close tabs, for a pointer. */
 
     return cont;
 }

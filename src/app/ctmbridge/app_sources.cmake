@@ -50,8 +50,8 @@ target_sources(moonlight-lib PRIVATE
         ${CMAKE_SOURCE_DIR}/src/app/ui/streaming/ctm_panel.c
         ${CMAKE_SOURCE_DIR}/src/app/ui/streaming/cursor_align.c
         ${CMAKE_SOURCE_DIR}/src/app/ui/streaming/keyboard_place.c
-        ${CMAKE_SOURCE_DIR}/src/app/ui/streaming/lock_numpad.c
-        ${CMAKE_SOURCE_DIR}/src/app/ui/streaming/soft_keyboard_close.c)
+        ${CMAKE_SOURCE_DIR}/src/app/ui/streaming/keyboard_tabs.c
+        ${CMAKE_SOURCE_DIR}/src/app/ui/streaming/lock_numpad.c)
 
 # The pairing proof's signer (src/app/stream/bridge_proof.c) reads this TV's
 # paired key with mbedtls, which libgamestream links for itself, privately.
