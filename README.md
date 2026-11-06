@@ -65,17 +65,17 @@ speaker audio (microphone on USB only).**
 
 *Note: DS5-USBIP can be set up, stopped and started through the same stream.*
 
-## USB Bridge Settings <sup>[[1]](#1-usb-bridge)</sup>
+## USB Bridge Settings
 
 Located at **Settings (⚙️) → USB Bridge**.
 
 | Setting | &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; What it does |
 |:---|:---|
 | **Enable Device Bridging** | The master switch for bridging. On by default |
-| **Auto Bridge** | A list of the connected devices to mark for bridging. Only DualSenses are set to bridge on stream start by default |
-| **Enable Gesture Bridging** | Enable DualSense bridging gestures. A two finger hold on the DualSense touchpad: one second bridges, four seconds releases |
-| **Enable DualSense touchpad as mouse in dashboard and streaming overlay** | One finger moves the TV's pointer and a press of the DualSense touchpad clicks |
-| **Enable Wired Microphone** | Enables the microphone on a DualSense connected to a USB port |
+| **Auto Bridge** | A list of the connected devices to mark for bridging. DualSenses and DS4s (CUH-ZCT2) are set to bridge on stream start by default |
+| **Enable Gesture Bridging** | Enable DualSense and DS4 bridging gestures. A two finger hold on the controller's touchpad: one second bridges, four seconds releases |
+| **Enable touchpad as mouse in dashboard and streaming overlay** | One finger moves the TV's pointer and a press of the DualSense or DS4 touchpad clicks |
+| **Enable Wired Microphone** | Enables the microphone on a DualSense, or a headset microphone on a DS4, connected to a USB port |
 | **Enable BT Microphone (Unavailable)** | Disabled. A bug in webOS makes a Bluetooth DualSense's microphone unusable |
 | **Disable Lightbar Bridge/Release/Refusal Signals** | Turns off the lightbar on a bridge, a release and a refusal |
 | **Disable Rumble Bridge/Release/Refusal Signals** | Turns off the rumble on a bridge, a release and a refusal |
@@ -97,39 +97,39 @@ Located at **Settings (⚙️) → USB Bridge**.
 
 | Feature | &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; What it does |
 |:---|:---|
-| **Streaming menu**<sup>[[2]](#2-streaming-menu-and-cursor-features)</sup> | Vibepollo's host controls (Resume, Terminate, Remote Input, Remote Monitor) leave the game grid for one **Streaming** button in the launcher's top bar, which also says what is streaming. Terminate asks first. |
+| **Streaming menu** | Vibepollo's host controls (Resume, Terminate, Remote Input, Remote Monitor) leave the game grid for one **Streaming** button in the launcher's top bar, which also says what is streaming. Terminate asks first. |
 | **Global DualSense touchpad as mouse** | Use DualSense touchpad as mouse in Dashboard and Streaming Overlay. |
 | **Volume controls** | Control webOS volume with right controller stick in the app dashboard and streaming overlay.<br>• **R-stick up**: volume up<br>• **R-stick down**: volume down<br>• **R-stick press**: mute/unmute |
-| **In-stream cursor options**<sup>[[2]](#2-streaming-menu-and-cursor-features)</sup> | • **Ctrl+Alt+Shift+M**: Turns the TV's cursor on or off; off is for games where the mouse moves past the edge of the screen.<br>• **Ctrl+Alt+Shift+C**: Switches between Aurora's small, sharp cursor and the TV's regular one.<br>• **Ctrl+Alt+Shift+A**: Opens manual cursor alignment that you control with a controller d-pad or keyboard arrow keys. |
-| **Bluetooth Devices panel**<sup>[[3]](#3-bluetooth-manager)</sup> | A more convenient way to manage Bluetooth devices than webOS's buried Bluetooth menu. |
+| **In-stream cursor options** | • **Ctrl+Alt+Shift+M**: Turns the TV's cursor on or off; off is for games where the mouse moves past the edge of the screen.<br>• **Ctrl+Alt+Shift+C**: Switches between Aurora's small, sharp cursor and the TV's regular one.<br>• **Ctrl+Alt+Shift+A**: Opens manual cursor alignment that you control with a controller d-pad or keyboard arrow keys. |
+| **Bluetooth Devices panel** | A more convenient way to manage Bluetooth devices than webOS's buried Bluetooth menu. |
 | **Cancel pairing and connecting** | Connecting and PIN pairing processes can be cancelled mid run. |
-| **Windows Sign In controller rebinds**<sup>[[4]](#4-windows-sign-in)</sup> | If DS5-USBIP has started on the host while your Windows system is locked, aurora-tv will know to provide special controller functionality and present it over the stream so you can sign in without keyboard, mouse or remote. |
+| **Windows Sign In controller rebinds** | If DS5-USBIP has started on the host while your Windows system is locked, aurora-tv will know to provide special controller functionality and present it over the stream so you can sign in without keyboard, mouse or remote. |
 | **Cosmetic changes** | • Purple highlight selector with Play and Stop buttons on streaming app that react under a pointer.<br>• The profile box is hidden when there is only one profile. |
 
 ## Screenshots
 
-### [1] USB Bridge
+### USB Bridge
 
 <p>
 <a href="docs/images/aurora-usb-bridge-panel.png"><img src="docs/images/aurora-usb-bridge-panel.png" alt="USB Bridge panel" width="49%"></a>
 <a href="docs/images/aurora-usb-bridge-settings.png"><img src="docs/images/aurora-usb-bridge-settings.png" alt="USB Bridge settings" width="49%"></a>
 </p>
 
-### [2] Streaming Menu and Cursor features
+### Streaming Menu and Cursor features
 
 <p>
 <a href="docs/images/aurora-streaming-menu.jpg"><img src="docs/images/aurora-streaming-menu.jpg" alt="Streaming menu" width="49%"></a>
 <a href="docs/images/aurora-cursor-alignment.png"><img src="docs/images/aurora-cursor-alignment.png" alt="Cursor alignment bar" width="49%"></a>
 </p>
 
-### [3] Bluetooth manager
+### Bluetooth manager
 
 <p>
 <a href="docs/images/aurora-bluetooth-overlay.png"><img src="docs/images/aurora-bluetooth-overlay.png" alt="Bluetooth Devices panel over the streaming overlay" width="49%"></a>
 <a href="docs/images/aurora-bluetooth-dashboard.jpg"><img src="docs/images/aurora-bluetooth-dashboard.jpg" alt="Bluetooth Devices panel in the dashboard" width="49%"></a>
 </p>
 
-### [4] Windows Sign In
+### Windows Sign In
 
 <p>
 <a href="docs/images/aurora-windows-sign-in-list.png"><img src="docs/images/aurora-windows-sign-in-list.png" alt="Windows Sign In controller list" width="49%"></a>
