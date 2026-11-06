@@ -129,13 +129,16 @@ void keyboard_tabs_create(lv_obj_t *keyboard, lv_obj_t *panel) {
     if (keyboard == NULL || panel == NULL) {
         return;
     }
-    /* Not clickable itself: a click between the tabs lands where it would without them. */
+    /* Not clickable itself: a click between the tabs lands where it would without them.
+     * ⛔ START, not END: a row as wide as its content counts only how far its tabs
+     * reach to the right, so END packed Move past its left edge and cut it to "top"
+     * (Build 645 on the rooted monitor). Where the row sits is row_place()'s job. */
     lv_obj_t *row = lv_obj_create(keyboard);
     lv_obj_remove_style_all(row);
     lv_obj_clear_flag(row, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_size(row, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
     lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(row, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_flex_align(row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_column(row, LV_DPX(6), 0);
     s_row = row;
     s_panel = panel;
