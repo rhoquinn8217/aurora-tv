@@ -331,6 +331,7 @@ static int glue_list_locked_body(ctm_bridge_dev_t *out, int max, bool scan)
         out[n].device_name[0] = '\0';
         out[n].usb_serial[0] = '\0';
         out[n].iface = -1;
+        out[n].own_card = false;
         for (int k = 0; k < item->device_count; ++k) {
             int j = item->device_indices[k];
             if (j >= 0 && j < g_scan.count && g_scan.devices[j].node[0]) {
@@ -340,6 +341,13 @@ static int glue_list_locked_body(ctm_bridge_dev_t *out, int max, bool scan)
                 snprintf(out[n].device_name, sizeof(out[n].device_name), "%s", dev->device_name);
                 snprintf(out[n].usb_serial, sizeof(out[n].usb_serial), "%s", dev->usb_serial);
                 out[n].iface = dev->iface_num;
+                /* ⓘ A DS4 on a cable only: its Auto Bridge tick waits on this,
+                 * and nothing else reads it. A few small files, no card opened. */
+                if (strcmp(out[n].kind, "ds4_usb") == 0) {
+                    out[n].own_card = ctm_controller_own_card_of(dev->node, dev->phys,
+                                                                 (unsigned) strtoul(item->vid, NULL, 16),
+                                                                 (unsigned) strtoul(item->pid, NULL, 16)) >= 0;
+                }
                 break;
             }
         }

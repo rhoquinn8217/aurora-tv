@@ -1105,17 +1105,21 @@ static void cmd_devices(control_job_t *job)
         }
         /* ⓘ marked says whether auto bridge would take it at the next stream
          * start, which since 2026-09-14 is decided for its whole device: group
-         * is that device's number in groups, and iface the part's interface. */
+         * is that device's number in groups, and iface the part's interface.
+         * own_card (2026-11-05): a sound card of its own, read for a DS4 on a
+         * cable only, which makes it ticked by default. */
         const int g = group_of_part(count, i);
         const char *marked = g >= 0 && auto_bridge_ticked(&app_configuration->bridge, devs,
                                                           &s_groups[g]) ? "yes" : "no";
         reply(job, "%d bridged=%s kind=%s id=%s:%s bus=%s node=%s player=%d sdl_mac=%s uniq=%s "
-                   "serial=%s controller=%s type=%s mark=%s marked=%s group=%d iface=%d name=\"%s\"\n",
+                   "serial=%s controller=%s type=%s mark=%s marked=%s group=%d iface=%d own_card=%s "
+                   "name=\"%s\"\n",
               d->index, d->plugged ? "yes" : "no", d->kind, d->vid, d->pid, d->bus,
               d->node[0] != '\0' ? d->node : "-", ctm_bridge_gesture_player_for_node(d->node),
               sdl_mac, d->mac[0] != '\0' ? d->mac : "-",
               d->serial[0] != '\0' ? d->serial : "-", d->controller ? "yes" : "no",
-              d->type[0] != '\0' ? d->type : "-", mark, marked, g, d->iface, d->name);
+              d->type[0] != '\0' ? d->type : "-", mark, marked, g, d->iface,
+              d->own_card ? "yes" : "no", d->name);
     }
 }
 

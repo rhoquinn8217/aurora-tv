@@ -106,7 +106,9 @@ typedef struct bridge_settings_t {
     /* ⭐ THE DUALSENSES SOMEONE UNTICKED, marks of the same form. A DualSense or
      * an Edge is ticked until it is unticked (rhoquinn8217, 2026-10-15: "DS5
      * and DS5 edges are just ticked by default and can be untick"), so for them
-     * the exception is what is stored. Empty: every DualSense bridges itself. */
+     * the exception is what is stored. Empty: every DualSense bridges itself.
+     * ⓘ Since 2026-11-05 a DS4 with a sound card of its own as well
+     * (auto_bridge_ticked_by_default in input/auto_bridge.c). */
     char *auto_skip;
     /* ⭐ "Bridge all devices on startup" (rhoquinn8217, 2026-09-13): when a stream
      * starts, bridge EVERY device, serial or not, and ignore the marks above --
