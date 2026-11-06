@@ -106,6 +106,7 @@ HTTP *http_create(const char *keydir) {
     return http;
 }
 
+/* This fork (2026-10-22): the request in progress ends at once, from any thread (aborted, above). */
 void http_abort(HTTP *http) {
     assert(http != NULL);
     /* No lock: the request in progress holds it. */

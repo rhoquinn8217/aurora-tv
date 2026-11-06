@@ -62,9 +62,10 @@
  * went off and where to bring it back. Only that button raises it: the other
  * button, the count running out and a dismissal change nothing, so they say
  * nothing.
- * ⓘ It stays this long, the time the app's other timed notice has for two
- * sentences, and takes no input: the game has the controller back at once. */
-#define PROMPT_NOTE_MS 7000
+ * ⓘ Four seconds, as for every message that asks for no choice (rhoquinn8217,
+ * 2026-11-01: "7 seconds is too long"), and it takes no input: the game has the
+ * controller back at once. */
+#define PROMPT_NOTE_MS 4000
 /* How often it asks whether it is still true. */
 #define PROMPT_NOTE_TICK_MS 250
 
@@ -133,8 +134,8 @@ static bool (*s_note_true)(void) = NULL;
 
 static prompt_words_t prompt_words(bool vmouse, bool touchpad_mouse) {
     /* ⓘ Virtual Mouse in the overlay is the way back for all three: pressing
-     * it puts every one of the TV's mouse controls back as the Input settings
-     * have them, and Virtual Mouse on. */
+     * it turns Virtual Mouse on, and the touchpad's mouse mode with it
+     * (input/bridge_override.h). */
     if (vmouse && touchpad_mouse) {
         return (prompt_words_t) {
                 locstr("Warning: Turn off Virtual Mouse and the touchpad's mouse mode to prevent binding conflicts "
@@ -174,6 +175,17 @@ static prompt_words_t tv_cursor_words(void) {
 /* The message after the TV cursor's button stays while the cursor is off. */
 static bool tv_cursor_off(void) {
     return !tv_cursor_mode_on();
+}
+
+/* And the one after the first button, while Virtual Mouse and the touchpad's
+ * mouse mode are both off: Virtual Mouse turned on again takes it away. */
+static bool mouse_controls_off(void) {
+    if (global == NULL || global->session == NULL) {
+        return false;
+    }
+    const stream_input_t *input = session_get_input(global->session);
+    return input != NULL && !bridge_session_vmouse_active(global->session) &&
+           input->touchpad_mode != TOUCHPAD_MODE_MOUSE;
 }
 
 /* The top of the overlay's row of buttons, in pixels down the picture, read
@@ -415,9 +427,12 @@ static void on_deleted(lv_event_t *event) {
     if (s_released_grab) {
         s_released_grab = false;
         /* ⓘ Back to the stream, unless something else of the interface's has
-         * come up since and wants the pointer. */
-        if (global != NULL && global->session != NULL && !streaming_overlay_shown() &&
-            !streaming_soft_keyboard_shown()) {
+         * come up since and wants the pointer. ⛔ And only while the stream
+         * still takes input (2026-10-23): the session lives on through
+         * "Disconnecting...", after the stream's close has let the pointer
+         * go, and a grab taken then stayed in the launcher. */
+        if (global != NULL && global->session != NULL && session_has_input(global->session) &&
+            !streaming_overlay_shown() && !streaming_soft_keyboard_shown()) {
             app_set_mouse_grab(&global->input, true);
         }
     }
@@ -436,13 +451,12 @@ static void switch_off(const char *by) {
         return;
     }
     commons_log_info("Streaming", "bridge prompt: accepted, %s -- the TV's mouse controls go off", by);
-    bridge_override_set(global != NULL ? global->session : NULL, true);
-    /* ⓘ Said only if it is so: the switch does not act with device bridging
-     * off, though nothing bridges then to raise the pop-up either. */
-    if (!bridge_override_active() || s_mbox == NULL) {
+    bridge_override_mouse_off(global != NULL ? global->session : NULL);
+    /* ⓘ Said only if it is so. */
+    if (!mouse_controls_off() || s_mbox == NULL) {
         return;
     }
-    note_show(s_done, "the message after the button", bridge_override_active, lv_obj_get_parent(s_mbox));
+    note_show(s_done, "the message after the button", mouse_controls_off, lv_obj_get_parent(s_mbox));
 }
 
 static void on_button(lv_event_t *event) {
@@ -525,10 +539,6 @@ void bridge_prompt_request(void) {
     }
     if (s_mbox != NULL && s_about != PROMPT_ABOUT_MOUSE_CONTROLS) {
         commons_log_info("Streaming", "bridge prompt: the TV cursor's is up, this one is not raised");
-        return;
-    }
-    if (bridge_override_active()) {
-        commons_log_info("Streaming", "bridge prompt: the TV's mouse controls are off already, nothing to ask");
         return;
     }
     stream_input_t *input = session_get_input(global->session);
@@ -626,6 +636,24 @@ void bridge_prompt_note(const char *text) {
     note_show(text, "a message in its place", NULL, NULL);
 }
 
+void bridge_prompt_note_while(const char *text, bool (*still_true)(void)) {
+    /* ⓘ Not while the pop-up is up, as above. */
+    if (s_mbox != NULL) {
+        return;
+    }
+    note_show(text, "a message while it is true", still_true, NULL);
+}
+
+bool bridge_prompt_note_up(void) {
+    return s_note != NULL;
+}
+
+void bridge_prompt_note_bridge_refused(bool locked) {
+    bridge_prompt_note(locked ? locstr("Unable to bridge device. Windows is locked. Please unlock it first.")
+                              : locstr("Unable to bridge device. DS5-USBIP is offline. "
+                                       "If you are at the sign-in screen, please sign in first."));
+}
+
 static void measure(const lv_obj_t *box, const lv_obj_t *label, bridge_prompt_measure_t *out) {
     /* ⓘ Laid out now rather than at the next redraw, so a reading taken the
      * moment it is raised is of the box as it will be drawn. */
@@ -674,4 +702,8 @@ int bridge_prompt_note_measure(bridge_prompt_measure_t *out) {
     measure(s_note, lv_obj_get_child(s_note, 0), out);
     const uint32_t shown = lv_tick_elaps(s_note_since);
     return shown >= PROMPT_NOTE_MS ? 0 : (int) (PROMPT_NOTE_MS - shown);
+}
+
+const char *bridge_prompt_note_words(void) {
+    return s_note != NULL ? lv_label_get_text(lv_obj_get_child(s_note, 0)) : "";
 }

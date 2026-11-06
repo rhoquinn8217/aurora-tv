@@ -4,6 +4,7 @@
  */
 
 #include "soft_keyboard.h"
+#include "keyboard_place.h"
 #include "app.h"
 #include "config.h"
 #include "stream/input/keyboard_input.h"
@@ -566,6 +567,8 @@ lv_obj_t *soft_keyboard_create(lv_obj_t *parent, session_t *session,
     lv_obj_set_style_pad_gap(kbd_content, LV_DPX(4), 0);
     lv_obj_clear_flag(kbd_content, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_align(kbd_content, LV_ALIGN_BOTTOM_MID, 0, 0);
+    /* This fork: Create moves it, top or bottom (keyboard_place.h). */
+    keyboard_place_attach(kbd_content);
 
     kbd_data_t *kd = malloc(sizeof(kbd_data_t));
     if (!kd) {

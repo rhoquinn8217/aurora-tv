@@ -4,7 +4,8 @@
 #include <stdio.h>
 
 /* ⭐ THE USB BRIDGE'S SETTINGS, saved in moonlight.ini beside the app's own,
- * and the one other setting of this fork's: where the TV cursor's tip sits.
+ * and this fork's other settings beside them: the TV cursor's tips, the
+ * touchpad as a mouse.
  *
  * ⓘ They are one member of the app's settings, app_settings_t's `bridge`, so
  * every copy of the settings carries them, and upstream's settings code makes
@@ -13,7 +14,8 @@
  * in bridge_settings.c), so a TV keeps what it was set to.
  */
 typedef struct bridge_settings_t {
-    /* ⭐ CAN A DEVICE BE HANDED TO THE PC AT ALL? Defaults OFF (since build 307).
+    /* ⭐ CAN A DEVICE BE HANDED TO THE PC AT ALL? Defaults ON since 2026-10-15,
+     * when a DualSense started bridging itself (off from build 307 until then).
      *
      * ⓘ The gesture, the USB Bridge panel and Auto Bridge at stream start are
      * the only ways to ask for a bridge, so this switches all three and nothing
@@ -51,10 +53,12 @@ typedef struct bridge_settings_t {
      * nothing and there is no way to tell that from a gesture that was not
      * recognised. Said in the section description rather than per switch.
      *
-     * ⚠️ DEFAULTS ARE NOT SETTLED. Everything is on while this is being worked
-     * on so testing is not gated behind ticking boxes. ⓘ Microphone capture is
-     * expected to end up OFF -- it is only for voice chat through the
-     * controller itself, and most people will not want it. */
+     * ⭐ EVERYTHING IS ON OUT OF THE BOX, the wired microphone included
+     * (rhoquinn8217, 2026-10-28, asked in the code review whether it should
+     * start off: "All features need to be presented as that what is being
+     * advertised. I don't want some looking for how to turn something on. I
+     * rather they only look when they need to turn something off."). These
+     * switches are there to turn a thing off. */
     bool signal_light;
     bool signal_rumble;
     bool signal_tone;
@@ -75,7 +79,8 @@ typedef struct bridge_settings_t {
      *
      * ⚠️ mic_bt EXISTS ON THIS BRANCH but can never be set: the settings
      * screen greys it out. ⭐ It is here so the two branches differ ONLY by the
-     * arming code itself -- see upstream-direction.md, 2026-08-21. ⛔ Do not
+     * arming code itself -- see upstream-direction.md in the docs repo,
+     * ds5-webos-bridge, 2026-08-21. ⛔ Do not
      * "tidy" it away; that reintroduces the divergence it exists to prevent. */
     bool mic_wired;
     bool mic_bt;
@@ -101,19 +106,20 @@ typedef struct bridge_settings_t {
     /* ⭐ THE DUALSENSES SOMEONE UNTICKED, marks of the same form. A DualSense or
      * an Edge is ticked until it is unticked (rhoquinn8217, 2026-10-15: "DS5
      * and DS5 edges are just ticked by default and can be untick"), so for them
-     * the exception is what is stored. Empty: every DualSense bridges itself. */
+     * the exception is what is stored. Empty: every DualSense bridges itself.
+     * ⓘ Since 2026-11-05 a DS4 with a sound card of its own as well
+     * (auto_bridge_ticked_by_default in input/auto_bridge.c). */
     char *auto_skip;
     /* ⭐ "Bridge all devices on startup" (rhoquinn8217, 2026-09-13): when a stream
      * starts, bridge EVERY device, serial or not, and ignore the marks above --
      * which are kept, so turning this off brings them back. ⛔ Off by default:
      * it is the user's explicit choice, never the unasked auto-plug. */
     bool auto_all;
-    /* ⭐ Bridge Override: the TV's own mouse and touchpad handling off for the
-     * stream. Off by default, and acts only with `enable` set. ⓘ It has
-     * no button: bridge_override.h says how a person switches it.
-     * ⛔ It never writes the Input settings it overrides; see
-     * input/bridge_override.h. */
-    bool override;
+    /* ⓘ No Bridge Override any more (rhoquinn8217, 2026-10-28): the pop-up's
+     * answer was saved here and kept the TV's mouse controls off in every
+     * stream after, with Settings showing them on. Its key, bridge_override,
+     * is read and ignored (bridge_settings.c); input/bridge_override.h says
+     * what is kept now. */
     /* ⭐ WHERE THIS TV DRAWS THE TIP OF ITS CURSOR, in the TV's own pixels,
      * right and down (input/tv_cursor.h): the drop's. Set by the align bar
      * (Ctrl+Alt+Shift+A), and so kept per TV, since this file is the TV's.
@@ -133,6 +139,12 @@ typedef struct bridge_settings_t {
      * showed this picture, found its tip on the C1 by eye (2026-10-11). */
     int tv_cursor_regular_x;
     int tv_cursor_regular_y;
+    /* ⭐ "Automatically pair DualSense/DualSense Edge Controllers", the check box
+     * at the foot of the Bluetooth controllers panel (rhoquinn8217, 2026-10-29;
+     * ui/common/bt_panel.h). On, a DualSense or an Edge the search finds pairs
+     * by itself; off, it waits for its Pair button like everything else. On by
+     * default, as every feature is. */
+    bool bt_auto_pair;
 } bridge_settings_t;
 
 /* The values a fresh install starts with. settings_initialize calls it after

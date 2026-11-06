@@ -36,9 +36,16 @@
 #include "ui/streaming/streaming.controller.h"
 #include "ui/streaming/bridge_prompt.h"
 #include "ui/streaming/ctm_panel.h"
+#include "ui/streaming/keyboard_place.h"
+#include "ui/streaming/lock_numpad.h"
+#include "ui/common/pad_marks.h"
+#include "stream/input/lock_keys.h"
 #include "input/bridge_override.h"
 #include "input/bridge_keyboard.h"
 #include "input/tv_cursor.h"
+#include "input/webos_popup.h"
+#include "input/bt_pairing.h"
+#include "ui/common/bt_panel.h"
 #include "ui/streaming/cursor_align.h"
 
 #if defined(TARGET_WEBOS)
@@ -135,16 +142,21 @@ static void cmd_help(control_job_t *job)
                "release-group <n>       release every part of a device, exactly as its panel row does\n"
                "bridge-all, release-all every part, as the panel's buttons do\n"
                "open-config             ask the host for its settings window, as the overlay's DS5-USBIP button does\n"
-               "set <name> <on|off>     a switch, without the remote: boost, light, rumble, tone, override, vmouse\n"
+               "set <name> <on|off>     a switch, without the remote: boost, light, rumble, tone, vmouse\n"
                "prompt [ok|dismiss]     the question a bridge raises: is it up, or answer it without a hand\n"
                "ui                      what is open on the screen: overlay, its keyboard, the panel, the align bar\n"
+               "numpad [ps|xbox|auto]   the controller at a locked Windows: numpad open or closed, where, whose marks, keys typed (a count)\n"
                "press <key>[:ms] ...    keys into aurora-tv's own screens, as a keyboard types them; not once a stream is up\n"
                "                        keys: up down left right enter esc home end backspace; :ms holds it (a long press)\n"
                "type <text>             characters into aurora-tv's own screens, a key each, as a keyboard types them\n"
                "                        (Shift for capitals, ':' and '_'); letters, digits and . - _ : [ ]; not once a stream is up\n"
                "host [<host>]           the launcher's host: which it shows, or pick one (a uuid or part of its name)\n"
-               "input                   the stream's live input state: Bridge Override and what it switches\n"
+               "input                   the stream's live input state: Virtual Mouse, the touchpad and the rest\n"
                "keys                    key events counted since the app started: the TV's keyboard grab, and webOS\n"
+               "popup                   a webOS pop-up over the app: is one up, the remote's node, keys sent as the remote\n"
+               "remote <key>            a remote key into a webOS pop-up: up down left right ok back, or its number;\n"
+               "                        refused unless a pop-up has the focus, so it never reaches the app\n"
+               "popup test | close      a webOS pop-up the app raises itself (OK and Cancel), or closes\n"
                "set settle <ms>         how long to let the link settle before a DS4 handback tone\n"
                "signal refuse <n>       play a device's refusal signal; no plug has to fail\n"
                "cursor [<right> <down> [<thin>]]  Aurora's TV pointer: what stands, or a shift and a\n"
@@ -152,8 +164,14 @@ static void cmd_help(control_job_t *job)
                "cursor on|off           the TV cursor on or off, and saved, as Ctrl+Alt+Shift+M does\n"
                "cursor align            open the bar that aligns the TV cursor, as Ctrl+Alt+Shift+A does\n"
                "cursor sharp|regular    the drop or webOS's own pointer, and saved, as Ctrl+Alt+Shift+C does\n"
+               "shot [name]             the app's own screen (never the stream's picture) to logs/, as a .bmp\n"
                "crash                   the crash recorder: armed or not, and where its record goes\n"
                "crash test|thread       crash the app on purpose, on its own loop or on a thread, to prove it\n"
+               "bt <method> [json]      one call to the TV's Bluetooth controller service, and its answer\n"
+               "                        (getPairedDeviceLists, requestDiscovery, cancelDiscovery and the rest)\n"
+               "bt panel [stream|close] the Bluetooth controllers panel: in the middle, on the right, or closed\n"
+               "bt state                what the panel shows: the TV's devices, the search, the status line\n"
+               "bt refresh | search on|off | forget <address>|all   what the panel's buttons do\n"
                "<device> is its number, its node, its vid:pid, or part of its name; <n> is from groups\n");
 }
 
@@ -175,7 +193,7 @@ static void cmd_set(control_job_t *job, const char *args)
     char name[32] = "";
     char value[16] = "";
     if (args == NULL || sscanf(args, "%31s %15s", name, value) != 2) {
-        reply(job, "ERR usage: set <boost|light|rumble|tone|override|vmouse> <on|off>, or set settle <ms>\n");
+        reply(job, "ERR usage: set <boost|light|rumble|tone|vmouse> <on|off>, or set settle <ms>\n");
         return;
     }
     /* ⛔⛔ BEFORE THE on/off CHECK, AND THAT IS THE WHOLE POINT.
@@ -217,7 +235,8 @@ static void cmd_set(control_job_t *job, const char *args)
         return;
     }
     /* ⭐ Virtual Mouse through the event its overlay button's twin on the
-     * remote raises, so it ends Bridge Override exactly as a press does. */
+     * remote raises, so it acts exactly as a press does: kept for the next
+     * stream too, and saved (input/bridge_override.h). */
     if (strcasecmp(name, "vmouse") == 0) {
         if (s_app->session == NULL) {
             reply(job, "ERR no stream is running\n");
@@ -229,18 +248,6 @@ static void cmd_set(control_job_t *job, const char *args)
         }
         reply(job, "OK virtual mouse %s%s\n", on ? "on" : "off",
               on != active ? ": asked for, as its button does" : " already");
-        return;
-    }
-    /* ⭐ Bridge Override by name, which a person never sees: the question a
-     * bridge raises switches it on and Virtual Mouse switches it off. Here
-     * it is set directly. Nothing is shown on the TV, as with either of those. */
-    if (strcasecmp(name, "override") == 0) {
-        bridge_override_set(s_app->session, on);
-        char state[256];
-        bridge_override_describe(s_app->session != NULL ? session_get_input(s_app->session) : NULL,
-                                 state, sizeof state);
-        reply(job, "OK %s%s\n", state,
-              on && !bridge_override_active() ? " -- Enable Device Bridging is off, so it does not act" : "");
         return;
     }
 #if defined(TARGET_WEBOS)
@@ -259,7 +266,7 @@ static void cmd_set(control_job_t *job, const char *args)
         return;
     }
 #endif
-    reply(job, "ERR try boost, light, rumble, tone, override, vmouse or settle\n");
+    reply(job, "ERR try boost, light, rumble, tone, vmouse or settle\n");
 }
 
 /* The question a bridge raises (ui/streaming/bridge_prompt.h): whether it is
@@ -301,8 +308,10 @@ static void cmd_prompt(control_job_t *job, const char *args)
         bridge_prompt_measure_t m;
         const int note_ms = bridge_prompt_note_measure(&m);
         if (note_ms >= 0) {
-            reply(job, "OK prompt=down note=up ms_left=%d size=%dx%d at=%d,%d bottom=%d buttons_top=%d lines=%d\n",
-                  note_ms, m.width, m.height, m.x, m.y, m.y + m.height, m.buttons_top, m.text_lines);
+            reply(job, "OK prompt=down note=up ms_left=%d size=%dx%d at=%d,%d bottom=%d buttons_top=%d lines=%d "
+                       "words=\"%s\"\n",
+                  note_ms, m.width, m.height, m.x, m.y, m.y + m.height, m.buttons_top, m.text_lines,
+                  bridge_prompt_note_words());
         } else {
             reply(job, "OK prompt=down note=down\n");
         }
@@ -325,6 +334,56 @@ static void cmd_ui(control_job_t *job)
           cursor_align_shown() ? "open" : "closed",
           tv_cursor_drawn() ? "drawn" : "hidden",
           s_app->session != NULL ? "active" : "idle");
+}
+
+/* What the screen shows over a locked Windows (ui/streaming/lock_numpad.h), and a
+ * count of what was typed, never what. `ps`, `xbox` or `auto` sets whose marks it
+ * draws, for a picture of the set not in hand; not saved. */
+static void cmd_numpad(control_job_t *job, const char *args)
+{
+    if (args != NULL && strcasecmp(args, "ps") == 0) {
+        pad_family_force(PAD_FAMILY_PLAYSTATION);
+    } else if (args != NULL && strcasecmp(args, "xbox") == 0) {
+        pad_family_force(PAD_FAMILY_XBOX);
+    } else if (args != NULL && strcasecmp(args, "auto") == 0) {
+        pad_family_force(-1);
+    } else if (args != NULL && args[0] != '\0') {
+        reply(job, "ERR try ps, xbox or auto\n");
+        return;
+    }
+    lv_area_t area = {0, 0, 0, 0};
+    const bool up = lock_numpad_area(&area);
+    reply(job, "OK numpad=%s after_sign_in=%s locked=%s pad=%s marks=%s typed=%u size=%dx%d at=%d,%d kbd_place=%s\n",
+          lock_numpad_state(), lock_numpad_after_up() ? "yes" : "no", lock_keys_active() ? "yes" : "no",
+          lock_keys_pad_on_stream() ? "yes" : "no",
+          pad_family_current() == PAD_FAMILY_XBOX ? "xbox" : "ps", lock_keys_typed(),
+          up ? (int) lv_area_get_width(&area) : 0, up ? (int) lv_area_get_height(&area) : 0,
+          (int) area.x1, (int) area.y1, keyboard_place_name());
+}
+
+/* A webOS pop-up over the app (input/webos_popup.h): whether one has the
+ * focus, the remote's node its keys go to, and how many went; or with `test`
+ * a pop-up the app raises itself, and with `close` that one closed. */
+static void cmd_popup(control_job_t *job, const char *args)
+{
+    if (args != NULL && args[0] != '\0') {
+        char said[192];
+        (void) webos_popup_test(args, said, sizeof said);
+        reply(job, "%s\n", said);
+        return;
+    }
+    char line[256];
+    webos_popup_describe(line, sizeof line);
+    reply(job, "OK %s\n", line);
+}
+
+/* A key into a webOS pop-up as the remote presses it, without a hand. Refused
+ * unless a pop-up has the focus, so it can never reach the app. */
+static void cmd_remote(control_job_t *job, const char *args)
+{
+    char said[192];
+    (void) webos_popup_send(args, said, sizeof said);
+    reply(job, "%s\n", said);
 }
 
 static void cmd_status(control_job_t *job)
@@ -355,14 +414,15 @@ static void cmd_status(control_job_t *job)
                          : compat == CTM_BRIDGE_COMPAT_UPDATE_PC   ? "update-pc"
                          : compat == CTM_BRIDGE_COMPAT_UPDATE_TV   ? "update-tv"
                                                                    : "unknown";
-    reply(job, " bridge=%s listener=%s protocol=%s agent=\"%s\" core=%s",
-          ctm_bridge_active() ? "running" : "stopped", listener, protocol, agent, bridge_core_commit());
+    reply(job, " bridge=%s listener=%s protocol=%s agent=\"%s\" core=%s locked=%s",
+          ctm_bridge_active() ? "running" : "stopped", listener, protocol, agent, bridge_core_commit(),
+          ctm_bridge_agent_locked() ? "yes" : "no");
 #endif
-    reply(job, " override=%s\n", bridge_override_active() ? "on" : "off");
+    reply(job, "\n");
 }
 
-/* The stream's LIVE input state, which is what Bridge Override changes. The
- * saved settings are not it: the override never writes them. */
+/* The stream's LIVE input state. Of the saved settings, only Virtual Mouse
+ * follows it (input/bridge_override.h). */
 static void cmd_input(control_job_t *job)
 {
     if (s_app->session == NULL) {
@@ -374,9 +434,6 @@ static void cmd_input(control_job_t *job)
     reply(job, "OK %s\n", state);
 }
 
-/* Where key events have come from since the app started: the TV's keyboard
- * grab, and webOS through SDL. Works with no stream too, which is how to see
- * whether webOS hands a keyboard's keys to the app at all. */
 /* Aurora's TV pointer (input/tv_cursor.h): what stands now, or a shift and a
  * thinning to try live, not saved (rhoquinn8217, 2026-10-11: "move it
  * slightly down and to the right"), so a test needs no build per try. And
@@ -617,7 +674,7 @@ static void cmd_press(control_job_t *job, const char *args)
             }
         }
         if (!press_key_named(word, &steps[count])) {
-            reply(job, "ERR no key '%s': up down left right enter esc home end\n", word);
+            reply(job, "ERR no key '%s': up down left right enter ok esc back home end backspace\n", word);
             return;
         }
         steps[count].hold_ms = (uint32_t) hold;
@@ -625,7 +682,7 @@ static void cmd_press(control_job_t *job, const char *args)
         count++;
     }
     if (count == 0) {
-        reply(job, "ERR usage: press <key>[:ms] ...  keys: up down left right enter esc home end backspace\n");
+        reply(job, "ERR usage: press <key>[:ms] ...  keys: up down left right enter ok esc back home end backspace\n");
         return;
     }
     press_start(job, steps, count, total_ms);
@@ -643,7 +700,14 @@ static void cmd_type(control_job_t *job, const char *args)
     }
     press_step_t steps[PRESS_MAX];
     int count = 0;
-    for (const char *c = args != NULL ? args : ""; *c != '\0' && *c != ' ' && *c != '\t' && *c != '\r'; c++) {
+    const char *text = args != NULL ? args : "";
+    /* ⓘ One word: a space types nothing (no key for it), and stopping at it
+     * while answering OK hid that the rest was never typed (2026-10-23). */
+    if (strpbrk(text, " \t") != NULL) {
+        reply(job, "ERR type takes one word: no key types a space\n");
+        return;
+    }
+    for (const char *c = text; *c != '\0' && *c != '\r'; c++) {
         if (count == PRESS_MAX) {
             reply(job, "ERR at most %d characters at a time\n", PRESS_MAX);
             return;
@@ -661,6 +725,9 @@ static void cmd_type(control_job_t *job, const char *args)
     press_start(job, steps, count, (uint32_t) count * (PRESS_TAP_MS + PRESS_GAP_MS));
 }
 
+/* Where key events have come from since the app started: the TV's keyboard
+ * grab, and webOS through SDL. Works with no stream too, which is how to see
+ * whether webOS hands a keyboard's keys to the app at all. */
 static void cmd_keys(control_job_t *job)
 {
     char counts[160];
@@ -968,11 +1035,22 @@ static void cmd_stats(control_job_t *job)
 
 #if defined(TARGET_WEBOS)
 
+/* ⭐ A SCAN UNDER TWO SECONDS OLD IS READ, NOT MADE AGAIN (2026-10-28). The
+ * lab asks for `groups` about once a second, and each ask scanned every device
+ * on the app's loop; with a Bluetooth DS4 bridged one such scan waited behind
+ * its writes for five seconds (ctm_bridge_glue.c). Whether a device is bridged
+ * is read from the session table either way, so it is never stale. */
+#define CONTROL_SCAN_FRESH_MS 2000
+
 static int list_devices(ctm_bridge_dev_t *devs)
 {
     /* ⛔ The quiet list outside a stream. The full one wakes the bridge core and
      * broadcasts for a listener that cannot exist yet, which is why the settings
      * pane uses the quiet one too. */
+    if (ctm_bridge_scan_age_ms() < CONTROL_SCAN_FRESH_MS) {
+        return ctm_bridge_active() ? ctm_bridge_list_known(devs, CONTROL_MAX_DEVICES)
+                                   : ctm_bridge_list_quiet_known(devs, CONTROL_MAX_DEVICES);
+    }
     return ctm_bridge_active() ? ctm_bridge_list(devs, CONTROL_MAX_DEVICES)
                                : ctm_bridge_list_quiet(devs, CONTROL_MAX_DEVICES);
 }
@@ -1027,17 +1105,21 @@ static void cmd_devices(control_job_t *job)
         }
         /* ⓘ marked says whether auto bridge would take it at the next stream
          * start, which since 2026-09-14 is decided for its whole device: group
-         * is that device's number in groups, and iface the part's interface. */
+         * is that device's number in groups, and iface the part's interface.
+         * own_card (2026-11-05): a sound card of its own, read for a DS4 on a
+         * cable only, which makes it ticked by default. */
         const int g = group_of_part(count, i);
         const char *marked = g >= 0 && auto_bridge_ticked(&app_configuration->bridge, devs,
                                                           &s_groups[g]) ? "yes" : "no";
         reply(job, "%d bridged=%s kind=%s id=%s:%s bus=%s node=%s player=%d sdl_mac=%s uniq=%s "
-                   "serial=%s controller=%s type=%s mark=%s marked=%s group=%d iface=%d name=\"%s\"\n",
+                   "serial=%s controller=%s type=%s mark=%s marked=%s group=%d iface=%d own_card=%s "
+                   "name=\"%s\"\n",
               d->index, d->plugged ? "yes" : "no", d->kind, d->vid, d->pid, d->bus,
               d->node[0] != '\0' ? d->node : "-", ctm_bridge_gesture_player_for_node(d->node),
               sdl_mac, d->mac[0] != '\0' ? d->mac : "-",
               d->serial[0] != '\0' ? d->serial : "-", d->controller ? "yes" : "no",
-              d->type[0] != '\0' ? d->type : "-", mark, marked, g, d->iface, d->name);
+              d->type[0] != '\0' ? d->type : "-", mark, marked, g, d->iface,
+              d->own_card ? "yes" : "no", d->name);
     }
 }
 
@@ -1148,6 +1230,11 @@ static bool bridge_possible(control_job_t *job)
          * later meets a listener that has just started. */
         ctm_bridge_agent_recheck();
         reply(job, "ERR the listener is offline (checking again now)\n");
+        return false;
+    }
+    if (ctm_bridge_agent_locked()) {
+        ctm_bridge_agent_recheck();
+        reply(job, "ERR Windows is locked on the PC (checking again now)\n");
         return false;
     }
     /* ⓘ And as the panel does for a side that needs an update. */
@@ -1418,6 +1505,12 @@ static void run_command(control_job_t *job)
         cmd_prompt(job, args);
     } else if (strcasecmp(verb, "ui") == 0) {
         cmd_ui(job);
+    } else if (strcasecmp(verb, "numpad") == 0) {
+        cmd_numpad(job, args);
+    } else if (strcasecmp(verb, "popup") == 0) {
+        cmd_popup(job, args);
+    } else if (strcasecmp(verb, "remote") == 0) {
+        cmd_remote(job, args);
     } else if (strcasecmp(verb, "press") == 0) {
         cmd_press(job, args);
     } else if (strcasecmp(verb, "type") == 0) {
@@ -1511,6 +1604,73 @@ static void send_text(int fd, const char *text)
     send_all(fd, text, strlen(text));
 }
 
+/* The panel's own words for `bt`, ahead of the service's methods: panel [stream|close],
+ * state, refresh, search on|off, forget <address>|all. The panel opens and closes
+ * on the UI thread; the rest only queue work for the pairing thread. */
+static void bt_panel_open_ui(void *data)
+{
+    if (data == (void *) 2) {
+        bt_panel_close();
+    } else {
+        bt_panel_open(data == (void *) 1);
+    }
+}
+
+static void bt_panel_post(void *data)
+{
+    if (lv_async_call(bt_panel_open_ui, data) != LV_RES_OK) {
+        bt_panel_open_ui(data);
+    }
+}
+
+static bool bt_panel_command(int fd, const char *word, const char *arg)
+{
+    char line[400];
+    if (strcasecmp(word, "panel") == 0) {
+        void *how = strcasecmp(arg, "close") == 0 ? (void *) 2 : strcasecmp(arg, "stream") == 0 ? (void *) 1 : NULL;
+        if (!app_bus_post(s_app, bt_panel_post, how)) {
+            send_text(fd, "ERR the app did not accept the command\n");
+        } else {
+            send_text(fd, how == (void *) 2 ? "OK closing the panel\n" : "OK opening the panel\n");
+        }
+        return true;
+    }
+    if (strcasecmp(word, "state") == 0) {
+        bt_pairing_state_t st;
+        bt_pairing_state(&st);
+        snprintf(line, sizeof line, "OK listed=%d searching=%d count=%d full=%d status=\"%s\"\n", st.listed ? 1 : 0,
+                 st.searching ? 1 : 0, st.count, bt_pairing_full(&st) ? 1 : 0, st.status);
+        send_text(fd, line);
+        for (int i = 0; i < st.count; i++) {
+            snprintf(line, sizeof line, "%d %s gamepad=%d connected=%d name=\"%s\"\n", i, st.devices[i].addr,
+                     st.devices[i].gamepad ? 1 : 0, st.devices[i].connected ? 1 : 0, st.devices[i].name);
+            send_text(fd, line);
+        }
+        return true;
+    }
+    if (strcasecmp(word, "refresh") == 0) {
+        bt_pairing_refresh();
+        send_text(fd, "OK asked the TV for its list\n");
+        return true;
+    }
+    if (strcasecmp(word, "search") == 0) {
+        const bool on = strcasecmp(arg, "off") != 0;
+        bt_pairing_search(on);
+        send_text(fd, on ? "OK search on\n" : "OK search off\n");
+        return true;
+    }
+    if (strcasecmp(word, "forget") == 0) {
+        if (arg[0] == '\0') {
+            send_text(fd, "ERR bt forget <address>|all\n");
+            return true;
+        }
+        bt_pairing_forget(strcasecmp(arg, "all") == 0 ? NULL : arg);
+        send_text(fd, "OK forgetting\n");
+        return true;
+    }
+    return false;
+}
+
 static void handle_client(int fd)
 {
     const struct timeval timeout = {.tv_sec = 3, .tv_usec = 0};
@@ -1531,6 +1691,45 @@ static void handle_client(int fd)
     }
     if (len == 0) {
         send_text(fd, "ERR empty command; try help\n");
+        return;
+    }
+
+    /* The TV's Bluetooth controller service needs nothing of the app's, so it
+     * is asked from this thread: the screens never wait on the TV, which can
+     * take up to five seconds to answer (input/bt_pairing.h). */
+    if (strncasecmp(line, "bt", 2) == 0 && (line[2] == ' ' || line[2] == '\0')) {
+        const char *p = line + 2;
+        while (*p == ' ') {
+            ++p;
+        }
+        char method[40] = "";
+        size_t m = 0;
+        while (*p != '\0' && *p != ' ' && m + 1 < sizeof method) {
+            method[m++] = *p++;
+        }
+        method[m] = '\0';
+        while (*p == ' ') {
+            ++p;
+        }
+        if (method[0] == '\0') {
+            send_text(fd, "ERR bt <method> [json]; try help\n");
+            return;
+        }
+        if (bt_panel_command(fd, method, p)) {
+            return;
+        }
+        char *answer = bt_pairing_call(method, *p != '\0' ? p : "{}");
+        if (answer == NULL) {
+            send_text(fd, "ERR no answer: not a method of the service, the call could not be made, "
+                          "or nothing came back in five seconds (logs/bt-pairing.log)\n");
+            return;
+        }
+        send_text(fd, "OK ");
+        send_text(fd, method);
+        send_text(fd, " ");
+        send_text(fd, answer);
+        send_text(fd, "\n");
+        free(answer);
         return;
     }
 

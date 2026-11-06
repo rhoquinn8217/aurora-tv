@@ -7,9 +7,12 @@
 
 #include "ctm_bridge_glue.h"
 
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
+#include <time.h>
 #include <unistd.h>
 
 #include "ctm_state.h"   /* core API + shared globals (g_running, g_scan, ...) */
@@ -17,6 +20,7 @@
 #include "device_identity.inl" /* the identity rules, shared with the core */
 #include "protocol_level.inl"   /* whether this app and the listener can work together */
 #include "held_touch.inl"       /* a bridged pad's touchpad, for the TV's pointer */
+#include "held_nav.inl"         /* a bridged pad's d-pad and buttons, for a webOS pop-up */
 
 static bool s_active = false;
 
@@ -42,11 +46,44 @@ void ctm_bridge_use_pairing_signer(ctm_bridge_signer_fn signer)
  * and the three branches it guarded were removed 2026-09-15 (a switch nobody
  * can turn on reads as a choice somebody is making). */
 
+/* When the last scan began, on the monotonic clock: a device that connects
+ * mid-stream was scanned for up to three times in a few seconds (its bus,
+ * Auto Bridge's look, the arrival watch), each 0.25 to 0.85 s on the U5s and
+ * far more with a Bluetooth DS4 bridged. A caller that knows when its device
+ * appeared reads the last scan when it is younger than that (2026-10-23).
+ * ⓘ 32 bits, which the TV's 32-bit CPU reads and writes whole from any thread;
+ * the age wraps every 49 days, harmless for an age that matters for seconds. */
+static volatile uint32_t s_scan_at_ms;
+static volatile bool s_scanned;
+
+static uint32_t glue_now_ms(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (uint32_t)((uint64_t)ts.tv_sec * 1000u + (uint64_t)ts.tv_nsec / 1000000u);
+}
+
+uint64_t ctm_bridge_scan_age_ms(void)
+{
+    return s_scanned ? (uint64_t)(uint32_t)(glue_now_ms() - s_scan_at_ms) : UINT64_MAX;
+}
+
+/* ⏱️ EVERY SCAN TIMED, AND A SLOW ONE NAMED (2026-10-28). With a Bluetooth DS4
+ * bridged, a write to it holds the kernel's lock over every hidraw node for up
+ * to five seconds, and a scan opens and asks every node: on the rooted monitor
+ * the app's loop went still for 15 s after one was bridged, and nothing said
+ * which scan it had been. Past this, the scan is logged with what asked. */
+#define SCAN_SLOW_MS 300
+
 /* Enumerate + build the logical model + Stage-1 puck enumeration capture. The
  * Steam puck only exposes its full composite if g_puck_enum is cached BEFORE the
- * plug; the standalone app did this in its refresh_devices(), so the glue must too. */
-static void ctm_glue_enumerate(void)
+ * plug; the standalone app did this in its refresh_devices(), so the glue must too.
+ * `why` is what asked, for the log of a slow one. */
+static void ctm_glue_enumerate(const char *why)
 {
+    const uint32_t started = glue_now_ms();
+    s_scan_at_ms = started;
+    s_scanned = true;
     enumerate_devices(&g_scan);
     build_logical_devices(&g_scan, &g_devices);
     bool puck = false;
@@ -59,6 +96,10 @@ static void ctm_glue_enumerate(void)
     }
     if (!puck) {
         g_puck_enum.valid = 0;
+    }
+    const uint32_t took = glue_now_ms() - started;
+    if (took > SCAN_SLOW_MS) {
+        log_append("ctm glue: slow scan, %u ms, for %s", (unsigned)took, why ? why : "?");
     }
 }
 
@@ -131,7 +172,7 @@ static void ctm_glue_ensure_core(void)
     if (!agent_is_known()) {
         log_append("ctm glue: no agent address yet -- a stream sets it");
     }
-    ctm_glue_enumerate();
+    ctm_glue_enumerate("the bridge's start");
     s_core_up = true;
 }
 
@@ -157,7 +198,7 @@ void ctm_bridge_set_gesture_enabled(bool enabled)
 /* ⭐⭐ "ENABLE DEVICE BRIDGING", HANDED IN THE SAME WAY (code review,
  * 2026-10-05). Only Auto Bridge asked it, so every stream started the agent
  * probe, the hotplug watch and the stopSniff worker, fresh installs included,
- * where bridging is off by default.
+ * where bridging was off by default then.
  * ⓘ Off, ctm_bridge_start() still marks the stream up: the control port is
  * ungated by design and bridges with the switch off, and a plug brings the
  * core up itself. */
@@ -168,16 +209,6 @@ void ctm_bridge_set_enabled(bool enabled)
     s_enabled = enabled;
 }
 
-/* ⭐⭐ HOLD OR RELEASE A BRIDGED CONTROLLER'S INPUT.
- *
- * ⓘ Called as the TV's own overlay opens and closes -- see app_ui_open. The
- * core blanks each report while held rather than dropping it, so a button that
- * was down when the overlay opened is actually released in the game instead of
- * staying stuck. ⭐ Audio, rumble, the lightbar and the unbridge chord all keep
- * working throughout.
- *
- * ⓘ Safe with nothing bridged: the flag is only read in the relay path, and
- * with no session there is nothing to relay. */
 /* ⭐ WHICH SIGNALS THIS SIDE MAY MAKE, and whether the microphone is captured.
  *
  * ⓘ Handed in rather than read here: this target cannot see the app's headers
@@ -199,10 +230,23 @@ void ctm_bridge_set_mic_capture(bool on)
     ctm_mic_capture_set_enabled(on ? 1 : 0);
 }
 
+/* ⭐⭐ HOLD OR RELEASE A BRIDGED CONTROLLER'S INPUT.
+ *
+ * ⓘ Called as the TV's own overlay opens and closes -- see app_ui_open. The
+ * core blanks each report while held rather than dropping it, so a button that
+ * was down when the overlay opened is actually released in the game instead of
+ * staying stuck. ⭐ Audio, rumble, the lightbar and the unbridge chord all keep
+ * working throughout.
+ *
+ * ⓘ Safe with nothing bridged: the flag is only read in the relay path, and
+ * with no session there is nothing to relay. */
 void ctm_bridge_set_input_held(bool held)
 {
     ctm_input_set_held(held ? 1 : 0);
 }
+
+/* Defined below, with the pads that come straight back. */
+static void glue_pad_will_return(const ctm_controller_dev_t *dev);
 
 bool ctm_bridge_start(void)
 {
@@ -215,6 +259,8 @@ bool ctm_bridge_start(void)
         return true;
     }
     ctm_glue_ensure_core();
+    /* A DS4Dongle the PC restarts is taken again when it returns. */
+    ctm_controller_set_return_cb(glue_pad_will_return);
 
     /* ⭐⭐ START THE AGENT PROBE WHEN THE BRIDGE COMES UP, not when something is
      * first plugged.
@@ -231,6 +277,9 @@ bool ctm_bridge_start(void)
      * ⓘ Safe to call more than once -- it starts a worker only if one is not
      * already running. */
     ctm_bridge_gesture_init();
+    /* The probe asks the PC only during a stream: woken here, with a probe at
+     * once, and parked again by ctm_bridge_stop (2026-10-23). */
+    ctm_agent_probe_park(false);
 
     /* The TV pointer used to be bridged here unconditionally, whatever the
      * auto-plug setting said -- the third path that claimed a device without
@@ -250,10 +299,12 @@ bool ctm_bridge_start(void)
 }
 
 /* The listing itself. Enumerates and fills; brings NOTHING up. */
-static int glue_list_locked_body(ctm_bridge_dev_t *out, int max)
+static int glue_list_locked_body(ctm_bridge_dev_t *out, int max, bool scan)
 {
     pthread_mutex_lock(&s_dev_mutex);
-    ctm_glue_enumerate();
+    if (scan || !s_scanned) {
+        ctm_glue_enumerate("a device list");
+    }
     int n = 0;
     for (int i = 0; i < g_devices.count && n < max; ++i) {
         logical_device_t *item = &g_devices.items[i];
@@ -280,6 +331,7 @@ static int glue_list_locked_body(ctm_bridge_dev_t *out, int max)
         out[n].device_name[0] = '\0';
         out[n].usb_serial[0] = '\0';
         out[n].iface = -1;
+        out[n].own_card = false;
         for (int k = 0; k < item->device_count; ++k) {
             int j = item->device_indices[k];
             if (j >= 0 && j < g_scan.count && g_scan.devices[j].node[0]) {
@@ -289,6 +341,13 @@ static int glue_list_locked_body(ctm_bridge_dev_t *out, int max)
                 snprintf(out[n].device_name, sizeof(out[n].device_name), "%s", dev->device_name);
                 snprintf(out[n].usb_serial, sizeof(out[n].usb_serial), "%s", dev->usb_serial);
                 out[n].iface = dev->iface_num;
+                /* ⓘ A DS4 on a cable only: its Auto Bridge tick waits on this,
+                 * and nothing else reads it. A few small files, no card opened. */
+                if (strcmp(out[n].kind, "ds4_usb") == 0) {
+                    out[n].own_card = ctm_controller_own_card_of(dev->node, dev->phys,
+                                                                 (unsigned) strtoul(item->vid, NULL, 16),
+                                                                 (unsigned) strtoul(item->pid, NULL, 16)) >= 0;
+                }
                 break;
             }
         }
@@ -311,7 +370,16 @@ int ctm_bridge_list(ctm_bridge_dev_t *out, int max)
         return 0;
     }
     ctm_glue_ensure_core();
-    return glue_list_locked_body(out, max);
+    return glue_list_locked_body(out, max, true);
+}
+
+int ctm_bridge_list_known(ctm_bridge_dev_t *out, int max)
+{
+    if (out == NULL || max <= 0) {
+        return 0;
+    }
+    ctm_glue_ensure_core();
+    return glue_list_locked_body(out, max, false);
 }
 
 /* ⭐⭐ THE SAME LIST WITHOUT WAKING ANYTHING (T-135, 2026-09-08).
@@ -329,7 +397,15 @@ int ctm_bridge_list_quiet(ctm_bridge_dev_t *out, int max)
     if (out == NULL || max <= 0) {
         return 0;
     }
-    return glue_list_locked_body(out, max);
+    return glue_list_locked_body(out, max, true);
+}
+
+int ctm_bridge_list_quiet_known(ctm_bridge_dev_t *out, int max)
+{
+    if (out == NULL || max <= 0) {
+        return 0;
+    }
+    return glue_list_locked_body(out, max, false);
 }
 
 /* The row behind a node in the last enumeration, or NULL. Caller holds
@@ -374,15 +450,87 @@ static logical_device_t *item_for_node_locked(const char *node)
  * live. The scan only maps the node to its row's key, which a connected device
  * keeps, so a stale scan cannot make a live bridge look gone -- which also
  * removes the "a scan blinked" misses PLUG_MISSES exists for. */
+/* ⭐ THE KEY OF A NODE THE GESTURE PLUGGED, NOTED AT THE PLUG (2026-10-28).
+ * The check above runs every 500 ms for each pad the gesture bridged, and took
+ * the device lock to turn the node into its row's key. A plug now runs on its
+ * own thread (ctm_bridge_plug_node_begin) and holds that lock through its scan
+ * and a Bluetooth DS4's handover tone, so the check would have held the app's
+ * loop just as long. The key is noted when the plug succeeds, and the session
+ * table, which has a lock of its own, answers. A node no longer bridged is
+ * forgotten the first time it is asked about. */
+#define PLUGGED_NODES_MAX 8
+static struct {
+    char node[64];
+    char key[96];
+} s_plugged_nodes[PLUGGED_NODES_MAX];
+static pthread_mutex_t s_plugged_nodes_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+/* Notes the key of the row behind `node`. Under s_dev_mutex. */
+static void plugged_node_note_locked(const char *node)
+{
+    const logical_device_t *item = item_for_node_locked(node);
+    if (item == NULL || !node || !node[0]) {
+        return;
+    }
+    pthread_mutex_lock(&s_plugged_nodes_mutex);
+    int slot = -1;
+    for (int i = 0; i < PLUGGED_NODES_MAX; ++i) {
+        if (strcmp(s_plugged_nodes[i].node, node) == 0) {
+            slot = i;
+            break;
+        }
+        if (slot < 0 && !s_plugged_nodes[i].node[0]) {
+            slot = i;
+        }
+    }
+    if (slot >= 0) {
+        snprintf(s_plugged_nodes[slot].node, sizeof(s_plugged_nodes[slot].node), "%s", node);
+        snprintf(s_plugged_nodes[slot].key, sizeof(s_plugged_nodes[slot].key), "%s", item->key);
+    }
+    pthread_mutex_unlock(&s_plugged_nodes_mutex);
+}
+
+/* 1 bridged, 0 not (and forgotten), -1 not a node noted at a plug. */
+static int plugged_node_answer(const char *node)
+{
+    char key[96] = "";
+    pthread_mutex_lock(&s_plugged_nodes_mutex);
+    int slot = -1;
+    for (int i = 0; i < PLUGGED_NODES_MAX; ++i) {
+        if (s_plugged_nodes[i].node[0] && strcmp(s_plugged_nodes[i].node, node) == 0) {
+            slot = i;
+            snprintf(key, sizeof(key), "%s", s_plugged_nodes[i].key);
+            break;
+        }
+    }
+    pthread_mutex_unlock(&s_plugged_nodes_mutex);
+    if (slot < 0) {
+        return -1;
+    }
+    if (session_index_for_key(key) >= 0) {
+        return 1;
+    }
+    pthread_mutex_lock(&s_plugged_nodes_mutex);
+    if (strcmp(s_plugged_nodes[slot].node, node) == 0) {
+        s_plugged_nodes[slot].node[0] = '\0';
+    }
+    pthread_mutex_unlock(&s_plugged_nodes_mutex);
+    return 0;
+}
+
 bool ctm_bridge_node_is_plugged(const char *node)
 {
     if (!node || !node[0]) {
         return false;
     }
+    const int noted = plugged_node_answer(node);
+    if (noted >= 0) {
+        return noted == 1;
+    }
     pthread_mutex_lock(&s_dev_mutex);
     logical_device_t *item = item_for_node_locked(node);
     if (item == NULL) {
-        ctm_glue_enumerate();
+        ctm_glue_enumerate("an is-plugged check");
         item = item_for_node_locked(node);
     }
     const bool plugged = item != NULL && session_index_for_key(item->key) >= 0;
@@ -390,53 +538,6 @@ bool ctm_bridge_node_is_plugged(const char *node)
     return plugged;
 }
 
-/* Is this node a Bluetooth controller rather than a wired one?
- *
- * Asked so the app can leave the confirmation signals to the bridge core on
- * Bluetooth, where it builds the controller's reports itself and can do the
- * light, the pulse and the tone together. Running the app's own patterns as
- * well produces two overlapping signals with different characters, which
- * reads as a controller that does not know what it is doing.
- *
- * The distinction is already in the device kind -- "ds5" is the Bluetooth
- * DualSense, "ds5_usb" the wired one -- so nothing new has to be worked out
- * to answer it. */
-/* The one switch, asked through the glue because the app cannot see the core's
- * headers directly. One definition, both sides. */
-bool ctm_bridge_signals_enabled(void)
-{
-    return CTM_SIGNALS_ENABLED ? true : false;
-}
-
-/* Will the bridge core signal this controller itself?
- *
- * ⭐ THE RIGHT QUESTION, replacing "is this Bluetooth". Both transports have a
- * rich signal and a coarse SDL fallback, and running both gives two buzzes of
- * different characters -- which reads as a controller that does not know what
- * it is doing. What matters is not which cable it is but whether the rich one
- * is about to play.
- *
- * Bluetooth: always. The core builds the controller's own reports -- light,
- * felt pulse and tone together -- and needs nothing but a device node.
- *
- * Wired: only once a session exists, because that is what opens the speaker
- * the tone and pulse are written to. So a refused plug on a cable correctly
- * falls back, and a successful one correctly does not. */
-/* Signal a REFUSED plug richly, on whichever transport this is.
- *
- * Returns true if it did, false if the caller should fall back to SDL.
- *
- * ⭐ A refusal is the moment the user most needs telling, and until now it got
- * the coarsest signal we had -- because a failed plug leaves no session to
- * play through. Neither transport actually needs one:
- *
- *   Bluetooth: the signal is bytes to a device node, and the node is still
- *     there. Nothing about it depends on the host, which is the point, since
- *     the host being unreachable is WHY the plug failed.
- *
- *   Wired: the sound card exists because the controller is plugged into the
- *     TV, not because a bridge succeeded. ⚠️ But with two plugged in there is
- *     no telling which card is which, so that case declines and falls back. */
 /* The bridge kind of the row behind a node, or NULL. Caller holds s_dev_mutex
  * and has enumerated. */
 static const char *kind_for_node_locked(const char *node)
@@ -460,12 +561,31 @@ bool bridge_identity_mac_shaped(const char *s)
     return identity_mac_shaped(s) != 0;
 }
 
+/* Signal a REFUSED plug richly, on whichever transport this is.
+ *
+ * Returns true if it did, false if the caller should fall back to SDL.
+ *
+ * ⭐ A refusal is the moment the user most needs telling, and until now it got
+ * the coarsest signal we had -- because a failed plug leaves no session to
+ * play through. Neither transport actually needs one:
+ *
+ *   Bluetooth: the signal is bytes to a device node, and the node is still
+ *     there. Nothing about it depends on the host, which is the point, since
+ *     the host being unreachable is WHY the plug failed.
+ *
+ *   Wired: the sound card exists because the controller is plugged into the
+ *     TV, not because a bridge succeeded. ⚠️ But with two plugged in there is
+ *     no telling which card is which, so that case declines and falls back. */
 bool ctm_bridge_signal_refused(const char *node)
 {
-    if (!ctm_bridge_signals_enabled() || !node || !node[0]) return false;
+    if (!node || !node[0]) return false;
     char kind[16] = "";
     pthread_mutex_lock(&s_dev_mutex);
-    ctm_glue_enumerate();
+    /* The last scan first, as its siblings ask (2026-10-23): this ran right
+     * after the plug's own scan, and a node's kind does not change. */
+    if (item_for_node_locked(node) == NULL) {
+        ctm_glue_enumerate("a refusal signal");
+    }
     const char *k = kind_for_node_locked(node);
     if (k) {
         snprintf(kind, sizeof(kind), "%s", k);
@@ -494,6 +614,95 @@ bool ctm_bridge_signal_refused(const char *node)
         return ctm_signal_wired_no_session(node, 2 /* BTSIG_REFUSED */) == 0;
     }
     return false;
+}
+
+/* ⭐ THE REFUSAL OFF THE APP'S LOOP (2026-10-23). Its tones and flashes take
+ * 1.6 to 2.9 s on a Bluetooth DualSense, about 2.5 s on a DS4 and up to about
+ * 5 s on a cable, and the gesture played them on the app's loop: nothing drew
+ * and no pad was read meanwhile. Played on a thread of its own now; the
+ * gesture asks for the answer each tick. A few pads at once at most. */
+#define REFUSALS_MAX 4
+enum { REFUSAL_FREE, REFUSAL_PLAYING, REFUSAL_SOUNDED, REFUSAL_SILENT };
+static struct {
+    char node[64];
+    int state;
+} s_refusals[REFUSALS_MAX];
+static pthread_mutex_t s_refusal_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+static void *refusal_thread(void *arg)
+{
+    const int i = (int)(intptr_t)arg;
+    char node[64];
+    pthread_mutex_lock(&s_refusal_mutex);
+    snprintf(node, sizeof(node), "%s", s_refusals[i].node);
+    pthread_mutex_unlock(&s_refusal_mutex);
+    const bool sounded = ctm_bridge_signal_refused(node);
+    pthread_mutex_lock(&s_refusal_mutex);
+    s_refusals[i].state = sounded ? REFUSAL_SOUNDED : REFUSAL_SILENT;
+    pthread_mutex_unlock(&s_refusal_mutex);
+    return NULL;
+}
+
+bool ctm_bridge_signal_refused_begin(const char *node)
+{
+    if (!node || !node[0]) return false;
+    pthread_mutex_lock(&s_refusal_mutex);
+    int slot = -1;
+    int done = -1;
+    for (int i = 0; i < REFUSALS_MAX; ++i) {
+        const bool same = strcmp(s_refusals[i].node, node) == 0;
+        if (s_refusals[i].state == REFUSAL_PLAYING && same) {
+            pthread_mutex_unlock(&s_refusal_mutex);
+            return true;   /* already playing for this pad */
+        }
+        /* ⓘ An answer nobody collected (its pad left while it played) is
+         * stale: this node's goes now, another's when no slot is free. */
+        if (s_refusals[i].state == REFUSAL_SOUNDED || s_refusals[i].state == REFUSAL_SILENT) {
+            if (same) {
+                s_refusals[i].state = REFUSAL_FREE;
+            } else if (done < 0) {
+                done = i;
+            }
+        }
+        if (slot < 0 && s_refusals[i].state == REFUSAL_FREE) slot = i;
+    }
+    if (slot < 0) slot = done;
+    if (slot < 0) {
+        pthread_mutex_unlock(&s_refusal_mutex);
+        return false;
+    }
+    snprintf(s_refusals[slot].node, sizeof(s_refusals[slot].node), "%s", node);
+    s_refusals[slot].state = REFUSAL_PLAYING;
+    pthread_mutex_unlock(&s_refusal_mutex);
+    pthread_t thread;
+    if (pthread_create(&thread, NULL, refusal_thread, (void *)(intptr_t)slot) != 0) {
+        pthread_mutex_lock(&s_refusal_mutex);
+        s_refusals[slot].state = REFUSAL_FREE;
+        pthread_mutex_unlock(&s_refusal_mutex);
+        return false;
+    }
+    pthread_detach(thread);
+    return true;
+}
+
+int ctm_bridge_signal_refused_answer(const char *node)
+{
+    int answer = 0;   /* none asked for this pad: nothing sounded */
+    pthread_mutex_lock(&s_refusal_mutex);
+    for (int i = 0; i < REFUSALS_MAX; ++i) {
+        if (!node || strcmp(s_refusals[i].node, node) != 0 || s_refusals[i].state == REFUSAL_FREE) {
+            continue;
+        }
+        if (s_refusals[i].state == REFUSAL_PLAYING) {
+            answer = -1;
+        } else {
+            answer = s_refusals[i].state == REFUSAL_SOUNDED ? 1 : 0;
+            s_refusals[i].state = REFUSAL_FREE;
+        }
+        break;
+    }
+    pthread_mutex_unlock(&s_refusal_mutex);
+    return answer;
 }
 
 /* Does the CORE have a connected signal for the pad on this node? (T-212)
@@ -529,8 +738,6 @@ static bool core_signals_node_locked(const char *node)
 
 bool ctm_bridge_node_signals_itself(const char *node)
 {
-    if (!ctm_bridge_signals_enabled()) return false;
-
     /* ⛔⛔ T-212: ASK WHETHER THE CORE WILL, NOT WHETHER THE PAD IS PLUGGED.
      *
      * This said "plugged, so the core has it" -- and for a Bluetooth Xbox pad
@@ -552,7 +759,7 @@ bool ctm_bridge_node_signals_itself(const char *node)
      * ctm_bridge_node_is_plugged, which learned the same on the U5s. */
     pthread_mutex_lock(&s_dev_mutex);
     if (item_for_node_locked(node) == NULL) {
-        ctm_glue_enumerate();
+        ctm_glue_enumerate("a will-the-core-signal check");
     }
     const bool core_has_one = core_signals_node_locked(node);
     pthread_mutex_unlock(&s_dev_mutex);
@@ -576,6 +783,10 @@ int ctm_bridge_ds5_animation_over(int fd)
     return ctm_ds5_animation_over(fd);
 }
 
+/* Is this node a Bluetooth controller rather than a wired one? The device kind
+ * says -- "ds5" is the Bluetooth DualSense, "ds5_usb" the wired one -- so
+ * nothing new has to be worked out to answer it. ⓘ Whether the core signals a
+ * pad is ctm_bridge_node_signals_itself's question, not this one's. */
 bool ctm_bridge_node_is_bluetooth(const char *node)
 {
     if (!node || !node[0]) {
@@ -588,7 +799,7 @@ bool ctm_bridge_node_is_bluetooth(const char *node)
      * that only log lines read. A pad's bus does not change while it is in the
      * list, so a new scan is made only for a node the last one does not have. */
     if (item_for_node_locked(node) == NULL) {
-        ctm_glue_enumerate();
+        ctm_glue_enumerate("an is-Bluetooth check");
     }
     /* ⛔⛔ THE BUS SAYS THIS, NOT A LIST OF TWO KINDS.
      *
@@ -607,17 +818,172 @@ bool ctm_bridge_node_is_bluetooth(const char *node)
     return bt;
 }
 
-bool ctm_bridge_plug_node(const char *node)
+/* The plug, and whether a failed one never reached the listener, read under
+ * the same lock: two plugs on two threads cannot then swap their answers. */
+static bool plug_node_reached(const char *node, bool *unreachable)
 {
     /* ⓘ Said before any way out, as in the core's own entry points (code
      * review, 2026-10-05): a stale "not reached" schedules a retry. */
     g_last_plug_unreachable = false;
+    *unreachable = false;
     if (!s_active) return false;
     ctm_glue_ensure_core();
     pthread_mutex_lock(&s_dev_mutex);
     bool ok = plug_in_by_node(node);
+    /* ⓘ The plug scanned every device into the same list (plug_in_by_node),
+     * so that is the last scan: the control port reads it rather than
+     * scanning again while the new session starts. On the lab's monitor a
+     * Bluetooth DS4 hung up 0.6 s after its bridge, with a 607 ms scan
+     * running through those 0.6 s (2026-10-28). */
+    s_scan_at_ms = glue_now_ms();
+    s_scanned = true;
+    if (ok) {
+        plugged_node_note_locked(node);
+    } else {
+        *unreachable = g_last_plug_unreachable;
+    }
     pthread_mutex_unlock(&s_dev_mutex);
     return ok;
+}
+
+bool ctm_bridge_plug_node(const char *node)
+{
+    bool unreachable;
+    return plug_node_reached(node, &unreachable);
+}
+
+/* ⭐⭐ THE PLUG OFF THE APP'S LOOP (2026-10-28). The gesture plugged on the
+ * app's loop, and a plug scans every device (plug_in_by_node) and, for a
+ * DualShock 4, plays its handover tone before the session starts (about 2.5 s,
+ * ui_bridge.c). With a Bluetooth DS4 the scan waits behind its writes too, so
+ * a bridge froze the picture and every pad for seconds; the lab's monitor went
+ * still for 15 s around one. Played as the refusal is (above): on a thread of
+ * its own, the gesture asking for the answer each tick. ⓘ The tone still
+ * comes before the session, on the same thread, as the core requires. */
+#define PLUGS_MAX 4
+enum { PLUG_FREE, PLUG_RUNNING, PLUG_DONE };
+static struct {
+    char node[64];
+    int state;
+    bool ok;
+    bool unreachable;
+} s_plugs[PLUGS_MAX];
+static pthread_mutex_t s_plug_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+static void *plug_thread(void *arg)
+{
+    const int i = (int)(intptr_t)arg;
+    char node[64];
+    pthread_mutex_lock(&s_plug_mutex);
+    snprintf(node, sizeof(node), "%s", s_plugs[i].node);
+    pthread_mutex_unlock(&s_plug_mutex);
+    bool unreachable = false;
+    const bool ok = plug_node_reached(node, &unreachable);
+    pthread_mutex_lock(&s_plug_mutex);
+    s_plugs[i].ok = ok;
+    s_plugs[i].unreachable = unreachable;
+    s_plugs[i].state = PLUG_DONE;
+    pthread_mutex_unlock(&s_plug_mutex);
+    return NULL;
+}
+
+bool ctm_bridge_plug_node_begin(const char *node)
+{
+    if (!node || !node[0]) return false;
+    pthread_mutex_lock(&s_plug_mutex);
+    int slot = -1;
+    int done = -1;
+    for (int i = 0; i < PLUGS_MAX; ++i) {
+        const bool same = strcmp(s_plugs[i].node, node) == 0;
+        if (s_plugs[i].state == PLUG_RUNNING && same) {
+            pthread_mutex_unlock(&s_plug_mutex);
+            return true;   /* already plugging this pad */
+        }
+        /* ⓘ An answer nobody collected (its pad left while it plugged) is
+         * stale: this node's goes now, another's when no slot is free. */
+        if (s_plugs[i].state == PLUG_DONE) {
+            if (same) {
+                s_plugs[i].state = PLUG_FREE;
+            } else if (done < 0) {
+                done = i;
+            }
+        }
+        if (slot < 0 && s_plugs[i].state == PLUG_FREE) slot = i;
+    }
+    if (slot < 0) slot = done;
+    if (slot < 0) {
+        pthread_mutex_unlock(&s_plug_mutex);
+        return false;
+    }
+    snprintf(s_plugs[slot].node, sizeof(s_plugs[slot].node), "%s", node);
+    s_plugs[slot].state = PLUG_RUNNING;
+    s_plugs[slot].ok = false;
+    s_plugs[slot].unreachable = false;
+    pthread_mutex_unlock(&s_plug_mutex);
+    pthread_t thread;
+    if (pthread_create(&thread, NULL, plug_thread, (void *)(intptr_t)slot) != 0) {
+        pthread_mutex_lock(&s_plug_mutex);
+        s_plugs[slot].state = PLUG_FREE;
+        pthread_mutex_unlock(&s_plug_mutex);
+        return false;
+    }
+    pthread_detach(thread);
+    return true;
+}
+
+int ctm_bridge_plug_node_answer(const char *node)
+{
+    int answer = 0;   /* none asked for this pad: nothing plugged */
+    pthread_mutex_lock(&s_plug_mutex);
+    for (int i = 0; i < PLUGS_MAX; ++i) {
+        if (!node || strcmp(s_plugs[i].node, node) != 0 || s_plugs[i].state == PLUG_FREE) {
+            continue;
+        }
+        if (s_plugs[i].state == PLUG_RUNNING) {
+            answer = -1;
+        } else {
+            answer = s_plugs[i].ok ? 1 : (s_plugs[i].unreachable ? 2 : 0);
+            s_plugs[i].state = PLUG_FREE;
+        }
+        break;
+    }
+    pthread_mutex_unlock(&s_plug_mutex);
+    return answer;
+}
+
+/* ⛔ A BRIDGE CANNOT OUTLIVE ITS STREAM, SO THE STOP WAITS FOR A PLUG UNDER
+ * WAY (2026-10-28). A plug on its thread could add its session after the stop
+ * had released every session, and leave that pad bridged with no stream. A
+ * plug only begins on the app's loop, as the stop runs, so none can start
+ * while this waits. ⓘ Bounded: a plug past it is said in the log. */
+#define PLUG_STOP_WAIT_MS 20000
+
+static void plugs_wait_finished(void)
+{
+    const uint32_t started = glue_now_ms();
+    for (;;) {
+        bool running = false;
+        pthread_mutex_lock(&s_plug_mutex);
+        for (int i = 0; i < PLUGS_MAX; ++i) {
+            if (s_plugs[i].state == PLUG_RUNNING) {
+                running = true;
+                break;
+            }
+        }
+        pthread_mutex_unlock(&s_plug_mutex);
+        const uint32_t waited = glue_now_ms() - started;
+        if (!running) {
+            if (waited > 0) {
+                log_append("ctm glue: the stop waited %u ms for a plug under way", (unsigned)waited);
+            }
+            return;
+        }
+        if (waited > PLUG_STOP_WAIT_MS) {
+            log_append("ctm glue: a plug still under way after %u ms; the stop goes on", (unsigned)waited);
+            return;
+        }
+        usleep(10 * 1000);
+    }
 }
 
 /* ⭐⭐ THE DEVICE A ROW NAMES, AS THE LIST STANDS NOW (code review,
@@ -656,6 +1022,8 @@ bool ctm_bridge_plug_row(const ctm_bridge_dev_t *row)
     /* ⓘ As above: a row that names nothing must not answer with the last
      * plug's "not reached". */
     g_last_plug_unreachable = false;
+    /* ⛔ Not outside a stream's bridge, as ctm_bridge_plug_node (2026-10-23). */
+    if (!s_active) return false;
     ctm_glue_ensure_core();
     pthread_mutex_lock(&s_dev_mutex);
     bool ok = false;
@@ -758,6 +1126,89 @@ static bool release_soon(const char *key)
     return true;
 }
 
+/* ------------------------------------------ what the PC dropped as it went --
+ *
+ * ⭐ DS5-USBIP STOPPED ANSWERING IN THE MIDDLE OF A STREAM (rhoquinn8217,
+ * 2026-11-05: "Can aurora-tv trigger autobridge when the DS5-USBIP is detected
+ * to be on?"). It quit, crashed, or was restarted by its own setup, and the
+ * reaper below released what it held. Those devices are still connected to
+ * the TV, at the same nodes, so a node is all that is kept: Auto Bridge
+ * bridges each again once DS5-USBIP answers (input/auto_bridge.c), ticked or
+ * not, since the PC ended those bridges and the person did not. A device
+ * released by hand is never on this list.
+ * ⓘ Matched on the node alone. A device that left and came back meanwhile
+ * has a new connection, which Auto Bridge's own look at arrivals takes when
+ * it is ticked. Kept for the rest of the stream at most. */
+static char s_lost[MAX_SESSIONS][64];
+static int s_lost_count;
+static pthread_mutex_t s_lost_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+static void glue_lost_note(const char *node)
+{
+    if (node == NULL || node[0] == '\0') {
+        return;
+    }
+    pthread_mutex_lock(&s_lost_mutex);
+    bool known = false;
+    for (int i = 0; i < s_lost_count && !known; ++i) {
+        known = strcmp(s_lost[i], node) == 0;
+    }
+    if (!known && s_lost_count < MAX_SESSIONS) {
+        snprintf(s_lost[s_lost_count], sizeof s_lost[0], "%s", node);
+        ++s_lost_count;
+    }
+    pthread_mutex_unlock(&s_lost_mutex);
+}
+
+bool ctm_bridge_lost_pending(void)
+{
+    pthread_mutex_lock(&s_lost_mutex);
+    const bool any = s_lost_count > 0;
+    pthread_mutex_unlock(&s_lost_mutex);
+    return any;
+}
+
+bool ctm_bridge_lost_has(const ctm_bridge_dev_t *d)
+{
+    if (d == NULL || d->node[0] == '\0') {
+        return false;
+    }
+    bool found = false;
+    pthread_mutex_lock(&s_lost_mutex);
+    for (int i = 0; i < s_lost_count && !found; ++i) {
+        found = strcmp(s_lost[i], d->node) == 0;
+    }
+    pthread_mutex_unlock(&s_lost_mutex);
+    return found;
+}
+
+bool ctm_bridge_lost_take(const ctm_bridge_dev_t *d)
+{
+    if (d == NULL || d->node[0] == '\0') {
+        return false;
+    }
+    bool found = false;
+    pthread_mutex_lock(&s_lost_mutex);
+    for (int i = 0; i < s_lost_count && !found; ++i) {
+        if (strcmp(s_lost[i], d->node) == 0) {
+            --s_lost_count;
+            if (i != s_lost_count) {
+                memcpy(s_lost[i], s_lost[s_lost_count], sizeof s_lost[0]);
+            }
+            found = true;
+        }
+    }
+    pthread_mutex_unlock(&s_lost_mutex);
+    return found;
+}
+
+void ctm_bridge_lost_forget(void)
+{
+    pthread_mutex_lock(&s_lost_mutex);
+    s_lost_count = 0;
+    pthread_mutex_unlock(&s_lost_mutex);
+}
+
 /* ⭐⭐ RELEASE A CONTROLLER WHOSE HOST HAS GONE. T-127, 2026-08-23.
  *
  * ⛔ THE FAULT: close the listener's window and the controller stayed claimed by
@@ -791,6 +1242,7 @@ int ctm_bridge_reap_gone_hosts(void)
 {
     int reaped = 0;
     char gone[MAX_SESSIONS][96];
+    char gone_node[MAX_SESSIONS][64];
     int gone_count = 0;
 
     pthread_mutex_lock(&s_dev_mutex);
@@ -805,6 +1257,7 @@ int ctm_bridge_reap_gone_hosts(void)
         ctm_controller_get_status(c, &st);
         if (!st.host_gone) continue;
         snprintf(gone[gone_count], sizeof(gone[gone_count]), "%s", g_sessions[i].key);
+        snprintf(gone_node[gone_count], sizeof(gone_node[gone_count]), "%s", g_sessions[i].node);
         ++gone_count;
     }
     pthread_mutex_unlock(&g_sessions_mutex);
@@ -814,7 +1267,18 @@ int ctm_bridge_reap_gone_hosts(void)
     for (int i = 0; i < gone_count; ++i) {
         if (!release_soon(gone[i])) continue;
         log_append("ctm glue: host gone -- releasing '%s'", gone[i]);
+        /* ⭐ And noted, so it bridges again when DS5-USBIP is back. */
+        glue_lost_note(gone_node[i]);
         ++reaped;
+    }
+    /* ⭐ WHAT THE PROBE READ BEFORE IS NOT AN ANSWER NOW (2026-11-05). The core
+     * gives up after three seconds without one, and the probe asks every ten,
+     * so its last ONLINE can be from before the PC went. Auto Bridge would take
+     * that for DS5-USBIP back, ask at once, be refused, and the pad would stay
+     * with the TV. Unknown until the probe asks again, which it does now. */
+    if (reaped > 0) {
+        g_agent_probed = false;
+        ctm_agent_probe_soon();
     }
     pthread_mutex_unlock(&s_dev_mutex);
     return reaped;
@@ -944,6 +1408,39 @@ int ctm_bridge_held_touches(ctm_bridge_touch_t *out, int max)
     return count;
 }
 
+/* ⓘ The same walk, for a webOS pop-up while input is held. */
+int ctm_bridge_held_navs(ctm_bridge_nav_t *out, int max)
+{
+    int count = 0;
+    if (out == NULL || max <= 0) {
+        return 0;
+    }
+    pthread_mutex_lock(&s_dev_mutex);
+    pthread_mutex_lock(&g_sessions_mutex);
+    for (int i = 0; i < g_session_count && count < max; ++i) {
+        ctm_controller_t *c = g_sessions[i].controller;
+        if (!c || g_sessions[i].stopping) continue;
+        ctm_controller_status_t st;
+        ctm_controller_get_status(c, &st);
+        const uint32_t w = st.held_nav ? st.held_nav_word : held_nav_word(0, 128, 128);
+        const unsigned keys = HELD_NAV_KEYS(w);
+        snprintf(out[count].node, sizeof(out[count].node), "%s", g_sessions[i].node);
+        out[count].reading = st.held_nav;
+        out[count].up = (keys & HELD_NAV_UP) != 0;
+        out[count].down = (keys & HELD_NAV_DOWN) != 0;
+        out[count].left = (keys & HELD_NAV_LEFT) != 0;
+        out[count].right = (keys & HELD_NAV_RIGHT) != 0;
+        out[count].south = (keys & HELD_NAV_SOUTH) != 0;
+        out[count].east = (keys & HELD_NAV_EAST) != 0;
+        out[count].lx = ((int) HELD_NAV_LX(w) - 128) * 256;
+        out[count].ly = ((int) HELD_NAV_LY(w) - 128) * 256;
+        ++count;
+    }
+    pthread_mutex_unlock(&g_sessions_mutex);
+    pthread_mutex_unlock(&s_dev_mutex);
+    return count;
+}
+
 /* ⭐ THE DS5-USBIP BUTTON'S REQUEST (rhoquinn8217, 2026-09-28: "a bridge opens
  * the config window. Can we use the same mechanism?"). The USB server opens its
  * settings window by itself when a device is bridged, whatever the device is.
@@ -965,7 +1462,7 @@ bool ctm_bridge_open_config(char *name, size_t name_len)
         name[0] = '\0';
     }
     /* ⛔ Not before the bridge is running: nothing can be bridged outside a
-     * stream, and looking would bring the core up early. */
+     * stream, so there is nothing to look for. */
     if (!ctm_bridge_active()) {
         return false;
     }
@@ -1079,7 +1576,9 @@ void ctm_bridge_stop(void)
     if (!s_active && !s_core_up) {
         return;
     }
+    plugs_wait_finished();
     release_local_sessions_on_exit();
+    ctm_agent_probe_park(true);
     g_running = false;
     if (g_stop_sniff_thread_started) {
         pthread_join(g_stop_sniff_thread, NULL);
@@ -1088,6 +1587,12 @@ void ctm_bridge_stop(void)
     log_append("ctm glue: bridge stopped");
     s_active = false;
     s_core_up = false;
+}
+
+void ctm_bridge_stop_quietly(void)
+{
+    ctm_unplug_quietly = true;
+    ctm_bridge_stop();
 }
 
 bool ctm_bridge_active(void)
@@ -1133,6 +1638,90 @@ ctm_bridge_compat_t ctm_bridge_agent_compat(void)
     const int compat = g_agent_compat;
     return (compat >= PROTOCOL_OK && compat <= PROTOCOL_UPDATE_TV) ? (ctm_bridge_compat_t) compat
                                                                   : CTM_BRIDGE_COMPAT_UNKNOWN;
+}
+
+bool ctm_bridge_agent_locked(void)
+{
+    return g_agent_locked != 0;
+}
+
+/* ---------------------------------------------- a pad that comes straight back --
+ *
+ * ⭐ A DS4DONGLE RESTARTED BY THE PC (2026-11-04). DS5-USBIP changes a DS4Dongle's
+ * "speaker without headphones" by restarting it, which takes the pad off USB and
+ * ends its bridge; rhoquinn8217 asked for the bridge to come back by itself. The
+ * core says so just before the restart (ctm_controller_set_return_cb), and Auto
+ * Bridge takes the pad again when it reappears, as if it were ticked.
+ * ⓘ Matched on its vendor and product, and on its MAC where both sides know it:
+ * the window is seconds, and nothing else of a DS4Dongle's ids comes back then. */
+#define RETURN_SLOTS      4
+#define RETURN_WINDOW_MS  15000u
+
+typedef struct {
+    char vid[8];
+    char pid[8];
+    char mac[64];
+    uint32_t until_ms;   /* glue_now_ms(), which wraps: compared by difference */
+    bool live;
+} glue_return_t;
+
+static glue_return_t s_returning[RETURN_SLOTS];
+static pthread_mutex_t s_returning_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+static bool glue_return_live(const glue_return_t *r, uint32_t now)
+{
+    return r->live && (int32_t) (r->until_ms - now) > 0;
+}
+
+/* On the pad's session thread: note it, nothing more. */
+static void glue_pad_will_return(const ctm_controller_dev_t *dev)
+{
+    if (dev == NULL) {
+        return;
+    }
+    const uint32_t now = glue_now_ms();
+    pthread_mutex_lock(&s_returning_mutex);
+    int slot = 0;
+    for (int i = 0; i < RETURN_SLOTS; ++i) {
+        if (!glue_return_live(&s_returning[i], now)) {
+            slot = i;
+            break;
+        }
+        if ((int32_t) (s_returning[i].until_ms - s_returning[slot].until_ms) < 0) {
+            slot = i;
+        }
+    }
+    glue_return_t *r = &s_returning[slot];
+    snprintf(r->vid, sizeof r->vid, "%s", dev->vid);
+    snprintf(r->pid, sizeof r->pid, "%s", dev->pid);
+    /* ⓘ A DS4's serial is the pad's MAC once the core has read it (0x12). */
+    snprintf(r->mac, sizeof r->mac, "%s", dev->serial);
+    r->until_ms = now + RETURN_WINDOW_MS;
+    r->live = true;
+    pthread_mutex_unlock(&s_returning_mutex);
+}
+
+bool ctm_bridge_expected_back(const ctm_bridge_dev_t *d)
+{
+    if (d == NULL) {
+        return false;
+    }
+    const uint32_t now = glue_now_ms();
+    bool back = false;
+    pthread_mutex_lock(&s_returning_mutex);
+    for (int i = 0; i < RETURN_SLOTS && !back; ++i) {
+        glue_return_t *r = &s_returning[i];
+        if (!glue_return_live(r, now) || strcasecmp(r->vid, d->vid) != 0 || strcasecmp(r->pid, d->pid) != 0) {
+            continue;
+        }
+        if (r->mac[0] != '\0' && d->serial[0] != '\0' && !identity_same(r->mac, d->serial)) {
+            continue;
+        }
+        r->live = false;   /* once */
+        back = true;
+    }
+    pthread_mutex_unlock(&s_returning_mutex);
+    return back;
 }
 
 const char *ctm_bridge_agent_update_advice(void)

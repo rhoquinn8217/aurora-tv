@@ -18,17 +18,25 @@ target_sources(moonlight-lib PRIVATE
         ${CMAKE_SOURCE_DIR}/src/app/input/bridge_keyboard.c
         ${CMAKE_SOURCE_DIR}/src/app/input/bridge_override.c
         ${CMAKE_SOURCE_DIR}/src/app/input/bridge_request.c
+        ${CMAKE_SOURCE_DIR}/src/app/input/bt_pairing.c
         ${CMAKE_SOURCE_DIR}/src/app/input/ctm_bridge_gesture.c
         ${CMAKE_SOURCE_DIR}/src/app/input/device_groups.c
         ${CMAKE_SOURCE_DIR}/src/app/input/mouse_seen.c
         ${CMAKE_SOURCE_DIR}/src/app/input/overlay_volume.c
         ${CMAKE_SOURCE_DIR}/src/app/input/touchpad_pointer.c
         ${CMAKE_SOURCE_DIR}/src/app/input/tv_cursor.c
+        ${CMAKE_SOURCE_DIR}/src/app/input/webos_popup.c
+        ${CMAKE_SOURCE_DIR}/src/app/lvgl/image_corners.c
+        ${CMAKE_SOURCE_DIR}/src/app/lvgl/draw_line_fix.c
         ${CMAKE_SOURCE_DIR}/src/app/stream/bridge_pointer.c
         ${CMAKE_SOURCE_DIR}/src/app/stream/bridge_proof.c
         ${CMAKE_SOURCE_DIR}/src/app/stream/bridge_session.c
         ${CMAKE_SOURCE_DIR}/src/app/stream/connect_cancel.c
+        ${CMAKE_SOURCE_DIR}/src/app/stream/input/bridge_switch_hold.c
+        ${CMAKE_SOURCE_DIR}/src/app/stream/input/lock_keys.c
+        ${CMAKE_SOURCE_DIR}/src/app/ui/common/bt_panel.c
         ${CMAKE_SOURCE_DIR}/src/app/ui/common/click_away.c
+        ${CMAKE_SOURCE_DIR}/src/app/ui/common/pad_marks.c
         ${CMAKE_SOURCE_DIR}/src/app/ui/common/type_into_box.c
         ${CMAKE_SOURCE_DIR}/src/app/ui/launcher/add_server_box.c
         ${CMAKE_SOURCE_DIR}/src/app/ui/launcher/server_cards.c
@@ -41,6 +49,8 @@ target_sources(moonlight-lib PRIVATE
         ${CMAKE_SOURCE_DIR}/src/app/ui/streaming/connecting_cancel.c
         ${CMAKE_SOURCE_DIR}/src/app/ui/streaming/ctm_panel.c
         ${CMAKE_SOURCE_DIR}/src/app/ui/streaming/cursor_align.c
+        ${CMAKE_SOURCE_DIR}/src/app/ui/streaming/keyboard_place.c
+        ${CMAKE_SOURCE_DIR}/src/app/ui/streaming/lock_numpad.c
         ${CMAKE_SOURCE_DIR}/src/app/ui/streaming/soft_keyboard_close.c)
 
 # The pairing proof's signer (src/app/stream/bridge_proof.c) reads this TV's
@@ -50,7 +60,9 @@ target_link_libraries(moonlight-lib PRIVATE ${MBEDX509_LIBRARY} ${MBEDCRYPTO_LIB
 
 # A command port on 127.0.0.1 that lets a terminal on the TV launch a stream
 # and bridge devices without the remote. Loopback only; see
-# src/app/control_server.h.
+# src/app/control_server.h. ⛔ Not in a build people download: anything running
+# on a TV could use it, as it has no password. AURORA_RELEASE_BUILD=1 in
+# scripts/webos/docker_build_inner.sh turns it off (2026-11-02).
 option(AURORA_TERMINAL_CONTROL "Listen on 127.0.0.1 for commands from a terminal on the TV" ON)
 if (AURORA_TERMINAL_CONTROL)
     target_compile_definitions(moonlight-lib PUBLIC AURORA_TERMINAL_CONTROL=1)

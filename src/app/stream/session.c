@@ -158,8 +158,7 @@ bool session_start_input(session_t *session) {
     }
 #endif
     session_input_started(&session->input);
-    /* This fork: Bridge Override keeps the virtual mouse off; see bridge_session.h. */
-    if (session->config.vmouse && bridge_session_vmouse_allowed()) {
+    if (session->config.vmouse) {
         session_input_set_vmouse_active(&session->input.vmouse, true);
     }
     bridge_session_started(session);
@@ -176,9 +175,6 @@ bool session_has_input(session_t *session) {
 }
 
 void session_toggle_vmouse(session_t *session) {
-    if (bridge_session_vmouse_pressed(session)) {
-        return;
-    }
     bool value = !session_input_is_vmouse_active(&session->input.vmouse);
     session_input_set_vmouse_active(&session->input.vmouse, value);
 }

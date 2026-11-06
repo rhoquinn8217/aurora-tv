@@ -21,9 +21,8 @@
  * ➡️ So: the TV's grab NEVER TAKES a keyboard that is bridged, by asking rather
  * than by losing a race; it LETS GO of every keyboard just before anything is
  * bridged; and it LOOKS AGAIN a moment after anything is bridged or released,
- * taking the keyboards that are not bridged. Bridge Override does not have to be
- * on for a bridged keyboard to type once, and it no longer touches the keyboard
- * at all (bridge_override.h).
+ * taking the keyboards that are not bridged. Nothing has to be switched off for
+ * a bridged keyboard to type once.
  *
  * ⭐ AURORA'S SHORTCUTS WORK ON A KEYBOARD THE TV HAS (rhoquinn8217, 2026-09-30:
  * "it doesn't work unless the keyboard is bridged. It should work all the

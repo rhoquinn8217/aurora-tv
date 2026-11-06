@@ -3,9 +3,14 @@
 #include <Limelight.h>
 #include <SDL.h>
 #include <stdint.h>
+#include <string.h>
 
+#include "app.h"
+#include "app_settings.h"
 #include "input/app_input.h"
 #include "logging.h"
+#include "stream/input/lock_keys.h"
+#include "stream/input/session_input.h"
 
 /* What bridge_switch_hold.h says, per Moonlight slot. */
 #define SWITCH_SLOTS 16
@@ -22,6 +27,12 @@ static struct {
     uint8_t fingers;
 } s_held[SWITCH_SLOTS];
 
+void bridge_switch_hold_reset(void) {
+    /* ⓘ At a stream's start and end (2026-10-23): a hold left at the end of a
+     * stream masked that button's first press in the next one. */
+    memset(s_held, 0, sizeof s_held);
+}
+
 /* This pad's slot, or NULL. ⓘ A slot another pad held is emptied first: a pad
  * that left while something was held passes nothing on. */
 static void *held_for(const app_gamepad_state_t *gamepad) {
@@ -37,18 +48,102 @@ static void *held_for(const app_gamepad_state_t *gamepad) {
     return &s_held[gamepad->gs_id];
 }
 
-void bridge_switch_hold_begin(const app_gamepad_state_t *gamepad) {
+/*
+ * What the pad holds this moment, read from SDL (code review, 2026-10-27). Not
+ * from the stream's copy in `gamepad`: while the overlay is open the pad's
+ * events go to the overlay and that copy stands still, so a stick or trigger
+ * let go meanwhile stayed "held" here and swallowed its next press.
+ *
+ * ⓘ Each button gives the flag stream_input_handle_cbutton gives it, A/B and
+ * X/Y swapped as it swaps them. The touchpad's click is a pad button only when
+ * the touchpad is not the mouse: as the mouse, the click never reaches the
+ * pad's buttons, so it is not held here either.
+ */
+static const struct {
+    SDL_GameControllerButton button;
+    int flag, swapped;
+} pad_buttons[] = {
+        {SDL_CONTROLLER_BUTTON_A, A_FLAG, B_FLAG},
+        {SDL_CONTROLLER_BUTTON_B, B_FLAG, A_FLAG},
+        {SDL_CONTROLLER_BUTTON_X, X_FLAG, Y_FLAG},
+        {SDL_CONTROLLER_BUTTON_Y, Y_FLAG, X_FLAG},
+        {SDL_CONTROLLER_BUTTON_DPAD_UP, UP_FLAG, UP_FLAG},
+        {SDL_CONTROLLER_BUTTON_DPAD_DOWN, DOWN_FLAG, DOWN_FLAG},
+        {SDL_CONTROLLER_BUTTON_DPAD_LEFT, LEFT_FLAG, LEFT_FLAG},
+        {SDL_CONTROLLER_BUTTON_DPAD_RIGHT, RIGHT_FLAG, RIGHT_FLAG},
+        {SDL_CONTROLLER_BUTTON_BACK, BACK_FLAG, BACK_FLAG},
+        {SDL_CONTROLLER_BUTTON_START, PLAY_FLAG, PLAY_FLAG},
+        {SDL_CONTROLLER_BUTTON_GUIDE, SPECIAL_FLAG, SPECIAL_FLAG},
+        {SDL_CONTROLLER_BUTTON_LEFTSTICK, LS_CLK_FLAG, LS_CLK_FLAG},
+        {SDL_CONTROLLER_BUTTON_RIGHTSTICK, RS_CLK_FLAG, RS_CLK_FLAG},
+        {SDL_CONTROLLER_BUTTON_LEFTSHOULDER, LB_FLAG, LB_FLAG},
+        {SDL_CONTROLLER_BUTTON_RIGHTSHOULDER, RB_FLAG, RB_FLAG},
+#if SDL_VERSION_ATLEAST(2, 0, 14)
+        {SDL_CONTROLLER_BUTTON_MISC1, MISC_FLAG, MISC_FLAG},
+        {SDL_CONTROLLER_BUTTON_PADDLE1, PADDLE1_FLAG, PADDLE1_FLAG},
+        {SDL_CONTROLLER_BUTTON_PADDLE2, PADDLE2_FLAG, PADDLE2_FLAG},
+        {SDL_CONTROLLER_BUTTON_PADDLE3, PADDLE3_FLAG, PADDLE3_FLAG},
+        {SDL_CONTROLLER_BUTTON_PADDLE4, PADDLE4_FLAG, PADDLE4_FLAG},
+#endif
+};
+
+static int live_buttons(const stream_input_t *input, SDL_GameController *controller) {
+    int buttons = 0;
+    for (size_t i = 0; i < sizeof pad_buttons / sizeof pad_buttons[0]; ++i) {
+        if (SDL_GameControllerGetButton(controller, pad_buttons[i].button)) {
+            buttons |= app_configuration->swap_abxy ? pad_buttons[i].swapped : pad_buttons[i].flag;
+        }
+    }
+#if SDL_VERSION_ATLEAST(2, 0, 14)
+    if (input->touchpad_mode != TOUCHPAD_MODE_MOUSE &&
+        SDL_GameControllerGetButton(controller, SDL_CONTROLLER_BUTTON_TOUCHPAD)) {
+        buttons |= TOUCHPAD_FLAG;
+    }
+#endif
+    return buttons;
+}
+
+/* A trigger as the stream scales it (stream_input_handle_caxis). */
+static bool live_trigger_down(SDL_GameController *controller, SDL_GameControllerAxis axis) {
+    const Sint16 value = SDL_GameControllerGetAxis(controller, axis);
+    return value > 0 && (value * 255UL / 32767) != 0;
+}
+
+/* A stick outside the stream's dead zone (filter_deadzone_2axis). */
+static bool live_stick_moved(const stream_input_t *input, SDL_GameController *controller,
+                             SDL_GameControllerAxis x_axis, SDL_GameControllerAxis y_axis) {
+    const int32_t x = SDL_GameControllerGetAxis(controller, x_axis);
+    const int32_t y = SDL_GameControllerGetAxis(controller, y_axis);
+    const uint32_t magnitude_pow2 = (uint32_t) (x * x) + (uint32_t) (y * y);
+    const uint32_t threshold = 32768u * input->stick_deadzone / 100u;
+    return magnitude_pow2 >= threshold * threshold;
+}
+
+/* False when this pad has no slot. */
+static bool hold_take(const stream_input_t *input, const app_gamepad_state_t *gamepad) {
     if (held_for(gamepad) == NULL) {
-        return;
+        return false;
     }
     const int slot = gamepad->gs_id;
-    s_held[slot].buttons = gamepad->buttons;
     uint8_t axes = 0;
-    if ((unsigned char) gamepad->leftTrigger != 0) axes |= SWITCH_AXIS_LT;
-    if ((unsigned char) gamepad->rightTrigger != 0) axes |= SWITCH_AXIS_RT;
-    /* ⓘ After the stream's own dead zone, so a stick only resting is at 0. */
-    if (gamepad->leftStickX != 0 || gamepad->leftStickY != 0) axes |= SWITCH_AXIS_LEFT;
-    if (gamepad->rightStickX != 0 || gamepad->rightStickY != 0) axes |= SWITCH_AXIS_RIGHT;
+    if (gamepad->controller != NULL && input != NULL) {
+        s_held[slot].buttons = live_buttons(input, gamepad->controller);
+        if (live_trigger_down(gamepad->controller, SDL_CONTROLLER_AXIS_TRIGGERLEFT)) axes |= SWITCH_AXIS_LT;
+        if (live_trigger_down(gamepad->controller, SDL_CONTROLLER_AXIS_TRIGGERRIGHT)) axes |= SWITCH_AXIS_RT;
+        if (live_stick_moved(input, gamepad->controller, SDL_CONTROLLER_AXIS_LEFTX, SDL_CONTROLLER_AXIS_LEFTY)) {
+            axes |= SWITCH_AXIS_LEFT;
+        }
+        if (live_stick_moved(input, gamepad->controller, SDL_CONTROLLER_AXIS_RIGHTX, SDL_CONTROLLER_AXIS_RIGHTY)) {
+            axes |= SWITCH_AXIS_RIGHT;
+        }
+    } else {
+        /* No SDL controller to ask: the stream's copy is all there is. */
+        s_held[slot].buttons = gamepad->buttons;
+        if ((unsigned char) gamepad->leftTrigger != 0) axes |= SWITCH_AXIS_LT;
+        if ((unsigned char) gamepad->rightTrigger != 0) axes |= SWITCH_AXIS_RT;
+        if (gamepad->leftStickX != 0 || gamepad->leftStickY != 0) axes |= SWITCH_AXIS_LEFT;
+        if (gamepad->rightStickX != 0 || gamepad->rightStickY != 0) axes |= SWITCH_AXIS_RIGHT;
+    }
     s_held[slot].axes = axes;
     uint8_t fingers = 0;
 #if SDL_VERSION_ATLEAST(2, 0, 14)
@@ -65,6 +160,20 @@ void bridge_switch_hold_begin(const app_gamepad_state_t *gamepad) {
     }
 #endif
     s_held[slot].fingers = fingers;
+    return true;
+}
+
+void bridge_switch_hold_keep_quiet(const stream_input_t *input, const app_gamepad_state_t *gamepad) {
+    (void) hold_take(input, gamepad);
+}
+
+void bridge_switch_hold_begin(const stream_input_t *input, const app_gamepad_state_t *gamepad) {
+    if (!hold_take(input, gamepad)) {
+        return;
+    }
+    const int slot = gamepad->gs_id;
+    const unsigned axes = s_held[slot].axes;
+    const unsigned fingers = s_held[slot].fingers;
     if (s_held[slot].buttons != 0 || axes != 0 || fingers != 0) {
         commons_log_info("Input", "Controller %d back from the bridge holding buttons 0x%x, axes 0x%x, "
                                   "fingers 0x%x: the stream sees them released until they are let go",
@@ -99,6 +208,16 @@ bridge_switch_axes_t bridge_switch_hold_axes(const app_gamepad_state_t *gamepad)
         (unsigned char) gamepad->leftTrigger, (unsigned char) gamepad->rightTrigger,
         gamepad->leftStickX, gamepad->leftStickY, gamepad->rightStickX, gamepad->rightStickY,
     };
+    /* While the numpad is open at a lock the triggers type, and click nothing for Virtual Mouse. */
+    if (lock_keys_triggers_type()) {
+        out.lt = 0;
+        out.rt = 0;
+    } else if (lock_keys_triggers_swapped()) {
+        /* At a lock R2 is the left button and L2 the right, the other way from Virtual Mouse's own. */
+        const unsigned char l2 = out.lt;
+        out.lt = out.rt;
+        out.rt = l2;
+    }
     if (held_for(gamepad) == NULL) {
         return out;
     }
@@ -125,6 +244,10 @@ bool bridge_switch_hold_skips_finger(const app_gamepad_state_t *gamepad, int fin
 }
 
 void bridge_switch_hold_send(const app_gamepad_state_t *gamepad, short active_mask, bool buttons_only) {
+    /* While Windows is locked nothing goes as a controller (lock_keys.h). */
+    if (lock_keys_active()) {
+        return;
+    }
     int buttons = gamepad->buttons;
     if (held_for(gamepad) != NULL) {
         buttons &= ~s_held[gamepad->gs_id].buttons;

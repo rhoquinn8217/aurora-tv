@@ -1,6 +1,7 @@
 #include "launcher.controller.h"
 #include "apps.controller.h"
 #include "stream_actions.h"
+#include "ui/common/bt_panel.h"
 
 #include "ui/root.h"
 
@@ -171,6 +172,7 @@ lv_obj_t *launcher_win_create(lv_fragment_t *self, lv_obj_t *parent) {
     lv_obj_clear_flag(srv_chevron, LV_OBJ_FLAG_CLICKABLE);
 
     stream_actions_button(controller, topbar);
+    bt_panel_topbar_button(controller, topbar);   /* This fork: the Bluetooth controllers panel; see ui/common/bt_panel.h. */
 
     /* Right-side action buttons (icon only). */
     lv_obj_t *add_btn = create_topbar_icon_btn(controller, topbar, MAT_SYMBOL_ADD_TO_QUEUE);

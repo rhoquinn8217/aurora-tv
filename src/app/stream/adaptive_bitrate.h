@@ -24,7 +24,9 @@ typedef struct {
 
 adaptive_bitrate_service_t *adaptive_bitrate_start(const adaptive_bitrate_config_t *config);
 
-/* Stops the service and waits for its thread; sends nothing more to the host.
+/* This fork: no restore, and called before the stream ends. Why:
+ * ctmbridge/NOTES.md, "The bitrate service at a stream's end".
+ * Stops the service and waits for its thread; sends nothing more to the host.
  * Call it before the stream ends (before LiStopConnection), so no bitrate
  * request can reach the host after its stream has gone. */
 void adaptive_bitrate_stop(adaptive_bitrate_service_t *service);

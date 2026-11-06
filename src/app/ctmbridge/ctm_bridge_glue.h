@@ -42,14 +42,10 @@ void ctm_bridge_set_enabled(bool enabled);
  * Returns true. */
 bool ctm_bridge_start(void);
 
-/* Stop bridging: unplug all sessions and stop the keep-alive thread. Idempotent. */
 /* Switch the UNBRIDGE chord on or off. ⭐ The app owns the setting and the
  * bridge half of the gesture; this passes the other half to the core. */
 void ctm_bridge_set_gesture_enabled(bool enabled);
 
-/* Hold a bridged controller's input while the TV's overlay is open, so
- * navigating the panel does not also play the game. ⭐ Reports are blanked, not
- * dropped -- a held button is released rather than left stuck. */
 /* Which confirmation signals the bridge may make, and whether it captures the
  * controller's microphone. ⭐ Set when a stream starts. */
 void ctm_bridge_set_signals(bool light, bool rumble, bool tone);
@@ -57,6 +53,9 @@ void ctm_bridge_set_tone_gap(int ms);
 
 void ctm_bridge_set_mic_capture(bool on);
 
+/* Hold a bridged controller's input while the TV's overlay is open, so
+ * navigating the panel does not also play the game. ⭐ Reports are blanked, not
+ * dropped -- a held button is released rather than left stuck. */
 void ctm_bridge_set_input_held(bool held);
 
 /* Who to tell when a bridged keyboard presses the overlay's shortcut,
@@ -70,7 +69,12 @@ void bridge_set_overlay_request(void (*cb)(void));
 void bridge_set_shortcut_request(void (*cb)(char letter));
 void bridge_set_pointer_used_request(void (*cb)(void));
 
+/* Stop bridging: unplug all sessions and stop the keep-alive thread. Idempotent. */
 void ctm_bridge_stop(void);
+
+/* The stop when the app quits: no release signals, so every BRIDGE_STOP goes
+ * out before webOS ends the app, about a second after closing it. */
+void ctm_bridge_stop_quietly(void);
 
 /* True while the bridge is active. */
 bool ctm_bridge_active(void);
@@ -108,6 +112,11 @@ typedef struct {
     char device_name[128];   /* the USB device's maker and product, or "" */
     char usb_serial[64];     /* the USB device's own serial, zeros and all, or "" */
     int iface;               /* the USB interface number, -1 when unknown */
+    /* ⭐ A SOUND CARD OF ITS OWN, on its own USB device (2026-11-05), as a
+     * second-model DS4 on a cable and the DS4Dongle have. Asked only for a DS4
+     * on a cable, the one kind whose Auto Bridge tick waits on it
+     * (input/auto_bridge.c); false for every other device. */
+    bool own_card;
 } ctm_bridge_dev_t;
 
 /* ⭐ Identity strings, answered by the core's own rules so the TV and the bridge
@@ -139,6 +148,27 @@ bool ctm_bridge_agent_probed(void);
  * whether or not it is. */
 bool ctm_bridge_agent_online(void);
 
+/* ⭐ Is Windows locked on the PC, as DS5-USBIP says (rhoquinn8217, 2026-11-01)? It
+ * takes no new bridge while it is. False when it has not said, or is offline. */
+bool ctm_bridge_agent_locked(void);
+
+/* ⭐ Is this device one the PC just restarted (a DS4Dongle whose settings it
+ * changed), so it is to be bridged again as it comes back? True once per
+ * restart, within seconds of it. */
+bool ctm_bridge_expected_back(const ctm_bridge_dev_t *d);
+
+/* ⭐ What the PC dropped when DS5-USBIP stopped answering mid-stream
+ * (ctm_bridge_reap_gone_hosts notes it), for Auto Bridge to bridge again once
+ * DS5-USBIP answers: ticked or not, and never what was released by hand.
+ * Is anything noted? */
+bool ctm_bridge_lost_pending(void);
+/* Is this device one of them? `has` only looks; `take` is true once, as it
+ * comes off the list. */
+bool ctm_bridge_lost_has(const ctm_bridge_dev_t *d);
+bool ctm_bridge_lost_take(const ctm_bridge_dev_t *d);
+/* Forget them all: at a stream's end, and after Auto Bridge has looked. */
+void ctm_bridge_lost_forget(void);
+
 /* ⭐ Can this TV app and DS5-USBIP on the PC work together (rhoquinn8217,
  * 2026-10-08)? Read from the listener's answers by the core
  * (protocol_level.inl); not known until one has come, nor while it is offline.
@@ -169,6 +199,14 @@ int ctm_bridge_list(ctm_bridge_dev_t *out, int max);
  * and no broadcast for an agent that cannot exist before a host is chosen.
  * ⭐ For the settings pane, which lists devices with no stream running. */
 int ctm_bridge_list_quiet(ctm_bridge_dev_t *out, int max);
+
+/* The two lists from the last scan, with no new one (the first ever still
+ * scans), and how old that scan is in ms (UINT64_MAX: none yet). A caller that
+ * knows when its device appeared reads the last scan when it is younger than
+ * that: one scan, not three, for a device that connects mid-stream. */
+int ctm_bridge_list_known(ctm_bridge_dev_t *out, int max);
+int ctm_bridge_list_quiet_known(ctm_bridge_dev_t *out, int max);
+uint64_t ctm_bridge_scan_age_ms(void);
 
 /* Is the controller behind this hidraw node already bridged? A plug attempt
  * cannot answer this -- it returns false both when already plugged and when
@@ -217,6 +255,21 @@ typedef struct {
 } ctm_bridge_touch_t;
 int ctm_bridge_held_touches(ctm_bridge_touch_t *out, int max);
 
+/* ⭐ A webOS pop-up (input/webos_popup.h): every bridged device's node, and
+ * for a pad whose layout the core reads, its d-pad, Cross (A) and Circle (B)
+ * and its left stick, as read from the pad's own report while input is held
+ * (the core's held_nav.inl). The stick runs -32768 to 32767, Y down, as SDL
+ * gives one. `reading` false: nothing read since the hold began, or a pad
+ * whose layout the core does not read. Returns how many. */
+typedef struct {
+    char node[64];
+    bool reading;
+    bool up, down, left, right;
+    bool south, east;
+    int lx, ly;
+} ctm_bridge_nav_t;
+int ctm_bridge_held_navs(ctm_bridge_nav_t *out, int max);
+
 /* True for a Bluetooth DualSense. */
 bool ctm_bridge_node_is_bluetooth(const char *node);
 
@@ -231,10 +284,6 @@ bool ctm_bridge_ds5_bt_paint(const char *node, uint8_t r, uint8_t g, uint8_t b, 
  * blocks. 1 over, 0 not yet, -1 nothing to read yet. */
 int ctm_bridge_ds5_animation_over(int fd);
 
-/* Confirmation signals, all or nothing -- tone, pulse, lightbar and fallback,
- * on every transport. */
-bool ctm_bridge_signals_enabled(void);
-
 /* Will the core signal this controller itself? If so the app leaves it alone,
  * rather than adding a second, coarser signal on top. */
 bool ctm_bridge_node_signals_itself(const char *node);
@@ -243,10 +292,24 @@ bool ctm_bridge_node_signals_itself(const char *node);
  * Bluetooth only: a cable needs a session to reach its sound card. */
 bool ctm_bridge_signal_refused(const char *node);
 
+/* The same refusal on a thread of its own, so the app's loop goes on
+ * (2026-10-23). _begin says whether it started; _answer says -1 while it
+ * plays, then once 1 (the core sounded it) or 0 (it could not: this side
+ * signals instead). */
+bool ctm_bridge_signal_refused_begin(const char *node);
+int ctm_bridge_signal_refused_answer(const char *node);
+
 /* Plug whichever device owns this /dev/hidrawN. When: a local gesture on the
  * controller itself named a device -- its node is the only identifier that
  * separates two otherwise identical controllers. Returns true if it plugged. */
 bool ctm_bridge_plug_node(const char *node);
+
+/* The same plug on a thread of its own, so the app's loop goes on (2026-10-28):
+ * a plug scans every device and a DS4's plays its handover tone first.
+ * _begin says whether it started; _answer says -1 while it runs, then once
+ * 1 (plugged), 0 (refused) or 2 (refused: the listener was not reached). */
+bool ctm_bridge_plug_node_begin(const char *node);
+int ctm_bridge_plug_node_answer(const char *node);
 
 /* Manually plug / unplug the device a row from ctm_bridge_list() names, found
  * again by its node (by name for the TV's remote, which has none). */

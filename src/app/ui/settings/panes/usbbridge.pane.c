@@ -16,7 +16,8 @@
 #include "pref_obj.h"
 
 /* ⭐ 0 on this branch: the Bluetooth microphone arming code does not exist here.
- * The experimental branch defines it 1. ⓘ See upstream-direction.md,
+ * The experimental branch defines it 1. ⓘ See upstream-direction.md in the docs
+ * repo, ds5-webos-bridge,
  * 2026-08-21 -- the branches are meant to differ by the arming and nothing
  * else, so anything that has to change with it is gated on this rather than
  * kept in step by hand. */
@@ -197,7 +198,7 @@ static lv_obj_t *create_obj(lv_fragment_t *self, lv_obj_t *container) {
 
     /* ⭐⭐ THE ONLY WAYS TO BRIDGE ARE THE PANEL, THE GESTURE AND AUTO BRIDGE,
      * so switching this off switches all three and nothing can be handed over.
-     * ⓘ Auto Bridge is checked where it runs, at stream start (session.c).
+     * ⓘ Auto Bridge is checked where it runs, at stream start (bridge_session.c).
      *
      * ⛔ IT IS NOT THE OLD "use CTM Bridge" SWITCH, removed 2026-08-19. That one
      * stopped Moonlight announcing any gamepad for the whole session, so an
@@ -208,8 +209,9 @@ static lv_obj_t *create_obj(lv_fragment_t *self, lv_obj_t *container) {
      * "update the places where it says DS5 and DualSense to say DS5/DS4 and
      * DualSense/DualShock4"). A cabled DS4 bridges by the chord through SDL, as a
      * DualSense does, and releases by it through the core's own DS4 type.
-     * ⚠️ On a cable only, so far: the Bluetooth DS4 type reads the release chord
-     * too, and no TV here has bridged a DS4 over Bluetooth.
+     * ⚠️ The gesture is proven on a cable. A Bluetooth DS4 has bridged since
+     * (2026-11-02, on the C1 and the rooted monitor), and its type reads the
+     * release gesture too, but no record says the gesture was used there.
      * ⓘ No .po file carries this line, so locstr() hands it back as written and
      * there is no translation to keep in step. */
     usbb_gap(view);
@@ -223,8 +225,8 @@ static lv_obj_t *create_obj(lv_fragment_t *self, lv_obj_t *container) {
 
 #if defined(TARGET_WEBOS)
     /* ⭐⭐ FIRST UNDER THE SWITCH, and that is the point (rhoquinn8217,
-     * 2026-09-08): bridging ships OFF, so the first thing anyone meets after
-     * turning it on is the way to never think about it again.
+     * 2026-09-08): the first thing anyone meets under the switch is the way to
+     * never think about it again.
      *
      * ⭐ The line teaches the idea before the preference. A mark does nothing
      * visible when it is made -- the effect arrives at the NEXT stream -- so
@@ -265,8 +267,9 @@ static lv_obj_t *create_obj(lv_fragment_t *self, lv_obj_t *container) {
      *
      * ⭐ WORDED BY rhoquinn8217, 2026-09-15: *"Change it to 'DS5/DS5E and DS4
      * Options'"*, once a cabled DS4 had the gesture and the lightbar and rumble
-     * signals below. ⓘ It still has no microphone or tone, and the heading was
-     * chosen knowing that. */
+     * signals below. ⓘ A cabled second-model DS4 has the microphone and the
+     * tone as well since 2026-11-04, through its own sound card; a first-model
+     * DS4 has neither, as it has no sound card over USB. */
     pref_title_label(view, locstr("DS5/DS5E and DS4 Options"));
 
     /* ⭐⭐ CAPABILITIES FIRST, OPT-OUTS LAST, and the wording follows the same
@@ -307,9 +310,19 @@ static lv_obj_t *create_obj(lv_fragment_t *self, lv_obj_t *container) {
 
     /* ⭐ THE TOUCHPAD AS THE TV'S MOUSE, in their words (rhoquinn8217,
      * 2026-10-20). A plain box, not a dependent one: it works with bridging
-     * off, so it does not grey out with it (input/touchpad_pointer.h). */
+     * off, so it does not grey out with it (input/touchpad_pointer.h).
+     *
+     * ⭐ NO PAD IN THE LABEL (rhoquinn8217, 2026-11-05). The heading above and
+     * the line below already name the DualSense, the Edge and the DualShock 4,
+     * and the touchpad works on all three, so "DualSense" alone in the label
+     * said less than the rest of the section.
+     *
+     * ⛔ TWO LINES ON PURPOSE (2026-10-30). A checkbox never wraps its text, and
+     * one line this long runs past the pane's edge; the row is tall enough for
+     * the second line. ⓘ Still two with "DualSense" gone: as one line it is 59
+     * characters, about all a row holds at 1920 wide. */
     usbb_gap(view);
-    pref_checkbox(view, locstr("Enable touchpad as mouse in dashboard and streaming overlay"),
+    pref_checkbox(view, locstr("Enable touchpad as mouse\nin dashboard and streaming overlay"),
                   &app_configuration->bridge.touchpad_pointer, false);
     pref_desc_label(view, locstr("One finger moves the pointer; press the touchpad to click "
                                  "(DualSense/DualSense Edge/DualShock4)."), false);

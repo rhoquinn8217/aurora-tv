@@ -92,6 +92,14 @@ need "USB Bridge pane declared" \
 need "USB Bridge pane compiled" \
      src/app/ctmbridge/app_sources.cmake "usbbridge.pane.c"
 
+# --- the fork's own identity ---------------------------------------------
+# ⛔ A merge taking upstream's id would install over GuiDev1994's Aurora and
+# read its settings and hosts (code review, 2026-10-23).
+need "the fork's own app id" \
+     CMakeLists.txt 'set(WEBOS_APPINFO_ID "com.aurora.gamestream.rhqn")'
+need "... and its own title in the TV's launcher" \
+     deploy/webos/appinfo.json '"title": "Aurora RHQN"'
+
 # --- the fork's build files ----------------------------------------------
 # ⛔ EVERYTHING OF OURS HANGS OFF ONE LINE IN A FILE OF UPSTREAM'S. If a merge
 # takes upstream's side of src/app/CMakeLists.txt, nothing of ours is compiled.
@@ -111,6 +119,15 @@ need "the build number is in our file" \
      src/app/ctmbridge/build_number.cmake "^set(CTM_BUILD_NUMBER [0-9][0-9]*)"
 absent "the build number is NOT back in upstream's build file" \
        CMakeLists.txt "CTM_BUILD_NUMBER"
+
+# ⓘ A build people download has no command port and carries its debug symbols.
+# Both lines are in upstream's files, and losing either still builds.
+need "a release build leaves the command port out" \
+     scripts/webos/docker_build_inner.sh "AURORA_RELEASE_BUILD.*\|AURORA_TERMINAL_CONTROL=OFF"
+need_count "a test build and a release build each say what the port does" \
+     scripts/webos/docker_build_inner.sh "AURORA_TERMINAL_CONTROL=" 2
+need "the debug symbols' strip leaves the crash record its function names" \
+     cmake/ArchiveDebugSymbols.cmake "strip-debug"
 
 # Every source file our list names is in the tree.
 for f in $(grep -o 'src/app/[A-Za-z0-9_./]*\.c' src/app/ctmbridge/app_sources.cmake 2>/dev/null); do
@@ -152,7 +169,7 @@ else
 fi
 
 # --- the settings themselves ---------------------------------------------
-# ⓘ The ten bridge settings are one member of upstream's settings struct, and
+# ⓘ The bridge's settings are one member of upstream's settings struct, and
 # src/app/bridge_settings.c holds the rest. Upstream's settings code makes
 # three calls into it, and losing any of them compiles: without the defaults
 # every switch starts off and the auto-bridge list is unset, without the save
@@ -210,7 +227,7 @@ need "input hold handed to the core" \
 
 # --- the calls app.c makes into bridge_app.c --------------------------------
 # ⓘ app.c is upstream's application file and edited in most releases. The
-# fork's code there is five one-line calls into src/app/bridge_app.c, and a
+# fork's code there is six one-line calls into src/app/bridge_app.c, and a
 # merge that takes upstream's side of app.c drops them without a sound.
 need "app.c disarms a microphone left streaming, at start" \
      src/app/app.c "bridge_app_before_sdl();"
@@ -223,24 +240,21 @@ need "app.c starts the command port" \
 need "app.c stops the command port" \
      src/app/app.c "bridge_app_stopping();"
 in_order "app.c runs the bridge's turn after SDL's events are filtered" \
-     src/app/app.c "void app_process_events" "SDL_FilterEvents(app_event_filter, app);" "bridge_app_events(app);"
+     src/app/app.c "void app_process_events" "bridge_app_filter_events(app_event_filter, app);" "bridge_app_events(app);"
 
 # --- the calls the stream files make into files of ours ------------------------
 # ⓘ session.c and session_events.c are upstream's stream files. The bridge's
-# start and stop, its hold on the virtual mouse and the remote's pointer are a
-# call each into src/app/stream/bridge_session.c and bridge_pointer.c, and the
-# order of each call against upstream's own line beside it is what makes it
-# work.
-need "session.c lets Bridge Override keep the virtual mouse off at stream start" \
-     src/app/stream/session.c "session->config.vmouse && bridge_session_vmouse_allowed()"
+# start and stop and the remote's pointer are a call each into
+# src/app/stream/bridge_session.c and bridge_pointer.c, and the order of each
+# call against upstream's own line beside it is what makes it work.
+# ⓘ Virtual Mouse needs no call of ours in session.c since 2026-10-28: what is
+# kept of it is followed from bridge_app.c (input/bridge_override.h).
 in_order "session.c starts the bridge after the input has started" \
      src/app/stream/session.c "bool session_start_input" \
      "session_input_started(&session->input);" "bridge_session_started(session);"
 in_order "session.c stops the bridge after the input has stopped" \
      src/app/stream/session.c "void session_stop_input" \
      "session_input_stopped(&session->input);" "bridge_session_stopped();"
-need "a Virtual Mouse press switches Bridge Override off, in session.c" \
-     src/app/stream/session.c "if (bridge_session_vmouse_pressed(session)) {"
 in_order "the remote's pointer takes its events before the stream's own input" \
      src/app/stream/session_events.c "bool session_handle_input_event" \
      "bridge_pointer_event(session, event)" "switch (event->type)"
@@ -272,11 +286,6 @@ in_order "a grabbed keyboard's keys are asked about before they go to the host" 
 in_order "the interface drops a key the keyboard grab already fed it" \
      src/app/lvgl/input/lv_drv_sdl_key.c "static void sdl_input_read(lv_indev_drv_t *drv, lv_indev_data_t *data) {" \
      "const int fed = bridge_keyboard_sdl_key(&e.key);" "webos_key_input_mode(input, &e.key);"
-# ⓘ Bridge Override changes the stream's live copy of the settings, so it has
-# to come after upstream fills that copy in, or upstream's line puts it back.
-in_order "Bridge Override applies after the stream's settings are copied" \
-     src/app/stream/input/session_input.c "void session_input_init" \
-     "input->touchpad_scroll_scale = config->touchpad_natural_scroll" "bridge_override_apply(input);"
 need "the bridge's question holds the input as the overlay does" \
      src/app/ui/root.c "streaming_soft_keyboard_shown() || bridge_prompt_shown()"
 need "a removed controller's gesture is forgotten" \
@@ -284,7 +293,8 @@ need "a removed controller's gesture is forgotten" \
 
 # --- the branch switch ---------------------------------------------------
 # ⛔ THE ONE LINE THAT SEPARATES THE BRANCHES. On stable it must be absent, so
-# every gated block compiles out. On mic-capture-experimental it must be 1.
+# every gated block compiles out. On the Bluetooth microphone's branch,
+# ds5-bt-mic-capture, it must be 1.
 # ⚠️ BY CONTENT, NOT BY BRANCH NAME. A working copy checked out under any other
 # name -- a bisect branch, a local experiment -- would otherwise be judged
 # against the wrong rules and report a loss that is not one.
@@ -317,12 +327,12 @@ absent_built() {   # absent_built <description> <pattern>
 }
 
 if build_files_have "CTM_BT_MIC_ARMING=1"; then
-    branch=mic-capture-experimental
+    branch=ds5-bt-mic-capture
 else
     branch=stable
 fi
 case "$branch" in
-    mic-capture-experimental)
+    ds5-bt-mic-capture)
         need_built "experimental arms the BT microphone" "CTM_BT_MIC_ARMING=1"
         need_built "experimental marks its packages" 'CTM_BUILD_SUFFIX "_EXP"'
         ;;
@@ -342,12 +352,46 @@ need "the pad scan's flush waits until SDL's walk of its event queue is over" \
      src/app/input/input_gamepad.c "ctm_bridge_gesture_flush_device_added();"
 absent "the pad scan does NOT flush SDL's event queue itself (inside the walk, it tangles the queue)" \
      src/app/input/input_gamepad.c "SDL_FlushEvent(SDL_JOYDEVICEADDED)"
+need "SDL's walk of its event queue goes through ours" \
+     src/app/app.c "bridge_app_filter_events(app_event_filter, app);"
+absent "app.c does NOT start SDL's walk itself (a change of the mouse's mode during it tangles the queue)" \
+     src/app/app.c "SDL_FilterEvents("
+in_order "a change of the mouse's mode asked during SDL's walk waits until it is over" \
+     src/app/input/app_input.c "void app_set_mouse_grab(" \
+     "bridge_app_mouse_grab_later(input, grab)" "SDL_SetRelativeMouseMode("
+in_order "... and runs as the walk ends" \
+     src/app/bridge_app.c "void bridge_app_filter_events(" \
+     "SDL_FilterEvents(popup_first, userdata);" "app_set_mouse_grab("
+# ⓘ Any other caller would flush from inside the walk with nothing to stop it.
+other_mode_callers=$(grep -rl "SDL_SetRelativeMouseMode(" src/app --include='*.c' 2>/dev/null | grep -v '^src/app/input/app_input\.c$')
+if [ -z "$other_mode_callers" ] && [ -f src/app/input/app_input.c ]; then
+    pass=$((pass + 1))
+else
+    echo "⛔ LOST: only app_set_mouse_grab changes the mouse's mode"
+    echo "   also called from: $other_mode_callers"
+    fail=$((fail + 1))
+fi
 in_order "Connecting... closes an older box first" \
      src/app/ui/streaming/streaming.controller.c "static bool on_event(lv_fragment_t *self, int code, void *userdata) {" \
      "/* This fork: an older box goes first." "progress_dialog_create(locstr(\"Connecting...\"));"
 in_order "Disconnecting... closes a Connecting box still up first" \
      src/app/ui/streaming/streaming.controller.c "static bool on_event(lv_fragment_t *self, int code, void *userdata) {" \
      "/* This fork: a Connecting box still up goes first." "progress_dialog_create(locstr(\"Disconnecting...\"));"
+need "discovery takes only the streaming service's port" \
+     src/app/backend/pcmanager/discovery/impl/microdns.c '"._nvstream._tcp.local") != 0'
+in_order "the bitrate service stops before the connection does" \
+     src/app/stream/session_worker.c "int session_worker(session_t *session) {" \
+     "adaptive_bitrate_stop(session->abr);" "LiStopConnection();"
+need "... and sends nothing once stopping" \
+     src/app/stream/adaptive_bitrate.c "Once stopping, never send"
+absent_in_function "... not even the old bitrate back, which wedged the host" \
+     src/app/stream/adaptive_bitrate.c "void adaptive_bitrate_stop(" "abr_set_bitrate("
+need "the bitrate service sees a stop within 50 ms" \
+     src/app/stream/adaptive_bitrate.c "This fork: in steps, so a stop is seen in 50 ms"
+need "a Cancel ends with its session on the desktop path too" \
+     src/app/stream/session_worker_embedded.c "connect_cancel_done(session, NULL);"
+need "the hardware mouse's stop is said until its worker has gone" \
+     src/app/stream/input/session_evmouse.c "while (!SDL_AtomicGet(&mouse->exited))"
 need "the host's lightbar waits while a bridge signal draws" \
      src/app/input/input_gamepad.c "ctm_bridge_gesture_light_busy(state->controller)"
 need_count "upstream's wired feedback stays off a pad the bridge is using, at all four entry points" \
@@ -368,6 +412,12 @@ need "the stream boost is a setting" \
      src/app/ui/settings/panes/experimental.pane.c "app_configuration->stream_priority"
 need "the stream boost setting is read before the connection starts" \
      src/app/stream/session_worker.c "settings.stream_priority"
+in_order "rounded pictures keep their corners: the drawing is wrapped once the display exists" \
+     src/app/ui/root.c "void app_ui_open(" \
+     "lv_disp_t *disp = lv_disp_drv_register(driver);" "image_corners_install(disp);"
+in_order "a line draws with the argument LVGL reads: the drawing is wrapped once the display exists" \
+     src/app/ui/root.c "void app_ui_open(" \
+     "lv_disp_t *disp = lv_disp_drv_register(driver);" "draw_line_fix_install(disp);"
 
 # ⓘ The notes and the code stay in step: every "This fork:" line names a section
 # that exists, and every section is named by at least one such line.
@@ -434,7 +484,7 @@ in_order "the USB Bridge panel goes before the screen's focus group" \
 # Losing any of these compiles, and a button held at the release is held on
 # the stream's controller.
 need "the switch's file is built" \
-     src/app/stream/input/CMakeLists.txt "bridge_switch_hold.c"
+     src/app/ctmbridge/app_sources.cmake "src/app/stream/input/bridge_switch_hold.c"
 need_count "what the stream is sent leaves out what was held at the switch" \
      src/app/stream/input/session_gamepad.c "bridge_switch_hold_send(gamepad, input->input->activeGamepadMask" 2
 need "a button held at the switch works again once let go" \
@@ -443,6 +493,38 @@ need "a stick or trigger held at the switch works again once at rest" \
      src/app/stream/input/session_gamepad.c "bridge_switch_hold_note_axes(gamepad);"
 need "a finger down at the switch stays off the stream until lifted" \
      src/app/stream/input/session_gamepad.c "bridge_switch_hold_skips_finger(gamepad, event->finger"
+
+# --- a controller's buttons type while Windows is locked (rhoquinn8217, 2026-11-01) ---
+# Windows ignores the pad at a lock reached by a new stream, so the TV turns its
+# buttons into keys (stream/input/lock_keys.h), with a numpad on the screen and
+# Create moving the on-screen keyboard. Losing any of these compiles: the buttons
+# go on being a controller, and nothing unlocks without a keyboard.
+in_order "while Windows is locked the buttons type, before the stream's own handling" \
+     src/app/stream/input/session_gamepad.c "void stream_input_handle_cbutton" \
+     "if (lock_keys_button(input, gamepad, event)) { return; }" "Physical Y/Triangle opens the soft keyboard"
+in_order "... and the triggers" \
+     src/app/stream/input/session_gamepad.c "void stream_input_handle_caxis" \
+     "lock_keys_axis(input, gamepad, event);" "bridge_switch_hold_note_axes(gamepad);"
+need "nothing goes as a controller meanwhile, or a PIN types twice" \
+     src/app/stream/input/bridge_switch_hold.c "if (lock_keys_active()) {"
+need "the on-screen keyboard's Circle does not send Esc at a lock" \
+     src/app/lvgl/input/lv_drv_sdl_key.c "if (vk == VK_ESCAPE && lock_keys_active())"
+need "Create moves the on-screen keyboard" \
+     src/app/lvgl/input/lv_drv_sdl_key.c "keyboard_place_button(e.cbutton.which, e.cbutton.button, pressed)"
+need "... from where it was put, with the line that says so" \
+     src/app/ui/streaming/soft_keyboard.c "keyboard_place_attach(kbd_content);"
+need "the buttons type, and the numpad shows, from the app's loop" \
+     src/app/bridge_app.c "lock_keys_tick(app);"
+need "... the numpad" \
+     src/app/bridge_app.c "lock_numpad_tick();"
+need "the typing is built" \
+     src/app/ctmbridge/app_sources.cmake "src/app/stream/input/lock_keys.c"
+need "the numpad is built" \
+     src/app/ctmbridge/app_sources.cmake "src/app/ui/streaming/lock_numpad.c"
+need "the keyboard's place is built" \
+     src/app/ctmbridge/app_sources.cmake "src/app/ui/streaming/keyboard_place.c"
+need "the marks are built" \
+     src/app/ctmbridge/app_sources.cmake "src/app/ui/common/pad_marks.c"
 
 # --- the touchpad follows Virtual Mouse (rhoquinn8217, 2026-10-20) ---
 # While Virtual Mouse lends the touchpad, two fingers pressed are the bridge
@@ -462,7 +544,7 @@ in_order "with the TV cursor on, the touchpad moves it and tells the host the po
      "if (touchpad_pointer_stream_move(input, finger_dx, finger_dy * touchpad_aspect(gamepad)))" "LiSendMouseMoveEvent(dx, dy);"
 in_order "what a pad holds is noted before it is announced again" \
      src/app/stream/input/session_input.c "void stream_input_restore_gamepad" \
-     "bridge_switch_hold_begin(gamepad);" "stream_input_send_gamepad_arrive(input, gamepad)"
+     "bridge_switch_hold_begin(input, gamepad);" "stream_input_send_gamepad_arrive(input, gamepad)"
 
 # --- the wheel in the overlay (rhoquinn8217, 2026-10-11) --------------------
 # ⓘ Upstream's file: the encoder fallback moved the focus against the wheel.
@@ -505,7 +587,7 @@ in_order "Ctrl+Alt+Shift+C, upstream's show-the-mouse, switches the sharp and re
 # stream_actions.c).
 in_order "the host's controls leave each list before the grid shows it" \
      src/app/ui/launcher/apps.controller.c "static void appload_loaded" \
-     "stream_actions_take(&fragment->uuid, apps);" "lv_gridview_set_data_advanced("
+     "stream_actions_take(&fragment->uuid, apps);" "lv_gridview_set_data_advanced(fragment->applist,"
 in_order "the running app's badge shows on every TV, not only the one that started it" \
      src/app/ui/launcher/apps.controller.c "static void appitem_bind" \
      "stream_actions_running_id(&controller->uuid, pcmanager_server_current_app(" "lv_obj_clear_flag(holder->play_indicator, LV_OBJ_FLAG_HIDDEN);"
@@ -519,6 +601,12 @@ in_order "a tile pressed while another app runs asks first" \
 in_order "the Stream actions button sits right after the host button" \
      src/app/ui/launcher/launcher.view.c "lv_obj_t *launcher_win_create" \
      "lv_label_set_text_static(srv_chevron, MAT_SYMBOL_ARROW_DROP_DOWN);" "stream_actions_button(controller, topbar);"
+# ⓘ Taking upstream's back compiles, and the controller button that opens the
+# Bluetooth controllers panel is gone from the top bar (ui/common/bt_panel.h,
+# 2026-10-29). The overlay's Bluetooth button is in bridge_overlay.c, ours.
+in_order "the Bluetooth controllers button sits right after Stream actions" \
+     src/app/ui/launcher/launcher.view.c "lv_obj_t *launcher_win_create" \
+     "stream_actions_button(controller, topbar);" "bt_panel_topbar_button(controller, topbar);"
 
 # --- the server window gives the controls back (rhoquinn8217, 2026-10-17) ---
 # ⓘ A fix of ours inside upstream's server.popup.c. Taking upstream's back
@@ -658,6 +746,13 @@ need "... and a JSON post waits too" \
      core/libgamestream/src/http.c "int ret = post_json_once(http, url, payload, data);"
 need "libgamestream builds the gate" \
      core/libgamestream/src/CMakeLists.txt "host_gate.c"
+
+# --- The launch does not ask for continuous audio (2026-11-02) ---
+# ⓘ Vibepollo 2.0.3 and 2.0.4 honour the request by placing each captured packet
+# at its timestamp, and every stream's sound comes out scratchy (Vibepollo issue
+# #703). Upstream's line, back from a merge, still compiles.
+absent "the launch does NOT ask for continuous audio" \
+     core/libgamestream/src/client.c '"continuousAudio"'
 
 # --- The add-a-computer box opens filled in, with a clear button; the stream's
 # keyboard has a Close tab (rhoquinn8217, 2026-10-23) ---

@@ -617,7 +617,9 @@ int gs_start_app(GS_CLIENT hnd, PSERVER_DATA server, STREAM_CONFIGURATION *confi
     if (surround_params) {
         append_param(url, sizeof(url), "surroundParams", surround_params);
     }
-    append_param(url, sizeof(url), "continuousAudio", "1");
+    /* continuousAudio is left out on purpose (2026-11-02). Vibepollo 2.0.3 and 2.0.4 honour it by placing
+     * each captured packet at its timestamp, and those timestamps are uneven enough to leave holes and
+     * skips in the sound about 100 times a second (Vibepollo issue #703). */
     if (!reconnect_same_app || !is_gfe) {
         if (config->supportedVideoFormats & VIDEO_FORMAT_MASK_10BIT) {
             append_param(url, sizeof(url), "hdrMode", "1");

@@ -56,6 +56,15 @@ void ctm_bridge_gesture_reset(SDL_JoystickID id);
  * is not an SDL controller and has no gesture path to borrow. */
 bool ctm_bridge_gesture_request_bridge(const char *node);
 
+/* Was a bridge refused since this last asked, because DS5-USBIP was not reached,
+ * or because Windows is locked? */
+typedef enum {
+    CTM_BRIDGE_REFUSED_NONE = 0,
+    CTM_BRIDGE_REFUSED_OFFLINE,
+    CTM_BRIDGE_REFUSED_LOCKED
+} ctm_bridge_refused_t;
+ctm_bridge_refused_t ctm_bridge_gesture_take_refused(void);
+
 /* Is the input node dev_path (/dev/input/eventN) part of a device that is
  * bridged right now? For the TV's keyboard grab: see bridge_keyboard.h. */
 bool ctm_bridge_gesture_event_is_bridged(const char *dev_path);

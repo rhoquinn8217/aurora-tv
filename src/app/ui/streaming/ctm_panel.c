@@ -29,6 +29,7 @@
 #include "input/ctm_bridge_gesture.h"
 #include "input/bridge_request.h"
 #include "input/device_groups.h"
+#include "bridge_prompt.h"
 #include "lvgl/font/material_icons_regular_symbols.h"
 #include "lvgl/theme/lv_theme_moonlight.h"
 
@@ -39,10 +40,6 @@
  * is the two calls the streaming screen makes, doing nothing (code review,
  * 2026-10-05: it did not compile there). */
 #if defined(TARGET_WEBOS)
-
-/* Which setting a detail row edits. ⚠️ This lived one line above the block that
- * was lifted and was missed on the first pass -- the whole build failed on it. */
-
 
 /* Forward declarations, moved with the block rather than left behind: several of
  * these functions call each other in both directions. */
@@ -122,12 +119,14 @@ static bool        s_ctm_server_known = false;
  * for it, can no more bridge than an offline one. The label says which side to
  * update, and a press is refused as an offline server's is, by flashing it. */
 static ctm_bridge_compat_t s_ctm_server_compat = CTM_BRIDGE_COMPAT_UNKNOWN;
+/* Windows is locked on the PC, and it takes no new bridge until it is unlocked. */
+static bool s_ctm_server_locked = false;
 
-/* Nothing can be bridged: the server is known to be offline, or to need an
- * update on one side. */
+/* Nothing can be bridged: the server is known to be offline, to need an update
+ * on one side, or to have Windows locked. */
 static bool ctm_server_refuses(void) {
     return s_ctm_server_known &&
-           (!s_ctm_server_online || s_ctm_server_compat == CTM_BRIDGE_COMPAT_UPDATE_PC ||
+           (!s_ctm_server_online || s_ctm_server_locked || s_ctm_server_compat == CTM_BRIDGE_COMPAT_UPDATE_PC ||
             s_ctm_server_compat == CTM_BRIDGE_COMPAT_UPDATE_TV);
 }
 
@@ -143,6 +142,7 @@ static void ctm_paint_state(void) {
         return;
     }
     const char *state = !s_ctm_server_online ? "- OFFLINE"
+                      : s_ctm_server_locked ? "- Windows is locked"
                       : s_ctm_server_compat == CTM_BRIDGE_COMPAT_UPDATE_PC ? "- Update DS5-USBIP on the PC"
                       : s_ctm_server_compat == CTM_BRIDGE_COMPAT_UPDATE_TV ? "- Update the TV app"
                       : "- ONLINE";
@@ -221,12 +221,15 @@ static void ctm_online_tick(lv_timer_t *t) {
     const bool known = ctm_bridge_agent_probed();
     const bool now = ctm_bridge_agent_online();
     const ctm_bridge_compat_t compat = ctm_bridge_agent_compat();
-    if (known == s_ctm_server_known && now == s_ctm_server_online && compat == s_ctm_server_compat) {
+    const bool locked = ctm_bridge_agent_locked();
+    if (known == s_ctm_server_known && now == s_ctm_server_online && compat == s_ctm_server_compat &&
+        locked == s_ctm_server_locked) {
         return;
     }
     s_ctm_server_known = known;
     s_ctm_server_online = now;
     s_ctm_server_compat = compat;
+    s_ctm_server_locked = locked;
     ctm_paint_state();
     /* ⓘ The rows and Bridge All are drawn from this state, so a change has to
      * rebuild them -- but only on a CHANGE, which is rare. */
@@ -251,6 +254,11 @@ static void ctm_flash_tick(lv_timer_t *t) {
 }
 
 static void ctm_flash_offline(void) {
+    /* ⭐ And in words (rhoquinn8217, 2026-11-01). Not for an update: the tag itself
+     * says which side needs it. */
+    if (!s_ctm_server_online || s_ctm_server_locked) {
+        bridge_prompt_note_bridge_refused(s_ctm_server_online);
+    }
     if (!s_ctm_state_lbl) {
         return;
     }
@@ -328,9 +336,16 @@ static lv_group_t *s_ctm_dead_nav    = NULL;
 #define CTM_PENDING_MS 6000
 /* ⓘ How often the watcher below looks while a bridge or a release is in flight. */
 #define CTM_PENDING_POLL_MS 400
-static char     s_ctm_pending_group[96];   /* "" while nothing is pending */
-static bool     s_ctm_pending_want = false;
-static uint32_t s_ctm_pending_until = 0;
+/* ⭐ ONE FOR EACH ROW ASKED ABOUT (code review, 2026-10-31). There was one, and
+ * Bridge All wrote over it device by device, so only the last device was
+ * watched: with a keyboard last, whose plug lands at once, the watching stopped
+ * while the pads were still pulsing, and they stayed BASIC. */
+typedef struct {
+    char group[96];   /* "" while free */
+    bool want;
+    uint32_t until;
+} pending_row_t;
+static pending_row_t s_pending_rows[DEVICE_GROUPS_MAX];
 static lv_timer_t *s_ctm_pending_timer = NULL;
 
 /* ⭐ Remember what we asked for, so the row can grey until it happens.
@@ -357,13 +372,44 @@ static void ctm_pending_watch_stop(void) {
     }
 }
 
-static void ctm_set_pending(const device_group_t *g, bool want) {
-    snprintf(s_ctm_pending_group, sizeof s_ctm_pending_group, "%s", s_ctm_devs[g->part[0]].group);
-    s_ctm_pending_want = want;
-    s_ctm_pending_until = lv_tick_get() + CTM_PENDING_MS;
+static pending_row_t *pending_row_find(const char *group) {
+    for (int i = 0; i < DEVICE_GROUPS_MAX; ++i) {
+        if (s_pending_rows[i].group[0] != '\0' && strcmp(s_pending_rows[i].group, group) == 0) {
+            return &s_pending_rows[i];
+        }
+    }
+    return NULL;
+}
+
+static bool pending_rows_any(void) {
+    for (int i = 0; i < DEVICE_GROUPS_MAX; ++i) {
+        if (s_pending_rows[i].group[0] != '\0') {
+            return true;
+        }
+    }
+    return false;
+}
+
+static void pending_watch_start(void) {
     if (s_ctm_pending_timer == NULL) {
         s_ctm_pending_timer = lv_timer_create(ctm_pending_watch_cb, CTM_PENDING_POLL_MS, NULL);
     }
+}
+
+static void ctm_set_pending(const device_group_t *g, bool want) {
+    const char *group = s_ctm_devs[g->part[0]].group;
+    pending_row_t *row = pending_row_find(group);
+    for (int i = 0; i < DEVICE_GROUPS_MAX && row == NULL; ++i) {
+        if (s_pending_rows[i].group[0] == '\0') {
+            row = &s_pending_rows[i];
+        }
+    }
+    if (row != NULL) {
+        snprintf(row->group, sizeof row->group, "%s", group);
+        row->want = want;
+        row->until = lv_tick_get() + CTM_PENDING_MS;
+    }
+    pending_watch_start();
 }
 
 /* Has the change asked for on the pending row landed, by the session table?
@@ -371,18 +417,18 @@ static void ctm_set_pending(const device_group_t *g, bool want) {
  * scans nothing for a device still in it. A part with no node (the TV remote's
  * row) cannot be asked this way, and is answered "yes", which refreshes as
  * before. */
-static bool ctm_pending_landed(void) {
+static bool ctm_pending_landed(const pending_row_t *row) {
     bool any = false;
     for (int i = 0; i < s_ctm_ndev; ++i) {
         const ctm_bridge_dev_t *d = &s_ctm_devs[i];
-        if (strcmp(d->group, s_ctm_pending_group) != 0) {
+        if (strcmp(d->group, row->group) != 0) {
             continue;
         }
         if (d->node[0] == '\0') {
             return true;
         }
         any = true;
-        if (ctm_bridge_node_is_plugged(d->node) != s_ctm_pending_want) {
+        if (ctm_bridge_node_is_plugged(d->node) != row->want) {
             return false;
         }
     }
@@ -403,13 +449,28 @@ static void ctm_pending_watch_cb(lv_timer_t *t) {
         ctm_pending_watch_stop();
         return;
     }
-    const bool done = s_ctm_pending_group[0] == '\0' ||
-                      lv_tick_get() > s_ctm_pending_until;
-    if (done || ctm_pending_landed()) {
-        ctm_request_refresh();  /* ⭐ Always one more at the end, so the last state is drawn. */
+    const uint32_t now = lv_tick_get();
+    bool refresh = false;
+    bool waiting = false;
+    for (int i = 0; i < DEVICE_GROUPS_MAX; ++i) {
+        pending_row_t *row = &s_pending_rows[i];
+        if (row->group[0] == '\0') {
+            continue;
+        }
+        if (now > row->until) {
+            row->group[0] = '\0';   /* out of time, or its device left the list */
+            refresh = true;
+            continue;
+        }
+        waiting = true;
+        refresh = refresh || ctm_pending_landed(row);
     }
-    if (done) {
+    if (!waiting) {
+        refresh = true;  /* ⭐ Always one more at the end, so the last state is drawn. */
         ctm_pending_watch_stop();
+    }
+    if (refresh) {
+        ctm_request_refresh();
     }
 }
 /* Bridge every part of the device on this row that is not bridged already:
@@ -462,7 +523,10 @@ static void ctm_bridge_device(int row) {
     if (asked > 0 && failed == asked) {
         /* ⓘ Every plug refused: nothing is on its way, so the row should not
          * grey for six seconds waiting for it. */
-        s_ctm_pending_group[0] = '\0';
+        pending_row_t *pending = pending_row_find(s_ctm_devs[g->part[0]].group);
+        if (pending != NULL) {
+            pending->group[0] = '\0';
+        }
     }
     /* ⛔ ASKING IS NOT BRIDGING. The gesture takes over and the plug happens on
      * a later tick, so a refresh now reads the OLD state and the row still says
@@ -510,17 +574,6 @@ static void ctm_toggle_device(int row) {
     }
 }
 
-/* Release every bridged device, one at a time, the same way a row does.
- *
- * ⛔ NOT release_local_sessions_on_exit(), the APP SHUTDOWN path. It tears
- * down every session at once while holding the device mutex, and with the
- * microphone disarm in the unplug path -- then five writes twenty milliseconds
- * apart, per device -- the overlay froze long enough to look like a crash.
- * Measured 2026-08-18.
- *
- * ⚠️ This still runs on the UI thread and still blocks; it just has far less to
- * do, and it does the same thing pressing each row would. Getting these calls
- * off the UI thread is T-062 and is a bigger change than this. */
 /* Bridge every device that is not already bridged, the same way pressing its
  * row would.
  *
@@ -539,7 +592,24 @@ static void ctm_bridge_all(void) {
     }
 }
 
+/* Release every bridged device, one at a time, the same way a row does.
+ *
+ * ⛔ NOT release_local_sessions_on_exit(), the APP SHUTDOWN path. It tears
+ * down every session at once while holding the device mutex, and with the
+ * microphone disarm in the unplug path -- then five writes twenty milliseconds
+ * apart, per device -- the overlay froze long enough to look like a crash.
+ * Measured 2026-08-18.
+ *
+ * ⭐ EVERY ROW WATCHED, AS A ROW'S OWN RELEASE IS (code review, 2026-10-31).
+ * Nothing watched this one, and the refresh after it read sessions still
+ * stopping, which count as bridged, so every row stayed FULL until the next
+ * press. ⓘ Each release runs on a thread of its own since 2026-10-05. */
 static void ctm_release_all(void) {
+    for (int k = 0; k < s_ctm_ngroup; ++k) {
+        if (s_ctm_groups[k].plugged > 0) {
+            ctm_set_pending(&s_ctm_groups[k], false);
+        }
+    }
     for (int i = 0; i < s_ctm_ndev; ++i) {
         if (s_ctm_devs[i].plugged) {
             bridge_release_device(&s_ctm_devs[i]);
@@ -818,7 +888,7 @@ static lv_obj_t *ctm_make_dev_row(const device_group_t *g, int idx) {
     lv_obj_set_style_border_color(row, CTM_COL_FOCUS, LV_STATE_FOCUSED);
     lv_obj_set_style_bg_color(row, CTM_COL_FOCUS, LV_STATE_FOCUSED);
     lv_obj_set_style_bg_opa(row, LV_OPA_COVER, LV_STATE_FOCUSED);
-    /* Persistent selection: stays lit while focus is in the detail pane. */
+    /* Persistent selection: the row last focused stays lit (ctm_dev_focus_cb). */
     lv_obj_set_style_bg_color(row, lv_color_hex(0x223046), LV_STATE_CHECKED);
     lv_obj_set_style_bg_opa(row, LV_OPA_COVER, LV_STATE_CHECKED);
     lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
@@ -967,9 +1037,10 @@ static lv_obj_t *ctm_make_dev_row(const device_group_t *g, int idx) {
      * ⛔ "idle" was wrong for an unbridged controller, and for a mouse: the
      * stream carries them, so they are WORKING, just by the other path. */
 
-    /* The action, drawn as a button. ⚠️ NOT actually clickable in its own right:
-     * the whole row takes the press, so this is an affordance rather than a
-     * second target to aim at. */
+    /* The action, drawn as a button. ⚠️ NOT clickable in its own right: a click
+     * falls through to the row, which a pointer only focuses (2026-10-11). A
+     * pointer bridges and releases with the badges; Select on the row does it
+     * from the keys. */
     /* ⭐⭐ FULL IN A GREEN BOX, BASIC AS PLAIN TEXT.
      *
      * ⛔ Colour used to be on the ACTION button, and it read backwards: a big
@@ -1060,9 +1131,9 @@ static lv_obj_t *ctm_make_dev_row(const device_group_t *g, int idx) {
      *
      * ⭐ ONLY THE AVAILABLE DIRECTION IS EVER SHOWN. A bridged device offers
      * "release" and nothing else; pressing right does nothing, and showing it
-     * would promise otherwise. ⓘ The row itself still takes a press, which
-     * toggles -- that is the path for anyone who does not want to think about
-     * direction. */
+     * would promise otherwise. ⓘ Select on the row still toggles, for anyone
+     * who does not want to think about direction; a pointer's click on the row
+     * only focuses it (2026-10-11), and the badges are a pointer's switch. */
     lv_obj_t *actlbl = lv_label_create(act);
     /* ⛔ PLAIN CHARACTERS, NOT LV_SYMBOL_*. LV_SYMBOL_LEFT was tried on
      * 2026-08-20 and rendered as an empty box -- the small theme font on these
@@ -1093,11 +1164,11 @@ static lv_obj_t *ctm_make_dev_row(const device_group_t *g, int idx) {
         lv_obj_set_style_opa(row, LV_OPA_30, 0);
     }
 
-    if (s_ctm_pending_group[0] != '\0' &&
-        strcmp(s_ctm_pending_group, s_ctm_devs[g->part[0]].group) == 0) {
-        const bool landed = s_ctm_pending_want ? state_full : (g->plugged == 0);
-        if (landed || lv_tick_get() > s_ctm_pending_until) {
-            s_ctm_pending_group[0] = '\0';
+    pending_row_t *pending = pending_row_find(s_ctm_devs[g->part[0]].group);
+    if (pending != NULL) {
+        const bool landed = pending->want ? state_full : (g->plugged == 0);
+        if (landed || lv_tick_get() > pending->until) {
+            pending->group[0] = '\0';
         } else {
             lv_obj_set_style_opa(row, LV_OPA_50, 0);
         }
@@ -1124,8 +1195,9 @@ static lv_obj_t *ctm_make_dev_row(const device_group_t *g, int idx) {
     return row;
 }
 
-/* ⛔ Guarded rather than trusting LV_STATE_DISABLED, which greys a button but
- * does not reliably stop it being activated. ⭐ And it flashes the reason. */
+/* ⛔ Guarded for a server that went away after the panel was drawn: Bridge All
+ * is greyed (LV_STATE_DISABLED) only when it was refusing already then, and a
+ * greyed button takes no press at all. ⭐ And it flashes the reason. */
 static void ctm_act_plugall_cb(lv_event_t *e) {
     LV_UNUSED(e);
     if (ctm_server_refuses()) {
@@ -1242,6 +1314,7 @@ static void ctm_panel_refresh(void) {
         s_ctm_server_known = ctm_bridge_agent_probed();
         s_ctm_server_online = ctm_bridge_agent_online();
         s_ctm_server_compat = ctm_bridge_agent_compat();
+        s_ctm_server_locked = ctm_bridge_agent_locked();
         lv_label_set_text_fmt(s_ctm_status_lbl, "USB Server: %s", listener);
         ctm_paint_state();
     }
@@ -1340,6 +1413,14 @@ static void ctm_panel_refresh(void) {
                        : focus_on_plugall   ? s_ctm_btn_plugall
                        : focus_on_unplugall ? s_ctm_btn_unplugall
                        : NULL;
+        /* ⛔ Never back onto a greyed button (2026-10-23). Bridge All is rebuilt
+         * greyed when the server refuses, and a greyed object with the focus
+         * takes no key, Back included (lv_indev.c, "!dis"): pressing it with
+         * DS5-USBIP off left the panel deaf. Release All, or the row, instead. */
+        if (back != NULL && lv_obj_has_state(back, LV_STATE_DISABLED)) {
+            back = s_ctm_btn_unplugall != NULL && !lv_obj_has_state(s_ctm_btn_unplugall, LV_STATE_DISABLED)
+                   ? s_ctm_btn_unplugall : NULL;
+        }
         if (back) {
             lv_group_focus_obj(back);
             lv_obj_add_state(back, LV_STATE_FOCUS_KEY);
@@ -1374,6 +1455,13 @@ static void ctm_close_panel(void) {
         s_ctm_flash_timer = NULL;
     }
     s_ctm_flash_left = 0;
+    /* ⓘ And the online timer, which has only this panel's labels to write to
+     * (code review, 2026-10-23): it ran on once a second until the stream
+     * ended. The next open makes a new one. */
+    if (s_ctm_online_timer) {
+        lv_timer_del(s_ctm_online_timer);
+        s_ctm_online_timer = NULL;
+    }
     /* Hide NOW (same-frame UI change) and move input back to the overlay; the old
      * group stays alive until the async teardown, so the in-flight keypad event
      * that triggered this close keeps a valid group pointer. */
@@ -1642,6 +1730,11 @@ static void open_ctm_panel(lv_event_t *event) {
 
     app_input_set_group(&controller->global->ui.input, s_ctm_nav_group);
     ctm_panel_refresh();
+    /* ⓘ A row asked about before the panel last closed may still be on its way,
+     * and the watcher stopped with the panel: left alone, that row stays grey. */
+    if (pending_rows_any()) {
+        pending_watch_start();
+    }
 }
 
 /* ---- the seam ---------------------------------------------------------- */

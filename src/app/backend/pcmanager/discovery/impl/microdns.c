@@ -18,6 +18,8 @@
 #include "impl.h"
 
 #include <microdns/microdns.h>
+#include <string.h>
+#include <strings.h>
 #include "sockaddr.h"
 #include "logging.h"
 
@@ -82,6 +84,9 @@ void discovery_callback(discovery_task_t *task, int status, const struct rr_entr
                 break;
             }
             case RR_SRV: {
+                /* This fork: the streaming service's port only. Why: ctmbridge/NOTES.md, "One service's port". */
+                const size_t name_len = cur->name != NULL ? strlen(cur->name) : 0;
+                if (name_len < 21 || strcasecmp(cur->name + name_len - 21, "._nvstream._tcp.local") != 0) { continue; }
                 sockaddr_set_port(addr, cur->data.SRV.port);
                 break;
             }

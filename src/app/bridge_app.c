@@ -1,5 +1,11 @@
 #include "bridge_app.h"
 
+#include <dirent.h>
+#include <limits.h>
+#include <stdio.h>
+#include <string.h>
+#include <sys/stat.h>
+
 #include <SDL.h>
 
 #include "control_server.h"
@@ -21,6 +27,9 @@
 #include "input/overlay_volume.h"   /* the TV's volume from the right stick */
 #include "input/bridge_override.h"  /* the touchpad follows Virtual Mouse */
 #include "input/auto_bridge.h"      /* a ticked device that connects, bridged */
+#include "input/webos_popup.h"      /* a webOS pop-up answered from a controller */
+#include "stream/input/lock_keys.h" /* a controller's buttons type at a lock */
+#include "ui/streaming/lock_numpad.h"
 #include "ui/streaming/cursor_align.h"   /* cursor_align_shown */
 
 #if defined(TARGET_WEBOS)
@@ -39,7 +48,59 @@ static void pointer_used(void) {
 }
 #endif
 
+/* ⓘ The bridge core's: <app>/logs/<name>, the folder every log of ours is in. */
+const char *ctm_log_path(const char *name);
+
+/* ⭐ THE LOGS, SET ASIDE AT EACH START (2026-10-23). Every log of ours and of
+ * the core is appended to, and only crash.log was ever set aside
+ * (crash_recorder.c), so they grew for the life of the install: a cabled
+ * DualSense's microphone wrote a line a second. Here, before anything opens
+ * one, a log past LOG_KEEP_BYTES becomes <name>.old, in place of the last, so
+ * each keeps at most about twice that. ⓘ Logs and notes only (.log, .txt):
+ * crash.log keeps its own rule, and a screenshot is not a log. */
+#define LOG_KEEP_BYTES (512L * 1024L)
+
+static void logs_set_aside_large(void) {
+    char dir[PATH_MAX];
+    snprintf(dir, sizeof dir, "%s", ctm_log_path("."));
+    const size_t dir_len = strlen(dir);
+    if (dir_len >= 2 && strcmp(dir + dir_len - 2, "/.") == 0) {
+        dir[dir_len - 2] = '\0';
+    }
+    /* ⛔ Our own folder only: with no HOME the core falls back to /tmp, and
+     * what else lies there is not ours to move. */
+    const size_t len_dir = strlen(dir);
+    if (len_dir < 5 || strcmp(dir + len_dir - 5, "/logs") != 0) {
+        return;
+    }
+    DIR *logs = opendir(dir);
+    if (logs == NULL) {
+        return;
+    }
+    struct dirent *entry;
+    while ((entry = readdir(logs)) != NULL) {
+        const char *name = entry->d_name;
+        const size_t len = strlen(name);
+        const bool is_log = len > 4 && (strcmp(name + len - 4, ".log") == 0 || strcmp(name + len - 4, ".txt") == 0);
+        if (!is_log || strcmp(name, "crash.log") == 0) {
+            continue;
+        }
+        char path[PATH_MAX];
+        char old_path[PATH_MAX];
+        snprintf(path, sizeof path, "%s/%s", dir, name);
+        struct stat st;
+        if (stat(path, &st) != 0 || !S_ISREG(st.st_mode) || st.st_size <= LOG_KEEP_BYTES) {
+            continue;
+        }
+        snprintf(old_path, sizeof old_path, "%s.old", path);
+        rename(path, old_path);
+    }
+    closedir(logs);
+}
+
 void bridge_app_before_sdl(void) {
+    /* First: nothing has opened a log yet. */
+    logs_set_aside_large();
     /* ⛔⛔ BEFORE SDL TOUCHES ANY CONTROLLER.
      *
      * A DualSense told to stream microphone audio keeps doing it when a
@@ -101,6 +162,9 @@ void bridge_app_started(app_t *app) {
     /* ⓘ Once the window is up: the TV's pointer with its tip on the point the
      * host is told, the cursor and the place this TV keeps (input/tv_cursor.h). */
     tv_cursor_init(app->ui.window);
+    /* ⓘ Once the window is up too: a webOS pop-up over it, answered from a
+     * controller (input/webos_popup.h). */
+    webos_popup_init(app->ui.window);
     /* ⓘ Only its log: the pointer itself comes with the interface's display
      * (input/touchpad_pointer.h). */
     touchpad_pointer_init(app);
@@ -125,7 +189,7 @@ void bridge_app_stopping(void) {
      * ⭐ The hosts too: hosts.ini (each host's address, the one selected, its
      * starred and hidden apps) is written only by pcmanager_destroy, later
      * still, so a crash on the way out lost every star and hide of the session.
-     * Saved from this thread, as pcmanager_set_wake already does. */
+     * Saved from this thread, as pcmanager_set_wake_settings already does. */
     if (app_configuration != NULL) {
         settings_save(app_configuration);
     }
@@ -134,10 +198,73 @@ void bridge_app_stopping(void) {
     }
     /* ⓘ A stop asked in the last pass of the loop still runs. */
     bridge_session_run_pending();
+#if defined(TARGET_WEBOS)
+    /* ⭐ AND A STREAM STILL UP AT QUIT STOPS ITS BRIDGE HERE (2026-10-23).
+     * Only the stream screen's close stopped it, and at quit that event is
+     * dropped unread (app_bus_drain): no BRIDGE_STOP went out, and the PC kept
+     * every bridged pad for its grace, about 15 s, with its last state. Quietly:
+     * webOS ends a closing app about a second after closing it, and a release
+     * signal takes a second or more a pad. */
+    if (ctm_bridge_active()) {
+        ctm_bridge_stop_quietly();
+    }
+#endif
     control_server_stop();
     touchpad_pointer_deinit();
     tv_cursor_deinit();
     overlay_volume_deinit();
+}
+
+/* ⛔⛔ NOT INSIDE SDL'S WALK OF ITS QUEUE (2026-10-31). A change of the mouse's
+ * mode ends with SDL dropping the mouse moves it has queued, and upstream asks
+ * for one while it handles a stream's open and close, the overlay and the
+ * on-screen keyboard, all inside SDL_FilterEvents. The next entry SDL has
+ * already taken can be one of those moves: the walk then goes on through SDL's
+ * spent entries, delivering old events again. Why, and what that did on the C1:
+ * ctmbridge/NOTES.md, "The mouse mode's flush".
+ * ➡️ So a request made during the walk is kept, the last one winning, and runs
+ * as the walk ends, before anything reads the mode in that pass.
+ * ⛔ Only during the walk: a pointer event read in the old mode reaches the host
+ * as an absolute position (session_mouse.c), so a request from anywhere else
+ * still takes effect at once. */
+static SDL_threadID s_walking;   /* the thread inside the walk, 0 when none is */
+static struct {
+    bool due;
+    bool grab;
+    app_input_t *input;
+} s_grab_later;
+
+/* ⭐ A WEBOS POP-UP SEES A CONTROLLER FIRST (2026-11-03): while one has the
+ * focus, a controller's press is the remote's and goes no further
+ * (input/webos_popup.h); every other event reaches upstream's filter as ever. */
+static SDL_EventFilter s_upstream_filter;
+
+static int SDLCALL popup_first(void *userdata, SDL_Event *event) {
+    if (webos_popup_take(event)) {
+        return 0;
+    }
+    return s_upstream_filter(userdata, event);
+}
+
+void bridge_app_filter_events(SDL_EventFilter filter, void *userdata) {
+    s_walking = SDL_ThreadID();
+    s_upstream_filter = filter;
+    SDL_FilterEvents(popup_first, userdata);
+    s_walking = 0;
+    if (s_grab_later.due) {
+        s_grab_later.due = false;
+        app_set_mouse_grab(s_grab_later.input, s_grab_later.grab);
+    }
+}
+
+bool bridge_app_mouse_grab_later(app_input_t *input, bool grab) {
+    if (SDL_ThreadID() != s_walking) {
+        return false;
+    }
+    s_grab_later.due = true;
+    s_grab_later.grab = grab;
+    s_grab_later.input = input;
+    return true;
 }
 
 void bridge_app_events(app_t *app) {
@@ -147,6 +274,14 @@ void bridge_app_events(app_t *app) {
      * SDL's event filter, now that the filter has let go of the event lock
      * (bridge_session.c). The tick below then sees the bridge as it is. */
     bridge_session_run_pending();
+    /* ⭐ A webOS pop-up over the app, come or gone, and the presses kept for it
+     * sent on as the remote's, now that SDL's walk is over
+     * (input/webos_popup.h). Before the ticks below that read the pads. */
+    webos_popup_tick();
+    /* ⭐ While Windows is locked a controller is a mouse, or types
+     * (stream/input/lock_keys.h). ⓘ Before Auto Bridge below and the touchpad's tick:
+     * at the unlock Virtual Mouse is back as it was before either reads it. */
+    lock_keys_tick(app);
     /* ⛔⛔ streaming_overlay_shown(), NOT app_ui_is_opened(). Third attempt, and
      * this one has evidence rather than reasoning behind it.
      *
@@ -166,15 +301,20 @@ void bridge_app_events(app_t *app) {
      * here: a bridged controller is held while any is up, and a keyboard
      * works any. */
     const bool interface_has_input = streaming_overlay_shown() || bridge_prompt_shown() || cursor_align_shown();
-    ctm_bridge_gesture_tick(&app->input, app->session, interface_has_input);
+    /* ⭐ A webOS pop-up holds them too (input/webos_popup.h): a bridged keyboard
+     * and mouse go back to webOS, which answers with them, and the core reads a
+     * bridged pad's keys for it. ⓘ Not for the keyboard's tick below: that
+     * would feed the overlay behind the pop-up. */
+    ctm_bridge_gesture_tick(&app->input, app->session, interface_has_input || webos_popup_up());
     /* ⭐ The TV's volume from the right stick while the overlay is up, from a
      * pad the TV holds or a bridged one (input/overlay_volume.h). After the
      * tick above, which is what holds a bridged pad's input for the overlay.
      * ⭐ And on Aurora's own screens with no stream (rhoquinn8217, 2026-10-20:
      * "In the dashboard, stick up/down and press controls volume up/down and
      * mute like it does in the streaming overlay"): they read neither the
-     * right stick nor its click. */
-    overlay_volume_tick(&app->input, app->session == NULL || streaming_overlay_shown());
+     * right stick nor its click. ⓘ Not while a webOS pop-up has the focus:
+     * the pads answer that (input/webos_popup.h). */
+    overlay_volume_tick(&app->input, (app->session == NULL || streaming_overlay_shown()) && !webos_popup_up());
     /* ⭐ The touchpad as the host's mouse while Virtual Mouse is on
      * (input/bridge_override.h). */
     bridge_override_touchpad_tick(app->session);
@@ -186,8 +326,20 @@ void bridge_app_events(app_t *app) {
      * never seen. */
     mouse_seen_tick();
     /* ⭐ A ticked device bridges itself: at a stream's start once DS5-USBIP
-     * answers, and when it connects during the stream (input/auto_bridge.h). */
-    auto_bridge_poll(app->session != NULL);
+     * answers, and when it connects during the stream (input/auto_bridge.h).
+     * ⛔ While the bridge is up, not while the session merely exists
+     * (2026-10-23): the session outlives the bridge's stop by seconds, and a
+     * device that arrived then was bridged to the last stream's PC, with
+     * nothing to release it until the next stream ended. */
+    auto_bridge_poll(app->session != NULL && ctm_bridge_active());
+    const ctm_bridge_refused_t refused = ctm_bridge_gesture_take_refused();
+    if (refused != CTM_BRIDGE_REFUSED_NONE) {
+        bridge_prompt_note_bridge_refused(refused == CTM_BRIDGE_REFUSED_LOCKED);
+    }
+    /* A lock newer than the last probe's answer: what is ticked bridges at the unlock. */
+    if (refused == CTM_BRIDGE_REFUSED_LOCKED) {
+        auto_bridge_stream_started();
+    }
     if (app->session == NULL) {
         s_asked_at_bridge = 0;
     }
@@ -206,12 +358,18 @@ void bridge_app_events(app_t *app) {
 #else
     (void) interface_has_input;
 #endif
+    /* ⭐ What a controller does over a locked Windows, on the screen
+     * (ui/streaming/lock_numpad.h). */
+    lock_numpad_tick();
     /* The TV's cursor, put back if the window has the screen again. */
     tv_cursor_tick();
     /* ⭐ The touchpad as the TV's mouse while Aurora's own screens have the
      * input: no stream, or the overlay or a bridge's question up
-     * (input/touchpad_pointer.h). */
-    touchpad_pointer_tick(&app->input, app->session == NULL || streaming_overlay_shown() || bridge_prompt_shown());
+     * (input/touchpad_pointer.h). ⓘ Not while a webOS pop-up has the focus:
+     * a click would land on Aurora's screen under it. */
+    touchpad_pointer_tick(&app->input,
+                          (app->session == NULL || streaming_overlay_shown() || bridge_prompt_shown()) &&
+                          !webos_popup_up());
     /* ⓘ Upstream v1.2.9's touchpad tap-hold, for its touchpad mouse mode, runs
      * in app.c right after this. It reads the same SDL touchpad state the
      * gesture polls here; neither consumes events, so the two coexist.

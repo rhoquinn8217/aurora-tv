@@ -61,6 +61,53 @@ The merge guard keeps the call and checks that upstream's two `SDL_FlushEvent`
 lines do not come back there. If an upstream release drops the flush, drop the
 call with it.
 
+## The mouse mode's flush
+
+**Where:** `src/app/app.c`, `app_process_events()`, and
+`src/app/input/app_input.c`, `app_set_mouse_grab()`.
+
+When the mouse's mode really changes, `SDL_SetRelativeMouseMode` ends by
+dropping the mouse moves waiting in SDL's queue. Upstream changes it while
+handling a stream's open and close, the overlay opening and the on-screen
+keyboard, all inside `SDL_FilterEvents`. If the pointer is moving, the next entry
+SDL has already taken can be one of those moves, and the walk goes on through
+its spent entries, as in "The scan's flush" above. With "Absolute mouse mode" (the
+TV cursor) or "Use mouse hardware" on, the mode never changes and SDL flushes
+nothing.
+
+Seen on 2026-10-31 on the C1 (603), TV cursor off, as a stream opened: SIGSEGV
+at address 0xd, locking the mutex of a sync post delivered a second time, whose
+struct lay on a stack that had moved on (`app_bus_post_sync`). The next stream's
+main loop stopped at the same moment, which fits and is not proven; a stale
+callback stopped the same way in the lab's probe on 2026-10-21. No log says
+whether the pointer moved at that instant.
+
+Proven on 603's own SDL with the C1's own C library, under emulation, five runs
+each: an old event delivered twice with a move behind the request and once with
+none; the crash's address, `pc` and `lr`; and glibc's double free when SDL's event
+loop stopped afterwards, the C1's abort at quit on 2026-10-21. Moving the
+request past the walk cured all three.
+
+Proven on a real set on 2026-11-01, the rooted monitor, by a test-only probe on
+two branches never merged, one run each: without this change the flush ran inside
+the walk and 13 of 16 old events were delivered again; with it the flush waited
+for the walk's end and none were.
+
+`bridge_app_filter_events()` (bridge_app.c) runs the walk and marks it, and
+`bridge_app_mouse_grab_later()` keeps a request made during it for the walk's end,
+the last one winning. The moves still waiting then are dropped, as upstream
+intends. Outside the walk nothing changes: `session_mouse.c` sends a pointer event
+read in the old mode to the host as an absolute position, so a request from the
+interface's own timers must not wait.
+
+⛔ Nothing inside the walk may make SDL drop queued events. In build 603 this was
+the last call that did: `SDL_StopTextInput` also flushes, and runs from an LVGL
+async call, after the walk.
+
+**Merge guard:** "SDL's walk of its event queue goes through ours", "a change of
+the mouse's mode asked during SDL's walk waits until it is over", "only
+app_set_mouse_grab changes the mouse's mode".
+
 ## One box at a time
 
 **Where:** `src/app/ui/streaming/streaming.controller.c`, `on_event()`, the
@@ -274,3 +321,70 @@ The row is shown on rooted sets only. On an unrooted TV the boost never runs,
 so the row would be a control that does nothing.
 
 **Merge guard:** "the stream boost is a setting".
+
+## One service's port
+
+**Where:** `src/app/backend/pcmanager/discovery/impl/microdns.c`,
+`discovery_callback()`, its `RR_SRV` case.
+
+libmicrodns hands over a whole answer when any record in it is the streaming
+service's, and upstream took the port of EVERY service record in it, so the
+last one read won. A Windows PC answers a network browse (a Cast or AirPlay
+device on the network sends one every minute) with Delivery Optimization's
+service first and the streaming service second, in one answer, and libmicrodns
+lists them backwards: the app took port 7680, its status check there failed,
+and the PC showed "offline" for a few seconds once a minute (CAELUM,
+2026-10-23, caught on the rooted monitor). Only a record whose name ends in
+`._nvstream._tcp.local` gives the port now.
+
+**Merge guard:** "discovery takes only the streaming service's port".
+
+## The bitrate service at a stream's end
+
+**Where:** `src/app/stream/session_worker.c` at the stream's end, and
+`src/app/stream/adaptive_bitrate.c`, its thread's sleep.
+
+A `/bitrate` request that reaches the host after its stream has ended wedged
+Vibepollo 1.18.4 until it restarted (`adaptive_bitrate_stop` says how), so the
+service is stopped, and sends nothing once stopping, before
+`LiStopConnection`. "Disconnecting..." is posted before that stop, since it
+asks nothing of the host, and the thread sleeps in 50 ms steps, so the stop
+takes 50 ms rather than up to a second (2026-10-23).
+
+**Merge guard:** "the bitrate service stops before the connection does", "the
+bitrate service sees a stop within 50 ms".
+
+## Cover corners after a stream
+
+**Where:** `src/app/ui/root.c`, `app_ui_open()`, right after the display is
+registered; the fix is `src/app/lvgl/image_corners.c`.
+
+After a stream, every cover in the launcher had a black square at each corner
+where the rounding should be. LVGL's SDL renderer cuts a rounded picture's
+corners with the mask a rounded background of the same radius is drawn with,
+and the background leaves its own colour and opacity on that mask. The
+stream's statistics box is black, with the covers' radius, so covers whose
+corners were made after it got black ones, and kept them from the cache.
+LVGL is a submodule of someone else's, so the fix wraps the display's
+rectangle drawing instead: after each rounded background, the mask is set back
+to plain white and fully opaque (2026-10-26).
+
+**Merge guard:** "rounded pictures keep their corners: the drawing is wrapped
+once the display exists".
+
+## Drawing a line
+
+**Where:** `src/app/ui/root.c`, `app_ui_open()`, right after the display is
+registered; the fix is `src/app/lvgl/draw_line_fix.c`.
+
+LVGL's SDL renderer defines `lv_draw_sdl_draw_line` with five arguments and
+calls it with four, so the last, a `bool *` it writes whenever a line has no
+texture yet, is whatever the stack holds. The overlay's Bluetooth mark crashed
+the app on it (the lab, 2026-10-30); the top bar's mark and the Virtual Mouse
+tick wrote through the same pointer and got away with it. LVGL is a submodule
+of someone else's, so the display draws through a function that passes a real
+one.
+
+**Merge guard:** "a line draws with the argument LVGL reads: the drawing is
+wrapped once the display exists". Taking upstream's `root.c` back compiles, and
+any line in the app can write through a stray pointer again.

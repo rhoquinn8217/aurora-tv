@@ -21,7 +21,7 @@
 /* A controller was bridged while the TV's own mouse mode is on (T-170).
  * Posted by the gesture, which includes no UI headers; the streaming
  * controller decides whether the warning applies and raises it. */
-#define USER_CTM_MOUSE_MODE_WARN 537
+#define USER_CTM_MOUSE_MODE_WARN 537   /* This fork: posted by input/ctm_bridge_gesture.c */
 
 
 extern unsigned int app_userevent_remotebutton;

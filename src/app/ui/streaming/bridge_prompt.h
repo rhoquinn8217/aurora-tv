@@ -3,9 +3,10 @@
  * ⭐ WHY IT EXISTS. A bridged controller reaches the host as itself, and the TV
  * goes on reading it. Virtual Mouse turns its sticks and triggers into a host
  * mouse, and the touchpad's mouse mode sends its click as a mouse click, so one
- * press arrives as a controller and as a mouse. One switch turns the TV's own
- * handling off for the stream (input/bridge_override.h), and this is where a
- * person is offered it: at the moment they bridge a controller.
+ * press arrives as a controller and as a mouse. This is where a person is
+ * offered to turn them off: at the moment they bridge a controller, each time
+ * Virtual Mouse or the touchpad's mouse mode is on. The answer itself is not
+ * kept; Virtual Mouse's own on or off is (input/bridge_override.h).
  *
  * It warns, offers the fix and its refusal as two buttons, counts, and goes
  * away by itself:
@@ -116,6 +117,17 @@ void bridge_prompt_stream_ended(void);
  * at the top left). */
 void bridge_prompt_note(const char *text);
 
+/* The same message, gone sooner if `still_true`, asked four times a second, says so. */
+void bridge_prompt_note_while(const char *text, bool (*still_true)(void));
+
+/* Is a message up in the pop-up's place? */
+bool bridge_prompt_note_up(void);
+
+/* A bridge somebody asked for did not reach DS5-USBIP, or met a locked Windows,
+ * said on the screen (rhoquinn8217, 2026-11-01). The TV cannot tell a PC at its
+ * sign-in screen from one with DS5-USBIP not running, so those words cover both. */
+void bridge_prompt_note_bridge_refused(bool locked);
+
 /* For the control port: the seconds left on the count, 0 when it is not up;
  * and its first button, the one that turns it off, pressed without a hand.
  * False when it is not up. ⓘ Its second button does what a dismissal does. */
@@ -148,5 +160,8 @@ bool bridge_prompt_measure(bridge_prompt_measure_t *out);
 /* The same for the message a pressed button leaves. Returns the milliseconds
  * it has left, or -1 when it is not on the screen. */
 int bridge_prompt_note_measure(bridge_prompt_measure_t *out);
+
+/* The message's words, for the control port; empty when none is up. */
+const char *bridge_prompt_note_words(void);
 
 #endif /* BRIDGE_PROMPT_H */

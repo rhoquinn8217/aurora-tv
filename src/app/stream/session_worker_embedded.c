@@ -26,6 +26,7 @@
 #include "logging.h"
 #include "backend/pcmanager/worker/worker.h"
 #include "embed_wrapper.h"
+#include "connect_cancel.h"
 
 #include <errno.h>
 
@@ -110,6 +111,7 @@ int session_worker_embedded(session_t *session) {
         session_set_state(session, STREAMING_NONE);
     }
 
+    connect_cancel_done(session, NULL);   /* This fork: a Cancel ends with its session (connect_cancel.h). */
     bus_pushevent(USER_STREAM_FINISHED, NULL, NULL);
     app_bus_post(app, (bus_actionfunc) app_session_destroy, app);
     return 0;

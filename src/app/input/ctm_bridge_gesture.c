@@ -157,6 +157,15 @@ typedef struct {
      * SDL tick to try at (0 = none); retry_used keeps it to one per request. */
     uint32_t retry_at;
     bool retry_used;
+    /* ⭐ The core's refusal signal for prep_node still playing on its own
+     * thread (2026-10-23): the pad waits for its answer, as it waited for the
+     * call before, and refusal_answered() does what the answer asks. */
+    bool refusal_waiting;
+    /* ⭐ The plug of prep_node still running on its own thread (2026-10-28):
+     * the pad waits for its answer, and plug_answered() does what follows it.
+     * plug_t0 is when it began, for the log. */
+    bool plug_waiting;
+    uint64_t plug_t0;
 
     uint8_t buzz_left;   /* half-steps of the refusal rumble still to run */
     uint32_t buzz_next;  /* SDL ticks when the next buzz half-step is due */
@@ -175,7 +184,6 @@ typedef struct {
      * (flash_write), with the takeover the first time. ds5_since is when the
      * pad was first seen (SDL ticks, 0 = not a DualSense). */
     uint32_t ds5_since;
-    bool ds5_bt_checked; /* the transport has been asked: once, when it matters */
     bool ds5_bt;         /* and it is Bluetooth */
     bool ds5_took_light; /* the takeover has gone out for this connection */
     /* ⭐ WHEN IT WILL TAKE A COLOUR, from its own clock (rhoquinn8217,
@@ -188,6 +196,9 @@ typedef struct {
 } watched_t;
 
 #define PAINTED_NEVER (-100)
+
+/* A bridge just refused, and why, for the app's loop to say on the screen. */
+static ctm_bridge_refused_t s_refused = CTM_BRIDGE_REFUSED_NONE;
 
 /* How long before the one more try: long enough for a stream's start to
  * settle, short enough to still feel like the same press. */
@@ -294,6 +305,8 @@ static watched_t *watched_for(SDL_JoystickID id) {
         free_slot->fired = false;
         free_slot->painted_slot = PAINTED_NEVER;
         free_slot->excluded_slot1 = 0;
+        free_slot->refusal_waiting = false;
+        free_slot->plug_waiting = false;
     }
     return free_slot;
 }
@@ -337,25 +350,6 @@ static void log_controller_identity(SDL_GameController *controller, SDL_Joystick
                 SDL_GameControllerGetPlayerIndex(controller));
 }
 
-/* Is the gesture being made right now? Two fingers down AND the touchpad
- * pressed -- the same three facts the bridge core reads out of the raw report,
- * asked of SDL instead. */
-/* Should THIS file produce the signal, or has the core already?
- *
- * Both transports have a rich signal -- a tone and a felt pulse through the
- * controller's audio -- and a coarse SDL fallback. Running both gives two
- * buzzes of different characters, which reads as a controller that does not
- * know what it is doing.
- *
- * ⭐ So the question is not "which cable is this" but "is the rich one about
- * to play". On Bluetooth the core always can; on a cable it can once a session
- * has opened the speaker, which means a refused plug correctly falls back here
- * and a successful one correctly does not.
- *
- * ⚠️ And on Bluetooth there is deliberately NO fallback. The ways that path
- * can fail take SDL down with it -- a controller that has stopped accepting
- * reports ignores SDL's just as readily as ours -- so a second signal that
- * fails in the same conditions is noise, not insurance. */
 /* T-212 -- SAY WHETHER A PULSE ACTUALLY HAPPENED.
  *
  * ⛔ Every "pulse" line in this file used to print whether or not a rumble was
@@ -424,12 +418,30 @@ static void flash_arm(watched_t *w, uint8_t r, uint8_t g, uint8_t b, int flashes
     w->flash_next = SDL_GetTicks();
 }
 
+/* Should THIS file produce the signal, or has the core already?
+ *
+ * Both transports have a rich signal -- a tone and a felt pulse through the
+ * controller's audio -- and a coarse SDL fallback. Running both gives two
+ * buzzes of different characters, which reads as a controller that does not
+ * know what it is doing.
+ *
+ * ⭐ So the question is not "which cable is this" but "is the rich one about
+ * to play". On Bluetooth the core always can; on a cable it can once a session
+ * has opened the speaker, which means a refused plug correctly falls back here
+ * and a successful one correctly does not.
+ *
+ * ⚠️ And on Bluetooth there is deliberately NO fallback. The ways that path
+ * can fail take SDL down with it -- a controller that has stopped accepting
+ * reports ignores SDL's just as readily as ours -- so a second signal that
+ * fails in the same conditions is noise, not insurance. */
 static bool gesture_signal_here(const char *node)
 {
-    if (!ctm_bridge_signals_enabled()) return false;
     return !ctm_bridge_node_signals_itself(node);
 }
 
+/* Is the gesture being made right now? Two fingers down AND the touchpad
+ * pressed -- the same three facts the bridge core reads out of the raw report,
+ * asked of SDL instead. */
 static bool gesture_held(SDL_GameController *controller) {
     if (!controller) {
         return false;
@@ -474,51 +486,6 @@ static bool gesture_held(SDL_GameController *controller) {
 #define PREP_STEPS        20
 #define PREP_STEP_MS      50
 
-/* The post-unplug signal: three shorter breaths rather than one long one.
- * Repetition is what makes it unmistakable, and each breath is brief enough
- * that three of them still pass in about a second and a half. */
-/* ⭐⭐ TWO breaths, not three, and MANY more steps in each.
- *
- * ⛔ Ten steps is too few to read as breathing -- each one is a visible jump,
- * and nine jumps in a row look like a flicker however long they take. Slowing
- * the step to 90 ms made it MORE steppy, not smoother: measured 453 ms then
- * 812 ms for the same nine steps, and it still read as fast.
- *
- * ⭐ Smoothness is the step COUNT; pace is the interval. 26 steps at 45 ms is a
- * breath of about 1.2 s with 26 brightness levels in it. ⓘ Dropped to two
- * breaths so the handback does not run to three and a half seconds. */
-
-/* ⭐⭐ HOW LONG ONE BREATH TAKES. Ten steps at this interval.
- *
- * ⛔ It used to borrow the pre-plug pulse's 50 ms, which made a breath half a
- * second long -- and half a second reads as a BLINK, not breathing. rhoquinn8217,
- * 2026-08-19: "it's just going really fast now." ⓘ The log had been saying so
- * all along: `bridge pulse finished, 9 steps in 453ms`.
- *
- * ⚠️ The pre-plug pulse keeps the shorter step deliberately: it fills the
- * second between the one-second hold and the plug, so it is a different job.
- *
- * ⭐ 90 ms gives a breath just under a second, which is about the rate a person
- * breathes and is what makes it read as calm rather than urgent. */
-/* ⭐ 20 ms, which the app's loop can hold -- it ran 25 steps in 1128 ms at 45,
- * so the pace is real rather than aspirational. Sixty steps at 20 ms is a
- * breath of 1.2 s with THIRTY brightness levels climbing and thirty falling. */
-/* ⭐ How long ONE breath lasts. The shape is drawn from the clock, so this is
- * a real duration rather than a step count times an interval -- and it holds
- * whatever the app's loop is doing. About a second reads as breathing; half a
- * second reads as a blink. */
-
-/* ⭐ The BRIDGE breath is deliberately shorter than the handback's.
- *
- * ⛔ Not a style choice. A bridge hands the controller over the instant this
- * starts -- the emulated pad retires, the real one arrives, and the host
- * repaints -- so a long breath spends most of itself competing with a device
- * changing hands. ⚠️ Measured by eye across builds: 450 ms read as clean,
- * 800-1200 ms read as flickering throughout.
- *
- * ⓘ A handback has no such problem, because nothing is being relayed by then --
- * which is why yellow has never flickered and can afford to be slow. */
-
 /* How often to ask whether a controller we plugged is still bridged.
  *
  * The app is never told when an unplug finishes -- the teardown happens on the
@@ -526,17 +493,18 @@ static bool gesture_held(SDL_GameController *controller) {
  * So the transition has to be noticed by asking.
  *
  * Twice a second, and only while a controller we plugged is still plugged.
- * That lookup enumerates devices, which is real work; asking every pass would
- * put a filesystem scan on the app's main loop. The cheaper fix, when it is
+ * That lookup reads the last scan, and scans again for a node it does not
+ * know, which is real work; asking every pass could put a filesystem scan on
+ * the app's main loop. The cheaper fix, when it is
  * worth doing, is for the core to say so rather than for this to ask. */
 #define PLUG_CHECK_MS     500
 /* ⛔⛔ HOW MANY CONSECUTIVE "NOT PLUGGED" ANSWERS BEFORE WE BELIEVE IT.
  *
- * ctm_bridge_node_is_plugged() RE-ENUMERATES on every call, and an enumeration
- * that runs while a device is arriving or leaving can miss a node that is
- * perfectly well bridged. On one answer that is indistinguishable from an
- * unplug, so a healthy bridge was torn down by an unrelated controller being
- * paired.
+ * ctm_bridge_node_is_plugged() reads the last scan and scans again for a node
+ * it does not know, and a scan that runs while a device is arriving or leaving
+ * can miss a node that is perfectly well bridged. On one answer that is
+ * indistinguishable from an unplug, so a healthy bridge was torn down by an
+ * unrelated controller being paired.
  *
  * ⭐ Measured 2026-08-18: a DualSense was paired over Bluetooth while a
  * DualSense Edge was bridged. Three milliseconds after the new controller
@@ -598,8 +566,9 @@ static bool gesture_held(SDL_GameController *controller) {
  * half a second is a report every 40 ms with nothing to spare, so an "on"
  * lands late and its "off" lands on top of it.
  *
- * At 200/150 each burst gets five or six reports and each gap gets four, so
- * the shape survives the pacing. Slower on a cable too, but three taps at
+ * At 200/150 each burst got five or six reports and each gap four, so the
+ * shape survived the pacing; doubled since (BUZZ_ON_MS, BUZZ_OFF_MS below), it
+ * has room to spare. Slower on a cable too, but three taps at
  * this length still read as three taps -- and a signal that is legible
  * everywhere beats one that is crisp on the transport most people do not
  * use.
@@ -686,27 +655,6 @@ static bool gesture_held(SDL_GameController *controller) {
 #define REFUSED_ON_MS     125
 #define REFUSED_OFF_MS    125
 
-/* One step of the flash.
- *
- * Set through SDL rather than by writing a report ourselves. Two reasons, both
- * learned the hard way on 2026-08-06:
- *
- * SDL's own PlayStation driver is enabled here (it is what makes a Bluetooth
- * controller send its touchpad at all), and that driver writes output reports
- * including the lightbar. A raw write is simply overwritten by it -- the light
- * went straight to whatever SDL wanted and our colour was never seen.
- *
- * And SDL builds the right report for whichever transport the controller is
- * on, checksum included. Writing the wired report over a Bluetooth link was
- * killing sessions, which is why the earlier confirmation light had to be
- * gated to wired. Going through SDL removes that limit entirely.
- *
- * Deliberately NOT a loop with sleeps in it: this runs on the app's main loop,
- * and sleeping here would freeze the interface for the length of the signal.
- * The loop's own passes are the clock, exactly as the gesture hold is timed. */
-/* ⓘ Returns what SDL said: 0 accepted, -1 refused or no light. Almost every
- * caller is an animation step and ignores it; the handback paint reads it, so a
- * colour that never lands is a line in the log. */
 /* Stop reading a DualSense's clock: its animation is over, or it has gone. */
 static void ds5_clock_close(watched_t *w) {
     if (w->ds5_clock_fd1 != 0) {
@@ -741,8 +689,7 @@ static bool ds5_light_ready(watched_t *w) {
  * gesture's own hold takes a second. Only while this side draws the pulse. */
 static bool ds5_bridge_held(watched_t *w) {
     if (w->ds5_since == 0 || !w->ds5_bt || w->ds5_took_light) return false;
-    if (!ctm_bridge_signals_enabled() ||
-        !(app_configuration && app_configuration->bridge.signal_light)) {
+    if (!(app_configuration && app_configuration->bridge.signal_light)) {
         return false;
     }
     if (ds5_light_ready(w)) {
@@ -769,10 +716,7 @@ static void flash_write_past_sdl(SDL_GameController *controller, uint8_t r, uint
     if (!ds5_light_ready(w)) return;
     const char *path = SDL_GameControllerPath(controller);
     if (!path) return;
-    if (!w->ds5_bt_checked) {
-        w->ds5_bt_checked = true;
-        w->ds5_bt = ctm_bridge_node_is_bluetooth(path);
-    }
+    /* ⓘ ds5_bt was asked with ds5_since, which is set by then. */
     if (!w->ds5_bt) return;
     const bool take = !w->ds5_took_light;
     const bool ok = ctm_bridge_ds5_bt_paint(path, r, g, b, take);
@@ -783,6 +727,30 @@ static void flash_write_past_sdl(SDL_GameController *controller, uint8_t r, uint
     }
 }
 
+/* One step of the flash.
+ *
+ * Set through SDL rather than by writing a report ourselves. Two reasons, both
+ * learned the hard way on 2026-08-06:
+ *
+ * SDL's own PlayStation driver is enabled here (it is what makes a Bluetooth
+ * controller send its touchpad at all), and that driver writes output reports
+ * including the lightbar. A raw write is simply overwritten by it -- the light
+ * went straight to whatever SDL wanted and our colour was never seen.
+ *
+ * And SDL builds the right report for whichever transport the controller is
+ * on, checksum included. Writing the wired report over a Bluetooth link was
+ * killing sessions, which is why the earlier confirmation light had to be
+ * gated to wired. Going through SDL removes that limit entirely.
+ *
+ * Deliberately NOT a loop with sleeps in it: this runs on the app's main loop,
+ * and sleeping here would freeze the interface for the length of the signal.
+ * The loop's own passes are the clock, exactly as the gesture hold is timed. */
+/* ⓘ Returns what SDL said: 0 accepted, -1 refused or no light. Almost every
+ * caller is an animation step and ignores it; the handback paint reads it, so a
+ * colour that never lands is a line in the log. */
+/* ⓘ And on a Bluetooth DualSense the colour goes past SDL as well
+ * (flash_write_past_sdl), which holds every colour back until it has taken
+ * the light over itself. */
 static int flash_write(SDL_GameController *controller, uint8_t r, uint8_t g, uint8_t b) {
     if (controller) {
         const int rc = SDL_GameControllerSetLED(controller, r, g, b);
@@ -802,23 +770,6 @@ static int flash_write(SDL_GameController *controller, uint8_t r, uint8_t g, uin
  * Set directly rather than by re-applying the index: SDL sees the same value
  * and repaints nothing, which left the light stuck on the signal colour.
  * Measured 2026-08-06 on both transports. */
-/* ⭐⭐ THE COLOUR A BRIDGED CONTROLLER IS HANDED OVER IN.
- *
- * ⛔ After a bridge the light is NOT ours. The controller belongs to the host,
- * and Windows and Steam paint it themselves -- measured 2026-08-07: plugging a
- * ds5 in leaves the lightbar TEAL.
- *
- * ⚠️ So repainting the player colour on the way out was a claim we do not have.
- * It also showed: our colour, then Steam's a moment later, a visible flip that
- * says the wrong thing about who owns the controller.
- *
- * ⭐ Painting it where the host is about to put it makes the handover
- * seamless. rhoquinn8217, 2026-08-19: "setting it early makes the flow cleaner."
- *
- * ⓘ THE EXACT VALUE IS APPROXIMATE. Teal was observed, not measured as an RGB
- * triple. If it ever visibly steps when Steam takes over, this is the number to
- * tune -- it is one line. */
-
 static int paint_player_colour(SDL_GameController *controller) {
     static const uint8_t player_rgb[4][3] = {
         { 0x00, 0x00, 0xff },   /* 1: blue   */
@@ -842,29 +793,6 @@ static int paint_player_colour_for(watched_t *w, SDL_GameController *controller)
     }
     return rc;
 }
-
-/* A ramp that rises and falls: bright in the middle, dark at both ends, so it
- * reads as a breath rather than a blink. For a signal that ends on a colour of
- * its own, where the last step is not the thing being seen.
- *
- * `span` is the length of ONE breath, so a longer count simply repeats it. */
-/* ⭐⭐ BRIGHTNESS FROM THE CLOCK, NOT FROM A STEP COUNTER.
- *
- * ⛔ The pulse used to count steps and sleep between them, which means the
- * SHAPE depended on the app's loop keeping time -- and that loop is also
- * drawing the interface. This file already warned about it: an earlier version
- * "froze at its brightest and stayed there, because it animated on the UI
- * thread and lost the competition for it."
- *
- * ⚠️ It was got wrong twice in one day, in opposite directions. Fifty
- * milliseconds a step looked smooth; ninety looked steppy; twenty looked like
- * the light was fighting something, because the loop cannot promise fifty
- * updates a second and the steps landed unevenly.
- *
- * ⭐ Asking the clock removes the problem instead of tuning it. A late pass
- * simply lands at the brightness that moment deserves, so jitter shifts nothing
- * -- and the shape is the same on a busy loop as an idle one. */
-
 
 /* A ramp that only rises, ending at full brightness.
  *
@@ -1126,6 +1054,12 @@ static void gesture_moonlight_forget_leaving(watched_t *w) {
     w->excluded_slot1 = 0;
 }
 
+ctm_bridge_refused_t ctm_bridge_gesture_take_refused(void) {
+    const ctm_bridge_refused_t refused = s_refused;
+    s_refused = CTM_BRIDGE_REFUSED_NONE;
+    return refused;
+}
+
 /* ⭐ START A BRIDGE REQUEST. The chord and the panel both arm the pulse that
  * hands a pad over, and this is the one place it is armed (code review,
  * 2026-10-05: it was written out twice).
@@ -1170,12 +1104,225 @@ static void request_arm(watched_t *w, SDL_GameController *controller, const char
     /* ⭐ The light switch is the gate the note above means (code review,
      * 2026-10-05): with only the build's master switch asked, a pulse with the
      * light signal off drew nothing and still held the bridge back a second. */
-    w->prep_left = (!ctm_bridge_signals_enabled() ||
-                    !(app_configuration && app_configuration->bridge.signal_light))
+    w->prep_left = !(app_configuration && app_configuration->bridge.signal_light)
                        ? 1 : PREP_STEPS;
     w->prep_next = SDL_GetTicks();
     w->retry_at = 0;
     w->retry_used = false;
+}
+
+/* ⭐ WHAT A REFUSAL'S ANSWER ASKS FOR (2026-10-23): the player colour once the
+ * core has lit and sounded it, or this side's red and buzz when it could not.
+ * The core plays its signal on a thread of its own now
+ * (ctm_bridge_signal_refused_begin): on the app's loop it froze the screen
+ * and every pad for 1.6 to 5 s. */
+static void refusal_answered(watched_t *w, SDL_GameController *controller, bool sounded) {
+    const bool lit = sounded && ctm_bridge_node_is_bluetooth(w->prep_node);
+
+    if (lit) {
+        /* ⭐ The core lit it, and its Bluetooth signal has finished by the time
+         * its answer comes. Then the player colour (rhoquinn8217, 2026-09-15),
+         * where a refused controller used to keep whatever the last flash left. */
+        paint_player_colour_for(w, controller);
+    } else {
+        /* ⭐ The user's switch. ⓘ The refusal is the one worth being loudest
+         * about, so it is gated last and independently of the others. */
+        if (app_configuration->bridge.signal_light)
+            flash_arm(w, 0xff, 0x00, 0x00, REFUSED_FLASHES);
+    }
+    if (!sounded) {
+        /* ⭐ THREE BUZZES ONLY FOR A PAD WITH NO LIGHT (rhoquinn8217,
+         * 2026-09-23): "non DS5 and non DS4 don't have 3 because they don't
+         * have lightbar or audio feedback." A pad with a light says it in red,
+         * with the one buzz every other signal has; a cabled DS4 was getting
+         * three. */
+        const int bursts = SDL_GameControllerHasLED(controller) ? 1 : BUZZ_BURSTS;
+        if (app_configuration->bridge.signal_rumble)
+            w->buzz_left = (uint8_t)(bursts * 2);   /* on and off per burst */
+        w->buzz_next = SDL_GetTicks();
+    }
+    gesture_log("refused on %s: core sounded=%d lit=%d",
+                w->prep_node, (int)sounded, (int)lit);
+}
+
+/* ⭐ WHAT A PLUG'S ANSWER ASKS FOR (2026-10-28). The plug runs on a thread of
+ * its own (ctm_bridge_plug_node_begin), and this is what followed the call
+ * when it ran on the app's loop: the retry when the listener was not
+ * reached, the bridged pad's signals and its Moonlight slot, or the
+ * refusal. Returns true if the controller was just handed to the bridge. */
+static bool plug_answered(watched_t *w, SDL_GameController *controller, bool ok, bool unreachable) {
+    uint64_t plug_ms = gesture_now_ms() - w->plug_t0;
+    gesture_log("pulse finished on %s : %s (plug call took %llums)",
+                w->prep_node, ok ? "plugged" : "refused",
+                (unsigned long long)plug_ms);
+    /* ⭐ NOT REACHED IS NOT REFUSED. When the connect failed, try
+     * once more in a moment instead of signalling a refusal; the
+     * second outcome, whatever it is, is signalled as usual. */
+    if (!ok && !w->retry_used && unreachable) {
+        w->retry_used = true;
+        w->retry_at = SDL_GetTicks() + PLUG_RETRY_MS;
+        gesture_log("listener not reached from %s: one more try in %d ms",
+                    w->prep_node, PLUG_RETRY_MS);
+        return false;
+    }
+    /* ⭐ NOT REACHED THE SECOND TIME, OR WINDOWS LOCKED: said on the screen as well
+     * as in the hand (rhoquinn8217, 2026-11-01). Taken by the app's loop, since
+     * this file includes no UI headers. */
+    if (!ok && unreachable) {
+        s_refused = CTM_BRIDGE_REFUSED_OFFLINE;
+    } else if (!ok && ctm_bridge_agent_locked()) {
+        s_refused = CTM_BRIDGE_REFUSED_LOCKED;
+    }
+    if (ok) {
+        /* Bridged. Say so in the hand holding the controller.
+         *
+         * Fires on both transports. Over a cable the audio device
+         * also plays a tone and its own pulse, so this reinforces
+         * rather than replaces -- judged by feel, and easily
+         * gated later if it turns out to be too much. */
+        /* ⓘ This rumble was once gated on Bluetooth while its layers
+         * were rebuilt; the gate is gone and the layer is on. */
+        /* ⛔⛔ THE SAME TRAP AS THE BYE PULSE. On Bluetooth
+         * gesture_signal_here() is always false -- the core claims
+         * the signal there -- so this never fired, gate or no gate.
+         * BT_LAYER_RUMBLE could not do anything while
+         * BT_LAYER_CORE_SIGNAL was 0. Found in step 4, 2026-08-18.
+         *
+         * ⭐ Ask whether the core will signal AND is switched on.
+         *
+         * ⏱️ TIMED: gesture_signal_here() ends in a full device
+         * enumeration and was measured at 5144ms on the C3 against
+         * 0 on the monitor. The number is logged so a slow one is
+         * seen rather than felt. */
+        uint64_t sig_t0 = gesture_now_ms();
+        const bool core_signals_ok = !gesture_signal_here(w->prep_node);
+        const uint64_t sig_ms = gesture_now_ms() - sig_t0;
+        gesture_log("confirmation pulse on %s: bridged (signal check %llums)",
+                    w->prep_node, (unsigned long long) sig_ms);
+        if (!core_signals_ok) {
+            /* ⓘ The rumble switch, which this alone did not ask
+             * (code review, 2026-10-05): the release's pulse and
+             * the refusal's buzz both do. */
+            if (app_configuration && app_configuration->bridge.signal_rumble) {
+                gesture_rumble_logged(controller, "confirmation pulse",
+                                      w->prep_node, OK_PULSE_STRENGTH,
+                                      OK_PULSE_MS);
+            }
+        } else {
+            /* ⛔ NOT a pulse. The core is expected to signal this pad
+             * instead -- and whether it does for a Bluetooth XBOX pad
+             * is exactly what has never been established. */
+            gesture_log("confirmation pulse on %s: NOT SENT BY US -- the core "
+                        "claims the signal here (transport=%s)",
+                        w->prep_node, w->xport == 1 ? "bluetooth" : "wired");
+        }
+        w->ours_plugged = true;
+        w->plug_miss = 0;
+        w->plug_check_next = SDL_GetTicks() + PLUG_CHECK_MS;
+        /* A CONTROLLER IS NOW BRIDGED, so warn if the TV's own
+         * mouse mode is on. It will go on driving the host
+         * cursor, which is DELIBERATE -- without it a bridged pad
+         * cannot reach the settings page to choose a listener
+         * preset, and you would need a second device -- but it
+         * surprises anyone who then sets one.
+         *
+         * Only controllers reach this function at all: a keyboard
+         * or mouse has no SDL controller behind its node and takes
+         * the direct plug instead. So every path that bridges a
+         * CONTROLLER passes here -- the chord, a panel row, Auto
+         * Bridge and the control port -- and nothing else does.
+         *
+         * Posted rather than called: this file includes no UI
+         * headers, and whether mouse mode is on is the streaming
+         * controller's to answer. Same mechanism as the overlay
+         * request below. */
+        gesture_log("mouse-mode warning: posting the event");
+        bus_pushevent(USER_CTM_MOUSE_MODE_WARN, NULL, NULL);
+        /* ⭐⭐ GREEN ON SUCCESS, FOR A PAD THE CORE WILL NOT PAINT.
+         * The paragraph below is still true for a
+         * DualSense -- the core draws its green with its tone, so
+         * the two arrive together -- but the core has no signal for
+         * a Bluetooth DS4, which left the only lit pad in the set
+         * going magenta straight back to its player colour, saying
+         * nothing about whether the bridge worked.
+         * ⓘ Steady, not a pattern: the host claims the light within
+         * a moment of this and would cut a flash sequence in half. */
+        if (core_signals_ok == false && app_configuration &&
+            app_configuration->bridge.signal_light) {
+            const int green_rc = flash_write(controller, 0x00, 0xff, 0x00);
+            gesture_paint_logged(controller, "bridged green",
+                                 w->prep_node, green_rc);
+            w->painted_slot = PAINTED_NEVER;   /* not the player colour now */
+        }
+        /* ⛔ PUT THE LIGHT BACK. The pre-plug pulse leaves magenta
+         * and walks away: nothing after it repaints, so the light
+         * stayed magenta until Steam claimed it -- long after the
+         * controller was already working. Measured in step 3,
+         * 2026-08-18.
+         *
+         * ⭐ The unplug path has done this all along; the plug path
+         * never did, because on a cable the core's own signal
+         * repainted it and hid the gap. */
+        /* ⛔⛔ NO GREEN FROM THIS SIDE FOR A PAD THE CORE SIGNALS.
+         * Changed 2026-08-19.
+         *
+         * ⚠️ It used to be drawn here, the moment the plug call
+         * returned -- about a SECOND before the core plays the
+         * confirmation tone. The light and the sound never arrived
+         * together, and no amount of tuning the breath could fix
+         * that, because they were triggered by different events.
+         *
+         * ⭐ The core paints it now, in the same code that plays the
+         * tone, so they are simultaneous by construction.
+         * ⓘ It went on to say green, yellow and red ALL come from
+         * the core on both transports, and this side only puts the
+         * player colour back. Not so since: the green above is drawn
+         * here for a pad the core does not signal, and a wired
+         * refusal's red flashes are drawn here too (code review,
+         * 2026-10-05).
+         *
+         * ⓘ The green WILL stutter, because a bridge completing is
+         * the moment the emulated pad retires and the real
+         * controller arrives on the host. Knowingly traded for the
+         * timing; see the note in ctm_bt_signal.inl. */
+        /* ⛔ RETIRED AFTER THE PLUG, NOT BEFORE. Retiring first was
+         * tried on 2026-08-18 to close the input gap and did not
+         * help -- the gap is Bluetooth-only and wired has none, so
+         * it is the device becoming usable, not the handover. And
+         * it left a phantom: the pad is only restored when the
+         * plugged-check notices the bridge has ended, which needs
+         * ours_plugged, which is set here. */
+        gesture_moonlight_set_excluded(w, controller, true);
+    }
+    if (!ok) {
+        /* A refusal is signalled from here on BOTH transports: the
+         * plug failed, so on a cable there is no session and no
+         * speaker to write a richer one to.
+         *
+         * ⚠️ The signal switches silence this too, each its own
+         * part, deliberately. A switch that keeps failures but
+         * drops successes sounds thoughtful and is really a second
+         * thing to reason about -- and if signals are off, being
+         * told nothing on failure is what was asked for.
+         *
+         * ⭐ THE LIGHT AND THE SOUND ARE TWO DECISIONS, not one --
+         * because on a cable they live on different devices.
+         *
+         * On Bluetooth the core's signal carries both: the lightbar
+         * and the audio ride the same report. On a cable the audio
+         * goes to the sound card and the lightbar to the HID
+         * device, so the core can only do the sound and the flashes
+         * have to come from here.
+         *
+         * Treating it as one decision left a wired refusal with two
+         * tones and no red at all. */
+        if (ctm_bridge_signal_refused_begin(w->prep_node)) {
+            w->refusal_waiting = true;   /* answered in a later tick */
+        } else {
+            refusal_answered(w, controller, false);
+        }
+    }
+    return ok;
 }
 
 /* Returns true if the controller was just handed to the bridge. */
@@ -1206,6 +1353,25 @@ static bool gesture_poll_one(SDL_GameController *controller, SDL_JoystickID id) 
     }
     if (!w) {
         return false;
+    }
+    /* A refusal still playing: nothing else for this pad until its answer. */
+    if (w->refusal_waiting) {
+        const int answer = ctm_bridge_signal_refused_answer(w->prep_node);
+        if (answer < 0) {
+            return false;
+        }
+        w->refusal_waiting = false;
+        refusal_answered(w, controller, answer == 1);
+    }
+    /* A plug still running on its thread: nothing else for this pad until
+     * its answer, as nothing else ran while the call held the loop. */
+    if (w->plug_waiting) {
+        const int answer = ctm_bridge_plug_node_answer(w->prep_node);
+        if (answer < 0) {
+            return false;
+        }
+        w->plug_waiting = false;
+        return plug_answered(w, controller, answer == 1, answer == 2);
     }
 
     /* ⭐ AND AGAIN WHEN THE PLAYER NUMBER ARRIVES OR CHANGES (rhoquinn8217,
@@ -1311,10 +1477,7 @@ static bool gesture_poll_one(SDL_GameController *controller, SDL_JoystickID id) 
                  * ⚠️ Measured on the monitor 2026-09-18 -- it rumbled on the
                  * bridge and was handed back in silence, while the Xbox pad beside
                  * it did both. ⭐ A DualSense still says nothing here, because
-                 * gesture_signal_here() is false for it: the core does sing.
-                 *
-                 * ⓘ gesture_signal_here() folds in ctm_bridge_signals_enabled(),
-                 * so the switch that used to be tested on this line still is. */
+                 * gesture_signal_here() is false for it: the core does sing. */
                 if (controller && app_configuration &&
                     app_configuration->bridge.signal_rumble &&
                     gesture_signal_here(w->prep_node)) {
@@ -1457,206 +1620,21 @@ static bool gesture_poll_one(SDL_GameController *controller, SDL_JoystickID id) 
                  * whole time, so the plug had SUCCEEDED at the far end while
                  * this side was still waiting -- which points at waiting for a
                  * reply rather than for a connection. The number below is what
-                 * turns that from a story into a measurement. */
-                uint64_t plug_t0 = gesture_now_ms();
-                bool ok = ctm_bridge_plug_node(w->prep_node);
-                uint64_t plug_ms = gesture_now_ms() - plug_t0;
-                gesture_log("pulse finished on %s : %s (plug call took %llums)",
-                            w->prep_node, ok ? "plugged" : "refused",
-                            (unsigned long long)plug_ms);
-                /* ⭐ NOT REACHED IS NOT REFUSED. When the connect failed, try
-                 * once more in a moment instead of signalling a refusal; the
-                 * second outcome, whatever it is, is signalled as usual. */
-                if (!ok && !w->retry_used && ctm_bridge_last_plug_unreachable()) {
-                    w->retry_used = true;
-                    w->retry_at = SDL_GetTicks() + PLUG_RETRY_MS;
-                    gesture_log("listener not reached from %s: one more try in %d ms",
-                                w->prep_node, PLUG_RETRY_MS);
+                 * turns that from a story into a measurement.
+                 * ⭐ ON A THREAD OF ITS OWN SINCE 2026-10-28
+                 * (ctm_bridge_plug_node_begin): plug_answered() does what
+                 * followed it, once the answer comes. */
+                w->plug_t0 = gesture_now_ms();
+                if (ctm_bridge_plug_node_begin(w->prep_node)) {
+                    w->plug_waiting = true;   /* answered in a later tick */
                     return false;
                 }
-                if (ok) {
-                    /* Bridged. Say so in the hand holding the controller.
-                     *
-                     * Fires on both transports. Over a cable the audio device
-                     * also plays a tone and its own pulse, so this reinforces
-                     * rather than replaces -- judged by feel, and easily
-                     * gated later if it turns out to be too much. */
-                    /* ⓘ T-120 gated this rumble on Bluetooth while its layers
-                     * were rebuilt; the gate is gone and the layer is on. */
-                    /* ⛔⛔ THE SAME TRAP AS THE BYE PULSE. On Bluetooth
-                     * gesture_signal_here() is always false -- the core claims
-                     * the signal there -- so this never fired, gate or no gate.
-                     * BT_LAYER_RUMBLE could not do anything while
-                     * BT_LAYER_CORE_SIGNAL was 0. Found in step 4, 2026-08-18.
-                     *
-                     * ⭐ Ask whether the core will signal AND is switched on.
-                     *
-                     * ⏱️ TIMED: gesture_signal_here() ends in a full device
-                     * enumeration and was measured at 5144ms on the C3 against
-                     * 0 on the monitor. The number is logged so a slow one is
-                     * seen rather than felt. */
-                    uint64_t sig_t0 = gesture_now_ms();
-                    const bool core_signals_ok = !gesture_signal_here(w->prep_node);
-                    const uint64_t sig_ms = gesture_now_ms() - sig_t0;
-                    gesture_log("confirmation pulse on %s: bridged (signal check %llums)",
-                                w->prep_node, (unsigned long long) sig_ms);
-                    if (!core_signals_ok) {
-                        /* ⓘ The rumble switch, which this alone did not ask
-                         * (code review, 2026-10-05): the release's pulse and
-                         * the refusal's buzz both do. */
-                        if (app_configuration && app_configuration->bridge.signal_rumble) {
-                            gesture_rumble_logged(controller, "confirmation pulse",
-                                                  w->prep_node, OK_PULSE_STRENGTH,
-                                                  OK_PULSE_MS);
-                        }
-                    } else {
-                        /* ⛔ NOT a pulse. The core is expected to signal this pad
-                         * instead -- and whether it does for a Bluetooth XBOX pad
-                         * is exactly what T-212 has never established. */
-                        gesture_log("confirmation pulse on %s: NOT SENT BY US -- the core "
-                                    "claims the signal here (transport=%s)",
-                                    w->prep_node, w->xport == 1 ? "bluetooth" : "wired");
-                    }
-                    w->ours_plugged = true;
-                    w->plug_miss = 0;
-                    w->plug_check_next = SDL_GetTicks() + PLUG_CHECK_MS;
-                    /* A CONTROLLER IS NOW BRIDGED, so warn if the TV's own
-                     * mouse mode is on (T-170). It will go on driving the host
-                     * cursor, which is DELIBERATE -- without it a bridged pad
-                     * cannot reach the settings page to choose a listener
-                     * preset, and you would need a second device -- but it
-                     * surprises anyone who then sets one.
-                     *
-                     * Only controllers reach this function at all: a keyboard
-                     * or mouse has no SDL controller behind its node and takes
-                     * the direct plug instead. So every path that bridges a
-                     * CONTROLLER passes here -- the chord, a panel row, Auto
-                     * Bridge and the control port -- and nothing else does.
-                     *
-                     * Posted rather than called: this file includes no UI
-                     * headers, and whether mouse mode is on is the streaming
-                     * controller's to answer. Same mechanism as the overlay
-                     * request below. */
-                    gesture_log("mouse-mode warning: posting the event");
-                    bus_pushevent(USER_CTM_MOUSE_MODE_WARN, NULL, NULL);
-                    /* ⭐⭐ GREEN ON SUCCESS, FOR A PAD THE CORE WILL NOT PAINT
-                     * (T-223). The paragraph below is still true for a
-                     * DualSense -- the core draws its green with its tone, so
-                     * the two arrive together -- but the core has no signal for
-                     * a Bluetooth DS4, which left the only lit pad in the set
-                     * going magenta straight back to its player colour, saying
-                     * nothing about whether the bridge worked.
-                     * ⓘ Steady, not a pattern: the host claims the light within
-                     * a moment of this and would cut a flash sequence in half. */
-                    if (core_signals_ok == false && app_configuration &&
-                        app_configuration->bridge.signal_light) {
-                        const int green_rc = flash_write(controller, 0x00, 0xff, 0x00);
-                        gesture_paint_logged(controller, "bridged green",
-                                             w->prep_node, green_rc);
-                        w->painted_slot = PAINTED_NEVER;   /* not the player colour now */
-                    }
-                    /* ⛔ PUT THE LIGHT BACK. The pre-plug pulse leaves magenta
-                     * and walks away: nothing after it repaints, so the light
-                     * stayed magenta until Steam claimed it -- long after the
-                     * controller was already working. Measured in step 3,
-                     * 2026-08-18.
-                     *
-                     * ⭐ The unplug path has done this all along; the plug path
-                     * never did, because on a cable the core's own signal
-                     * repainted it and hid the gap. */
-                    /* ⛔⛔ NO GREEN FROM THIS SIDE FOR A PAD THE CORE SIGNALS.
-                     * Changed 2026-08-19.
-                     *
-                     * ⚠️ It used to be drawn here, the moment the plug call
-                     * returned -- about a SECOND before the core plays the
-                     * confirmation tone. The light and the sound never arrived
-                     * together, and no amount of tuning the breath could fix
-                     * that, because they were triggered by different events.
-                     *
-                     * ⭐ The core paints it now, in the same code that plays the
-                     * tone, so they are simultaneous by construction.
-                     * ⓘ It went on to say green, yellow and red ALL come from
-                     * the core on both transports, and this side only puts the
-                     * player colour back. Not so since: the green above is drawn
-                     * here for a pad the core does not signal, and a wired
-                     * refusal's red flashes are drawn here too (code review,
-                     * 2026-10-05).
-                     *
-                     * ⓘ The green WILL stutter, because a bridge completing is
-                     * the moment the emulated pad retires and the real
-                     * controller arrives on the host. Knowingly traded for the
-                     * timing; see the note in ctm_bt_signal.inl. */
-                    /* ⛔ RETIRED AFTER THE PLUG, NOT BEFORE. Retiring first was
-                     * tried on 2026-08-18 to close the input gap and did not
-                     * help -- the gap is Bluetooth-only and wired has none, so
-                     * it is the device becoming usable, not the handover. And
-                     * it left a phantom: the pad is only restored when the
-                     * plugged-check notices the bridge has ended, which needs
-                     * ours_plugged, which is set here. */
-                    gesture_moonlight_set_excluded(w, controller, true);
-                }
-                if (!ok) {
-                    /* A refusal is signalled from here on BOTH transports: the
-                     * plug failed, so on a cable there is no session and no
-                     * speaker to write a richer one to.
-                     *
-                     * ⚠️ The one switch silences this too, deliberately. A
-                     * switch that keeps failures but drops successes sounds
-                     * thoughtful and is really a second thing to reason about
-                     * -- and if signals are off, being told nothing on failure
-                     * is what was asked for. */
-                    if (ctm_bridge_signals_enabled()) {
-                        /* ⭐ THE LIGHT AND THE SOUND ARE TWO DECISIONS, not
-                         * one -- because on a cable they live on different
-                         * devices.
-                         *
-                         * On Bluetooth the core's signal carries both: the
-                         * lightbar and the audio ride the same report. On a
-                         * cable the audio goes to the sound card and the
-                         * lightbar to the HID device, so the core can only do
-                         * the sound and the flashes have to come from here.
-                         *
-                         * Treating it as one decision left a wired refusal
-                         * with two tones and no red at all. */
-                        const bool sounded =
-                            ctm_bridge_signal_refused(w->prep_node);
-                        const bool lit =
-                            sounded && ctm_bridge_node_is_bluetooth(w->prep_node);
-
-                        if (lit) {
-                            /* ⭐ The core lit it, and its Bluetooth signal has
-                             * finished by the time the call returns. Then the
-                             * player colour (rhoquinn8217, 2026-09-15), where a
-                             * refused controller used to keep whatever the last
-                             * flash left. */
-                            paint_player_colour_for(w, controller);
-                        } else {
-                            /* ⭐ The user's switch. ⓘ The refusal is the one
-                             * worth being loudest about, so it is gated last
-                             * and independently of the others. */
-                            if (app_configuration->bridge.signal_light)
-                                flash_arm(w, 0xff, 0x00, 0x00, REFUSED_FLASHES);
-                        }
-                        if (!sounded) {
-                            /* ⭐ THREE BUZZES ONLY FOR A PAD WITH NO LIGHT
-                             * (rhoquinn8217, 2026-09-23): "non DS5 and non
-                             * DS4 don't have 3 because they don't have
-                             * lightbar or audio feedback." A pad with a light
-                             * says it in red, with the one buzz every other
-                             * signal has; a cabled DS4 was getting three. */
-                            const int bursts = SDL_GameControllerHasLED(controller) ? 1 : BUZZ_BURSTS;
-                            if (app_configuration->bridge.signal_rumble)
-                                w->buzz_left = (uint8_t)(bursts * 2);   /* on and off per burst */
-                            w->buzz_next = SDL_GetTicks();
-                        }
-                        gesture_log("refused on %s: core sounded=%d lit=%d",
-                                    w->prep_node, (int)sounded, (int)lit);
-                    }
-                }
-                return ok;
+                /* No thread to be had: here and now, as before. */
+                const bool ok = ctm_bridge_plug_node(w->prep_node);
+                return plug_answered(w, controller, ok, !ok && ctm_bridge_last_plug_unreachable());
             }
-            /* Up then back down: bright in the middle, dark at both ends, so it
-             * reads as a breath rather than a blink.
+            /* Rising, dark to full as the plug nears (pulse_level_rising),
+             * so the light is brightest as control is handed over.
              *
              * ⓘ Stays MAGENTA the whole way. Turning it green halfway was tried
              * on 2026-08-19 and rejected by rhoquinn8217: green before the plug means
@@ -1728,7 +1706,6 @@ static bool gesture_poll_one(SDL_GameController *controller, SDL_JoystickID id) 
              * because a bridge may be held for it from the first moment
              * (ds5_bridge_held); and its own clock, read past SDL until its
              * animation is over (ds5_light_ready). */
-            w->ds5_bt_checked = true;
             w->ds5_bt = path && ctm_bridge_node_is_bluetooth(path);
             if (w->ds5_bt && strncmp(path, "/dev/hidraw", 11) == 0) {
                 const int fd = open(path, O_RDONLY | O_NONBLOCK);
@@ -1749,7 +1726,7 @@ static bool gesture_poll_one(SDL_GameController *controller, SDL_JoystickID id) 
      * takeover first (flash_write_past_sdl), so a pad that SDL left on its
      * connection colour shows its player colour. Once a connection. */
     if (w->ds5_since != 0 && !w->ds5_took_light && !w->ours_plugged &&
-        (!w->ds5_bt_checked || w->ds5_bt) && ds5_light_ready(w)) {
+        w->ds5_bt && ds5_light_ready(w)) {
         paint_player_colour_for(w, controller);
     }
 
@@ -2056,8 +2033,8 @@ static bool arrival_node_appeared(void) {
  * only when no other pad on the driver is in use (arrival_check).
  *
  * ⓘ Which hint depends on the pad, so a missing DualSense does not disturb a
- * DS4 that is perfectly happy. ⚠️ The core's kind strings are cut to 8 bytes
- * ("ds5e_us"), hence the prefix test. */
+ * DS4 that is perfectly happy. ⓘ The prefix test dates from when the kind was
+ * cut to 8 bytes ("ds5e_us"); it is 16 now, and the prefix still fits both. */
 static const char *arrival_hidapi_hint(const char *kind) {
     if (kind == NULL) return NULL;
     if (strncmp(kind, "ds5", 3) == 0) return SDL_HINT_JOYSTICK_HIDAPI_PS5;
@@ -2121,9 +2098,14 @@ static void arrival_check(struct app_input_t *input) {
      * broadcasts for a listener -- the settings pane uses the quiet one for
      * exactly that reason -- and this runs a few seconds after ANY device
      * node appears, which includes replugging a dongle while a pad is
-     * bridged. A watchdog reads what is already known, and nothing else. */
+     * bridged.
+     * ⭐ And the last scan when it is younger than the node's appearance
+     * (2026-10-23): it then already holds the device, and the look costs no
+     * scan of its own. (This used to say a watchdog reads only what is known;
+     * the quiet list scanned every time.) */
     ctm_bridge_dev_t devs[16];
-    const int n = ctm_bridge_list_quiet(devs, 16);
+    const bool scanned_since = ctm_bridge_scan_age_ms() < (uint64_t) (ARRIVAL_SETTLE_MS - 500);
+    const int n = scanned_since ? ctm_bridge_list_quiet_known(devs, 16) : ctm_bridge_list_quiet(devs, 16);
     if (n <= 0) return;
 
     bool bridged = false;
@@ -2452,10 +2434,9 @@ void ctm_bridge_gesture_tick(struct app_input_t *input, struct session_t *sessio
         }
     }
 
-    /* ⭐ THE SETTING GATES THE WHOLE THING, at the one place it runs.
-     *
-     * ⓘ Returning here means no chord is ever detected: no pre-plug pulse, no
-     * plug, no watching.
+    /* ⭐ THE SETTING GATES THE CHORD, in gesture_poll_one ("THE GESTURE
+     * SWITCH BELONGS HERE"), not here: the tick returned early until
+     * 2026-08-20, which left a panel's request armed and never finished.
      *
      * ⓘ THE UNBRIDGE HALF IS GATED IN THE CORE, not here -- a bridged
      * controller's touchpad reports go through the bridge, so this side cannot
@@ -2468,7 +2449,19 @@ void ctm_bridge_gesture_tick(struct app_input_t *input, struct session_t *sessio
      * app switch, disconnect, crash -- unbridges everything. ➡️ So off means
      * off, in both directions, and the asymmetry was solving a problem that
      * does not exist. */
-    s_stream_input = session ? session_get_input(session) : NULL;
+    /* ⛔ ONLY WHILE THE STREAM TAKES INPUT (2026-10-23). The session lives on
+     * for seconds after its input stops, and it is freed by a bus action
+     * inside SDL's walk of its queue: a pad that left later in the same walk
+     * reached the freed session through this pointer
+     * (gesture_moonlight_forget_leaving). Once the input stops, the pointer
+     * goes, and so do the slots the bridge remembered in that stream's mask. */
+    stream_input_t *const was = s_stream_input;
+    s_stream_input = session && session_has_input(session) ? session_get_input(session) : NULL;
+    if (was != NULL && s_stream_input == NULL) {
+        for (int i = 0; i < MAX_WATCHED; ++i) {
+            s_watched[i].excluded_slot1 = 0;
+        }
+    }
     if (!input) {
         return;
     }

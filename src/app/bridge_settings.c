@@ -34,12 +34,12 @@ void bridge_settings_defaults(bridge_settings_t *settings) {
     set_string(&settings->auto_macs, "");
     set_string(&settings->auto_skip, "");
     settings->auto_all = false;
-    settings->override = false;
     settings->tv_cursor_x = -1;
     settings->tv_cursor_y = 3;
     settings->tv_cursor_regular = false;
     settings->tv_cursor_regular_x = 5;
     settings->tv_cursor_regular_y = -1;
+    settings->bt_auto_pair = true;
 }
 
 void bridge_settings_write(FILE *fp, const bridge_settings_t *settings) {
@@ -59,12 +59,12 @@ void bridge_settings_write(FILE *fp, const bridge_settings_t *settings) {
     write_list(fp, "bridge_auto_mark", settings->auto_macs);
     write_list(fp, "bridge_auto_skip", settings->auto_skip);
     ini_write_bool(fp, "bridge_auto_all", settings->auto_all);
-    ini_write_bool(fp, "bridge_override", settings->override);
     ini_write_int(fp, "tv_cursor_shift_x", settings->tv_cursor_x);
     ini_write_int(fp, "tv_cursor_shift_y", settings->tv_cursor_y);
     ini_write_string(fp, "tv_cursor_look", settings->tv_cursor_regular ? "regular" : "sharp");
     ini_write_int(fp, "tv_cursor_regular_shift_x", settings->tv_cursor_regular_x);
     ini_write_int(fp, "tv_cursor_regular_shift_y", settings->tv_cursor_regular_y);
+    ini_write_bool(fp, "bt_auto_pair_dualsense", settings->bt_auto_pair);
 }
 
 bool bridge_settings_parse(bridge_settings_t *settings, const char *name, const char *value) {
@@ -93,7 +93,8 @@ bool bridge_settings_parse(bridge_settings_t *settings, const char *name, const 
     } else if (INI_NAME_MATCH("bridge_auto_all")) {
         settings->auto_all = INI_IS_TRUE(value);
     } else if (INI_NAME_MATCH("bridge_override")) {
-        settings->override = INI_IS_TRUE(value);
+        /* ⓘ Read and ignored: Bridge Override is gone (bridge_settings.h), and
+         * a file saved before then still has the line until its next save. */
     } else if (INI_NAME_MATCH("tv_cursor_shift_x")) {
         settings->tv_cursor_x = atoi(value);
     } else if (INI_NAME_MATCH("tv_cursor_shift_y")) {
@@ -104,6 +105,8 @@ bool bridge_settings_parse(bridge_settings_t *settings, const char *name, const 
         settings->tv_cursor_regular_x = atoi(value);
     } else if (INI_NAME_MATCH("tv_cursor_regular_shift_y")) {
         settings->tv_cursor_regular_y = atoi(value);
+    } else if (INI_NAME_MATCH("bt_auto_pair_dualsense")) {
+        settings->bt_auto_pair = INI_IS_TRUE(value);
     } else {
         return false;
     }

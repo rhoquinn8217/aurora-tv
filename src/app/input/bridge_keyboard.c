@@ -23,6 +23,7 @@
 #include "ctm_bridge_glue.h"
 #include "ctm_bridge_gesture.h"
 #include "tv_cursor.h"
+#include "webos_popup.h"
 #include "ui/streaming/cursor_align.h"
 #include "stream/session.h"
 #include "stream/session_priv.h"
@@ -193,7 +194,7 @@ static bool s_nodes_known = false;
 /* The record a person can read on any set: logs/tv-keyboard.log, beside the
  * bridge core's own logs and stamped with the same clock. ⓘ commons_log goes
  * to PmLog, which a C1 or a C3 does not let the developer account read.
- * ⛔ From the app's loop only: the core builds the path in one shared buffer. */
+ * ⓘ The core builds the path in a buffer of each thread's own (log_path.inl). */
 #define KEYBOARD_LOG "tv-keyboard.log"
 #define KEYBOARD_LOG_MAX_BYTES (128L * 1024L)
 FILE *ctm_log_open(const char *name, const char *mode);
@@ -252,7 +253,7 @@ static int nav_slot_for_sym(SDL_Keycode sym) {
 
 bool bridge_keyboard_node_is_bridged(const char *event_path) {
     /* ⛔ Not before the bridge is running: nothing can be bridged outside a
-     * stream, and asking the glue would bring the core up early. */
+     * stream, so there is nothing to look for. */
     if (event_path == NULL || !ctm_bridge_active()) {
         return false;
     }
@@ -473,6 +474,16 @@ static void read_bridged_nodes(void) {
             if (slot < 0 || down == s_bridged_down[slot]) {
                 continue;
             }
+            /* ⭐ Not to the overlay behind a webOS pop-up: webOS reads this
+             * keyboard itself while the core has let it go, and answers with
+             * it. Unless the align bar holds it: then the key is the remote's
+             * (input/webos_popup.h). */
+            if (down && webos_popup_up()) {
+                if (s_bridged_taken[i]) {
+                    (void) webos_popup_take_key(k_nav[slot].vk, true);
+                }
+                continue;
+            }
             s_bridged_down[slot] = down;
             feed_overlay_from(slot, down, 0, true);
         }
@@ -516,6 +527,13 @@ void bridge_keyboard_take_bridged(bool take) {
 
 bool bridge_keyboard_evdev_key(stream_input_t *input, short vk, bool down, char modifiers) {
     SDL_AtomicAdd(&s_evdev_keys, 1);
+    /* ⭐ A webOS pop-up has the focus: a key going down is the pop-up's, sent
+     * on as the remote's or nowhere, and never to the host or the overlay
+     * behind it (input/webos_popup.h). A key let go goes on below, so the
+     * host lets go of one it was holding. */
+    if (webos_popup_take_key(vk, down)) {
+        return true;
+    }
     const bool overlay = s_overlay_open;
     if (overlay && !s_reader_in_overlay) {
         /* ⛔ The first key since the overlay opened: whatever the host still
@@ -965,8 +983,7 @@ void bridge_keyboard_tick(bool overlay_shown) {
     s_look_again_at = 0;
     /* Let go of everything, then look again: the scan skips what is bridged
      * (bridge_keyboard_node_is_bridged) and takes what has been released or
-     * has just connected. ⓘ Whatever Bridge Override says: it leaves the
-     * keyboard alone. */
+     * has just connected. */
     let_go(input);
     session_input_set_keyboard_grab(input, true);
     const bool holding = input->keyboard_evdev != NULL;

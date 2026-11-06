@@ -6,6 +6,7 @@
 #include <SDL.h>
 
 #include "errors.h"
+#include "logging.h"
 #include "session.h"
 #include "session_priv.h"
 
@@ -35,6 +36,7 @@ void connect_cancel_done(session_t *session, GS_CLIENT client) {
     if (cancelled) {
         /* What the cut-short launch or connection reported was the cancel. */
         streaming_error(session, GS_OK, "");
+        commons_log_info("Session", "Cancelled by the user: the error above was the cancel, and is not shown");
     }
 }
 
@@ -48,6 +50,7 @@ bool connect_cancel_now(session_t *session) {
     if (!connecting) {
         return false;
     }
+    commons_log_info("Session", "Cancel pressed while connecting: the launch and the connection give up");
     SDL_AtomicLock(&s_lock);
     s_cancelled = true;
     if (s_client != NULL) {

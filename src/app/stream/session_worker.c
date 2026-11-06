@@ -192,12 +192,14 @@ int session_worker(session_t *session) {
         SDL_CondWait(session->cond, session->mutex);
     }
     SDL_UnlockMutex(session->mutex);
-    /* The stream is ending, whoever ended it: stop adaptive bitrate first, so
-     * no bitrate request can reach the host after its stream has gone (see
-     * adaptive_bitrate_stop). */
+    /* The stream is ending, whoever ended it: stop adaptive bitrate before
+     * LiStopConnection, so no bitrate request can reach the host after its
+     * stream has gone (see adaptive_bitrate_stop). "Disconnecting..." first:
+     * CLOSE asks nothing of the host, and the stop waits for a request in
+     * flight, up to its 5 s cap (2026-10-23). */
+    bus_pushevent(USER_STREAM_CLOSE, NULL, NULL);
     adaptive_bitrate_stop(session->abr);
     session->abr = NULL;
-    bus_pushevent(USER_STREAM_CLOSE, NULL, NULL);
 
     session_set_state(session, STREAMING_DISCONNECTING);
     LiStopConnection();

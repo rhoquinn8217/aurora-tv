@@ -9,14 +9,11 @@
 #include "bridge_proof.h"
 #include "input/bridge_override.h"
 #include "input/bridge_keyboard.h"
+#include "stream/input/bridge_switch_hold.h"   /* nothing held across streams */
 #if defined(TARGET_WEBOS)
 #include "input/ctm_bridge_gesture.h"
 #include "input/auto_bridge.h"
 #endif
-
-bool bridge_session_vmouse_allowed(void) {
-    return !bridge_override_active();
-}
 
 /* ⛔⛔ NOT INSIDE SDL'S EVENT FILTER (code review, 2026-10-05). The stream's
  * start and stop reach the two functions below from session_start_input and
@@ -44,6 +41,8 @@ static void bridge_session_start_now(session_t *session);
 static void bridge_session_stop_now(void);
 
 void bridge_session_started(session_t *session) {
+    bridge_switch_hold_reset();
+    bridge_override_stream_started();   /* the pop-up's touchpad switch is for one stream */
     if (s_pending_count == PENDING_MAX) {
         /* ⓘ Never seen: four starts and stops in one pass. Run them rather
          * than lose one. */
@@ -55,6 +54,7 @@ void bridge_session_started(session_t *session) {
 }
 
 void bridge_session_stopped(void) {
+    bridge_switch_hold_reset();
     if (s_pending_count > 0 && s_pending[s_pending_count - 1].kind == PENDING_START) {
         --s_pending_count;   /* its start never ran: nothing to stop */
         return;
@@ -94,14 +94,15 @@ static void bridge_session_start_now(session_t *session) {
                            app_configuration->bridge.signal_rumble,
                            app_configuration->bridge.signal_tone);
     /* ⓘ Wired only. The Bluetooth setting is greyed out on this branch and
-     * the core refuses it regardless -- see app_settings.h. */
+     * the core refuses it regardless -- see bridge_settings.h. */
     ctm_bridge_set_mic_capture(app_configuration->bridge.mic_wired);
     /* ⓘ Off, the bridge starts nothing for this stream; see the glue. */
     ctm_bridge_set_enabled(app_configuration->bridge.enable);
 
-    // Keep Moonlight's controllers open (UI nav still works); host sends are
-    // gated and the controller-arrival is suppressed, so nothing reaches the
-    // host. The bridge forwards the plugged controller to the game itself.
+    // Keep Moonlight's controllers open (UI nav still works); a bridged pad's
+    // slot is left out of the mask Moonlight announces and its sends are
+    // gated, so nothing of it reaches the host twice. The bridge forwards the
+    // plugged controller to the game itself.
     //
     // The agent runs on the machine we are streaming from, so hand the
     // bridge that address rather than letting it broadcast for one: a
@@ -142,25 +143,6 @@ static void bridge_session_stop_now(void) {
 #if defined(TARGET_WEBOS)
     ctm_bridge_gesture_restore_player_colours();
 #endif
-}
-
-bool bridge_session_vmouse_pressed(session_t *session) {
-    /* ⭐ THE PRESS WINS (rhoquinn8217, 2026-09-30, in place of a notice refusing
-     * it): Virtual Mouse pressed while Bridge Override is on switches the
-     * override off and the virtual mouse on.
-     * ⓘ Every way of switching the virtual mouse comes through
-     * session_toggle_vmouse(): the overlay's button, and the USER_TOGGLE_VMOUSE
-     * event, which the control port sends. So this is the one place that
-     * decides it, and the overlay's two handlers are upstream's.
-     * ⭐ Since 2026-10-01 this is the ONLY way a person switches the override
-     * off. The question a bridge raises switches it on (bridge_prompt.h), and
-     * it has no button of its own. ⓘ Nothing is said about it: the override's
-     * other switches come back with the mouse, without a notice. */
-    if (!bridge_override_active()) {
-        return false;
-    }
-    bridge_override_release_for_vmouse(session);
-    return true;
 }
 
 bool bridge_session_vmouse_active(session_t *session) {

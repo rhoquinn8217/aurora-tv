@@ -1,5 +1,4 @@
 target_sources(moonlight-lib PRIVATE
-        bridge_switch_hold.c
         keyboard_input.c
         session_input.c
         session_keyboard.c
