@@ -115,18 +115,22 @@ static void row_place(void) {
     } else {
         lv_obj_get_content_coords(s_panel, &keys);
     }
-    /* The tab's own padding reaches past its words, so past the keys' end too. */
-    const lv_coord_t x = keys.x2 - panel.x2 + TAB_PAD_HOR;
     const bool top = keyboard_place_at_top();
+    const lv_coord_t width = lv_obj_get_width(s_row);
+    const lv_coord_t height = lv_obj_get_height(s_row);
     const lv_coord_t strip = top ? panel.y2 - keys.y2 : keys.y1 - panel.y1;
     /* A strip lower than the row would be: past the panel's edge, never over the keys. */
-    const lv_coord_t spare = strip - lv_obj_get_height(s_row);
+    const lv_coord_t spare = strip - height;
     const lv_coord_t in = spare >= 0 ? spare / 2 : spare;
-    if (top) {
-        lv_obj_align_to(s_row, s_panel, LV_ALIGN_BOTTOM_RIGHT, x, -in);
-    } else {
-        lv_obj_align_to(s_row, s_panel, LV_ALIGN_TOP_RIGHT, x, in);
-    }
+    /* Where the row starts on the screen; the tab's own padding reaches past its
+     * words, so past the keys' end too. ⛔ Not lv_obj_align_to: its inside
+     * alignments count from inside the panel's padding, which put the words 20 px
+     * in from here on the C1, almost on F12 (Build 650). */
+    const lv_coord_t x1 = keys.x2 + TAB_PAD_HOR - width + 1;
+    const lv_coord_t y1 = top ? panel.y2 - in - height + 1 : panel.y1 + in;
+    lv_area_t frame;
+    lv_obj_get_content_coords(lv_obj_get_parent(s_row), &frame);
+    lv_obj_set_pos(s_row, x1 - frame.x1, y1 - frame.y1);
 }
 
 static void panel_resized(lv_event_t *event) {
