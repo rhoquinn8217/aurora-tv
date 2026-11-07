@@ -21,7 +21,7 @@
  * inside of a button?"). A tab is its mark and its words alone, on the panel, in
  * the strip between the panel's edge and the keys, so they read over any picture.
  * Its padding stays as the target a pointer aims at, and a press turns it the
- * purple a focused key is outlined in. */
+ * purple a focused key is outlined in.
  *
  * ⓘ A click on the dimmed picture does NOT close the keyboard, on purpose
  * (rhoquinn8217, 2026-10-23): keys are clicked with the remote's pointer, and a
