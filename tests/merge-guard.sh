@@ -511,7 +511,7 @@ need "the on-screen keyboard's Circle does not send Esc at a lock" \
      src/app/lvgl/input/lv_drv_sdl_key.c "if (vk == VK_ESCAPE && lock_keys_active())"
 need "Create moves the on-screen keyboard" \
      src/app/lvgl/input/lv_drv_sdl_key.c "keyboard_place_button(e.cbutton.which, e.cbutton.button, pressed)"
-need "... from where it was put, with the line that says so" \
+need "... from where it was put" \
      src/app/ui/streaming/soft_keyboard.c "keyboard_place_attach(kbd_content);"
 need "the buttons type, and the numpad shows, from the app's loop" \
      src/app/bridge_app.c "lock_keys_tick(app);"
@@ -753,6 +753,56 @@ need "libgamestream builds the gate" \
 # #703). Upstream's line, back from a merge, still compiles.
 absent "the launch does NOT ask for continuous audio" \
      core/libgamestream/src/client.c '"continuousAudio"'
+
+# --- The add-a-computer box opens filled in, with a clear button; the stream's
+# keyboard has Move and Close tabs (rhoquinn8217, 2026-10-23 and 2026-11-06) ---
+# ⓘ A line of ours in each of two upstream files. Taking upstream's back
+# compiles, and the box opens empty with nothing to empty it in one click, or
+# the keyboard has nothing a pointer can move or close it with
+# (src/app/ui/launcher/add_server_box.c, src/app/ui/streaming/keyboard_tabs.c).
+in_order "the add-a-computer box opens with the TV's own network, and a clear button" \
+     src/app/ui/launcher/add.dialog.c "static lv_obj_t *create_dialog" \
+     "type_into_box(dialog, ip_input, btns, 1);" "add_server_box(ip_input, btns, 1);"
+in_order "the stream's keyboard has its Move and Close tabs" \
+     src/app/ui/streaming/soft_keyboard.c "lv_obj_t *soft_keyboard_create(lv_obj_t *parent, session_t *session," \
+     "lv_obj_add_event_cb(cont, container_delete_cb, LV_EVENT_DELETE, kbd);" "keyboard_tabs_create(cont, kbd_content);"
+need "the box's filling is built" \
+     src/app/ctmbridge/app_sources.cmake "src/app/ui/launcher/add_server_box.c"
+need "the tabs are built" \
+     src/app/ctmbridge/app_sources.cmake "src/app/ui/streaming/keyboard_tabs.c"
+
+# --- A controller types into the add-a-computer box: a number pad, and
+# aurora-tv's own keyboard for a name (rhoquinn8217, 2026-11-06) ---
+# ⓘ The keyboard is the stream's, opened with no stream, and what a key would
+# send to a host goes into the box (src/app/ui/common/keyboard_text.c). Lines of
+# ours in two upstream files. Taking upstream's back compiles: then a key sends
+# nothing anywhere, closing the keyboard crashes on the stream it does not have,
+# and its L1, R1 and L2 do nothing.
+in_order "the keyboard's keys go into a box while it types into one" \
+     src/app/ui/streaming/soft_keyboard.c "static void kbd_send_key(soft_kbd_t *kbd, short vk, bool down)" \
+     "if (keyboard_text_send(vk, down, kbd->mods.shift)) { return; }" "keyboard_input_send_key(kbd->input"
+in_order "... a shifted key too" \
+     src/app/ui/streaming/soft_keyboard.c "static void kbd_send_key_shift(soft_kbd_t *kbd, short vk, bool down)" \
+     "if (keyboard_text_send(vk, down, true)) { return; }" "keyboard_input_send_key(kbd->input"
+need "... and with no stream it closes without touching one" \
+     src/app/ui/streaming/soft_keyboard.c "if (kbd->input != NULL) { stream_input_flush_pressed_keys(kbd->input); }"
+need "... and its L1, R1 and L2 work without one" \
+     src/app/ui/streaming/soft_keyboard.c "(!kbd->input && !keyboard_text_shown())"
+need "... and a controller's buttons reach it" \
+     src/app/lvgl/input/lv_drv_sdl_key.c "if (!keyboard_text_button(&e)) {"
+need "... L2 too" \
+     src/app/lvgl/input/lv_drv_sdl_key.c "(streaming_soft_keyboard_shown() || keyboard_text_shown())"
+need "the keyboard that types into a box is built" \
+     src/app/ctmbridge/app_sources.cmake "src/app/ui/common/keyboard_text.c"
+
+# --- One key at a time, the newer one winning (rhoquinn8217, 2026-11-07) ---
+# ⓘ With Cross still held on a key, the d-pad did not move: LVGL's keypad reads
+# a second key as the first still held. Lines of ours in an upstream file;
+# taking upstream's back compiles, and the d-pad waits for Cross again.
+need "a key pressed while another is held lets the held one go first" \
+     src/app/lvgl/input/lv_drv_sdl_key.c "if (key_handover(input, state, data)) {"
+need "... and goes in on the next read" \
+     src/app/lvgl/input/lv_drv_sdl_key.c "if (handover_pending) {"
 
 echo
 if [ "$fail" -eq 0 ]; then

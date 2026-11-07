@@ -12,6 +12,8 @@
 #include "stream/input/vk.h"
 #include "stream/session.h"
 #include "lvgl/theme/lv_theme_moonlight_colors.h"
+#include "keyboard_tabs.h"
+#include "ui/common/keyboard_text.h"
 
 #include <Limelight.h>
 #include <stdlib.h>
@@ -293,10 +295,12 @@ static void kbd_toggle_layer(soft_kbd_t *kbd, kbd_data_t *kd) {
 }
 
 static void kbd_send_key(soft_kbd_t *kbd, short vk, bool down) {
+    if (keyboard_text_send(vk, down, kbd->mods.shift)) { return; }   /* This fork: typing into a box (ui/common/keyboard_text.h). */
     keyboard_input_send_key(kbd->input, vk, down, &kbd->mods, app_configuration->syskey_capture);
 }
 
 static void kbd_send_key_shift(soft_kbd_t *kbd, short vk, bool down) {
+    if (keyboard_text_send(vk, down, true)) { return; }   /* This fork: typing into a box (ui/common/keyboard_text.h). */
     keyboard_modifier_state_t mods = kbd->mods;
     mods.shift = true;
     keyboard_input_send_key(kbd->input, vk, down, &mods, app_configuration->syskey_capture);
@@ -433,7 +437,7 @@ static void container_delete_cb(lv_event_t *e) {
         kbd_release_held_key(kbd);
         kbd->btnm = NULL;
         kbd_force_release(kbd);
-        stream_input_flush_pressed_keys(kbd->input);
+        if (kbd->input != NULL) { stream_input_flush_pressed_keys(kbd->input); }   /* This fork: none when it typed into a box. */
         if (kbd->group) {
             lv_group_del(kbd->group);
         }
@@ -455,7 +459,7 @@ void soft_keyboard_focus_keys(lv_obj_t *keyboard_container) {
 
 bool soft_keyboard_gamepad_shortcut(soft_kbd_gp_action_t action, bool pressed) {
     soft_kbd_t *kbd = g_active_kbd;
-    if (!kbd || !kbd->btnm || !kbd->input || !kbd->kd) {
+    if (!kbd || !kbd->btnm || (!kbd->input && !keyboard_text_shown()) || !kbd->kd) {   /* This fork: or typing into a box. */
         return false;
     }
 
@@ -597,6 +601,7 @@ lv_obj_t *soft_keyboard_create(lv_obj_t *parent, session_t *session,
     lv_obj_add_event_cb(btnm, kbd_data_delete_cb, LV_EVENT_DELETE, kd);
     lv_group_focus_obj(btnm);
     lv_obj_add_event_cb(cont, container_delete_cb, LV_EVENT_DELETE, kbd);
+    keyboard_tabs_create(cont, kbd_content);   /* This fork: Move and Close tabs, for a pointer. */
 
     return cont;
 }
