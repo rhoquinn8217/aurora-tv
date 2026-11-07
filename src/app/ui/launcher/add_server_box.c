@@ -232,6 +232,11 @@ static void pad_style(lv_obj_t *pad) {
     lv_obj_set_style_border_color(pad, lv_color_hex(FOCUS), LV_PART_ITEMS | LV_STATE_FOCUS_KEY);
     lv_obj_set_style_border_width(pad, LV_DPX(3), LV_PART_ITEMS | LV_STATE_FOCUSED);
     lv_obj_set_style_border_width(pad, LV_DPX(3), LV_PART_ITEMS | LV_STATE_FOCUS_KEY);
+    /* And no more: the theme's blue outline around it too made two halos, the
+     * blue one cut off at the pad's edge (rhoquinn8217, 2026-11-06: "Keep the
+     * purple one becaue the blue one clips outs"). */
+    lv_obj_set_style_outline_width(pad, 0, LV_PART_ITEMS | LV_STATE_FOCUSED);
+    lv_obj_set_style_outline_width(pad, 0, LV_PART_ITEMS | LV_STATE_FOCUS_KEY);
 }
 
 /* Under the box, in two rows more of upstream's grid: the pad, then what its
