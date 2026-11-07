@@ -1,4 +1,4 @@
-/* The stream's on-screen keyboard has two tabs on its edge: Move and Close.
+/* The stream's on-screen keyboard has two tabs at its edge: Move and Close.
  *
  * ⭐ CLOSE (rhoquinn8217, 2026-10-23): "for gui's aurora-tv on screen keyboard
  * add a button to close it." GuiDev1994's keyboard (soft_keyboard.c) closes with
@@ -13,10 +13,15 @@
  * controller connected too, without Create's mark then.
  *
  * ⓘ WHERE (their picture, the same day): side by side at the right end, Close
- * last, its right end over the keys' right end (F12's), on the edge that faces
- * the middle of the screen: the top edge while the keyboard is at the bottom, the
- * bottom edge while it is at the top. They overlap the panel's padding, not the
- * keys.
+ * last, its right end over the keys' right end (F12's), on the side that faces
+ * the middle of the screen: above the keys while the keyboard is at the bottom,
+ * below them while it is at the top.
+ *
+ * ⭐ NO BOX (rhoquinn8217, the same day: "can you have them floating and not
+ * inside of a button?"). A tab is its mark and its words alone, on the panel, in
+ * the strip between the panel's edge and the keys, so they read over any picture.
+ * Its padding stays as the target a pointer aims at, and a press turns it the
+ * purple a focused key is outlined in. */
  *
  * ⓘ A click on the dimmed picture does NOT close the keyboard, on purpose
  * (rhoquinn8217, 2026-10-23): keys are clicked with the remote's pointer, and a

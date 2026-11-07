@@ -13,12 +13,13 @@
 #include "util/i18n.h"
 #include "util/user_event.h"
 
-/* The keys' own colours (soft_keyboard.c: KBD_KEY_BG, KBD_KEY_PRESS). */
-#define TAB_BG      0x2C2C2C
-#define TAB_PRESS   0x3A3A3A
+/* Words on the panel, with no box: light, and while pressed the purple a focused
+ * key is outlined in (soft_keyboard.c: KBD_FOCUS_PURPLE). */
 #define TAB_TEXT    0xEBEBEB
-/* How far the tabs reach over the panel's padding. */
-#define TAB_OVERLAP LV_DPX(6)
+#define TAB_PRESS   0x8B5CF6
+/* Around the words, the target a pointer aims at: what the boxed tabs had. */
+#define TAB_PAD_HOR LV_DPX(12)
+#define TAB_PAD_VER LV_DPX(6)
 #define TAB_MARK    LV_DPX(18)
 
 static lv_obj_t *s_row;
@@ -39,7 +40,8 @@ static void move_clicked(lv_event_t *event) {
 }
 
 /* A plain object, not a button, and in no group: the pad and the arrows keep
- * walking the keys alone; a tab is for a pointer. */
+ * walking the keys alone; a tab is for a pointer. No fill and no border: the
+ * words float on the panel (rhoquinn8217, 2026-11-06). */
 static lv_obj_t *tab_create(lv_obj_t *row, lv_event_cb_t clicked) {
     lv_obj_t *tab = lv_obj_create(row);
     lv_obj_remove_style_all(tab);
@@ -48,16 +50,12 @@ static lv_obj_t *tab_create(lv_obj_t *row, lv_event_cb_t clicked) {
     lv_obj_set_size(tab, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
     lv_obj_set_flex_flow(tab, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(tab, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_hor(tab, LV_DPX(12), 0);
-    lv_obj_set_style_pad_ver(tab, LV_DPX(6), 0);
+    lv_obj_set_style_pad_hor(tab, TAB_PAD_HOR, 0);
+    lv_obj_set_style_pad_ver(tab, TAB_PAD_VER, 0);
     lv_obj_set_style_pad_column(tab, LV_DPX(6), 0);
-    lv_obj_set_style_radius(tab, LV_DPX(8), 0);
-    lv_obj_set_style_bg_color(tab, lv_color_hex(TAB_BG), 0);
-    lv_obj_set_style_bg_color(tab, lv_color_hex(TAB_PRESS), LV_STATE_PRESSED);
-    lv_obj_set_style_bg_opa(tab, LV_OPA_COVER, 0);
-    lv_obj_set_style_border_color(tab, lv_color_hex(TAB_PRESS), 0);
-    lv_obj_set_style_border_width(tab, 1, 0);
+    /* All of a tab takes its colour from the tab, so a press turns all of it purple. */
     lv_obj_set_style_text_color(tab, lv_color_hex(TAB_TEXT), 0);
+    lv_obj_set_style_text_color(tab, lv_color_hex(TAB_PRESS), LV_STATE_PRESSED);
     lv_obj_add_event_cb(tab, clicked, LV_EVENT_CLICKED, NULL);
     return tab;
 }
@@ -73,35 +71,61 @@ static void tab_words(lv_obj_t *tab, const char *words) {
 static void move_fill(void) {
     lv_obj_clean(s_move);
     if (global != NULL && app_input_get_gamepads_count(&global->input) > 0) {
-        pad_mark_create(s_move, PAD_MARK_VIEW, pad_family_current(), TAB_MARK, lv_color_hex(TAB_TEXT));
+        lv_obj_t *mark = pad_mark_create(s_move, PAD_MARK_VIEW, pad_family_current(), TAB_MARK,
+                                         lv_color_hex(TAB_TEXT));
+        /* The tab's colour instead, pressed or not, as the words take it. */
+        lv_obj_remove_local_style_prop(mark, LV_STYLE_TEXT_COLOR, 0);
     }
     tab_words(s_move, keyboard_place_at_top() ? locstr("Move to bottom") : locstr("Move to top"));
 }
 
-/* Overlapping the panel's padding but not the keys, Close's right end over the
- * keys' right end. The keys sit inside the panel's padding and inside their
- * button matrix's own, which the theme sets: the panel's alone left the Close
- * tab 46 px past F12 on the rooted monitor (Build 583). */
+/* The button matrix that holds the keys, inside the panel. */
+static lv_obj_t *keys_of(lv_obj_t *panel) {
+    const uint32_t children = lv_obj_get_child_cnt(panel);
+    for (uint32_t i = 0; i < children; ++i) {
+        lv_obj_t *child = lv_obj_get_child(panel, (int32_t) i);
+        if (lv_obj_check_type(child, &lv_btnmatrix_class)) {
+            return child;
+        }
+    }
+    return NULL;
+}
+
+/* Inside the panel, in the strip between its edge and the keys on the side that
+ * faces the middle, centred across that strip, the words' right end over the
+ * keys' right end (F12's). The keys sit inside the panel's padding and inside
+ * their button matrix's own, which the theme sets: the panel's alone put the
+ * Close tab 46 px past F12 on the rooted monitor (Build 583). */
 static void row_place(void) {
     if (s_row == NULL || s_panel == NULL) {
         return;
     }
-    lv_coord_t inset = lv_obj_get_style_pad_right(s_panel, LV_PART_MAIN);
-    const uint32_t children = lv_obj_get_child_cnt(s_panel);
-    for (uint32_t i = 0; i < children; ++i) {
-        lv_obj_t *child = lv_obj_get_child(s_panel, (int32_t) i);
-        if (lv_obj_check_type(child, &lv_btnmatrix_class)) {
-            inset += lv_obj_get_style_pad_right(child, LV_PART_MAIN);
-            break;
-        }
-    }
     /* The panel is placed by layout, and Move's words change the row's width: lay
-     * out first, then place. */
+     * out first, then measure and place. */
     lv_obj_update_layout(s_panel);
-    if (keyboard_place_at_top()) {
-        lv_obj_align_to(s_row, s_panel, LV_ALIGN_OUT_BOTTOM_RIGHT, -inset, -TAB_OVERLAP);
+    lv_area_t panel;
+    lv_area_t keys;
+    lv_obj_get_coords(s_panel, &panel);
+    lv_obj_t *matrix = keys_of(s_panel);
+    if (matrix != NULL) {
+        lv_obj_get_coords(matrix, &keys);
+        keys.x2 -= lv_obj_get_style_pad_right(matrix, LV_PART_MAIN);
+        keys.y1 += lv_obj_get_style_pad_top(matrix, LV_PART_MAIN);
+        keys.y2 -= lv_obj_get_style_pad_bottom(matrix, LV_PART_MAIN);
     } else {
-        lv_obj_align_to(s_row, s_panel, LV_ALIGN_OUT_TOP_RIGHT, -inset, TAB_OVERLAP);
+        lv_obj_get_content_coords(s_panel, &keys);
+    }
+    /* The tab's own padding reaches past its words, so past the keys' end too. */
+    const lv_coord_t x = keys.x2 - panel.x2 + TAB_PAD_HOR;
+    const bool top = keyboard_place_at_top();
+    const lv_coord_t strip = top ? panel.y2 - keys.y2 : keys.y1 - panel.y1;
+    /* A strip lower than the row would be: past the panel's edge, never over the keys. */
+    const lv_coord_t spare = strip - lv_obj_get_height(s_row);
+    const lv_coord_t in = spare >= 0 ? spare / 2 : spare;
+    if (top) {
+        lv_obj_align_to(s_row, s_panel, LV_ALIGN_BOTTOM_RIGHT, x, -in);
+    } else {
+        lv_obj_align_to(s_row, s_panel, LV_ALIGN_TOP_RIGHT, x, in);
     }
 }
 
