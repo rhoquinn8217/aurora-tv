@@ -123,11 +123,12 @@ static void keyboard_closed(bool enter, void *user) {
     lv_obj_clear_flag(parts->pad, LV_OBJ_FLAG_HIDDEN);
     lv_obj_clear_flag(parts->legend, LV_OBJ_FLAG_HIDDEN);
     lv_obj_center(parts->window);
+    /* Back on the Keyboard key, now or from Cancel and OK. */
+    parts->back_to = PAD_KEYBOARD;
     if (enter) {
         lv_group_focus_obj(parts->buttons);
         lv_btnmatrix_set_selected_btn(parts->buttons, parts->ok);
     } else {
-        parts->back_to = PAD_KEYBOARD;
         lv_group_focus_obj(parts->pad);
     }
 }
@@ -137,7 +138,11 @@ static void pad_pressed(lv_event_t *event) {
     const uint16_t id = lv_btnmatrix_get_selected_btn(parts->pad);
     if (id == PAD_KEYBOARD) {
         if (!keyboard_text_shown()) {
-            /* Out of the way, so the window fits above or below the keyboard. */
+            /* Out of the way, so the window fits above or below the keyboard. Not
+             * focused-looking first: LVGL hands a hidden object's focus on, and
+             * Cancel lit up under the keyboard (Build 653). The window's focus
+             * stays on the pad, for when the keyboard goes. */
+            lv_obj_clear_state(parts->pad, LV_STATE_FOCUSED | LV_STATE_FOCUS_KEY);
             lv_obj_add_flag(parts->pad, LV_OBJ_FLAG_HIDDEN);
             lv_obj_add_flag(parts->legend, LV_OBJ_FLAG_HIDDEN);
             keyboard_text_open(parts->box, parts->window, keyboard_closed, parts);
