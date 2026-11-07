@@ -258,7 +258,10 @@ static void pad_create(box_parts_t *parts) {
     s_pad_map[PAD_MAP_KEYBOARD] = locstr("Keyboard");
     lv_obj_t *pad = lv_btnmatrix_create(content);
     lv_btnmatrix_set_map(pad, s_pad_map);
-    lv_btnmatrix_set_btn_ctrl(pad, PAD_KEYBOARD, LV_BTNMATRIX_CTRL_NO_REPEAT);
+    /* A key types once however long Cross is held, as on aurora-tv's keyboard:
+     * held while the d-pad moves on, a digit typed itself again and again (Build
+     * 656 on the rooted monitor, a second's hold: "111111"). */
+    lv_btnmatrix_set_btn_ctrl_all(pad, LV_BTNMATRIX_CTRL_NO_REPEAT);
     lv_obj_set_grid_cell(pad, LV_GRID_ALIGN_CENTER, 0, 3, LV_GRID_ALIGN_START, 3, 1);
     lv_obj_set_size(pad, LV_DPX(220), PAD_ROWS * LV_DPX(26) + (PAD_ROWS - 1) * LV_DPX(6));
     pad_style(pad);
