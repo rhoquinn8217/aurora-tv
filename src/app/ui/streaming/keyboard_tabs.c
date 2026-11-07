@@ -8,6 +8,7 @@
 #include "lvgl/font/material_icons_regular_symbols.h"
 #include "util/font.h"   /* app_fonts_t, which the theme's header names without declaring */
 #include "lvgl/theme/lv_theme_moonlight.h"
+#include "ui/common/keyboard_text.h"
 #include "ui/common/pad_marks.h"
 #include "util/bus.h"
 #include "util/i18n.h"
@@ -28,6 +29,11 @@ static lv_obj_t *s_move;
 
 static void close_clicked(lv_event_t *event) {
     LV_UNUSED(event);
+    /* Typing into a box of the app's: it closes itself (ui/common/keyboard_text.h). */
+    if (keyboard_text_shown()) {
+        keyboard_text_close(false);
+        return;
+    }
     /* As the remote's Back (lvgl/input/lv_drv_sdl_key.c): the stream screen
      * closes the keyboard and tells the session it has gone. */
     bus_pushevent(USER_CLOSE_SOFT_KEYBOARD, NULL, NULL);

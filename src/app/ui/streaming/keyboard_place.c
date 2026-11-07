@@ -3,6 +3,7 @@
 #include "keyboard_place.h"
 
 #include "keyboard_tabs.h"
+#include "ui/common/keyboard_text.h"
 #include "ui/common/pad_marks.h"
 
 static bool s_top;
@@ -14,6 +15,8 @@ static void place_apply(void) {
     }
     /* The tabs go to the edge that faces the middle now, Move with its new words. */
     keyboard_tabs_place();
+    /* A window it types into moves to the space it leaves (ui/common/keyboard_text.h). */
+    keyboard_text_place();
 }
 
 static void panel_deleted(lv_event_t *event) {

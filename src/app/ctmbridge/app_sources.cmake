@@ -36,6 +36,7 @@ target_sources(moonlight-lib PRIVATE
         ${CMAKE_SOURCE_DIR}/src/app/stream/input/lock_keys.c
         ${CMAKE_SOURCE_DIR}/src/app/ui/common/bt_panel.c
         ${CMAKE_SOURCE_DIR}/src/app/ui/common/click_away.c
+        ${CMAKE_SOURCE_DIR}/src/app/ui/common/keyboard_text.c
         ${CMAKE_SOURCE_DIR}/src/app/ui/common/pad_marks.c
         ${CMAKE_SOURCE_DIR}/src/app/ui/common/type_into_box.c
         ${CMAKE_SOURCE_DIR}/src/app/ui/launcher/add_server_box.c

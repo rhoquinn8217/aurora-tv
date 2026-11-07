@@ -771,6 +771,30 @@ need "the box's filling is built" \
 need "the tabs are built" \
      src/app/ctmbridge/app_sources.cmake "src/app/ui/streaming/keyboard_tabs.c"
 
+# --- A controller types into the add-a-computer box: a number pad, and
+# aurora-tv's own keyboard for a name (rhoquinn8217, 2026-11-06) ---
+# ⓘ The keyboard is the stream's, opened with no stream, and what a key would
+# send to a host goes into the box (src/app/ui/common/keyboard_text.c). Lines of
+# ours in two upstream files. Taking upstream's back compiles: then a key sends
+# nothing anywhere, closing the keyboard crashes on the stream it does not have,
+# and its L1, R1 and L2 do nothing.
+in_order "the keyboard's keys go into a box while it types into one" \
+     src/app/ui/streaming/soft_keyboard.c "static void kbd_send_key(soft_kbd_t *kbd, short vk, bool down)" \
+     "if (keyboard_text_send(vk, down, kbd->mods.shift)) { return; }" "keyboard_input_send_key(kbd->input"
+in_order "... a shifted key too" \
+     src/app/ui/streaming/soft_keyboard.c "static void kbd_send_key_shift(soft_kbd_t *kbd, short vk, bool down)" \
+     "if (keyboard_text_send(vk, down, true)) { return; }" "keyboard_input_send_key(kbd->input"
+need "... and with no stream it closes without touching one" \
+     src/app/ui/streaming/soft_keyboard.c "if (kbd->input != NULL) { stream_input_flush_pressed_keys(kbd->input); }"
+need "... and its L1, R1 and L2 work without one" \
+     src/app/ui/streaming/soft_keyboard.c "(!kbd->input && !keyboard_text_shown())"
+need "... and a controller's buttons reach it" \
+     src/app/lvgl/input/lv_drv_sdl_key.c "if (!keyboard_text_button(&e)) {"
+need "... L2 too" \
+     src/app/lvgl/input/lv_drv_sdl_key.c "(streaming_soft_keyboard_shown() || keyboard_text_shown())"
+need "the keyboard that types into a box is built" \
+     src/app/ctmbridge/app_sources.cmake "src/app/ui/common/keyboard_text.c"
+
 echo
 if [ "$fail" -eq 0 ]; then
     echo "⭐ merge guard: $pass checks, nothing lost"

@@ -18,6 +18,7 @@
 #include "input/bridge_keyboard.h"
 #include "ui/common/type_into_box.h"
 #include "ui/streaming/keyboard_place.h"
+#include "ui/common/keyboard_text.h"
 #include "stream/input/lock_keys.h"
 
 #if TARGET_WEBOS
@@ -238,10 +239,11 @@ static void sdl_input_read(lv_indev_drv_t *drv, lv_indev_data_t *data) {
         bool handled_modal = false;
         /* LT edge while soft keyboard is open → toggle abc / &123 */
         static bool kbd_lt_held = false;
-        if (!streaming_soft_keyboard_shown()) {
+        /* This fork: also while it types into a box (ui/common/keyboard_text.h). */
+        if (!streaming_soft_keyboard_shown() && !keyboard_text_shown()) {
             kbd_lt_held = false;
         }
-        if (streaming_soft_keyboard_shown() && e.type == SDL_CONTROLLERAXISMOTION
+        if ((streaming_soft_keyboard_shown() || keyboard_text_shown()) && e.type == SDL_CONTROLLERAXISMOTION
             && e.caxis.axis == SDL_CONTROLLER_AXIS_TRIGGERLEFT) {
             bool down = e.caxis.value > 16000;
             if (down != kbd_lt_held) {
@@ -264,6 +266,14 @@ static void sdl_input_read(lv_indev_drv_t *drv, lv_indev_data_t *data) {
             } else {
                 handled_modal = true; /* swallow stick noise in UI */
             }
+        } else if (keyboard_text_shown()
+            && (e.type == SDL_CONTROLLERBUTTONDOWN || e.type == SDL_CONTROLLERBUTTONUP)) {
+            /* This fork: the keyboard typing into a box, its buttons as in the stream
+             * (ui/common/keyboard_text.h); the d-pad and Cross walk and press its keys. */
+            if (!keyboard_text_button(&e)) {
+                read_event(&e, state);
+            }
+            handled_modal = true;
         } else if (ui_modal_consumes_input()
             && (e.type == SDL_CONTROLLERBUTTONDOWN || e.type == SDL_CONTROLLERBUTTONUP)) {
             bool pressed = (e.cbutton.state == SDL_PRESSED);
