@@ -123,9 +123,11 @@ static void keyboard_closed(bool enter, void *user) {
     lv_obj_clear_flag(parts->pad, LV_OBJ_FLAG_HIDDEN);
     lv_obj_clear_flag(parts->legend, LV_OBJ_FLAG_HIDDEN);
     lv_obj_center(parts->window);
-    /* Back on the Keyboard key, now or from Cancel and OK. */
+    /* Back on the Keyboard key, now or from Cancel and OK. Enter goes to OK only
+     * when OK can add: on an address not finished it is grey, and its selection
+     * does not show. */
     parts->back_to = PAD_KEYBOARD;
-    if (enter) {
+    if (enter && !lv_btnmatrix_has_btn_ctrl(parts->buttons, parts->ok, LV_BTNMATRIX_CTRL_DISABLED)) {
         lv_group_focus_obj(parts->buttons);
         lv_btnmatrix_set_selected_btn(parts->buttons, parts->ok);
     } else {
