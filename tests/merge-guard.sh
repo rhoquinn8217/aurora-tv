@@ -795,6 +795,15 @@ need "... L2 too" \
 need "the keyboard that types into a box is built" \
      src/app/ctmbridge/app_sources.cmake "src/app/ui/common/keyboard_text.c"
 
+# --- One key at a time, the newer one winning (rhoquinn8217, 2026-11-07) ---
+# ⓘ With Cross still held on a key, the d-pad did not move: LVGL's keypad reads
+# a second key as the first still held. Lines of ours in an upstream file;
+# taking upstream's back compiles, and the d-pad waits for Cross again.
+need "a key pressed while another is held lets the held one go first" \
+     src/app/lvgl/input/lv_drv_sdl_key.c "if (key_handover(input, state, data)) {"
+need "... and goes in on the next read" \
+     src/app/lvgl/input/lv_drv_sdl_key.c "if (handover_pending) {"
+
 echo
 if [ "$fail" -eq 0 ]; then
     echo "⭐ merge guard: $pass checks, nothing lost"

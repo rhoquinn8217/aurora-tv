@@ -102,6 +102,33 @@ static bool read_stick_menu_nav(const SDL_ControllerAxisEvent *axis, lv_drv_sdl_
 static lv_key_t stick_auto_release_key;
 static bool stick_auto_release;
 
+/* This fork: one key at a time, the newer one winning. LVGL's keypad reads a key
+ * pressed while another is held as the held one still going, so a d-pad press
+ * with Cross still down on a key did not move (rhoquinn8217, 2026-11-07: "if you
+ * try to move on the virtual keyboard before release x that is press on a
+ * letter, it doesn't move"). The held key is let go first, as its own release
+ * would, and the new one goes in on the very next read. */
+static bool handover_pending;
+static uint32_t handover_key;
+
+static bool key_handover(const app_ui_input_t *input, const lv_drv_sdl_key_t *state, lv_indev_data_t *data) {
+    const lv_indev_t *indev = input->key.indev;
+    if (indev == NULL || state->state != LV_INDEV_STATE_PRESSED ||
+        indev->proc.types.keypad.last_state != LV_INDEV_STATE_PRESSED) {
+        return false;
+    }
+    const uint32_t held = indev->proc.types.keypad.last_key;
+    if (held == 0 || held == state->key) {
+        return false;
+    }
+    handover_pending = true;
+    handover_key = state->key;
+    data->key = held;
+    data->state = LV_INDEV_STATE_RELEASED;
+    data->continue_reading = true;
+    return true;
+}
+
 static void sdl_input_read(lv_indev_drv_t *drv, lv_indev_data_t *data);
 
 int lv_sdl_init_key_input(lv_drv_sdl_key_t *drv, app_ui_input_t *input) {
@@ -146,6 +173,17 @@ static void sdl_input_read(lv_indev_drv_t *drv, lv_indev_data_t *data) {
         lv_indev_wait_release(input->key.indev);
     }
     state->last_read_tick = lv_tick_get();
+
+    /* This fork: the key that came in while another was held (key_handover). */
+    if (handover_pending) {
+        handover_pending = false;
+        state->key = handover_key;
+        state->state = LV_INDEV_STATE_PRESSED;
+        data->key = state->key;
+        data->state = state->state;
+        data->continue_reading = true;
+        return;
+    }
 
     /* Complete one-shot stick presses so LVGL sees press + release. */
     if (stick_auto_release) {
@@ -382,6 +420,9 @@ static void sdl_input_read(lv_indev_drv_t *drv, lv_indev_data_t *data) {
         data->continue_reading = true;
     } else {
         data->continue_reading = false;
+    }
+    if (key_handover(input, state, data)) {   /* This fork: the held key goes first. */
+        return;
     }
     data->key = state->key;
     data->state = state->state;

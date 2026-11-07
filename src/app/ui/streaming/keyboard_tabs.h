@@ -4,7 +4,14 @@
  * add a button to close it." GuiDev1994's keyboard (soft_keyboard.c) closes with
  * the remote's Back or a pad's Circle, and nothing on it does: with a pointer
  * alone there was no way out. A click on Close closes it exactly as Back does
- * (USER_CLOSE_SOFT_KEYBOARD). Back and Circle are unchanged.
+ * (USER_CLOSE_SOFT_KEYBOARD). Back and Circle are unchanged. Beside the word,
+ * Circle's mark while a controller is connected, as Move has Create's: a cross
+ * there read as the button to press, and Cross types (rhoquinn8217, 2026-11-07:
+ * "Change it to a circle in a button instead of an x").
+ *
+ * ⓘ And one purple halo on the selected key, the edge without the outline
+ * GuiDev1994 drew around it (rhoquinn8217, 2026-11-07: "virtual keyboard has 2
+ * purple halos"), from the same hook (keyboard_tabs_create).
  *
  * ⭐ MOVE (rhoquinn8217, 2026-11-06, of the button that switches its place: "yes,
  * make it clickable"). Create moves the keyboard between the bottom of the screen

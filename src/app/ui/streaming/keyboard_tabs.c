@@ -5,9 +5,6 @@
 #include "app.h"
 #include "input/input_gamepad.h"
 #include "keyboard_place.h"
-#include "lvgl/font/material_icons_regular_symbols.h"
-#include "util/font.h"   /* app_fonts_t, which the theme's header names without declaring */
-#include "lvgl/theme/lv_theme_moonlight.h"
 #include "ui/common/keyboard_text.h"
 #include "ui/common/pad_marks.h"
 #include "util/bus.h"
@@ -26,6 +23,7 @@
 static lv_obj_t *s_row;
 static lv_obj_t *s_panel;
 static lv_obj_t *s_move;
+static lv_obj_t *s_close;
 
 static void close_clicked(lv_event_t *event) {
     LV_UNUSED(event);
@@ -72,17 +70,30 @@ static void tab_words(lv_obj_t *tab, const char *words) {
     lv_label_set_text_static(label, words);
 }
 
-/* Move says where it goes next. Create's mark only while a controller is
+/* The controller button that does what the tab does, only while a controller is
  * connected: without one, nothing can press it. */
-static void move_fill(void) {
-    lv_obj_clean(s_move);
+static void tab_mark(lv_obj_t *tab, pad_mark_t button) {
     if (global != NULL && app_input_get_gamepads_count(&global->input) > 0) {
-        lv_obj_t *mark = pad_mark_create(s_move, PAD_MARK_VIEW, pad_family_current(), TAB_MARK,
-                                         lv_color_hex(TAB_TEXT));
+        lv_obj_t *mark = pad_mark_create(tab, button, pad_family_current(), TAB_MARK, lv_color_hex(TAB_TEXT));
         /* The tab's colour instead, pressed or not, as the words take it. */
         lv_obj_remove_local_style_prop(mark, LV_STYLE_TEXT_COLOR, 0);
     }
+}
+
+/* Move says where it goes next, with Create's mark. */
+static void move_fill(void) {
+    lv_obj_clean(s_move);
+    tab_mark(s_move, PAD_MARK_VIEW);
     tab_words(s_move, keyboard_place_at_top() ? locstr("Move to bottom") : locstr("Move to top"));
+}
+
+/* Close has Circle's mark, the button that closes it, and no cross: on a
+ * PlayStation pad Cross is the button that types (rhoquinn8217, 2026-11-07:
+ * "Change it to a circle in a button instead of an x"). */
+static void close_fill(void) {
+    lv_obj_clean(s_close);
+    tab_mark(s_close, PAD_MARK_EAST);
+    tab_words(s_close, locstr("Close"));
 }
 
 /* The button matrix that holds the keys, inside the panel. */
@@ -149,6 +160,19 @@ static void row_deleted(lv_event_t *event) {
     s_row = NULL;
     s_panel = NULL;
     s_move = NULL;
+    s_close = NULL;
+}
+
+/* One purple halo on the selected key, as the add-a-computer number pad has:
+ * GuiDev1994's keys have a purple edge and a purple outline around it
+ * (rhoquinn8217, 2026-11-07: "virtual keyboard has 2 purple halos"). The edge
+ * stays. */
+static void keys_one_halo(lv_obj_t *panel) {
+    lv_obj_t *keys = keys_of(panel);
+    if (keys != NULL) {
+        lv_obj_set_style_outline_width(keys, 0, LV_PART_ITEMS | LV_STATE_FOCUSED);
+        lv_obj_set_style_outline_width(keys, 0, LV_PART_ITEMS | LV_STATE_FOCUS_KEY);
+    }
 }
 
 void keyboard_tabs_place(void) {
@@ -156,6 +180,7 @@ void keyboard_tabs_place(void) {
         return;
     }
     move_fill();
+    close_fill();
     row_place();
 }
 
@@ -180,11 +205,9 @@ void keyboard_tabs_create(lv_obj_t *keyboard, lv_obj_t *panel) {
     s_move = tab_create(row, move_clicked);
     move_fill();
 
-    lv_obj_t *close = tab_create(row, close_clicked);
-    lv_obj_t *mark = lv_label_create(close);
-    lv_obj_set_style_text_font(mark, lv_theme_moonlight_get_iconfont_small(keyboard), 0);
-    lv_label_set_text_static(mark, MAT_SYMBOL_CLOSE);
-    tab_words(close, locstr("Close"));
+    s_close = tab_create(row, close_clicked);
+    close_fill();
+    keys_one_halo(panel);
 
     lv_obj_add_event_cb(row, row_deleted, LV_EVENT_DELETE, NULL);
     lv_obj_add_event_cb(panel, panel_resized, LV_EVENT_SIZE_CHANGED, NULL);
