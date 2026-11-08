@@ -167,10 +167,25 @@ static void group_identity(const ctm_bridge_dev_t *devs, device_group_t *g)
 }
 
 /* One device's name: a single part is called what it is, several by the USB
- * device they share, as its maker and product. */
+ * device they share, as its maker and product.
+ *
+ * ⭐ EXCEPT A PLAYSTATION PAD WITH PARTS BESIDE IT, WHICH IS CALLED BY THE PAD
+ * (2026-11-07). A DS5Dongle presents a keyboard beside its pad, for its macros,
+ * and the USB device's maker and product read "Sony Interactive Entertainment
+ * DualSense Edge Wireless Controller" across the row. rhoquinn8217: "the
+ * DualSense Edge through the DS5dongle has a really long name in Aurora-tv ...
+ * Can we make it shorter?" The pad is what a person calls the device, so its
+ * short name ("DualSense Edge") names it, as it would alone. */
 static void group_name(const ctm_bridge_dev_t *devs, device_group_t *g)
 {
     if (g->part_count > 1) {
+        for (int p = 0; p < g->part_count; ++p) {
+            const ctm_bridge_dev_t *d = &devs[g->part[p]];
+            if (d->controller && strcmp(d->vid, "054c") == 0) {
+                snprintf(g->name, sizeof g->name, "%s", device_short_name(d));
+                return;
+            }
+        }
         for (int p = 0; p < g->part_count; ++p) {
             const ctm_bridge_dev_t *d = &devs[g->part[p]];
             if (d->device_name[0] != '\0') {
