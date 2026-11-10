@@ -150,10 +150,12 @@ static lv_obj_t *numpad_create(pad_family_t family) {
 /* The numpad closed: every button that does something, as the configs window's rows
  * read: a mark, a plain hyphen, what it does.
  * ⭐ At a User Account Control prompt, the same list under its own heading, without
- * the numpad, and without the keyboard unless the prompt can ask for a password or a
- * PIN (rhoquinn8217, 2026-11-09: "Keep mostly the same legends as the lock screen but
- * remove numpad and keyboard(unless there is a UAC screen that may require keyboard
- * input, then add the keybaord(aurora-tv's))"). */
+ * the numpad (rhoquinn8217, 2026-11-09: "Keep mostly the same legends as the lock
+ * screen but remove numpad and keyboard(unless there is a UAC screen that may require
+ * keyboard input, then add the keybaord(aurora-tv's))"). The keyboard is on every
+ * prompt since 2026-11-10 ("lets just add square to all UAC prompts. there's no
+ * downside of having it"), and Create is Tab in both lists ("create create button
+ * binded to tab"), under the d-pad: both move the focus. */
 static lv_obj_t *list_create(pad_family_t family, lock_keys_mode_t mode) {
     lv_obj_t *panel = dark_panel_create(NUMPAD_MARGIN_X, NUMPAD_MARGIN_Y);
     lv_obj_set_style_pad_row(panel, NUMPAD_LIST_GAP, 0);
@@ -179,11 +181,10 @@ static lv_obj_t *list_create(pad_family_t family, lock_keys_mode_t mode) {
     mark_row_create(panel, PAD_MARK_R2, family, locstr("- left click"));
     mark_row_create(panel, PAD_MARK_L2, family, locstr("- right click"));
     mark_row_create(panel, PAD_MARK_DPAD, family, locstr("- arrow keys"));
+    mark_row_create(panel, PAD_MARK_VIEW, family, locstr("- Tab"));
     mark_row_create(panel, PAD_MARK_SOUTH, family, locstr("- Enter"));
     mark_row_create(panel, PAD_MARK_EAST, family, locstr("- Esc"));
-    if (lock || mode == LOCK_KEYS_PROMPT_PASSWORD) {
-        mark_row_create(panel, PAD_MARK_WEST, family, locstr("- keyboard"));
-    }
+    mark_row_create(panel, PAD_MARK_WEST, family, locstr("- keyboard"));
     if (lock) {
         mark_row_create(panel, PAD_MARK_NORTH, family, locstr("- numpad"));
     }

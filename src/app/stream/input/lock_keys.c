@@ -304,13 +304,18 @@ static lock_act_t action_for(uint8_t what, bool numpad_open, short *key) {
         case SDL_CONTROLLER_BUTTON_B:
             *key = VK_ESCAPE;
             break;
+        case SDL_CONTROLLER_BUTTON_BACK:
+            /* Tab (rhoquinn8217, 2026-11-10: "create create button binded to tab"), at
+             * the lock and at every prompt. ⓘ Create is one of the overlay's chord, so it
+             * acts as it goes up (pad_press), and holding the chord sends no Tab. */
+            *key = VK_TAB;
+            break;
         case SDL_CONTROLLER_BUTTON_X:
-            /* ⭐ At a prompt, the keyboard only where one can ask for a password or a
-             * PIN (rhoquinn8217, 2026-11-09: "remove numpad and keyboard(unless there
-             * is a UAC screen that may require keyboard input, then add the
-             * keybaord(aurora-tv's))"). */
-            return (s_mode == LOCK_KEYS_LOCK || s_mode == LOCK_KEYS_PROMPT_PASSWORD) ? LOCK_ACT_KEYBOARD
-                                                                                    : LOCK_ACT_NONE;
+            /* ⭐ The keyboard at every prompt as well as at the lock (rhoquinn8217,
+             * 2026-11-10: "lets just add square to all UAC prompts. there's no downside
+             * of having it"). Until then only where a prompt could ask for a password or
+             * a PIN. */
+            return LOCK_ACT_KEYBOARD;
         case SDL_CONTROLLER_BUTTON_Y:
             /* And no numpad at a prompt. */
             return s_mode == LOCK_KEYS_LOCK ? LOCK_ACT_NUMPAD_OPEN : LOCK_ACT_NONE;

@@ -16,9 +16,10 @@
  * his: R2 is the left button and L2 the right, as DS5-USBIP's own configs have them
  * (their word, after a real lock: "Switch R2 and L2 mouse buttons to match ours"). His
  * stay his outside a lock. Beside his, as keys, since the lock screen often ignores a
- * controller: Cross is Enter, Circle is Esc, the d-pad the arrow keys. Square opens the
- * on-screen keyboard and Triangle the numpad ("Switch square and triangle functions"),
- * the other way from his Triangle.
+ * controller: Cross is Enter, Circle is Esc, the d-pad the arrow keys, and Create Tab
+ * (2026-11-10: "create create button binded to tab"), sent as Create goes up because it
+ * is one of the overlay's chord. Square opens the on-screen keyboard and Triangle the
+ * numpad ("Switch square and triangle functions"), the other way from his Triangle.
  *
  * ⭐ THE NUMPAD OPEN: the buttons type (their word: "When it is open, that's when
  * the numpad works"). On Windows' own map, so one layout holds at every lock.
@@ -55,9 +56,10 @@
  * to answer any UAC prompt in any case including when a controller is not bridged and
  * or birdge but the controller has a config that doesn't have d-pad movement and x as
  * select or a mouse mode and click"). The same controls as the numpad closed, without
- * the numpad, and without the keyboard unless the prompt can ask for a password or a
- * PIN; then Square opens this app's keyboard, from a bridged pad as well. DS5-USBIP
- * says which kind is up in its answer to the probe. Its prompts sit on the same
+ * the numpad. Square opens this app's keyboard at every prompt, from a bridged pad as
+ * well (2026-11-10: "lets just add square to all UAC prompts. there's no downside of
+ * having it"; until then only where a prompt could ask for a password or a PIN), and
+ * Create is Tab. DS5-USBIP says which kind is up in its answer to the probe. Its prompts sit on the same
  * secure desktop as the lock screen, which a mouse and keys through the stream reach.
  *   - A bridged pad goes on reaching the TV through SDL (input/bridge_override.h), so
  *     it is taken here as well; its reports to the PC are held at rest meanwhile, as
