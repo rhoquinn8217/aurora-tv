@@ -269,6 +269,11 @@ static lv_obj_t *create_obj(lv_fragment_t *self, lv_obj_t *container) {
      * DS5-USBIP's start until someone signs in, and only DS5-USBIP can tell the TV
      * that Windows is locked. */
     pref_title_label(view, locstr("Windows State Rebind Overrides"));
+    /* ⭐ Their disclaimer, under the title (rhoquinn8217, 2026-11-10: "Need a
+     * disclaimer after the Window State Rebind Overrides section title that these
+     * only work when connected to DS5-USBIP"): only DS5-USBIP can see the lock and
+     * the prompt (stream/input/lock_keys.h). */
+    pref_desc_label(view, locstr("These only work when connected to DS5-USBIP."), false);
     pref_checkbox(view, locstr("Enable Windows Sign In rebinds"),
                   &app_configuration->bridge.lock_rebinds, false);
     pref_desc_label(view, locstr(
