@@ -3,6 +3,8 @@
 
 #include "lock_numpad.h"
 
+#include <stdio.h>
+
 #include "stream/input/lock_keys.h"
 #include "ui/common/pad_marks.h"
 #include "ui/root.h"
@@ -50,7 +52,19 @@
 #define NUMPAD_AFTER_GAP LV_DPX(10)
 #define NUMPAD_AFTER_Y (NUMPAD_MARGIN_Y + LV_DPX(306))
 
+/* ⭐ THE CLOSE BUTTON, top right, level with the list (rhoquinn8217, 2026-11-10: "a
+ * close button to right of screen" ... "Click this or hold options for 4 seconds to
+ * disable <name of the legend, Window Login or UAC> rebinds"). A fail-safe that only
+ * closes: it turns these controls off until the next lock or prompt
+ * (lock_keys_dismiss), and nothing brings them back meanwhile ("holding the options
+ * button for 4 seconds does not bring it back. It's a close only path"). Clicked as
+ * the stats' pin is ("use the same functionality as the performance stats pin button
+ * that removes it"): the TV's pointer reaches it during a stream as it reaches the
+ * pin, the click going on to the PC as well. Its words wrap at this width. */
+#define NUMPAD_CLOSE_W LV_DPX(230)
+
 static lv_obj_t *s_after;
+static lv_obj_t *s_close;
 static lv_coord_t s_after_y = -1;   /* the list's foot plus the gap; -1 until a list is up */
 static lv_coord_t s_after_at = -1;  /* where the line is now */
 static lv_obj_t *s_up;
@@ -199,10 +213,47 @@ static lv_obj_t *list_create(pad_family_t family, lock_keys_mode_t mode) {
     return panel;
 }
 
+void lock_numpad_close_click(void) {
+    lock_keys_dismiss("Close clicked");
+}
+
+static void close_clicked(lv_event_t *event) {
+    LV_UNUSED(event);
+    lock_numpad_close_click();
+}
+
+/* The button: the list's name, and Options by its name on the pad in hand. */
+static lv_obj_t *close_create(pad_family_t family, lock_keys_mode_t mode) {
+    lv_obj_t *button = box_create(lv_layer_sys());
+    lv_obj_add_flag(button, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_style_bg_color(button, NUMPAD_PANEL_BG, 0);
+    lv_obj_set_style_bg_opa(button, LV_OPA_90, 0);
+    lv_obj_set_style_bg_color(button, NUMPAD_KEY_BG, LV_STATE_PRESSED);
+    lv_obj_set_style_border_color(button, NUMPAD_MARK, 0);
+    lv_obj_set_style_border_width(button, LV_DPX(1), 0);
+    lv_obj_set_style_radius(button, LV_DPX(10), 0);
+    lv_obj_set_style_pad_all(button, NUMPAD_PAD, 0);
+    lv_obj_set_size(button, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+    lv_obj_align(button, LV_ALIGN_TOP_RIGHT, -NUMPAD_MARGIN_X, NUMPAD_MARGIN_Y);
+    char words[160];
+    snprintf(words, sizeof words, locstr("Click this or hold %s for 4 seconds to disable %s rebinds"),
+             family == PAD_FAMILY_XBOX ? locstr("Menu") : locstr("Options"),
+             mode == LOCK_KEYS_LOCK ? locstr("Windows Sign In") : locstr("User Account Control"));
+    lv_obj_t *label = words_create(button, words, lv_theme_get_font_small(button));
+    lv_label_set_long_mode(label, LV_LABEL_LONG_WRAP);
+    lv_obj_set_width(label, NUMPAD_CLOSE_W);
+    lv_obj_add_event_cb(button, close_clicked, LV_EVENT_CLICKED, NULL);
+    return button;
+}
+
 static void take_down(void) {
     if (s_up != NULL) {
         lv_obj_del(s_up);
         s_up = NULL;
+    }
+    if (s_close != NULL) {
+        lv_obj_del(s_close);
+        s_close = NULL;
     }
 }
 
@@ -246,6 +297,7 @@ void lock_numpad_tick(void) {
     if (s_up == NULL || s_up_open != open || s_shown_family != family || s_shown_mode != mode) {
         take_down();
         s_up = open ? numpad_create(family) : list_create(family, mode);
+        s_close = close_create(family, mode);
         s_up_open = open;
         s_shown_family = family;
         s_shown_mode = mode;
@@ -262,6 +314,10 @@ void lock_numpad_tick(void) {
 
 bool lock_numpad_after_up(void) {
     return s_after != NULL;
+}
+
+bool lock_numpad_close_up(void) {
+    return s_close != NULL;
 }
 
 const char *lock_numpad_state(void) {

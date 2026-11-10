@@ -339,23 +339,31 @@ static void cmd_ui(control_job_t *job)
 
 /* What the screen shows over a locked Windows (ui/streaming/lock_numpad.h), and a
  * count of what was typed, never what. `ps`, `xbox` or `auto` sets whose marks it
- * draws, for a picture of the set not in hand; not saved. */
+ * draws, for a picture of the set not in hand; not saved. `close` does what a click
+ * on the Close button does: these controls off until the next lock or prompt. */
 static void cmd_numpad(control_job_t *job, const char *args)
 {
-    if (args != NULL && strcasecmp(args, "ps") == 0) {
+    if (args != NULL && strcasecmp(args, "close") == 0) {
+        if (!lock_numpad_close_up()) {
+            reply(job, "ERR the Close button is not up\n");
+            return;
+        }
+        lock_numpad_close_click();
+    } else if (args != NULL && strcasecmp(args, "ps") == 0) {
         pad_family_force(PAD_FAMILY_PLAYSTATION);
     } else if (args != NULL && strcasecmp(args, "xbox") == 0) {
         pad_family_force(PAD_FAMILY_XBOX);
     } else if (args != NULL && strcasecmp(args, "auto") == 0) {
         pad_family_force(-1);
     } else if (args != NULL && args[0] != '\0') {
-        reply(job, "ERR try ps, xbox or auto\n");
+        reply(job, "ERR try ps, xbox, auto or close\n");
         return;
     }
     lv_area_t area = {0, 0, 0, 0};
     const bool up = lock_numpad_area(&area);
-    reply(job, "OK numpad=%s after_sign_in=%s locked=%s prompt=%s pad=%s marks=%s typed=%u size=%dx%d at=%d,%d kbd_place=%s\n",
-          lock_numpad_state(), lock_numpad_after_up() ? "yes" : "no", lock_keys_mode() == LOCK_KEYS_LOCK ? "yes" : "no",
+    reply(job, "OK numpad=%s close=%s dismissed=%s after_sign_in=%s locked=%s prompt=%s pad=%s marks=%s typed=%u size=%dx%d at=%d,%d kbd_place=%s\n",
+          lock_numpad_state(), lock_numpad_close_up() ? "up" : "down", lock_keys_dismissed() ? "yes" : "no",
+          lock_numpad_after_up() ? "yes" : "no", lock_keys_mode() == LOCK_KEYS_LOCK ? "yes" : "no",
           lock_keys_mode() == LOCK_KEYS_PROMPT ? "yes" : lock_keys_mode() == LOCK_KEYS_PROMPT_PASSWORD ? "password" : "no",
           lock_keys_pad_on_stream() ? "yes" : "no",
           pad_family_current() == PAD_FAMILY_XBOX ? "xbox" : "ps", lock_keys_typed(),
@@ -386,12 +394,12 @@ static void cmd_uac(control_job_t *job, const char *args)
     said = (int) ctm_bridge_agent_uac();
 #endif
     const lock_keys_mode_t mode = lock_keys_mode();
-    reply(job, "OK said=%d faked=%d mode=%s hold=%s\n", said, lock_keys_faked_prompt(),
+    reply(job, "OK said=%d faked=%d mode=%s hold=%s dismissed=%s\n", said, lock_keys_faked_prompt(),
           mode == LOCK_KEYS_LOCK                ? "lock"
           : mode == LOCK_KEYS_PROMPT            ? "prompt"
           : mode == LOCK_KEYS_PROMPT_PASSWORD   ? "prompt-password"
                                                 : "off",
-          lock_keys_holds_bridged() ? "yes" : "no");
+          lock_keys_holds_bridged() ? "yes" : "no", lock_keys_dismissed() ? "yes" : "no");
 }
 
 /* A webOS pop-up over the app (input/webos_popup.h): whether one has the

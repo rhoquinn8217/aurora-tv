@@ -41,6 +41,9 @@
 /* The most a bridged pad stays held after a prompt, waiting for what was down on it
  * to be let go: a reading stuck down must not leave it dead in the game. */
 #define LOCK_QUIET_MS 5000
+/* Options held this long with nothing else turns this off, as Select held as long
+ * pins the stats (GAMEPAD_HOLD_STATS_MS). */
+#define LOCK_DISMISS_MS 4000
 
 /* The triggers, as two more buttons, while they type. */
 #define LOCK_L2 (SDL_CONTROLLER_BUTTON_MAX)
@@ -74,6 +77,7 @@ typedef struct {
 typedef struct {
     SDL_JoystickID instance_id;
     uint32_t down;   /* what has gone down since this began and not come up */
+    uint32_t options_since;  /* when Options went down alone, held since; 0 if not */
     bool chord;      /* the chord was made: nothing acts until it is let go */
     lock_press_t queue[LOCK_QUEUE];
     int queued;
@@ -88,6 +92,9 @@ static unsigned s_typed;
 /* After a prompt, until when the bridged pads may stay held; 0 when they are not. */
 static uint32_t s_quiet_until;
 static int s_fake_prompt = -1;
+/* Turned off by hand, and whether at a prompt (else at the lock). */
+static bool s_dismissed;
+static bool s_dismissed_prompt;
 #if defined(TARGET_WEBOS)
 static uint32_t s_last_ask;
 static uint32_t s_last_press;
@@ -127,6 +134,25 @@ void lock_keys_fake_prompt(int kind) {
 
 int lock_keys_faked_prompt(void) {
     return s_fake_prompt;
+}
+
+void lock_keys_dismiss(const char *how) {
+    if (s_mode == LOCK_KEYS_OFF || s_dismissed) {
+        return;
+    }
+    s_dismissed = true;
+    s_dismissed_prompt = mode_is_prompt(s_mode);
+#if defined(TARGET_WEBOS)
+    ctm_bridge_gesture_note("lock keys: turned off by hand (%s): every controller is a plain controller until "
+                            "the next %s", how != NULL ? how : "?",
+                            s_dismissed_prompt ? "User Account Control prompt or lock" : "lock or prompt");
+#else
+    (void) how;
+#endif
+}
+
+bool lock_keys_dismissed(void) {
+    return s_dismissed;
 }
 
 static bool pad_on_stream(const stream_input_t *input, const app_gamepad_state_t *gamepad) {
@@ -217,6 +243,7 @@ static lock_pad_t *pad_for(const app_gamepad_state_t *gamepad) {
 /* A trigger already held does not type: it counts as down, and has to be let go. */
 static void pad_forget(lock_pad_t *pad, const app_gamepad_state_t *gamepad) {
     pad->down = 0;
+    pad->options_since = 0;
     pad->chord = false;
     pad->queued = 0;
     if (SDL_GameControllerGetAxis(gamepad->controller, SDL_CONTROLLER_AXIS_TRIGGERLEFT) > LOCK_TRIGGER_UP) {
@@ -372,6 +399,13 @@ static void pad_press(stream_input_t *input, lock_pad_t *pad, uint8_t what) {
         return;
     }
     pad->down |= LOCK_BIT(what);
+    /* Options alone starts the hold that turns this off; anything with it ends it,
+     * the chord to the overlay included. */
+    if (what == SDL_CONTROLLER_BUTTON_START && pad->down == LOCK_BIT(what)) {
+        pad->options_since = SDL_GetTicks() | 1u;
+    } else {
+        pad->options_since = 0;
+    }
     if ((pad->down & LOCK_CHORD) == LOCK_CHORD) {
         /* The chord: its four buttons were not presses after all. */
         pad->chord = true;
@@ -405,6 +439,9 @@ static void pad_release(stream_input_t *input, lock_pad_t *pad, uint8_t what) {
         return;
     }
     pad->down &= ~LOCK_BIT(what);
+    if (what == SDL_CONTROLLER_BUTTON_START) {
+        pad->options_since = 0;
+    }
     for (int i = 0; i < pad->queued; ++i) {
         if (pad->queue[i].what == what && !pad->queue[i].decided) {
             pad->queue[i].decided = true;
@@ -560,6 +597,14 @@ void lock_keys_tick(app_t *app) {
         }
     }
 #endif
+    /* ⭐ OFF BY HAND UNTIL THE NEXT ONE (lock_keys_dismiss): until DS5-USBIP says
+     * neither a lock nor a prompt, or says the other of the two. */
+    if (wanted == LOCK_KEYS_OFF || (s_dismissed && mode_is_prompt(wanted) != s_dismissed_prompt)) {
+        s_dismissed = false;
+    }
+    if (s_dismissed) {
+        wanted = LOCK_KEYS_OFF;
+    }
     if (wanted != s_mode) {
         if (mode_is_prompt(wanted) && mode_is_prompt(s_mode)) {
             /* The prompt's kind said again, otherwise: only what Square does changes. */
@@ -593,5 +638,15 @@ void lock_keys_tick(app_t *app) {
         vmouse_set_vector(&input->vmouse, 0, 0);
         vmouse_set_scroll(&input->vmouse, 0, 0);
         vmouse_set_trigger(&input->vmouse, 0, 0);
+    }
+    /* Options held LOCK_DISMISS_MS alone, on any pad this takes: off by hand. Ended
+     * on the next pass, as an unlock is. */
+    const uint32_t held_at = SDL_GetTicks();
+    for (int i = 0; i < LOCK_SLOTS; ++i) {
+        if (s_pads[i].options_since != 0 && held_at - s_pads[i].options_since >= LOCK_DISMISS_MS) {
+            s_pads[i].options_since = 0;
+            lock_keys_dismiss("Options held 4 s");
+            break;
+        }
     }
 }

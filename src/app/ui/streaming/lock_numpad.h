@@ -39,5 +39,13 @@ const char *lock_numpad_state(void);
 /* Is the line about Auto Bridge up? For the control port. */
 bool lock_numpad_after_up(void);
 
+/* Is the Close button up (top right, with the list or the numpad)? For the control
+ * port. */
+bool lock_numpad_close_up(void);
+
+/* What a click on Close does: these controls off until the next lock or prompt
+ * (lock_keys_dismiss). The control port's `numpad close` as well. */
+void lock_numpad_close_click(void);
+
 /* Where it is, on the screen. False when nothing is up. */
 bool lock_numpad_area(lv_area_t *out);

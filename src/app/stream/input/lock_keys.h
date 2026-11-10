@@ -66,7 +66,18 @@
  *     while the overlay is open (lock_keys_holds_bridged), and stay held after the
  *     prompt until what was down is let go.
  *   - The stream's own pads are told they are at rest, as at the lock.
- *   - The control port can fake a prompt of either kind, to see this without one. */
+ *   - The control port can fake a prompt of either kind, to see this without one.
+ *
+ * ⭐⭐ AND IT CAN BE TURNED OFF BY HAND, a fail-safe (rhoquinn8217, 2026-11-10: "a
+ * close button to right of screen", "not just a close the displayed legends but
+ * disable the overrides as well so each controller controls like a plain
+ * controller", "This is a fail safe option incase the rebinds happen
+ * inappropriately. When someone closes it this way ... it needs to stay off until
+ * the next time a login or UAC is detected"). A button at the top right says "Click
+ * this or hold Options for 4 seconds to disable <the list's name> rebinds"; a click on
+ * it, as on the stats' pin, or Options held 4 s on a pad this takes with nothing else
+ * pressed, as Select pins the stats, ends this as an unlock or the prompt's end would.
+ * It stays off until DS5-USBIP says neither, or says the other of the two. */
 
 #pragma once
 
@@ -107,6 +118,13 @@ void lock_keys_fake_prompt(int kind);
 
 /* The kind faked, or -1. */
 int lock_keys_faked_prompt(void);
+
+/* Turned off by hand, with how in the log: off until the lock or the prompt is over,
+ * and on again at the next one. Nothing while off. */
+void lock_keys_dismiss(const char *how);
+
+/* Turned off by hand, and the lock or prompt it was turned off at still there? */
+bool lock_keys_dismissed(void);
 
 /* Is the numpad open? A lock starts with it closed. */
 bool lock_keys_numpad_open(void);
