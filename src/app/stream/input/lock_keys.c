@@ -597,6 +597,13 @@ void lock_keys_tick(app_t *app) {
         }
     }
 #endif
+    /* ⭐ EACH HAS ITS SWITCH (bridge_settings.h: lock_rebinds, uac_rebinds), both on
+     * by default: switched off, the controllers stay plain controllers then. */
+    if (app_configuration != NULL &&
+        ((wanted == LOCK_KEYS_LOCK && !app_configuration->bridge.lock_rebinds) ||
+         (mode_is_prompt(wanted) && !app_configuration->bridge.uac_rebinds))) {
+        wanted = LOCK_KEYS_OFF;
+    }
     /* ⭐ OFF BY HAND UNTIL THE NEXT ONE (lock_keys_dismiss): until DS5-USBIP says
      * neither a lock nor a prompt, or says the other of the two. */
     if (wanted == LOCK_KEYS_OFF || (s_dismissed && mode_is_prompt(wanted) != s_dismissed_prompt)) {

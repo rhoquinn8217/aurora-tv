@@ -259,6 +259,31 @@ static lv_obj_t *create_obj(lv_fragment_t *self, lv_obj_t *container) {
     /* ⓘ The pane's gap is zero so a description sits tight under its own
      * setting; without this the next heading sits tight under it too. */
     usbb_gap(view);
+
+    /* ⭐ THE WINDOWS STATE REBIND OVERRIDES, in their words (rhoquinn8217,
+     * 2026-11-10, heading, labels, descriptions and the warning as they wrote
+     * them; "is configure" made "is configured", and the second line given its
+     * full stop). Plain boxes, not dependent ones: both run with bridging off
+     * (stream/input/lock_keys.h). ⓘ The warning is the first sign-in after a
+     * restart: nobody is signed in, Vibepollo streams that screen and holds
+     * DS5-USBIP's start until someone signs in, and only DS5-USBIP can tell the TV
+     * that Windows is locked. */
+    pref_title_label(view, locstr("Windows State Rebind Overrides"));
+    pref_checkbox(view, locstr("Enable Windows Sign In rebinds"),
+                  &app_configuration->bridge.lock_rebinds, false);
+    pref_desc_label(view, locstr(
+            "While Windows is locked, aurora-tv sets and displays legend for usable button rebinds "
+            "for controllers including access to virtual keyboard and numpad."), false);
+    pref_desc_label(view, locstr(
+            "Warning: Does not work on first sign-in after the PC restarts when DS5-USBIP is "
+            "configured to start on stream start with Vibepollo."), false);
+    usbb_gap(view);
+    pref_checkbox(view, locstr("Enable User Account Control rebinds"),
+                  &app_configuration->bridge.uac_rebinds, false);
+    pref_desc_label(view, locstr(
+            "While a User Account Control prompt is up, aurora-tv sets and displays legend for usable "
+            "button rebinds for controllers including access to virtual keyboard."), false);
+    usbb_gap(view);
 #endif
 
     /* ⭐ A heading, so the four below do not each need to say "DualSense only".
