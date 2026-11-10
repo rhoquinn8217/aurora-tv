@@ -48,6 +48,7 @@ static lv_obj_t *s_after;
 static lv_obj_t *s_up;
 static bool s_up_open;
 static pad_family_t s_shown_family;
+static lock_keys_mode_t s_shown_mode;
 
 static lv_obj_t *box_create(lv_obj_t *parent) {
     lv_obj_t *box = lv_obj_create(parent);
@@ -147,16 +148,23 @@ static lv_obj_t *numpad_create(pad_family_t family) {
 }
 
 /* The numpad closed: every button that does something, as the configs window's rows
- * read: a mark, a plain hyphen, what it does. */
-static lv_obj_t *list_create(pad_family_t family) {
+ * read: a mark, a plain hyphen, what it does.
+ * ⭐ At a User Account Control prompt, the same list under its own heading, without
+ * the numpad, and without the keyboard unless the prompt can ask for a password or a
+ * PIN (rhoquinn8217, 2026-11-09: "Keep mostly the same legends as the lock screen but
+ * remove numpad and keyboard(unless there is a UAC screen that may require keyboard
+ * input, then add the keybaord(aurora-tv's))"). */
+static lv_obj_t *list_create(pad_family_t family, lock_keys_mode_t mode) {
     lv_obj_t *panel = dark_panel_create(NUMPAD_MARGIN_X, NUMPAD_MARGIN_Y);
     lv_obj_set_style_pad_row(panel, NUMPAD_LIST_GAP, 0);
     const lv_font_t *font = lv_theme_get_font_small(panel);
+    const bool lock = mode == LOCK_KEYS_LOCK;
 
     /* A line under the heading, to set it off from the rebinds. ⓘ The heading's own
      * border: it is the list's widest line, so the rule runs the list's width. A box of
      * 100% would come out with no width at all in a panel sized by its content. */
-    lv_obj_t *title = words_create(panel, locstr("Windows Sign In: Controller"), font);
+    lv_obj_t *title = words_create(panel, lock ? locstr("Windows Sign In: Controller")
+                                               : locstr("User Account Control: Controller"), font);
     lv_obj_set_style_pad_bottom(title, LV_DPX(4), 0);
     lv_obj_set_style_border_side(title, LV_BORDER_SIDE_BOTTOM, 0);
     lv_obj_set_style_border_width(title, LV_DPX(1), 0);
@@ -173,8 +181,12 @@ static lv_obj_t *list_create(pad_family_t family) {
     mark_row_create(panel, PAD_MARK_DPAD, family, locstr("- arrow keys"));
     mark_row_create(panel, PAD_MARK_SOUTH, family, locstr("- Enter"));
     mark_row_create(panel, PAD_MARK_EAST, family, locstr("- Esc"));
-    mark_row_create(panel, PAD_MARK_WEST, family, locstr("- keyboard"));
-    mark_row_create(panel, PAD_MARK_NORTH, family, locstr("- numpad"));
+    if (lock || mode == LOCK_KEYS_PROMPT_PASSWORD) {
+        mark_row_create(panel, PAD_MARK_WEST, family, locstr("- keyboard"));
+    }
+    if (lock) {
+        mark_row_create(panel, PAD_MARK_NORTH, family, locstr("- numpad"));
+    }
     return panel;
 }
 
@@ -205,20 +217,25 @@ static void after_show(bool show) {
 
 void lock_numpad_tick(void) {
     const bool showing = lock_keys_active() && !ui_should_block_input();
-    after_show(showing && after_sign_in());
+    const lock_keys_mode_t mode = lock_keys_mode();
+    /* ⓘ The line about Auto Bridge is the lock's: a prompt does not hold a bridge
+     * back (rhoquinn8217, 2026-11-09: "If the UAC: controller legend is the same, we
+     * don't need to have that message"). */
+    after_show(showing && mode == LOCK_KEYS_LOCK && after_sign_in());
     if (!showing || !lock_keys_pad_on_stream()) {
         take_down();
         return;
     }
     const bool open = lock_keys_numpad_open();
     const pad_family_t family = pad_family_current();
-    if (s_up != NULL && s_up_open == open && s_shown_family == family) {
+    if (s_up != NULL && s_up_open == open && s_shown_family == family && s_shown_mode == mode) {
         return;
     }
     take_down();
-    s_up = open ? numpad_create(family) : list_create(family);
+    s_up = open ? numpad_create(family) : list_create(family, mode);
     s_up_open = open;
     s_shown_family = family;
+    s_shown_mode = mode;
 }
 
 bool lock_numpad_after_up(void) {

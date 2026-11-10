@@ -26,6 +26,7 @@
 #include "bridge_keyboard.h"
 #include "app.h"   /* app_configuration, for the bridge_enable switch */
 #include "stream/session.h"
+#include "stream/input/lock_keys.h"
 #include "stream/input/session_input.h"
 
 #if defined(TARGET_WEBOS)
@@ -2411,8 +2412,14 @@ void ctm_bridge_gesture_tick(struct app_input_t *input, struct session_t *sessio
      *
      * ⛔ THE FAULT: with the overlay open, a bridged controller's presses still
      * reached the game behind it. An unbridged one's do not -- the app's event
-     * filter stops forwarding them. A bridged controller produces no SDL events
-     * at all; its reports go TV -> USB/IP -> PC and pass nothing.
+     * filter stops forwarding them. A bridged controller's reports go TV ->
+     * USB/IP -> PC without passing that filter. ⓘ SDL still reads it (Virtual
+     * Mouse takes its sticks: input/bridge_override.h), but nothing of what it
+     * reads is sent on for a bridged pad, so the filter has nothing to stop.
+     *
+     * ⭐ AND WHILE A USER ACCOUNT CONTROL PROMPT IS UP (2026-11-09): every
+     * controller answers it through the TV then, bridged ones too, so the game
+     * must not see their presses either (stream/input/lock_keys.h).
      *
      * ⚠️ TWO EARLIER ATTEMPTS GOT THE "IS THE OVERLAY OPEN" PART WRONG, so this
      * one SAYS WHAT IT DECIDED rather than being trusted. ⛔ The first hung it
@@ -2423,13 +2430,14 @@ void ctm_bridge_gesture_tick(struct app_input_t *input, struct session_t *sessio
      * ⓘ Re-asserted every pass on purpose: whatever happened last pass, this
      * pass corrects it, so it cannot latch again. */
     {
-        const bool held = overlay_open && session != NULL;
+        const bool prompt = lock_keys_holds_bridged();
+        const bool held = (overlay_open || prompt) && session != NULL;
         static int s_last = -1;
         if ((int) held != s_last) {
             s_last = (int) held;
-            gesture_log("input hold: %s (overlay=%d, session=%d)",
+            gesture_log("input hold: %s (overlay=%d, prompt=%d, session=%d)",
                         held ? "ON -- the game sees nothing pressed" : "off",
-                        (int) overlay_open, session != NULL);
+                        (int) overlay_open, (int) prompt, session != NULL);
             ctm_bridge_set_input_held(held);
         }
     }

@@ -152,6 +152,18 @@ bool ctm_bridge_agent_online(void);
  * takes no new bridge while it is. False when it has not said, or is offline. */
 bool ctm_bridge_agent_locked(void);
 
+/* ⭐ A User Account Control prompt up on the PC, and its kind, as DS5-USBIP last
+ * said (rhoquinn8217, 2026-11-09: "insure that the controller will be able to
+ * answer any UAC prompt in any case"). None when it has not said, is offline or
+ * is older than the word, and always none while Windows is locked. */
+typedef enum {
+    CTM_BRIDGE_UAC_NONE = 0,
+    CTM_BRIDGE_UAC_CONSENT,       /* Yes or No */
+    CTM_BRIDGE_UAC_CREDENTIALS,   /* it can ask for a password or PIN */
+} ctm_bridge_uac_t;
+
+ctm_bridge_uac_t ctm_bridge_agent_uac(void);
+
 /* ⭐ Is this device one the PC just restarted (a DS4Dongle whose settings it
  * changed), so it is to be bridged again as it comes back? True once per
  * restart, within seconds of it. */

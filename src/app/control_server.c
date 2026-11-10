@@ -146,6 +146,7 @@ static void cmd_help(control_job_t *job)
                "prompt [ok|dismiss]     the question a bridge raises: is it up, or answer it without a hand\n"
                "ui                      what is open on the screen: overlay, its keyboard, the panel, the align bar\n"
                "numpad [ps|xbox|auto]   the controller at a locked Windows: numpad open or closed, where, whose marks, keys typed (a count)\n"
+               "uac [0|1|2|auto]        a User Account Control prompt: what DS5-USBIP says, what the controls are up for; 1 or 2 fakes one\n"
                "press <key>[:ms] ...    keys into aurora-tv's own screens, as a keyboard types them; not once a stream is up\n"
                "                        keys: up down left right enter esc home end backspace; :ms holds it (a long press)\n"
                "type <text>             characters into aurora-tv's own screens, a key each, as a keyboard types them\n"
@@ -353,12 +354,44 @@ static void cmd_numpad(control_job_t *job, const char *args)
     }
     lv_area_t area = {0, 0, 0, 0};
     const bool up = lock_numpad_area(&area);
-    reply(job, "OK numpad=%s after_sign_in=%s locked=%s pad=%s marks=%s typed=%u size=%dx%d at=%d,%d kbd_place=%s\n",
-          lock_numpad_state(), lock_numpad_after_up() ? "yes" : "no", lock_keys_active() ? "yes" : "no",
+    reply(job, "OK numpad=%s after_sign_in=%s locked=%s prompt=%s pad=%s marks=%s typed=%u size=%dx%d at=%d,%d kbd_place=%s\n",
+          lock_numpad_state(), lock_numpad_after_up() ? "yes" : "no", lock_keys_mode() == LOCK_KEYS_LOCK ? "yes" : "no",
+          lock_keys_mode() == LOCK_KEYS_PROMPT ? "yes" : lock_keys_mode() == LOCK_KEYS_PROMPT_PASSWORD ? "password" : "no",
           lock_keys_pad_on_stream() ? "yes" : "no",
           pad_family_current() == PAD_FAMILY_XBOX ? "xbox" : "ps", lock_keys_typed(),
           up ? (int) lv_area_get_width(&area) : 0, up ? (int) lv_area_get_height(&area) : 0,
           (int) area.x1, (int) area.y1, keyboard_place_name());
+}
+
+/* ⭐ A User Account Control prompt (stream/input/lock_keys.h): what DS5-USBIP says
+ * is up (said=0 none, 1 Yes or No, 2 one that can ask for a password or PIN), what
+ * the controls are up for, and whether the bridged pads are held from the PC. With
+ * `1` or `2`, a prompt of that kind faked, to see its list and controls with none
+ * on the PC; `0` none faked; `auto` back to what DS5-USBIP says. Not saved; the
+ * controls follow on the app's next pass. */
+static void cmd_uac(control_job_t *job, const char *args)
+{
+    if (args != NULL && args[0] != '\0') {
+        if (strcasecmp(args, "auto") == 0) {
+            lock_keys_fake_prompt(-1);
+        } else if (strcmp(args, "0") == 0 || strcmp(args, "1") == 0 || strcmp(args, "2") == 0) {
+            lock_keys_fake_prompt(args[0] - '0');
+        } else {
+            reply(job, "ERR try 0, 1, 2 or auto\n");
+            return;
+        }
+    }
+    int said = 0;
+#if defined(TARGET_WEBOS)
+    said = (int) ctm_bridge_agent_uac();
+#endif
+    const lock_keys_mode_t mode = lock_keys_mode();
+    reply(job, "OK said=%d faked=%d mode=%s hold=%s\n", said, lock_keys_faked_prompt(),
+          mode == LOCK_KEYS_LOCK                ? "lock"
+          : mode == LOCK_KEYS_PROMPT            ? "prompt"
+          : mode == LOCK_KEYS_PROMPT_PASSWORD   ? "prompt-password"
+                                                : "off",
+          lock_keys_holds_bridged() ? "yes" : "no");
 }
 
 /* A webOS pop-up over the app (input/webos_popup.h): whether one has the
@@ -414,9 +447,9 @@ static void cmd_status(control_job_t *job)
                          : compat == CTM_BRIDGE_COMPAT_UPDATE_PC   ? "update-pc"
                          : compat == CTM_BRIDGE_COMPAT_UPDATE_TV   ? "update-tv"
                                                                    : "unknown";
-    reply(job, " bridge=%s listener=%s protocol=%s agent=\"%s\" core=%s locked=%s",
+    reply(job, " bridge=%s listener=%s protocol=%s agent=\"%s\" core=%s locked=%s uac=%d",
           ctm_bridge_active() ? "running" : "stopped", listener, protocol, agent, bridge_core_commit(),
-          ctm_bridge_agent_locked() ? "yes" : "no");
+          ctm_bridge_agent_locked() ? "yes" : "no", (int) ctm_bridge_agent_uac());
 #endif
     reply(job, "\n");
 }
@@ -1507,6 +1540,8 @@ static void run_command(control_job_t *job)
         cmd_ui(job);
     } else if (strcasecmp(verb, "numpad") == 0) {
         cmd_numpad(job, args);
+    } else if (strcasecmp(verb, "uac") == 0) {
+        cmd_uac(job, args);
     } else if (strcasecmp(verb, "popup") == 0) {
         cmd_popup(job, args);
     } else if (strcasecmp(verb, "remote") == 0) {

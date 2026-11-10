@@ -255,7 +255,14 @@ bool ctm_bridge_start(void)
     }
     if (!s_enabled) {
         s_active = true;
-        log_append("ctm glue: stream up, bridging off -- nothing started");
+        /* ⭐ BUT THE PROBE STILL ASKS THE PC (2026-11-09). Windows' lock and its
+         * User Account Control prompts are answered with the controller whether
+         * bridging is on or off (stream/input/lock_keys.h), and only the probe
+         * hears of them. It never started with bridging off, so neither did the
+         * lock's controls. Nothing else starts: no worker, no scan, no bridge. */
+        ctm_agent_probe_start();
+        ctm_agent_probe_park(false);
+        log_append("ctm glue: stream up, bridging off -- only the probe started, for the lock and its prompts");
         return true;
     }
     ctm_glue_ensure_core();
@@ -1643,6 +1650,19 @@ ctm_bridge_compat_t ctm_bridge_agent_compat(void)
 bool ctm_bridge_agent_locked(void)
 {
     return g_agent_locked != 0;
+}
+
+/* ⓘ The core's kinds, in the same order. */
+_Static_assert((int) CTM_BRIDGE_UAC_NONE == PROTOCOL_UAC_NONE &&
+               (int) CTM_BRIDGE_UAC_CONSENT == PROTOCOL_UAC_CONSENT &&
+               (int) CTM_BRIDGE_UAC_CREDENTIALS == PROTOCOL_UAC_CREDENTIALS,
+               "ctm_bridge_uac_t follows the core's PROTOCOL_UAC_ kinds");
+
+ctm_bridge_uac_t ctm_bridge_agent_uac(void)
+{
+    const int uac = g_agent_uac;
+    return (uac == PROTOCOL_UAC_CONSENT || uac == PROTOCOL_UAC_CREDENTIALS) ? (ctm_bridge_uac_t) uac
+                                                                            : CTM_BRIDGE_UAC_NONE;
 }
 
 /* ---------------------------------------------- a pad that comes straight back --

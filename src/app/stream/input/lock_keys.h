@@ -47,7 +47,24 @@
  * go, as at a bridge's handback.
  *
  * ⓘ Virtual Mouse goes back at the unlock to how it was, and the Input setting does
- * not follow it meanwhile (bridge_override_touchpad_tick). */
+ * not follow it meanwhile (bridge_override_touchpad_tick).
+ *
+ * ⭐⭐ AND AT A USER ACCOUNT CONTROL PROMPT, EVERY CONTROLLER, BRIDGED OR NOT
+ * (rhoquinn8217, 2026-11-09: "tell the TV, but override the controller inputs bridge
+ * or not, similar to the lock screen", and "insure that the controller will be able
+ * to answer any UAC prompt in any case including when a controller is not bridged and
+ * or birdge but the controller has a config that doesn't have d-pad movement and x as
+ * select or a mouse mode and click"). The same controls as the numpad closed, without
+ * the numpad, and without the keyboard unless the prompt can ask for a password or a
+ * PIN; then Square opens this app's keyboard, from a bridged pad as well. DS5-USBIP
+ * says which kind is up in its answer to the probe. Its prompts sit on the same
+ * secure desktop as the lock screen, which a mouse and keys through the stream reach.
+ *   - A bridged pad goes on reaching the TV through SDL (input/bridge_override.h), so
+ *     it is taken here as well; its reports to the PC are held at rest meanwhile, as
+ *     while the overlay is open (lock_keys_holds_bridged), and stay held after the
+ *     prompt until what was down is let go.
+ *   - The stream's own pads are told they are at rest, as at the lock.
+ *   - The control port can fake a prompt of either kind, to see this without one. */
 
 #pragma once
 
@@ -60,12 +77,34 @@ typedef struct stream_input_t stream_input_t;
 typedef struct app_t app_t;
 
 /* Once a pass of the app's loop: starts and ends it, and asks DS5-USBIP again twice
- * a second while Windows is locked, so that the pad is the stream's again about a
- * second after the unlock. */
+ * a second while Windows is locked or a prompt is up, so that the pad is the stream's
+ * again about a second after the unlock, or after the prompt is answered. */
 void lock_keys_tick(app_t *app);
 
-/* Is Windows locked, and the controller doing this? */
+/* Is Windows locked, or a User Account Control prompt up, and the controller doing
+ * this? */
 bool lock_keys_active(void);
+
+/* What the controls are up for. */
+typedef enum {
+    LOCK_KEYS_OFF = 0,
+    LOCK_KEYS_LOCK,              /* Windows is locked */
+    LOCK_KEYS_PROMPT,            /* a User Account Control prompt, Yes or No */
+    LOCK_KEYS_PROMPT_PASSWORD,   /* one that can ask for a password or PIN */
+} lock_keys_mode_t;
+
+lock_keys_mode_t lock_keys_mode(void);
+
+/* Are the bridged controllers' reports to be held at rest from the PC? While a
+ * prompt is up, and after it until what was down on them is let go. */
+bool lock_keys_holds_bridged(void);
+
+/* For the control port: a prompt of this kind (0 none, 1 Yes or No, 2 a password or
+ * PIN), as if DS5-USBIP had said so; -1 goes back to what it says. Not saved. */
+void lock_keys_fake_prompt(int kind);
+
+/* The kind faked, or -1. */
+int lock_keys_faked_prompt(void);
 
 /* Is the numpad open? A lock starts with it closed. */
 bool lock_keys_numpad_open(void);
@@ -85,7 +124,8 @@ bool lock_keys_triggers_type(void);
  * then sees them the other way about from its own. */
 bool lock_keys_triggers_swapped(void);
 
-/* Is a pad connected that can do this? The screen is about nothing without one. */
+/* Is a pad connected that can do this? The screen is about nothing without one. At a
+ * prompt any pad counts, bridged ones too. */
 bool lock_keys_pad_on_stream(void);
 
 /* Keys typed since the app started: a count, for the control port. */

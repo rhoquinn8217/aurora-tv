@@ -17,7 +17,11 @@
  * DS5-USBIP, replace "Auto Bridge is waiting for Windows to be unlocked" to "Devices will
  * be auto bridged after sign in."  Leave this up like the login controller legend and the
  * numpad until the user logs in"). Under the list and not in the notices' corner: that
- * corner is where a sign-in screen lists its other users. */
+ * corner is where a sign-in screen lists its other users.
+ *
+ * ⭐ AT A USER ACCOUNT CONTROL PROMPT (2026-11-09), the same list headed "User Account
+ * Control: Controller", without the numpad's row, without the keyboard's unless the
+ * prompt can ask for a password or a PIN, and without the line about Auto Bridge. */
 
 #pragma once
 
