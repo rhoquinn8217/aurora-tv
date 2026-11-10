@@ -40,11 +40,19 @@
  * down, which puts its foot about level with "Sign-in options". */
 #define NUMPAD_AT_X 625
 #define NUMPAD_AT_Y 234
-/* Where the line about Auto Bridge goes: below the list, with the numpad open as well,
- * so that it does not move. */
-#define NUMPAD_AFTER_Y (NUMPAD_MARGIN_Y + LV_DPX(285))
+/* Where the line about Auto Bridge goes: under the list, NUMPAD_AFTER_GAP below its
+ * foot, and it stays there while the numpad is open, so that it does not move.
+ * ⭐ MEASURED OFF THE LIST, not a constant (rhoquinn8217, 2026-11-10: "the rebind
+ * legend with the added create button symbol increased the box area and is now
+ * touching the message below it. Push the message down."): a constant sat under a
+ * list of twelve rows, and the thirteenth, Create - Tab, ran into it. ⓘ The constant
+ * stays for a lock with no list up yet, one row lower than it was. */
+#define NUMPAD_AFTER_GAP LV_DPX(10)
+#define NUMPAD_AFTER_Y (NUMPAD_MARGIN_Y + LV_DPX(306))
 
 static lv_obj_t *s_after;
+static lv_coord_t s_after_y = -1;   /* the list's foot plus the gap; -1 until a list is up */
+static lv_coord_t s_after_at = -1;  /* where the line is now */
 static lv_obj_t *s_up;
 static bool s_up_open;
 static pad_family_t s_shown_family;
@@ -207,9 +215,14 @@ static bool after_sign_in(void) {
 }
 
 static void after_show(bool show) {
+    const lv_coord_t y = s_after_y >= 0 ? s_after_y : NUMPAD_AFTER_Y;
     if (show && s_after == NULL) {
-        s_after = dark_panel_create(NUMPAD_MARGIN_X, NUMPAD_AFTER_Y);
+        s_after_at = y;
+        s_after = dark_panel_create(NUMPAD_MARGIN_X, y);
         words_create(s_after, locstr("Devices will be auto bridged after sign in."), lv_theme_get_font_small(s_after));
+    } else if (show && s_after_at != y) {
+        s_after_at = y;
+        lv_obj_align(s_after, LV_ALIGN_TOP_LEFT, NUMPAD_MARGIN_X, y);
     } else if (!show && s_after != NULL) {
         lv_obj_del(s_after);
         s_after = NULL;
@@ -222,21 +235,29 @@ void lock_numpad_tick(void) {
     /* ⓘ The line about Auto Bridge is the lock's: a prompt does not hold a bridge
      * back (rhoquinn8217, 2026-11-09: "If the UAC: controller legend is the same, we
      * don't need to have that message"). */
-    after_show(showing && mode == LOCK_KEYS_LOCK && after_sign_in());
+    const bool after = showing && mode == LOCK_KEYS_LOCK && after_sign_in();
     if (!showing || !lock_keys_pad_on_stream()) {
         take_down();
+        after_show(after);
         return;
     }
     const bool open = lock_keys_numpad_open();
     const pad_family_t family = pad_family_current();
-    if (s_up != NULL && s_up_open == open && s_shown_family == family && s_shown_mode == mode) {
-        return;
+    if (s_up == NULL || s_up_open != open || s_shown_family != family || s_shown_mode != mode) {
+        take_down();
+        s_up = open ? numpad_create(family) : list_create(family, mode);
+        s_up_open = open;
+        s_shown_family = family;
+        s_shown_mode = mode;
+        if (!open) {
+            /* Its rows are laid out now, so its foot is known. */
+            lv_obj_update_layout(s_up);
+            lv_area_t area;
+            lv_obj_get_coords(s_up, &area);
+            s_after_y = (lv_coord_t) (area.y2 + 1 + NUMPAD_AFTER_GAP);
+        }
     }
-    take_down();
-    s_up = open ? numpad_create(family) : list_create(family, mode);
-    s_up_open = open;
-    s_shown_family = family;
-    s_shown_mode = mode;
+    after_show(after);
 }
 
 bool lock_numpad_after_up(void) {
