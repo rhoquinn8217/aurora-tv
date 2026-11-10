@@ -31,11 +31,16 @@
  * itself, so the unlock is known within about a second. */
 #define LOCK_ASK_MS 500
 /* A press after this long with none: a lock that came while nobody was playing is
- * known at once, not at the probe's next ten seconds. Not a probe per press in a game. */
+ * known at once, not at the probe's next ask. Not a probe per press in a game.
+ * ⓘ The probe asks every second during a stream since 2026-11-09, so this gains a
+ * second at most now. */
 #define LOCK_IDLE_MS 30000
 /* As the on-screen keyboard reads L2, and well below that to let go. */
 #define LOCK_TRIGGER_DOWN 16000
 #define LOCK_TRIGGER_UP 8000
+/* The most a bridged pad stays held after a prompt, waiting for what was down on it
+ * to be let go: a reading stuck down must not leave it dead in the game. */
+#define LOCK_QUIET_MS 5000
 
 /* The triggers, as two more buttons, while they type. */
 #define LOCK_L2 (SDL_CONTROLLER_BUTTON_MAX)
@@ -75,22 +80,33 @@ typedef struct {
 } lock_pad_t;
 
 static lock_pad_t s_pads[LOCK_SLOTS];
-static bool s_active;
+static lock_keys_mode_t s_mode;
 static bool s_numpad_open;
 static bool s_vmouse_was;
 static bool s_interface_had_input;
 static unsigned s_typed;
+/* After a prompt, until when the bridged pads may stay held; 0 when they are not. */
+static uint32_t s_quiet_until;
+static int s_fake_prompt = -1;
 #if defined(TARGET_WEBOS)
 static uint32_t s_last_ask;
 static uint32_t s_last_press;
 #endif
 
+static bool mode_is_prompt(lock_keys_mode_t mode) {
+    return mode == LOCK_KEYS_PROMPT || mode == LOCK_KEYS_PROMPT_PASSWORD;
+}
+
 bool lock_keys_active(void) {
-    return s_active;
+    return s_mode != LOCK_KEYS_OFF;
+}
+
+lock_keys_mode_t lock_keys_mode(void) {
+    return s_mode;
 }
 
 bool lock_keys_numpad_open(void) {
-    return s_active && s_numpad_open;
+    return s_mode == LOCK_KEYS_LOCK && s_numpad_open;
 }
 
 bool lock_keys_triggers_type(void) {
@@ -98,16 +114,77 @@ bool lock_keys_triggers_type(void) {
 }
 
 bool lock_keys_triggers_swapped(void) {
-    return s_active && !s_numpad_open;
+    return s_mode != LOCK_KEYS_OFF && !s_numpad_open;
 }
 
 unsigned lock_keys_typed(void) {
     return s_typed;
 }
 
+void lock_keys_fake_prompt(int kind) {
+    s_fake_prompt = kind < 0 ? -1 : (kind > 2 ? 2 : kind);
+}
+
+int lock_keys_faked_prompt(void) {
+    return s_fake_prompt;
+}
+
 static bool pad_on_stream(const stream_input_t *input, const app_gamepad_state_t *gamepad) {
     return gamepad != NULL && gamepad->controller != NULL && gamepad->gs_id >= 0 && gamepad->gs_id < LOCK_SLOTS &&
            (input->moonlightExcludedMask & (1u << gamepad->gs_id)) == 0;
+}
+
+/* ⭐ WHICH CONTROLLERS THIS TAKES. At Windows' lock, those on the stream only: a
+ * bridged one types the PIN with Windows' own map (the header). At a User Account
+ * Control prompt, every one, bridged or not: a bridged pad's buttons may be bound to
+ * keys on the PC that answer nothing there, so it is read here through SDL and its
+ * reports to the PC are held at rest meanwhile (lock_keys_holds_bridged). */
+static bool pad_taken(const stream_input_t *input, const app_gamepad_state_t *gamepad) {
+    if (mode_is_prompt(s_mode)) {
+        return gamepad != NULL && gamepad->controller != NULL && gamepad->gs_id >= 0 && gamepad->gs_id < LOCK_SLOTS;
+    }
+    return pad_on_stream(input, gamepad);
+}
+
+/* Is anything down on a bridged pad: a button, or a trigger past the point a
+ * trigger lets go? Read off SDL, which reads a bridged pad as well. */
+static bool bridged_pad_held(const stream_input_t *input, const app_gamepad_state_t *gamepad) {
+    if (gamepad == NULL || gamepad->controller == NULL || gamepad->gs_id < 0 || gamepad->gs_id >= LOCK_SLOTS ||
+        (input->moonlightExcludedMask & (1u << gamepad->gs_id)) == 0) {
+        return false;
+    }
+    for (int b = 0; b < SDL_CONTROLLER_BUTTON_MAX; ++b) {
+        if (SDL_GameControllerGetButton(gamepad->controller, (SDL_GameControllerButton) b)) {
+            return true;
+        }
+    }
+    return SDL_GameControllerGetAxis(gamepad->controller, SDL_CONTROLLER_AXIS_TRIGGERLEFT) > LOCK_TRIGGER_UP ||
+           SDL_GameControllerGetAxis(gamepad->controller, SDL_CONTROLLER_AXIS_TRIGGERRIGHT) > LOCK_TRIGGER_UP;
+}
+
+/* ⭐ HELD AFTER THE PROMPT UNTIL LET GO. The Enter that answered it is often still
+ * down as the prompt goes, and the hold's end hands the pad's real state to the PC
+ * at once: it would press Cross in the game. So the hold stays until nothing is down
+ * on any bridged pad, at most LOCK_QUIET_MS. */
+bool lock_keys_holds_bridged(void) {
+    if (mode_is_prompt(s_mode)) {
+        return true;
+    }
+    if (s_quiet_until == 0) {
+        return false;
+    }
+    bool held = false;
+    if ((int32_t) (SDL_GetTicks() - s_quiet_until) < 0 && global != NULL && global->session != NULL) {
+        const stream_input_t *input = session_get_input(global->session);
+        const short max = input != NULL ? app_input_get_max_gamepads(&global->input) : 0;
+        for (short i = 0; i < max && !held; ++i) {
+            held = bridged_pad_held(input, app_input_gamepad_state_by_index(&global->input, i));
+        }
+    }
+    if (!held) {
+        s_quiet_until = 0;
+    }
+    return held;
 }
 
 bool lock_keys_pad_on_stream(void) {
@@ -120,7 +197,7 @@ bool lock_keys_pad_on_stream(void) {
     }
     const short max = app_input_get_max_gamepads(&global->input);
     for (short i = 0; i < max; ++i) {
-        if (pad_on_stream(input, app_input_gamepad_state_by_index(&global->input, i))) {
+        if (pad_taken(input, app_input_gamepad_state_by_index(&global->input, i))) {
             return true;
         }
     }
@@ -154,7 +231,7 @@ static void pads_forget(stream_input_t *input) {
     const short max = app_input_get_max_gamepads(input->input);
     for (short i = 0; i < max; ++i) {
         app_gamepad_state_t *gamepad = app_input_gamepad_state_by_index(input->input, i);
-        if (pad_on_stream(input, gamepad)) {
+        if (pad_taken(input, gamepad)) {
             pad_forget(pad_for(gamepad), gamepad);
         }
     }
@@ -227,10 +304,21 @@ static lock_act_t action_for(uint8_t what, bool numpad_open, short *key) {
         case SDL_CONTROLLER_BUTTON_B:
             *key = VK_ESCAPE;
             break;
+        case SDL_CONTROLLER_BUTTON_BACK:
+            /* Tab (rhoquinn8217, 2026-11-10: "create create button binded to tab"), at
+             * the lock and at every prompt. ⓘ Create is one of the overlay's chord, so it
+             * acts as it goes up (pad_press), and holding the chord sends no Tab. */
+            *key = VK_TAB;
+            break;
         case SDL_CONTROLLER_BUTTON_X:
+            /* ⭐ The keyboard at every prompt as well as at the lock (rhoquinn8217,
+             * 2026-11-10: "lets just add square to all UAC prompts. there's no downside
+             * of having it"). Until then only where a prompt could ask for a password or
+             * a PIN. */
             return LOCK_ACT_KEYBOARD;
         case SDL_CONTROLLER_BUTTON_Y:
-            return LOCK_ACT_NUMPAD_OPEN;
+            /* And no numpad at a prompt. */
+            return s_mode == LOCK_KEYS_LOCK ? LOCK_ACT_NUMPAD_OPEN : LOCK_ACT_NONE;
         default:
             return LOCK_ACT_NONE;
     }
@@ -336,14 +424,14 @@ bool lock_keys_button(stream_input_t *input, app_gamepad_state_t *gamepad, const
         pad_family_note(gamepad->instance_id);
 #if defined(TARGET_WEBOS)
         const uint32_t now = SDL_GetTicks();
-        if (!s_active && now - s_last_press >= LOCK_IDLE_MS && ctm_bridge_active()) {
+        if (s_mode == LOCK_KEYS_OFF && now - s_last_press >= LOCK_IDLE_MS && ctm_bridge_active()) {
             ctm_bridge_agent_recheck();
         }
         s_last_press = now;
 #endif
     }
     /* ⓘ The touchpad's click stays the stream's: as the mouse, it clicks. */
-    if (!s_active || !pad_on_stream(input, gamepad) || event->button == SDL_CONTROLLER_BUTTON_TOUCHPAD) {
+    if (s_mode == LOCK_KEYS_OFF || !pad_taken(input, gamepad) || event->button == SDL_CONTROLLER_BUTTON_TOUCHPAD) {
         return false;
     }
     lock_pad_t *pad = pad_for(gamepad);
@@ -356,7 +444,7 @@ bool lock_keys_button(stream_input_t *input, app_gamepad_state_t *gamepad, const
 }
 
 void lock_keys_axis(stream_input_t *input, app_gamepad_state_t *gamepad, const SDL_ControllerAxisEvent *event) {
-    if (!s_active || !pad_on_stream(input, gamepad)) {
+    if (s_mode == LOCK_KEYS_OFF || !pad_taken(input, gamepad)) {
         return;
     }
     uint8_t what;
@@ -389,34 +477,49 @@ void lock_keys_axis(stream_input_t *input, app_gamepad_state_t *gamepad, const S
     }
 }
 
-static void lock_begin(stream_input_t *input) {
-    s_active = true;
+static void lock_begin(stream_input_t *input, lock_keys_mode_t mode) {
+    s_mode = mode;
     s_numpad_open = false;
     s_interface_had_input = false;
+    s_quiet_until = 0;
     memset(s_pads, 0, sizeof s_pads);
     s_vmouse_was = session_input_is_vmouse_active(&input->vmouse);
     session_input_set_vmouse_active(&input->vmouse, true);
     const short max = app_input_get_max_gamepads(input->input);
     for (short i = 0; i < max; ++i) {
         app_gamepad_state_t *gamepad = app_input_gamepad_state_by_index(input->input, i);
+        if (!pad_taken(input, gamepad)) {
+            continue;
+        }
+        pad_forget(pad_for(gamepad), gamepad);
+        /* ⓘ A bridged pad is not the stream's to rest: its reports are held instead. */
         if (!pad_on_stream(input, gamepad)) {
             continue;
         }
         gamepad->buttons = 0;
-        pad_forget(pad_for(gamepad), gamepad);
         LiSendMultiControllerEvent(gamepad->gs_id, input->input->activeGamepadMask, 0, 0, 0, 0, 0, 0, 0);
     }
 #if defined(TARGET_WEBOS)
-    ctm_bridge_gesture_note("lock keys: Windows is locked, a controller on the stream is a mouse, or types");
+    ctm_bridge_gesture_note(mode == LOCK_KEYS_LOCK
+                                ? "lock keys: Windows is locked, a controller on the stream is a mouse, or types"
+                                : mode == LOCK_KEYS_PROMPT
+                                ? "lock keys: a User Account Control prompt, Yes or No: every controller is a mouse, "
+                                  "or keys, the bridged ones held from the PC"
+                                : "lock keys: a User Account Control prompt that can ask for a password or PIN: every "
+                                  "controller is a mouse, or keys, Square the keyboard, the bridged ones held from the PC");
 #endif
 }
 
 static void lock_end(stream_input_t *input) {
-    s_active = false;
+    const bool prompt = mode_is_prompt(s_mode);
+    s_mode = LOCK_KEYS_OFF;
     s_numpad_open = false;
     memset(s_pads, 0, sizeof s_pads);
+    /* The bridged pads stay held until what is down on them is let go. */
+    s_quiet_until = prompt ? SDL_GetTicks() + LOCK_QUIET_MS : 0;
 #if defined(TARGET_WEBOS)
-    ctm_bridge_gesture_note("lock keys: Windows is unlocked, the controllers are the stream's again");
+    ctm_bridge_gesture_note(prompt ? "lock keys: the prompt is gone, the controllers are the stream's and the bridge's again"
+                                   : "lock keys: Windows is unlocked, the controllers are the stream's again");
 #endif
     if (input == NULL) {
         return;
@@ -444,18 +547,33 @@ static void lock_end(stream_input_t *input) {
 
 void lock_keys_tick(app_t *app) {
     stream_input_t *input = app->session != NULL ? session_get_input(app->session) : NULL;
-    bool locked = false;
+    lock_keys_mode_t wanted = LOCK_KEYS_OFF;
 #if defined(TARGET_WEBOS)
-    locked = input != NULL && keyboard_input_available(input) && ctm_bridge_active() && ctm_bridge_agent_locked();
-#endif
-    if (locked != s_active) {
-        if (locked) {
-            lock_begin(input);
+    if (input != NULL && keyboard_input_available(input) && ctm_bridge_active()) {
+        if (ctm_bridge_agent_locked()) {
+            wanted = LOCK_KEYS_LOCK;
         } else {
-            lock_end(input);
+            const int kind = s_fake_prompt >= 0 ? s_fake_prompt : (int) ctm_bridge_agent_uac();
+            wanted = kind == CTM_BRIDGE_UAC_CONSENT       ? LOCK_KEYS_PROMPT
+                     : kind == CTM_BRIDGE_UAC_CREDENTIALS ? LOCK_KEYS_PROMPT_PASSWORD
+                                                          : LOCK_KEYS_OFF;
         }
     }
-    if (!s_active) {
+#endif
+    if (wanted != s_mode) {
+        if (mode_is_prompt(wanted) && mode_is_prompt(s_mode)) {
+            /* The prompt's kind said again, otherwise: only what Square does changes. */
+            s_mode = wanted;
+        } else {
+            if (s_mode != LOCK_KEYS_OFF) {
+                lock_end(input);
+            }
+            if (wanted != LOCK_KEYS_OFF) {
+                lock_begin(input, wanted);
+            }
+        }
+    }
+    if (s_mode == LOCK_KEYS_OFF) {
         return;
     }
 #if defined(TARGET_WEBOS)
