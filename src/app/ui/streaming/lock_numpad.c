@@ -320,6 +320,15 @@ bool lock_numpad_close_up(void) {
     return s_close != NULL;
 }
 
+bool lock_numpad_close_at(lv_coord_t x, lv_coord_t y) {
+    if (s_close == NULL) {
+        return false;
+    }
+    lv_area_t area;
+    lv_obj_get_coords(s_close, &area);
+    return x >= area.x1 && x <= area.x2 && y >= area.y1 && y <= area.y2;
+}
+
 const char *lock_numpad_state(void) {
     return s_up == NULL ? "off" : (s_up_open ? "open" : "closed");
 }

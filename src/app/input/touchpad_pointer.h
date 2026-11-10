@@ -83,4 +83,31 @@ typedef struct stream_input_t stream_input_t;
 
 bool touchpad_pointer_stream_move(stream_input_t *input, float dx, float dy);
 
+/* ⭐ THE TOUCHPAD'S CLICK ON AURORA'S OWN BUTTON, IN A STREAM (rhoquinn8217,
+ * 2026-11-10, at a User Account Control prompt: "the touchpad's cursor goes
+ * behind the overlay button and isn't able to click the button. The mouse's
+ * cursor's above the overlay button and can click the button."). Two faults:
+ *   - the cursor above was drawn under the button: both are on LVGL's system
+ *     layer and the button came later. The cursor now moves back in front
+ *     whenever it shows or moves;
+ *   - the touchpad's clicks in a stream went to the host alone, so nothing of
+ *     Aurora's could ever be clicked with it. A connected mouse's click reaches
+ *     Aurora's interface as well (webOS draws its pointer, above everything).
+ * ➡️ So while the cursor above is up over the lock list's Close
+ * (ui/streaming/lock_numpad.h), the touchpad's left click is Aurora's: Close is
+ * pressed, and the host is NOT told, so the click cannot land on whatever of
+ * the PC's sits under the button (the list being up when it should not be is
+ * what Close is for). Anywhere else the host is told, as before. And the
+ * cursor stays up while it is on Close, so a click there never goes to the
+ * PC unseen.
+ * `touchpad_pointer_stream_tap`: a light tap, clicked here, held long enough
+ * for LVGL to read it. True when Aurora took it; false, and upstream tells the
+ * host as before.
+ * `touchpad_pointer_stream_press`: the pad pressed in (`down`) or let go, the
+ * press `left_button` or not. `taken` is the pad's own note of whether its
+ * press was Aurora's, so its release goes the same way, and only its own.
+ * True when the press or release was Aurora's. */
+bool touchpad_pointer_stream_tap(void);
+bool touchpad_pointer_stream_press(bool *taken, bool left_button, bool down);
+
 #endif

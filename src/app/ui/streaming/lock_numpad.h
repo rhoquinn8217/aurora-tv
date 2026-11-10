@@ -43,6 +43,10 @@ bool lock_numpad_after_up(void);
  * port. */
 bool lock_numpad_close_up(void);
 
+/* Is this point of the screen on Close? For the touchpad's click in a stream,
+ * which only Aurora's own pointer can bring to Close (input/touchpad_pointer.h). */
+bool lock_numpad_close_at(lv_coord_t x, lv_coord_t y);
+
 /* What a click on Close does: these controls off until the next lock or prompt
  * (lock_keys_dismiss). The control port's `numpad close` as well. */
 void lock_numpad_close_click(void);

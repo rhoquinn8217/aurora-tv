@@ -61,6 +61,8 @@ struct session_input_touchpad_t {
     int8_t physical_mouse_button;
     uint8_t motion_state;
     uint8_t tap_state;
+    /* This fork: the pad pressed in, or a finger held, on Aurora's own button, so its release is Aurora's too (input/touchpad_pointer.h). */
+    bool press_auroras, hold_auroras;
 };
 
 static bool quit_combo_pressed = false;
@@ -267,6 +269,8 @@ void stream_input_handle_cbutton(stream_input_t *input, const SDL_ControllerButt
                     touchpad_begin_settling(state);
                 }
 
+                /* This fork: pressed in on Aurora's own button, the press and its release are Aurora's, not the host's (input/touchpad_pointer.h). */
+                if (state != NULL && touchpad_pointer_stream_press(&state->press_auroras, mouse_button == BUTTON_LEFT, event->type == SDL_CONTROLLERBUTTONDOWN)) { return; }
                 LiSendMouseButtonEvent(event->type == SDL_CONTROLLERBUTTONDOWN ?
                                        BUTTON_ACTION_PRESS : BUTTON_ACTION_RELEASE, mouse_button);
                 return;
@@ -496,7 +500,8 @@ void stream_input_handle_ctouchpad(stream_input_t *input, const SDL_ControllerTo
                                                  finger->down_timestamp + TOUCHPAD_TAP_THRESHOLD_MS);
             if (hold_elapsed) {
                 state->tap_state = TOUCHPAD_TAP_SINGLE_HOLD;
-                LiSendMouseButtonEvent(BUTTON_ACTION_PRESS, BUTTON_LEFT);
+                /* This fork: a finger held on Aurora's own button holds it, not the host's (input/touchpad_pointer.h). */
+                if (!touchpad_pointer_stream_press(&state->hold_auroras, true, true)) { LiSendMouseButtonEvent(BUTTON_ACTION_PRESS, BUTTON_LEFT); }
             } else {
                 touchpad_end_tap(state);
             }
@@ -670,7 +675,8 @@ void stream_input_update_touchpad_tap_hold(stream_input_t *input) {
                     timestamp,
                     finger->down_timestamp + TOUCHPAD_TAP_THRESHOLD_MS)) {
             state->tap_state = TOUCHPAD_TAP_SINGLE_HOLD;
-            LiSendMouseButtonEvent(BUTTON_ACTION_PRESS, BUTTON_LEFT);
+            /* This fork: a finger held on Aurora's own button holds it, not the host's (input/touchpad_pointer.h). */
+            if (!touchpad_pointer_stream_press(&state->hold_auroras, true, true)) { LiSendMouseButtonEvent(BUTTON_ACTION_PRESS, BUTTON_LEFT); }
         }
     }
 }
@@ -934,6 +940,8 @@ static bool touchpad_finger_exceeded_tap_slop(
 }
 
 static void touchpad_end_tap(session_input_touchpad_t *state) {
+    /* This fork: a hold that was Aurora's is let go there (input/touchpad_pointer.h). */
+    if (touchpad_pointer_stream_press(&state->hold_auroras, false, false)) { state->tap_state = TOUCHPAD_TAP_NONE; }
     if (state->tap_state == TOUCHPAD_TAP_SINGLE_HOLD) {
         LiSendMouseButtonEvent(BUTTON_ACTION_RELEASE, BUTTON_LEFT);
     }
@@ -966,6 +974,8 @@ static void touchpad_send_mouse_click(int mouse_button) {
     if (mouse_button == 0) {
         return;
     }
+    /* This fork: a tap on Aurora's own button clicks it, and the host is not told (input/touchpad_pointer.h). */
+    if (mouse_button == BUTTON_LEFT && touchpad_pointer_stream_tap()) { return; }
     LiSendMouseButtonEvent(BUTTON_ACTION_PRESS, mouse_button);
     LiSendMouseButtonEvent(BUTTON_ACTION_RELEASE, mouse_button);
 }
@@ -989,6 +999,8 @@ static session_input_touchpad_t *touchpad_state(
 
 static void touchpad_reset_state(session_input_touchpad_t *state) {
     touchpad_end_tap(state);
+    /* This fork: a press that was Aurora's is let go there, not on the host (input/touchpad_pointer.h). */
+    if (touchpad_pointer_stream_press(&state->press_auroras, false, false)) { state->physical_mouse_button = 0; }
     if (state->physical_mouse_button > 0) {
         LiSendMouseButtonEvent(BUTTON_ACTION_RELEASE, state->physical_mouse_button);
     }
