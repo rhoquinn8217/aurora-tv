@@ -246,11 +246,11 @@ static lv_obj_t *list_create(pad_family_t family, lock_keys_mode_t mode) {
 
     /* The heading, then Close, NUMPAD_HEADING_GAP apart at the least, and a line under
      * the two to set them off from the rebinds. ⓘ The heading's own border, the heading
-     * made as wide as the list once its rows are laid out (below), so the rule runs the
-     * list's width whichever line is the widest, and Close goes to its right end: the
-     * Options row can be wider than "Windows Sign In: Controller". Spaced between, not
-     * grown: a row sized by its content gives a grown child no room. A box of 100% would
-     * come out with no width at all in a panel sized by its content. */
+     * made as wide as the list's widest line once its rows are laid out (below), so the
+     * rule runs the list's width and Close goes to its right end: the Options row can be
+     * wider than "Windows Sign In: Controller". Spaced between, not grown: a row sized
+     * by its content gives a grown child no room. A box of 100% would come out with no
+     * width at all in a panel sized by its content. */
     lv_obj_t *heading = row_create(panel);
     lv_obj_set_flex_align(heading, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_column(heading, NUMPAD_HEADING_GAP, 0);
@@ -259,8 +259,8 @@ static lv_obj_t *list_create(pad_family_t family, lock_keys_mode_t mode) {
     lv_obj_set_style_border_width(heading, LV_DPX(1), 0);
     lv_obj_set_style_border_color(heading, NUMPAD_MARK, 0);
     lv_obj_set_style_border_opa(heading, LV_OPA_COVER, 0);
-    words_create(heading, lock ? locstr("Windows Sign In: Controller") : locstr("User Account Control: Controller"),
-                 font);
+    lv_obj_t *title = words_create(
+        heading, lock ? locstr("Windows Sign In: Controller") : locstr("User Account Control: Controller"), font);
     s_close = close_create(heading);
     lv_obj_t *gap = box_create(panel);
     lv_obj_set_size(gap, 1, LV_DPX(2));
@@ -279,8 +279,23 @@ static lv_obj_t *list_create(pad_family_t family, lock_keys_mode_t mode) {
         mark_row_create(panel, PAD_MARK_NORTH, family, locstr("- numpad"));
     }
     options_row_create(panel, family);
+    /* ⭐ THE LIST AS WIDE AS ITS WIDEST LINE, THE HEADING WITH CLOSE AMONG THEM
+     * (rhoquinn8217, 2026-11-10, at build 669, where Close sat over the heading's last
+     * word: "Expand the legend horizontally to fit the close button. Check the UAD
+     * legend as well"). Measured off the lines themselves: the list's own width, read
+     * straight after a first layout, still had the heading as wide as its words alone.
+     * And the list set to it as well, not left to follow its heading. */
     lv_obj_update_layout(panel);
-    lv_obj_set_width(heading, lv_obj_get_content_width(panel));
+    lv_coord_t widest = (lv_coord_t) (lv_obj_get_width(title) + NUMPAD_HEADING_GAP + lv_obj_get_width(s_close));
+    const uint32_t lines = lv_obj_get_child_cnt(panel);
+    for (uint32_t i = 0; i < lines; ++i) {
+        lv_obj_t *line = lv_obj_get_child(panel, (int32_t) i);
+        if (line != heading && lv_obj_get_width(line) > widest) {
+            widest = lv_obj_get_width(line);
+        }
+    }
+    lv_obj_set_width(heading, widest);
+    lv_obj_set_width(panel, (lv_coord_t) (widest + 2 * NUMPAD_PAD));
     return panel;
 }
 
