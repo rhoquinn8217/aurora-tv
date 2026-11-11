@@ -5,6 +5,7 @@
 
 #include <stdint.h>
 
+#include "util/font.h"   /* app_fonts_t, which the theme's header names */
 #include "lvgl/theme/lv_theme_moonlight.h"
 #include "stream/input/lock_keys.h"
 #include "ui/common/bt_panel.h"
