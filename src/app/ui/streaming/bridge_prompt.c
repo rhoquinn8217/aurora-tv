@@ -15,6 +15,7 @@
 #include "stream/session.h"
 #include "stream/session_priv.h"
 #include "stream/bridge_session.h"
+#include "stream/input/lock_keys.h"
 #include "streaming.controller.h"
 #include "cursor_align.h"
 #include "input/tv_cursor.h"
@@ -539,6 +540,14 @@ void bridge_prompt_request(void) {
     }
     if (s_mbox != NULL && s_about != PROMPT_ABOUT_MOUSE_CONTROLS) {
         commons_log_info("Streaming", "bridge prompt: the TV cursor's is up, this one is not raised");
+        return;
+    }
+    /* ⭐ NOT WHILE THE LOCK'S OR A PROMPT'S REBINDS ARE ON (rhoquinn8217, 2026-11-10,
+     * "yes" to skipping it then): they turn Virtual Mouse on themselves
+     * (stream/input/lock_keys.h), so it is not the person's to turn off then, and
+     * the pop-up only hid their list. */
+    if (lock_keys_active()) {
+        commons_log_info("Streaming", "bridge prompt: the lock's or a prompt's rebinds are on, nothing to ask");
         return;
     }
     stream_input_t *input = session_get_input(global->session);

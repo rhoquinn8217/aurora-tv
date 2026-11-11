@@ -41,6 +41,15 @@ typedef struct bridge_settings_t {
      * bridging off. 🔗 input/touchpad_pointer.h. */
     bool touchpad_pointer;
 
+    /* ⭐ THE TWO WINDOWS STATE REBIND OVERRIDES, each its own switch and on by
+     * default (rhoquinn8217, 2026-11-10: "Make them Windows Log In and UAC
+     * separate settings"): the controllers as a mouse and keys while Windows is
+     * locked, and while a User Account Control prompt is up
+     * (stream/input/lock_keys.h). Not tied to `enable`: both run with bridging
+     * off. */
+    bool lock_rebinds;
+    bool uac_rebinds;
+
     /* ⭐ THE SIGNALS AND THE MICROPHONE. All on for now.
      *
      * ⓘ These are "I do not want that" switches, not a battery feature. A

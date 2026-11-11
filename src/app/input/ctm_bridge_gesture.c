@@ -37,6 +37,7 @@
 #include <unistd.h>
 
 #include "ctm_bridge_glue.h"
+#include "bridge_request.h"
 #include "app_input.h"
 #include "input_gamepad.h"
 #include "logging.h"
@@ -144,6 +145,7 @@ typedef struct {
     uint32_t prep_next;  /* SDL ticks when the next pulse step is due */
     char prep_node[64];  /* the node to plug once the pulse finishes */
     bool ours_plugged;   /* we plugged this one and it is still bridged */
+    bool whole_device;   /* the chord asked: bridge the rest of its device too */
     /* 1 + the Moonlight slot this side excluded when it bridged the pad, so
      * the exclusion can be lifted when the pad leaves; 0 = none. */
     uint8_t excluded_slot1;
@@ -1112,6 +1114,57 @@ static void request_arm(watched_t *w, SDL_GameController *controller, const char
     w->retry_used = false;
 }
 
+/* ⭐⭐ THE GESTURE TAKES THE WHOLE DEVICE (rhoquinn8217, 2026-11-10: "okay make
+ * the gesture release the whole device."). A pad can be one part of a USB device
+ * with others beside it: a DS5Dongle's keyboard for its macros sits beside its
+ * pad. The release half is the core's, and it stops the pad's own session only,
+ * so the keyboard stayed bridged. So when a pad this side plugged is seen
+ * released, the rest of its device goes too, exactly as its USB Bridge row
+ * releases it (bridge_release_device), and when the chord bridges a pad, the
+ * rest of its device comes with it (bridge_request_device): released and bridged
+ * again by the gesture, a device is whole, not PARTIAL.
+ * ⓘ The release follows ANY release of the pad, not only the chord's: a row and
+ * Release All have taken the rest already, a stream's end and a host gone take
+ * everything, and the control port's `release` of the pad's part now takes its
+ * device too. The bridge follows the chord only, since a row, Auto Bridge and
+ * the control port ask for every part they want themselves.
+ * ⓘ The quiet list: it enumerates without bringing the core up, which a release
+ * seen after a stream has ended must not do. 32, as the panel's and the control
+ * port's lists. */
+#define WHOLE_DEVICE_PARTS 32
+static void gesture_whole_device(const char *node, bool bridge) {
+    ctm_bridge_dev_t devs[WHOLE_DEVICE_PARTS];
+    const int n = ctm_bridge_list_quiet(devs, WHOLE_DEVICE_PARTS);
+    const char *group = NULL;
+    for (int i = 0; i < n; ++i) {
+        if (strcmp(devs[i].node, node) == 0) {
+            group = devs[i].group;
+            break;
+        }
+    }
+    if (group == NULL || group[0] == '\0') {
+        return;
+    }
+    int acted = 0;
+    for (int i = 0; i < n; ++i) {
+        if (strcmp(devs[i].node, node) == 0 || strcmp(devs[i].group, group) != 0) {
+            continue;
+        }
+        if (bridge && !devs[i].plugged) {
+            gesture_log("%s: bridging %s too, a part of its device", node, devs[i].node);
+            bridge_request_device(&devs[i]);
+            ++acted;
+        } else if (!bridge && devs[i].plugged) {
+            gesture_log("%s: releasing %s too, a part of its device", node, devs[i].node);
+            bridge_release_device(&devs[i]);
+            ++acted;
+        }
+    }
+    if (acted == 0) {
+        gesture_log("%s: no other part of its device to %s", node, bridge ? "bridge" : "release");
+    }
+}
+
 /* ⭐ WHAT A REFUSAL'S ANSWER ASKS FOR (2026-10-23): the player colour once the
  * core has lit and sounded it, or this side's red and buzz when it could not.
  * The core plays its signal on a thread of its own now
@@ -1166,6 +1219,9 @@ static bool plug_answered(watched_t *w, SDL_GameController *controller, bool ok,
                     w->prep_node, PLUG_RETRY_MS);
         return false;
     }
+    /* The chord's ask for the rest of the device, taken once, whatever the answer. */
+    const bool whole_device = ok && w->whole_device;
+    w->whole_device = false;
     /* ⭐ NOT REACHED THE SECOND TIME, OR WINDOWS LOCKED: said on the screen as well
      * as in the hand (rhoquinn8217, 2026-11-01). Taken by the app's loop, since
      * this file includes no UI headers. */
@@ -1220,6 +1276,9 @@ static bool plug_answered(watched_t *w, SDL_GameController *controller, bool ok,
         w->ours_plugged = true;
         w->plug_miss = 0;
         w->plug_check_next = SDL_GetTicks() + PLUG_CHECK_MS;
+        if (whole_device) {
+            gesture_whole_device(w->prep_node, true);
+        }
         /* A CONTROLLER IS NOW BRIDGED, so warn if the TV's own
          * mouse mode is on. It will go on driving the host
          * cursor, which is DELIBERATE -- without it a bridged pad
@@ -1435,6 +1494,7 @@ static bool gesture_poll_one(SDL_GameController *controller, SDL_JoystickID id) 
                 w->plug_miss = 0;
                 w->ours_plugged = false;
                 gesture_moonlight_set_excluded(w, controller, false);
+                gesture_whole_device(w->prep_node, false);
                 /* ⭐⭐ THE PLAYER COLOUR AFTER A RELEASE (rhoquinn8217,
                  * 2026-09-15). The core's yellow ends dark, and a pad left dark
                  * read as "not connected". The plug-out, yellow included, has
@@ -1795,6 +1855,7 @@ static bool gesture_poll_one(SDL_GameController *controller, SDL_JoystickID id) 
     /* Start the pulse and hand over when it ends. The node is kept because it
      * is resolved now and used a second later. */
     request_arm(w, controller, node);
+    w->whole_device = true;
     gesture_log("fired on %s -> %s : pulsing before handover", dev_path, node);
     return false;
 }
@@ -2303,6 +2364,7 @@ bool ctm_bridge_gesture_request_bridge(const char *node) {
          * that makes a bridge a bridge happens on the following ticks, in the
          * one place it is written. */
         request_arm(w, gc, node);
+        w->whole_device = false;
         w->fired = true;
         gesture_log("panel asked to bridge %s : pulsing before handover", node);
         return true;

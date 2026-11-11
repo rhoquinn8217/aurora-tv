@@ -3,6 +3,7 @@
 #include "lock_keys.h"
 
 #include <stdint.h>
+#include <stdio.h>
 #include <string.h>
 
 #include <Limelight.h>
@@ -41,6 +42,10 @@
 /* The most a bridged pad stays held after a prompt, waiting for what was down on it
  * to be let go: a reading stuck down must not leave it dead in the game. */
 #define LOCK_QUIET_MS 5000
+/* Options held this long with nothing else asks to turn this off (rhoquinn8217,
+ * 2026-11-10: "change the 4 seconds to 2 seconds"). Until then 4 s, as long as Select
+ * is held to pin the stats (GAMEPAD_HOLD_STATS_MS). */
+#define LOCK_DISMISS_MS 2000
 
 /* The triggers, as two more buttons, while they type. */
 #define LOCK_L2 (SDL_CONTROLLER_BUTTON_MAX)
@@ -57,6 +62,8 @@ typedef enum {
     LOCK_ACT_KEYBOARD,
     LOCK_ACT_NUMPAD_OPEN,
     LOCK_ACT_NUMPAD_CLOSE,
+    LOCK_ACT_ANSWER_OK,
+    LOCK_ACT_ANSWER_CANCEL,
 } lock_act_t;
 
 /* ⭐ THE ORDER OF THE PRESSES IS THE ORDER OF THE DIGITS. With the numpad open, three
@@ -74,6 +81,7 @@ typedef struct {
 typedef struct {
     SDL_JoystickID instance_id;
     uint32_t down;   /* what has gone down since this began and not come up */
+    uint32_t options_since;  /* when Options went down alone, held since; 0 if not */
     bool chord;      /* the chord was made: nothing acts until it is let go */
     lock_press_t queue[LOCK_QUEUE];
     int queued;
@@ -88,6 +96,12 @@ static unsigned s_typed;
 /* After a prompt, until when the bridged pads may stay held; 0 when they are not. */
 static uint32_t s_quiet_until;
 static int s_fake_prompt = -1;
+/* Turned off by hand, and whether at a prompt (else at the lock). */
+static bool s_dismissed;
+static bool s_dismissed_prompt;
+/* A close's question waiting for its answer, and how it was asked. */
+static bool s_asking;
+static const char *s_asking_how;
 #if defined(TARGET_WEBOS)
 static uint32_t s_last_ask;
 static uint32_t s_last_press;
@@ -110,7 +124,7 @@ bool lock_keys_numpad_open(void) {
 }
 
 bool lock_keys_triggers_type(void) {
-    return lock_keys_numpad_open();
+    return lock_keys_numpad_open() || (s_asking && s_mode != LOCK_KEYS_OFF);
 }
 
 bool lock_keys_triggers_swapped(void) {
@@ -127,6 +141,26 @@ void lock_keys_fake_prompt(int kind) {
 
 int lock_keys_faked_prompt(void) {
     return s_fake_prompt;
+}
+
+void lock_keys_dismiss(const char *how) {
+    if (s_mode == LOCK_KEYS_OFF || s_dismissed) {
+        return;
+    }
+    s_dismissed = true;
+    s_dismissed_prompt = mode_is_prompt(s_mode);
+    s_asking = false;
+#if defined(TARGET_WEBOS)
+    ctm_bridge_gesture_note("lock keys: turned off by hand (%s): every controller is a plain controller until "
+                            "the next %s", how != NULL ? how : "?",
+                            s_dismissed_prompt ? "User Account Control prompt or lock" : "lock or prompt");
+#else
+    (void) how;
+#endif
+}
+
+bool lock_keys_dismissed(void) {
+    return s_dismissed;
 }
 
 static bool pad_on_stream(const stream_input_t *input, const app_gamepad_state_t *gamepad) {
@@ -217,6 +251,7 @@ static lock_pad_t *pad_for(const app_gamepad_state_t *gamepad) {
 /* A trigger already held does not type: it counts as down, and has to be let go. */
 static void pad_forget(lock_pad_t *pad, const app_gamepad_state_t *gamepad) {
     pad->down = 0;
+    pad->options_since = 0;
     pad->chord = false;
     pad->queued = 0;
     if (SDL_GameControllerGetAxis(gamepad->controller, SDL_CONTROLLER_AXIS_TRIGGERLEFT) > LOCK_TRIGGER_UP) {
@@ -237,9 +272,60 @@ static void pads_forget(stream_input_t *input) {
     }
 }
 
+/* The question has the pads now, or has just given them back: what is down on them
+ * is forgotten, and a click the triggers hold is let go. */
+static void pads_rest(void) {
+    stream_input_t *input = global != NULL && global->session != NULL ? session_get_input(global->session) : NULL;
+    if (input == NULL) {
+        return;
+    }
+    pads_forget(input);
+    vmouse_set_trigger(&input->vmouse, 0, 0);
+}
+
+void lock_keys_ask_dismiss(const char *how) {
+    if (s_mode == LOCK_KEYS_OFF || s_dismissed || s_asking) {
+        return;
+    }
+    s_asking = true;
+    s_asking_how = how != NULL ? how : "?";
+    pads_rest();
+#if defined(TARGET_WEBOS)
+    ctm_bridge_gesture_note("lock keys: %s: asking whether to turn the rebinds off", s_asking_how);
+#endif
+}
+
+bool lock_keys_asking(void) {
+    return s_asking && s_mode != LOCK_KEYS_OFF;
+}
+
+void lock_keys_answer(bool ok, const char *by) {
+    if (!lock_keys_asking()) {
+        return;
+    }
+    s_asking = false;
+    pads_rest();
+    char how[128];
+    snprintf(how, sizeof how, "%s, then %s %s", s_asking_how, ok ? "OK" : "Cancel", by != NULL ? by : "?");
+    if (ok) {
+        lock_keys_dismiss(how);
+        return;
+    }
+#if defined(TARGET_WEBOS)
+    ctm_bridge_gesture_note("lock keys: kept on (%s)", how);
+#endif
+}
+
 /* What a press does, in the state it went down in. */
 static lock_act_t action_for(uint8_t what, bool numpad_open, short *key) {
     *key = 0;
+    if (s_asking) {
+        /* ⭐ A close's question has the pad: Cross is its OK and Circle its Cancel (A
+         * and B on an Xbox pad), and nothing else acts. */
+        return what == SDL_CONTROLLER_BUTTON_A   ? LOCK_ACT_ANSWER_OK
+               : what == SDL_CONTROLLER_BUTTON_B ? LOCK_ACT_ANSWER_CANCEL
+                                                 : LOCK_ACT_NONE;
+    }
     if (numpad_open) {
         switch (what) {
             case SDL_CONTROLLER_BUTTON_DPAD_UP:
@@ -351,6 +437,12 @@ static void act(stream_input_t *input, const lock_press_t *press) {
         case LOCK_ACT_NUMPAD_CLOSE:
             numpad_set(input, false);
             break;
+        case LOCK_ACT_ANSWER_OK:
+            lock_keys_answer(true, "on a pad");
+            break;
+        case LOCK_ACT_ANSWER_CANCEL:
+            lock_keys_answer(false, "on a pad");
+            break;
         default:
             break;
     }
@@ -372,6 +464,13 @@ static void pad_press(stream_input_t *input, lock_pad_t *pad, uint8_t what) {
         return;
     }
     pad->down |= LOCK_BIT(what);
+    /* Options alone starts the hold that turns this off; anything with it ends it,
+     * the chord to the overlay included. */
+    if (what == SDL_CONTROLLER_BUTTON_START && pad->down == LOCK_BIT(what)) {
+        pad->options_since = SDL_GetTicks() | 1u;
+    } else {
+        pad->options_since = 0;
+    }
     if ((pad->down & LOCK_CHORD) == LOCK_CHORD) {
         /* The chord: its four buttons were not presses after all. */
         pad->chord = true;
@@ -405,6 +504,9 @@ static void pad_release(stream_input_t *input, lock_pad_t *pad, uint8_t what) {
         return;
     }
     pad->down &= ~LOCK_BIT(what);
+    if (what == SDL_CONTROLLER_BUTTON_START) {
+        pad->options_since = 0;
+    }
     for (int i = 0; i < pad->queued; ++i) {
         if (pad->queue[i].what == what && !pad->queue[i].decided) {
             pad->queue[i].decided = true;
@@ -462,8 +564,9 @@ void lock_keys_axis(stream_input_t *input, app_gamepad_state_t *gamepad, const S
     }
     if (!s_numpad_open) {
         /* ⛔ And a trigger dropping straight to rest would leave the mouse's button
-         * down on the host. ⓘ Its first is the left button: R2's, at a lock. */
-        vmouse_set_trigger(&input->vmouse, gamepad->rightTrigger, gamepad->leftTrigger);
+         * down on the host. ⓘ Its first is the left button: R2's, at a lock. None
+         * while a close's question waits: it has the pad. */
+        vmouse_set_trigger(&input->vmouse, s_asking ? 0 : gamepad->rightTrigger, s_asking ? 0 : gamepad->leftTrigger);
         return;
     }
     lock_pad_t *pad = pad_for(gamepad);
@@ -480,6 +583,7 @@ void lock_keys_axis(stream_input_t *input, app_gamepad_state_t *gamepad, const S
 static void lock_begin(stream_input_t *input, lock_keys_mode_t mode) {
     s_mode = mode;
     s_numpad_open = false;
+    s_asking = false;
     s_interface_had_input = false;
     s_quiet_until = 0;
     memset(s_pads, 0, sizeof s_pads);
@@ -514,6 +618,7 @@ static void lock_end(stream_input_t *input) {
     const bool prompt = mode_is_prompt(s_mode);
     s_mode = LOCK_KEYS_OFF;
     s_numpad_open = false;
+    s_asking = false;
     memset(s_pads, 0, sizeof s_pads);
     /* The bridged pads stay held until what is down on them is let go. */
     s_quiet_until = prompt ? SDL_GetTicks() + LOCK_QUIET_MS : 0;
@@ -560,6 +665,21 @@ void lock_keys_tick(app_t *app) {
         }
     }
 #endif
+    /* ⭐ EACH HAS ITS SWITCH (bridge_settings.h: lock_rebinds, uac_rebinds), both on
+     * by default: switched off, the controllers stay plain controllers then. */
+    if (app_configuration != NULL &&
+        ((wanted == LOCK_KEYS_LOCK && !app_configuration->bridge.lock_rebinds) ||
+         (mode_is_prompt(wanted) && !app_configuration->bridge.uac_rebinds))) {
+        wanted = LOCK_KEYS_OFF;
+    }
+    /* ⭐ OFF BY HAND UNTIL THE NEXT ONE (lock_keys_dismiss): until DS5-USBIP says
+     * neither a lock nor a prompt, or says the other of the two. */
+    if (wanted == LOCK_KEYS_OFF || (s_dismissed && mode_is_prompt(wanted) != s_dismissed_prompt)) {
+        s_dismissed = false;
+    }
+    if (s_dismissed) {
+        wanted = LOCK_KEYS_OFF;
+    }
     if (wanted != s_mode) {
         if (mode_is_prompt(wanted) && mode_is_prompt(s_mode)) {
             /* The prompt's kind said again, otherwise: only what Square does changes. */
@@ -593,5 +713,15 @@ void lock_keys_tick(app_t *app) {
         vmouse_set_vector(&input->vmouse, 0, 0);
         vmouse_set_scroll(&input->vmouse, 0, 0);
         vmouse_set_trigger(&input->vmouse, 0, 0);
+    }
+    /* Options held LOCK_DISMISS_MS alone, on any pad this takes: a close, which asks
+     * first. Its OK ends this on the next pass, as an unlock does. */
+    const uint32_t held_at = SDL_GetTicks();
+    for (int i = 0; i < LOCK_SLOTS; ++i) {
+        if (s_pads[i].options_since != 0 && held_at - s_pads[i].options_since >= LOCK_DISMISS_MS) {
+            s_pads[i].options_since = 0;
+            lock_keys_ask_dismiss("Options held 2 s");
+            break;
+        }
     }
 }

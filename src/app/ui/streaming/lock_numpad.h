@@ -21,7 +21,13 @@
  *
  * ⭐ AT A USER ACCOUNT CONTROL PROMPT (2026-11-09), the same list headed "User Account
  * Control: Controller", without the numpad's row, without the keyboard's unless the
- * prompt can ask for a password or a PIN, and without the line about Auto Bridge. */
+ * prompt can ask for a password or a PIN, and without the line about Auto Bridge.
+ *
+ * ⭐ AND CLOSE AT THE RIGHT OF THE LIST'S HEADING (2026-11-10), which turns these
+ * controls off until the next lock or prompt, after a question at the screen's centre:
+ * "Are you sure?", with OK and Cancel. Options held 2 s raises the same question. So a
+ * click is taken after all, on those two alone; a pad answers the question through
+ * stream/input/lock_keys.h. The why is in lock_numpad.c. */
 
 #pragma once
 
@@ -38,6 +44,36 @@ const char *lock_numpad_state(void);
 
 /* Is the line about Auto Bridge up? For the control port. */
 bool lock_numpad_after_up(void);
+
+/* Is the Close button up (at the right of the list's heading; the numpad has none)?
+ * For the control port. */
+bool lock_numpad_close_up(void);
+
+/* Is the question a close raises up? For the control port. */
+bool lock_numpad_question_up(void);
+
+/* Is this point of the screen on what asks to be clicked: Close, or the question (all
+ * of it, so a click on its words reaches nothing behind)? For the touchpad's click in a
+ * stream, which only Aurora's own pointer can bring there (input/touchpad_pointer.h),
+ * and a mouse's (lock_numpad_mouse_takes). */
+bool lock_numpad_button_at(lv_coord_t x, lv_coord_t y);
+
+/* A mouse's button went down or up at this point of the screen, in the interface's
+ * own frame, as the pointer's driver reads it (lvgl/input/lv_sdl_drv_pointer_input.c).
+ * True: the press was on Close or the question, so it and its release are theirs
+ * alone, and the stream is not told (rhoquinn8217, 2026-11-10: a mouse's click on Close
+ * goes to Close only). ⓘ The driver hands every button to the interface as a press, so
+ * every button is taken there, not the left alone. */
+bool lock_numpad_mouse_takes(int button, bool down, lv_coord_t x, lv_coord_t y);
+
+/* Where the line about Auto Bridge is, its top, or -1 while it is not up. For the
+ * control port. */
+lv_coord_t lock_numpad_after_at(void);
+
+/* What a click on Close does: the question, whose OK turns these controls off until
+ * the next lock or prompt (lock_keys_ask_dismiss). The control port's `numpad close` as
+ * well. */
+void lock_numpad_close_click(void);
 
 /* Where it is, on the screen. False when nothing is up. */
 bool lock_numpad_area(lv_area_t *out);

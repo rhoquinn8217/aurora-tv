@@ -15,6 +15,7 @@
 #include "tv_cursor.h"
 #include "ui/root.h"
 #include "ui/ui_input.h"
+#include "ui/streaming/lock_numpad.h"    /* the lock list's Close and its question, which a click in a stream can reach */
 #if defined(TARGET_WEBOS)
 #include "ctm_bridge_gesture.h"           /* which of SDL's pads is bridged */
 #include "ctmbridge/ctm_bridge_glue.h"    /* the bridged devices' nodes and touches */
@@ -95,6 +96,10 @@ static Uint32 s_used_at = 0;
 static bool s_stream_shown = false;
 static Uint32 s_stream_used_at = 0;
 static int s_mouse_x = -1, s_mouse_y = -1;
+/* In a stream, the touchpad's click on Aurora's own button (the header says
+ * why): the pads holding it pressed in, and a tap's click held until then. */
+static int s_stream_holds = 0;
+static Uint32 s_stream_tap_until = 0;
 
 static void tp_log(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
 
@@ -241,6 +246,8 @@ static void stand_down(void) {
 void touchpad_pointer_ui_closing(void) {
     stand_down();
     s_active = false;
+    s_stream_holds = 0;
+    s_stream_tap_until = 0;
     if (s_indev != NULL) {
         lv_indev_delete(s_indev);
         s_indev = NULL;
@@ -260,8 +267,26 @@ void touchpad_pointer_deinit(void) {
     touchpad_pointer_ui_closing();
 }
 
+/* ⭐ IN FRONT OF EVERYTHING OF AURORA'S (rhoquinn8217, 2026-11-10: "the
+ * touchpad's cursor goes behind the overlay button"). The cursor is on LVGL's
+ * system layer from the moment the interface opens, and whatever is put on that
+ * layer later is drawn over it, as a later child is: the lock list and its
+ * Close, a bridge's note. So it goes back in front as it shows and as it moves. */
+static void keep_in_front(void) {
+    const lv_obj_t *layer = lv_obj_get_parent(s_cursor);
+    if (layer != NULL && lv_obj_get_index(s_cursor) + 1 != lv_obj_get_child_cnt(layer)) {
+        lv_obj_move_foreground(s_cursor);
+    }
+}
+
 static void show(bool on) {
-    if (s_cursor == NULL || on == s_shown) {
+    if (s_cursor == NULL) {
+        return;
+    }
+    if (on) {
+        keep_in_front();
+    }
+    if (on == s_shown) {
         return;
     }
     s_shown = on;
@@ -271,6 +296,28 @@ static void show(bool on) {
     } else {
         lv_obj_add_flag(s_cursor, LV_OBJ_FLAG_HIDDEN);
     }
+}
+
+/* In a stream: is the cursor on Aurora's own button? So far the lock list's
+ * Close and the question it raises, the only things of Aurora's over a stream
+ * that ask to be clicked. */
+static bool stream_on_auroras_button(void) {
+    return lock_numpad_button_at((lv_coord_t) s_px, (lv_coord_t) s_py);
+}
+
+/* A click in a stream is Aurora's: the cursor above up, on Aurora's button. */
+static bool stream_click_is_auroras(void) {
+    return !s_active && s_stream_shown && s_indev != NULL && tv_cursor_mode_on() && stream_on_auroras_button();
+}
+
+/* Aurora's pointer pressed while a pad holds it in on Aurora's button, or while
+ * a tap's click lasts. ⓘ Not while Aurora's own screens have the input: their
+ * pass (touchpad_pointer_tick) owns the press then. */
+static void stream_press_update(void) {
+    if (s_active) {
+        return;
+    }
+    s_pressed = s_stream_holds > 0 || s_stream_tap_until != 0;
 }
 
 /* One pad's touch this pass, from SDL or from the core alike: `down` fingers,
@@ -414,10 +461,19 @@ void touchpad_pointer_tick(struct app_input_t *input, bool ui_has_input) {
             stand_down();
             tp_log("off: %s", ui_has_input ? "the setting is off" : "a stream or a webOS pop-up has the input");
         }
+        /* A tap's click on Aurora's button (touchpad_pointer_stream_tap), let
+         * go once LVGL has had the time to read it. */
+        if (s_stream_tap_until != 0 && (Sint32) (SDL_GetTicks() - s_stream_tap_until) >= 0) {
+            s_stream_tap_until = 0;
+            stream_press_update();
+        }
         /* The stream's cursor (touchpad_pointer_stream_move) goes 4 seconds
-         * after its last movement, or as the TV cursor is switched off. */
+         * after its last movement, or as the TV cursor is switched off.
+         * ⭐ But not while it is on Aurora's button: a click there is Aurora's
+         * only while the cursor shows (the header says why). */
         if (!ui_has_input && s_stream_shown &&
-            (!tv_cursor_mode_on() || (Sint32) (SDL_GetTicks() - s_stream_used_at) >= HIDE_AFTER_MS)) {
+            (!tv_cursor_mode_on() ||
+             ((Sint32) (SDL_GetTicks() - s_stream_used_at) >= HIDE_AFTER_MS && !stream_on_auroras_button()))) {
             s_stream_shown = false;
             show(false);
         }
@@ -429,6 +485,9 @@ void touchpad_pointer_tick(struct app_input_t *input, bool ui_has_input) {
     }
     if (!s_active) {
         s_active = true;
+        /* The press is this pass's from here: a stream's is forgotten. */
+        s_stream_holds = 0;
+        s_stream_tap_until = 0;
         tp_log("on: Aurora's screens have the input");
     }
 #if SDL_VERSION_ATLEAST(2, 0, 14)
@@ -566,5 +625,49 @@ bool touchpad_pointer_stream_move(stream_input_t *input, float dx, float dy) {
         tp_log("stream: the touchpad moves the TV cursor, from %d,%d", (int) s_px, (int) s_py);
     }
     show(true);
+    return true;
+}
+
+bool touchpad_pointer_stream_tap(void) {
+    if (!stream_click_is_auroras()) {
+        return false;
+    }
+    const Uint32 now = SDL_GetTicks();
+    s_stream_tap_until = now + TAP_CLICK_MS;
+    s_stream_used_at = now;
+    stream_press_update();
+    tp_log("stream: a tap on Aurora's button at %d,%d: clicked here, the host not told", (int) s_px, (int) s_py);
+    return true;
+}
+
+bool touchpad_pointer_stream_press(bool *taken, bool left_button, bool down) {
+    if (taken == NULL) {
+        return false;
+    }
+    if (!down) {
+        if (!*taken) {
+            return false;
+        }
+        *taken = false;
+        if (s_stream_holds > 0) {
+            --s_stream_holds;
+        }
+        stream_press_update();
+        tp_log("stream: let go on Aurora's button, the host not told");
+        return true;
+    }
+    /* A press of this pad's whose release never came is let go first. */
+    if (*taken) {
+        touchpad_pointer_stream_press(taken, left_button, false);
+    }
+    if (!left_button || !stream_click_is_auroras()) {
+        return false;
+    }
+    *taken = true;
+    ++s_stream_holds;
+    s_stream_used_at = SDL_GetTicks();
+    stream_press_update();
+    tp_log("stream: pressed in on Aurora's button at %d,%d: pressed here, the host not told", (int) s_px,
+           (int) s_py);
     return true;
 }
