@@ -83,6 +83,16 @@ typedef struct stream_input_t stream_input_t;
 
 bool touchpad_pointer_stream_move(stream_input_t *input, float dx, float dy);
 
+/* ⭐ AND THE RIGHT STICK, WHILE WINDOWS IS LOCKED OR A USER ACCOUNT CONTROL
+ * PROMPT IS UP (rhoquinn8217, 2026-11-10: "during windows log in and UAC, right
+ * stick to mouse isn't using aurora-tv mouse and can't click the close
+ * button"). There the stick is the mouse (stream/input/lock_keys.h), and it
+ * moved the host's pointer alone, as Virtual Mouse does, so the lock list's
+ * Close was out of its reach. With the TV cursor on it moves this cursor
+ * instead, as the touchpad does, by `dx_px`, `dy_px` of the interface's pixels,
+ * and the host is told the point. True when it was moved. */
+bool touchpad_pointer_stream_stick(stream_input_t *input, float dx_px, float dy_px);
+
 /* ⭐ THE TOUCHPAD'S CLICK ON AURORA'S OWN BUTTON, IN A STREAM (rhoquinn8217,
  * 2026-11-10, at a User Account Control prompt: "the touchpad's cursor goes
  * behind the overlay button and isn't able to click the button. The mouse's

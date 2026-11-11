@@ -1,5 +1,6 @@
 #include "session_virt_mouse.h"
 #include "session_input.h"
+#include "input/touchpad_pointer.h"   /* This fork: a left click on Aurora's own button over the stream. */
 
 #include <SDL_stdinc.h>
 #include <math.h>
@@ -46,8 +47,12 @@ void vmouse_set_scroll(session_input_vmouse_t *vmouse, short x, short y) {
 void vmouse_set_trigger(session_input_vmouse_t *vmouse, char l, char r) {
     const char trigger_threshold = 64;
     bool ldown = l > trigger_threshold, rdown = r > trigger_threshold;
+    static bool s_left_auroras;   /* This fork: the left press went to Aurora's own button */
     if (vmouse->state.l != ldown) {
-        LiSendMouseButtonEvent(ldown ? BUTTON_ACTION_PRESS : BUTTON_ACTION_RELEASE, BUTTON_LEFT);
+        /* This fork: with the TV cursor on Aurora's own button, the left press and its release are Aurora's; see input/touchpad_pointer.h. */
+        if (!touchpad_pointer_stream_press(&s_left_auroras, true, ldown)) {
+            LiSendMouseButtonEvent(ldown ? BUTTON_ACTION_PRESS : BUTTON_ACTION_RELEASE, BUTTON_LEFT);
+        }
     }
     if (vmouse->state.r != rdown) {
         LiSendMouseButtonEvent(rdown ? BUTTON_ACTION_PRESS : BUTTON_ACTION_RELEASE, BUTTON_RIGHT);

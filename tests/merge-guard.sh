@@ -519,6 +519,8 @@ need "... the numpad" \
      src/app/bridge_app.c "lock_numpad_tick();"
 need "a mouse's click on the lock list's Close or its question stays off the PC" \
      src/app/lvgl/input/lv_sdl_drv_pointer_input.c "!lock_numpad_mouse_takes(e.button.button"
+need "... and Virtual Mouse's left click there, R2's at a lock, when the right stick took the TV cursor to it" \
+     src/app/stream/input/session_virt_mouse.c "touchpad_pointer_stream_press(&s_left_auroras, true, ldown)"
 need "the typing is built" \
      src/app/ctmbridge/app_sources.cmake "src/app/stream/input/lock_keys.c"
 need "the numpad is built" \

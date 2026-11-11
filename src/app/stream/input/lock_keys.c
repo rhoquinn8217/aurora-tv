@@ -11,6 +11,8 @@
 #include "app.h"
 #include "input/app_input.h"
 #include "input/input_gamepad.h"
+#include "input/touchpad_pointer.h"
+#include "input/tv_cursor.h"
 #include "stream/input/bridge_switch_hold.h"
 #include "stream/input/keyboard_input.h"
 #include "stream/input/session_input.h"
@@ -102,6 +104,9 @@ static bool s_dismissed_prompt;
 /* A close's question waiting for its answer, and how it was asked. */
 static bool s_asking;
 static const char *s_asking_how;
+/* R2 down while the question waits, and whether its press went to Aurora's button. */
+static bool s_r2_down;
+static bool s_r2_auroras;
 #if defined(TARGET_WEBOS)
 static uint32_t s_last_ask;
 static uint32_t s_last_press;
@@ -131,6 +136,10 @@ bool lock_keys_triggers_swapped(void) {
     return s_mode != LOCK_KEYS_OFF && !s_numpad_open;
 }
 
+bool lock_keys_stick_moves_tv_cursor(void) {
+    return s_mode != LOCK_KEYS_OFF && tv_cursor_mode_on();
+}
+
 unsigned lock_keys_typed(void) {
     return s_typed;
 }
@@ -143,6 +152,15 @@ int lock_keys_faked_prompt(void) {
     return s_fake_prompt;
 }
 
+/* R2's press while the question waited, let go: Aurora's pointer is not left
+ * pressed when the question goes another way. */
+static void r2_let_go(void) {
+    s_r2_down = false;
+    if (s_r2_auroras) {
+        touchpad_pointer_stream_press(&s_r2_auroras, true, false);
+    }
+}
+
 void lock_keys_dismiss(const char *how) {
     if (s_mode == LOCK_KEYS_OFF || s_dismissed) {
         return;
@@ -150,6 +168,7 @@ void lock_keys_dismiss(const char *how) {
     s_dismissed = true;
     s_dismissed_prompt = mode_is_prompt(s_mode);
     s_asking = false;
+    r2_let_go();
 #if defined(TARGET_WEBOS)
     ctm_bridge_gesture_note("lock keys: turned off by hand (%s): every controller is a plain controller until "
                             "the next %s", how != NULL ? how : "?",
@@ -304,6 +323,7 @@ void lock_keys_answer(bool ok, const char *by) {
         return;
     }
     s_asking = false;
+    r2_let_go();
     pads_rest();
     char how[128];
     snprintf(how, sizeof how, "%s, then %s %s", s_asking_how, ok ? "OK" : "Cancel", by != NULL ? by : "?");
@@ -557,16 +577,37 @@ void lock_keys_axis(stream_input_t *input, app_gamepad_state_t *gamepad, const S
     } else {
         /* ⛔ Asked here as well as by the stream's handling, which asks only while a
          * stick or trigger is off rest: a stick dropping straight to rest would leave
-         * the mouse moving. */
-        vmouse_set_vector(&input->vmouse, gamepad->rightStickX, gamepad->rightStickY);
+         * the mouse moving. ⓘ Not the right stick while it moves the TV cursor
+         * (stick_moves_tv_cursor): Virtual Mouse would move the host's pointer away
+         * from it. */
+        if (lock_keys_stick_moves_tv_cursor()) {
+            vmouse_set_vector(&input->vmouse, 0, 0);
+        } else {
+            vmouse_set_vector(&input->vmouse, gamepad->rightStickX, gamepad->rightStickY);
+        }
         vmouse_set_scroll(&input->vmouse, gamepad->leftStickX, gamepad->leftStickY);
+        return;
+    }
+    if (s_asking) {
+        /* ⭐ A close's question has the pad: the triggers click nothing of the host's,
+         * and R2 clicks only what of Aurora's the TV cursor is on, the question's OK or
+         * Cancel (input/touchpad_pointer.h), as the touchpad does. */
+        if (what == LOCK_R2) {
+            if (!s_r2_down && event->value > LOCK_TRIGGER_DOWN) {
+                s_r2_down = true;
+                touchpad_pointer_stream_press(&s_r2_auroras, true, true);
+            } else if (s_r2_down && event->value < LOCK_TRIGGER_UP) {
+                r2_let_go();
+            }
+        }
+        vmouse_set_trigger(&input->vmouse, 0, 0);
         return;
     }
     if (!s_numpad_open) {
         /* ⛔ And a trigger dropping straight to rest would leave the mouse's button
-         * down on the host. ⓘ Its first is the left button: R2's, at a lock. None
-         * while a close's question waits: it has the pad. */
-        vmouse_set_trigger(&input->vmouse, s_asking ? 0 : gamepad->rightTrigger, s_asking ? 0 : gamepad->leftTrigger);
+         * down on the host. ⓘ Its first is the left button: R2's, at a lock; on
+         * Aurora's own button it is Aurora's (stream/input/session_virt_mouse.c). */
+        vmouse_set_trigger(&input->vmouse, gamepad->rightTrigger, gamepad->leftTrigger);
         return;
     }
     lock_pad_t *pad = pad_for(gamepad);
@@ -584,6 +625,7 @@ static void lock_begin(stream_input_t *input, lock_keys_mode_t mode) {
     s_mode = mode;
     s_numpad_open = false;
     s_asking = false;
+    r2_let_go();
     s_interface_had_input = false;
     s_quiet_until = 0;
     memset(s_pads, 0, sizeof s_pads);
@@ -619,6 +661,7 @@ static void lock_end(stream_input_t *input) {
     s_mode = LOCK_KEYS_OFF;
     s_numpad_open = false;
     s_asking = false;
+    r2_let_go();
     memset(s_pads, 0, sizeof s_pads);
     /* The bridged pads stay held until what is down on them is let go. */
     s_quiet_until = prompt ? SDL_GetTicks() + LOCK_QUIET_MS : 0;
@@ -647,6 +690,56 @@ static void lock_end(stream_input_t *input) {
         gamepad->buttons = 0;
         bridge_switch_hold_keep_quiet(input, gamepad);
         bridge_switch_hold_send(gamepad, input->input->activeGamepadMask, false);
+    }
+}
+
+/* How fast the right stick moves the TV cursor, in the interface's pixels a
+ * millisecond: Virtual Mouse's own curve (stream/input/session_virt_mouse.c), no
+ * movement under 4096 and the square root of the rest, at its pace of a step of
+ * that over 28 every 5 ms. Pushed all the way, about 1.2 pixels a millisecond. */
+static float stick_speed(short axis) {
+    const int a = axis > 0 ? axis : -axis;
+    if (a < 4096) {
+        return 0;
+    }
+    const float v = (float) (SDL_sqrt((double) (a - 4096)) / 140.0);
+    return axis > 0 ? v : -v;
+}
+
+/* ⭐ THE RIGHT STICK MOVES THE TV CURSOR (rhoquinn8217, 2026-11-10: "during windows
+ * log in and UAC, right stick to mouse isn't using aurora-tv mouse and can't click
+ * the close button"), with the TV cursor on, as the touchpad does: so R2, the left
+ * click here, reaches the list's Close and its question (input/touchpad_pointer.h).
+ * Once a pass, by how far the pad pushed furthest is pushed and how long the pass
+ * took: a stick held still sends no events. */
+static void stick_moves_tv_cursor(stream_input_t *input) {
+    static Uint32 s_at;
+    const Uint32 now = SDL_GetTicks();
+    Uint32 dt = s_at != 0 ? now - s_at : 0;
+    s_at = now;
+    if (dt > 50) {
+        dt = 50;   /* a long pass, or the first in a while: no leap */
+    }
+    if (input == NULL || dt == 0 || !lock_keys_stick_moves_tv_cursor() || ui_should_block_input()) {
+        return;
+    }
+    float vx = 0, vy = 0;
+    const short max = app_input_get_max_gamepads(input->input);
+    for (short i = 0; i < max; ++i) {
+        const app_gamepad_state_t *gamepad = app_input_gamepad_state_by_index(input->input, i);
+        if (!pad_taken(input, gamepad)) {
+            continue;
+        }
+        /* The stream's Y is up; the screen's is down. */
+        const float x = stick_speed(gamepad->rightStickX);
+        const float y = stick_speed((short) -SDL_max(gamepad->rightStickY, -32767));
+        if (x * x + y * y > vx * vx + vy * vy) {
+            vx = x;
+            vy = y;
+        }
+    }
+    if (vx != 0 || vy != 0) {
+        touchpad_pointer_stream_stick(input, vx * (float) dt, vy * (float) dt);
     }
 }
 
@@ -724,4 +817,5 @@ void lock_keys_tick(app_t *app) {
             break;
         }
     }
+    stick_moves_tv_cursor(input);
 }
