@@ -73,12 +73,16 @@
  * disable the overrides as well so each controller controls like a plain
  * controller", "This is a fail safe option incase the rebinds happen
  * inappropriately. When someone closes it this way ... it needs to stay off until
- * the next time a login or UAC is detected"). A button at the top right says "Turn off
- * rebind overrides", and the last row of the list says Options "- hold for 4s to
- * close" (ui/streaming/lock_numpad.c); a click on the button, as on the stats' pin, or
- * Options held 4 s on a pad this takes with nothing else pressed, as Select pins the
- * stats, ends this as an unlock or the prompt's end would. It stays off until
- * DS5-USBIP says neither, or says the other of the two.
+ * the next time a login or UAC is detected"). A button "Close" at the right of the
+ * list's heading, and the last row of the list says Options "- hold for 4s to close"
+ * (ui/streaming/lock_numpad.c). A click on the button, as on the stats' pin, or Options
+ * held 4 s on a pad this takes with nothing else pressed, as Select pins the stats,
+ * asks first, and its OK ends this as an unlock or the prompt's end would. It stays
+ * off until DS5-USBIP says neither, or says the other of the two.
+ * ⭐ THE QUESTION (2026-11-10: "On a close, open pop up with warning that rebindings
+ * will be turned off and if they are sure ok or cancel"): while it is up, Cross is its
+ * OK and Circle its Cancel (A and B on an Xbox pad), no other button does anything, and
+ * the triggers do not click. The sticks and the touchpad go on as the mouse.
  * ⓘ While this is on, a bridge raises no Virtual Mouse pop-up
  * (ui/streaming/bridge_prompt.h): this turns Virtual Mouse on itself. */
 
@@ -129,6 +133,18 @@ void lock_keys_dismiss(const char *how);
 /* Turned off by hand, and the lock or prompt it was turned off at still there? */
 bool lock_keys_dismissed(void);
 
+/* A close: Close clicked, or Options held 4 s, with how in the log. It asks first
+ * whether to turn this off (the header). Nothing while off, turned off already, or
+ * asking already. */
+void lock_keys_ask_dismiss(const char *how);
+
+/* Is the question a close raises waiting for its answer? */
+bool lock_keys_asking(void);
+
+/* Its answer, with what gave it in the log: OK turns this off by hand
+ * (lock_keys_dismiss), Cancel leaves it as it was. Nothing while no question waits. */
+void lock_keys_answer(bool ok, const char *by);
+
 /* Is the numpad open? A lock starts with it closed. */
 bool lock_keys_numpad_open(void);
 
@@ -140,7 +156,9 @@ bool lock_keys_button(stream_input_t *input, app_gamepad_state_t *gamepad, const
  * stream's handling goes on either way, for Virtual Mouse's sticks. */
 void lock_keys_axis(stream_input_t *input, app_gamepad_state_t *gamepad, const SDL_ControllerAxisEvent *event);
 
-/* Are the triggers typing? Virtual Mouse then sees them at rest. */
+/* Are the triggers kept from the mouse: typing, with the numpad open, or doing
+ * nothing while the question a close raises waits? Virtual Mouse then sees them at
+ * rest. */
 bool lock_keys_triggers_type(void);
 
 /* Are the triggers the mouse's buttons, R2 the left and L2 the right? Virtual Mouse

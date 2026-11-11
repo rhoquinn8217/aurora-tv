@@ -15,7 +15,7 @@
 #include "tv_cursor.h"
 #include "ui/root.h"
 #include "ui/ui_input.h"
-#include "ui/streaming/lock_numpad.h"    /* the lock list's Close, which a click in a stream can reach */
+#include "ui/streaming/lock_numpad.h"    /* the lock list's Close and its question, which a click in a stream can reach */
 #if defined(TARGET_WEBOS)
 #include "ctm_bridge_gesture.h"           /* which of SDL's pads is bridged */
 #include "ctmbridge/ctm_bridge_glue.h"    /* the bridged devices' nodes and touches */
@@ -299,9 +299,10 @@ static void show(bool on) {
 }
 
 /* In a stream: is the cursor on Aurora's own button? So far the lock list's
- * Close, the one button of Aurora's over a stream that asks to be clicked. */
+ * Close and the question it raises, the only things of Aurora's over a stream
+ * that ask to be clicked. */
 static bool stream_on_auroras_button(void) {
-    return lock_numpad_close_at((lv_coord_t) s_px, (lv_coord_t) s_py);
+    return lock_numpad_button_at((lv_coord_t) s_px, (lv_coord_t) s_py);
 }
 
 /* A click in a stream is Aurora's: the cursor above up, on Aurora's button. */

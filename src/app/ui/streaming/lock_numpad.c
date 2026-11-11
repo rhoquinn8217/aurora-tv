@@ -54,23 +54,36 @@
 #define NUMPAD_AFTER_GAP LV_DPX(10)
 #define NUMPAD_AFTER_Y (NUMPAD_MARGIN_Y + LV_DPX(327))
 
-/* ⭐ THE CLOSE BUTTON, top right, level with the list (rhoquinn8217, 2026-11-10: "a
- * close button to right of screen"). A fail-safe that only closes: it turns these
- * controls off until the next lock or prompt (lock_keys_dismiss), and nothing brings
- * them back meanwhile ("holding the options button for 4 seconds does not bring it
- * back. It's a close only path"). Clicked as the stats' pin is ("use the same
- * functionality as the performance stats pin button that removes it"): the TV's
- * pointer reaches it during a stream as it reaches the pin. A click on it is
- * Aurora's alone, the touchpad's (input/touchpad_pointer.h) and a mouse's
- * (lock_numpad_mouse_takes) alike: the PC is not told.
- * ⭐ ITS WORDS ARE ONE LINE, and the Options hold has its row in the legends
- * (2026-11-10, at build 667: "Label should just be "Turn off rebind overrides"" and
- * "In the legend add the options symbol", its words "hold for 4s to close"). Until
- * then the button carried both, "Click this or hold Options for 4 seconds to disable
- * <the list's name> rebinds", wrapped over four lines. */
+/* ⭐ CLOSE, AT THE RIGHT OF THE LIST'S HEADING (rhoquinn8217, 2026-11-10, at build
+ * 668: "Lets put a clickable (x) are the right of the legend. Clear so space after the
+ * last word in the title. Remove the button at the corner of the screen", then "Change
+ * the x in a circle to a button that simple labeled "close""). A fail-safe that only
+ * closes: it turns these controls off until the next lock or prompt
+ * (lock_keys_dismiss), and nothing brings them back meanwhile ("holding the options
+ * button for 4 seconds does not bring it back. It's a close only path"). Not on the
+ * numpad, where Circle closes the numpad ("no" to one there too): the Options hold
+ * closes from there. Through build 668 it was a button of its own at the top right of
+ * the screen ("a close button to right of screen"), lastly reading "Turn off rebind
+ * overrides"; the Options hold has had its row in the legends since 668.
+ * ⭐ AND A CLOSE ASKS FIRST ("On a close, open pop up with warning that rebindings will
+ * be turned off and if they are sure ok or cancel"): a question at the screen's
+ * centre, in the words of the third of three offered, with OK and Cancel, each with
+ * the pad's button that answers the same (stream/input/lock_keys.h). Close clicked and
+ * Options held 4 s alike.
+ * ⓘ Clicked as the stats' pin is ("use the same functionality as the performance stats
+ * pin button that removes it"): the TV's pointer reaches it during a stream as it
+ * reaches the pin. A click on Close or the question is Aurora's alone, the touchpad's
+ * (input/touchpad_pointer.h) and a mouse's (lock_numpad_mouse_takes) alike: the PC is
+ * not told. */
+/* Room after the heading's last word, before Close. */
+#define NUMPAD_HEADING_GAP LV_DPX(12)
+/* The question's width: its words wrap to it. */
+#define NUMPAD_QUESTION_W LV_DPX(330)
 
 static lv_obj_t *s_after;
-static lv_obj_t *s_close;
+static lv_obj_t *s_close;        /* the list's, gone with it; none with the numpad */
+static lv_obj_t *s_question;
+static pad_family_t s_question_family;
 static lv_coord_t s_after_y = -1;   /* the list's foot plus the gap; -1 until a list is up */
 static lv_coord_t s_after_at = -1;  /* where the line is now */
 static lv_obj_t *s_up;
@@ -190,6 +203,32 @@ static lv_obj_t *numpad_create(pad_family_t family) {
     return panel;
 }
 
+void lock_numpad_close_click(void) {
+    lock_keys_ask_dismiss("Close clicked");
+}
+
+static void close_clicked(lv_event_t *event) {
+    LV_UNUSED(event);
+    lock_numpad_close_click();
+}
+
+/* Close, in the heading: its word in a frame, as small as the word. */
+static lv_obj_t *close_create(lv_obj_t *parent) {
+    lv_obj_t *button = box_create(parent);
+    lv_obj_add_flag(button, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_style_bg_color(button, NUMPAD_KEY_BG, LV_STATE_PRESSED);
+    lv_obj_set_style_bg_opa(button, LV_OPA_COVER, LV_STATE_PRESSED);
+    lv_obj_set_style_border_color(button, NUMPAD_MARK, 0);
+    lv_obj_set_style_border_width(button, LV_DPX(1), 0);
+    lv_obj_set_style_radius(button, LV_DPX(6), 0);
+    lv_obj_set_style_pad_hor(button, LV_DPX(10), 0);
+    lv_obj_set_style_pad_ver(button, LV_DPX(3), 0);
+    lv_obj_set_size(button, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+    words_create(button, locstr("Close"), lv_theme_get_font_small(button));
+    lv_obj_add_event_cb(button, close_clicked, LV_EVENT_CLICKED, NULL);
+    return button;
+}
+
 /* The numpad closed: every button that does something, as the configs window's rows
  * read: a mark, a plain hyphen, what it does.
  * ⭐ At a User Account Control prompt, the same list under its own heading, without
@@ -205,18 +244,24 @@ static lv_obj_t *list_create(pad_family_t family, lock_keys_mode_t mode) {
     const lv_font_t *font = lv_theme_get_font_small(panel);
     const bool lock = mode == LOCK_KEYS_LOCK;
 
-    /* A line under the heading, to set it off from the rebinds. ⓘ The heading's own
-     * border, the heading made as wide as the list once its rows are laid out (below),
-     * so the rule runs the list's width whichever line is the widest: the Options row
-     * can be wider than "Windows Sign In: Controller". A box of 100% would come out
-     * with no width at all in a panel sized by its content. */
-    lv_obj_t *title = words_create(panel, lock ? locstr("Windows Sign In: Controller")
-                                               : locstr("User Account Control: Controller"), font);
-    lv_obj_set_style_pad_bottom(title, LV_DPX(4), 0);
-    lv_obj_set_style_border_side(title, LV_BORDER_SIDE_BOTTOM, 0);
-    lv_obj_set_style_border_width(title, LV_DPX(1), 0);
-    lv_obj_set_style_border_color(title, NUMPAD_MARK, 0);
-    lv_obj_set_style_border_opa(title, LV_OPA_COVER, 0);
+    /* The heading, then Close, NUMPAD_HEADING_GAP apart at the least, and a line under
+     * the two to set them off from the rebinds. ⓘ The heading's own border, the heading
+     * made as wide as the list once its rows are laid out (below), so the rule runs the
+     * list's width whichever line is the widest, and Close goes to its right end: the
+     * Options row can be wider than "Windows Sign In: Controller". Spaced between, not
+     * grown: a row sized by its content gives a grown child no room. A box of 100% would
+     * come out with no width at all in a panel sized by its content. */
+    lv_obj_t *heading = row_create(panel);
+    lv_obj_set_flex_align(heading, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_column(heading, NUMPAD_HEADING_GAP, 0);
+    lv_obj_set_style_pad_bottom(heading, LV_DPX(4), 0);
+    lv_obj_set_style_border_side(heading, LV_BORDER_SIDE_BOTTOM, 0);
+    lv_obj_set_style_border_width(heading, LV_DPX(1), 0);
+    lv_obj_set_style_border_color(heading, NUMPAD_MARK, 0);
+    lv_obj_set_style_border_opa(heading, LV_OPA_COVER, 0);
+    words_create(heading, lock ? locstr("Windows Sign In: Controller") : locstr("User Account Control: Controller"),
+                 font);
+    s_close = close_create(heading);
     lv_obj_t *gap = box_create(panel);
     lv_obj_set_size(gap, 1, LV_DPX(2));
     words_create(panel, locstr("Right stick - mouse"), font);
@@ -235,35 +280,97 @@ static lv_obj_t *list_create(pad_family_t family, lock_keys_mode_t mode) {
     }
     options_row_create(panel, family);
     lv_obj_update_layout(panel);
-    lv_obj_set_width(title, lv_obj_get_content_width(panel));
+    lv_obj_set_width(heading, lv_obj_get_content_width(panel));
     return panel;
 }
 
-void lock_numpad_close_click(void) {
-    lock_keys_dismiss("Close clicked");
-}
-
-static void close_clicked(lv_event_t *event) {
+static void question_ok_clicked(lv_event_t *event) {
     LV_UNUSED(event);
-    lock_numpad_close_click();
+    lock_keys_answer(true, "clicked");
 }
 
-/* The button, its words on one line and as wide as they are. */
-static lv_obj_t *close_create(void) {
-    lv_obj_t *button = box_create(lv_layer_sys());
+static void question_cancel_clicked(lv_event_t *event) {
+    LV_UNUSED(event);
+    lock_keys_answer(false, "clicked");
+}
+
+/* One of the question's answers: the pad's button that gives the same answer, then its
+ * word, in a key's colours. */
+static void answer_create(lv_obj_t *parent, pad_mark_t mark, pad_family_t family, const char *words,
+                          lv_event_cb_t clicked) {
+    lv_obj_t *button = row_create(parent);
     lv_obj_add_flag(button, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_set_style_bg_color(button, NUMPAD_PANEL_BG, 0);
-    lv_obj_set_style_bg_opa(button, LV_OPA_90, 0);
-    lv_obj_set_style_bg_color(button, NUMPAD_KEY_BG, LV_STATE_PRESSED);
-    lv_obj_set_style_border_color(button, NUMPAD_MARK, 0);
+    lv_obj_set_style_bg_color(button, NUMPAD_KEY_BG, 0);
+    lv_obj_set_style_bg_opa(button, LV_OPA_COVER, 0);
+    lv_obj_set_style_bg_color(button, NUMPAD_KEY_BORDER, LV_STATE_PRESSED);
+    lv_obj_set_style_border_color(button, NUMPAD_KEY_BORDER, 0);
     lv_obj_set_style_border_width(button, LV_DPX(1), 0);
-    lv_obj_set_style_radius(button, LV_DPX(10), 0);
-    lv_obj_set_style_pad_all(button, NUMPAD_PAD, 0);
-    lv_obj_set_size(button, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
-    lv_obj_align(button, LV_ALIGN_TOP_RIGHT, -NUMPAD_MARGIN_X, NUMPAD_MARGIN_Y);
-    words_create(button, locstr("Turn off rebind overrides"), lv_theme_get_font_small(button));
-    lv_obj_add_event_cb(button, close_clicked, LV_EVENT_CLICKED, NULL);
-    return button;
+    lv_obj_set_style_radius(button, LV_DPX(8), 0);
+    lv_obj_set_style_pad_hor(button, LV_DPX(10), 0);
+    lv_obj_set_style_pad_ver(button, LV_DPX(4), 0);
+    pad_mark_create(button, mark, family, NUMPAD_LEGEND_MARK, NUMPAD_MARK);
+    words_create(button, words, lv_theme_get_font_small(button));
+    lv_obj_add_event_cb(button, clicked, LV_EVENT_CLICKED, NULL);
+}
+
+/* ⭐ THE QUESTION A CLOSE RAISES, at the screen's centre, over the rest: its words are
+ * the third of three offered (rhoquinn8217, 2026-11-10: "3"). The line under it in the
+ * picture they saw was mine, not the question's ("you don't need to give the
+ * instructions again at the bottom of the popup"). ⓘ Clickable all over with nothing to
+ * do, so a click on its words reaches nothing behind. */
+static lv_obj_t *question_create(pad_family_t family) {
+    lv_obj_t *panel = box_create(lv_layer_sys());
+    lv_obj_add_flag(panel, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_style_bg_color(panel, NUMPAD_PANEL_BG, 0);
+    lv_obj_set_style_bg_opa(panel, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_color(panel, NUMPAD_MARK, 0);
+    lv_obj_set_style_border_width(panel, LV_DPX(1), 0);
+    lv_obj_set_style_radius(panel, LV_DPX(10), 0);
+    lv_obj_set_style_pad_all(panel, LV_DPX(14), 0);
+    lv_obj_set_style_pad_row(panel, LV_DPX(8), 0);
+    lv_obj_set_size(panel, NUMPAD_QUESTION_W, LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(panel, LV_FLEX_FLOW_COLUMN);
+    lv_obj_center(panel);
+
+    words_create(panel, locstr("Are you sure?"), lv_theme_get_font_normal(panel));
+    lv_obj_t *words = words_create(panel,
+                                   locstr("This turns off the rebinds in this list. Your controllers will work as "
+                                          "plain controllers until the next sign-in screen or User Account Control "
+                                          "prompt."),
+                                   lv_theme_get_font_small(panel));
+    lv_label_set_long_mode(words, LV_LABEL_LONG_WRAP);
+    lv_obj_set_width(words, lv_pct(100));
+
+    lv_obj_t *answers = row_create(panel);
+    lv_obj_set_width(answers, lv_pct(100));
+    lv_obj_set_flex_align(answers, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_column(answers, LV_DPX(8), 0);
+    lv_obj_set_style_pad_top(answers, LV_DPX(4), 0);
+    answer_create(answers, PAD_MARK_SOUTH, family, locstr("OK"), question_ok_clicked);
+    answer_create(answers, PAD_MARK_EAST, family, locstr("Cancel"), question_cancel_clicked);
+    /* Laid out now: a click can be asked about before the screen is next drawn. */
+    lv_obj_update_layout(panel);
+    return panel;
+}
+
+/* Up while a close's question waits, in the marks of the pad in hand. */
+static void question_show(bool on) {
+    if (!on) {
+        if (s_question != NULL) {
+            lv_obj_del(s_question);
+            s_question = NULL;
+        }
+        return;
+    }
+    const pad_family_t family = pad_family_current();
+    if (s_question != NULL && s_question_family != family) {
+        lv_obj_del(s_question);
+        s_question = NULL;
+    }
+    if (s_question == NULL) {
+        s_question = question_create(family);
+        s_question_family = family;
+    }
 }
 
 static void take_down(void) {
@@ -271,10 +378,7 @@ static void take_down(void) {
         lv_obj_del(s_up);
         s_up = NULL;
     }
-    if (s_close != NULL) {
-        lv_obj_del(s_close);
-        s_close = NULL;
-    }
+    s_close = NULL;
 }
 
 static bool after_sign_in(void) {
@@ -309,6 +413,7 @@ void lock_numpad_tick(void) {
     const bool after = showing && mode == LOCK_KEYS_LOCK && after_sign_in();
     if (!showing || !lock_keys_pad_on_stream()) {
         take_down();
+        question_show(false);
         after_show(after);
         return;
     }
@@ -317,7 +422,6 @@ void lock_numpad_tick(void) {
     if (s_up == NULL || s_up_open != open || s_shown_family != family || s_shown_mode != mode) {
         take_down();
         s_up = open ? numpad_create(family) : list_create(family, mode);
-        s_close = close_create();
         s_up_open = open;
         s_shown_family = family;
         s_shown_mode = mode;
@@ -328,8 +432,17 @@ void lock_numpad_tick(void) {
             lv_obj_get_coords(s_up, &area);
             s_after_y = (lv_coord_t) (area.y2 + 1 + NUMPAD_AFTER_GAP);
         }
+        if (s_question != NULL) {
+            /* Still over the rest. */
+            lv_obj_move_foreground(s_question);
+        }
     }
+    question_show(lock_keys_asking());
     after_show(after);
+}
+
+bool lock_numpad_question_up(void) {
+    return s_question != NULL;
 }
 
 bool lock_numpad_after_up(void) {
@@ -340,13 +453,28 @@ bool lock_numpad_close_up(void) {
     return s_close != NULL;
 }
 
-bool lock_numpad_close_at(lv_coord_t x, lv_coord_t y) {
-    if (s_close == NULL) {
-        return false;
+/* What of Aurora's that asks to be clicked is at this point, by name, or NULL. The
+ * question first: it is drawn over the rest. */
+static const char *button_at(lv_coord_t x, lv_coord_t y) {
+    const struct {
+        lv_obj_t *obj;
+        const char *name;
+    } asks[] = {{s_question, "the question"}, {s_close, "Close"}};
+    for (int i = 0; i < (int) (sizeof asks / sizeof asks[0]); ++i) {
+        if (asks[i].obj == NULL) {
+            continue;
+        }
+        lv_area_t area;
+        lv_obj_get_coords(asks[i].obj, &area);
+        if (x >= area.x1 && x <= area.x2 && y >= area.y1 && y <= area.y2) {
+            return asks[i].name;
+        }
     }
-    lv_area_t area;
-    lv_obj_get_coords(s_close, &area);
-    return x >= area.x1 && x <= area.x2 && y >= area.y1 && y <= area.y2;
+    return NULL;
+}
+
+bool lock_numpad_button_at(lv_coord_t x, lv_coord_t y) {
+    return button_at(x, y) != NULL;
 }
 
 bool lock_numpad_mouse_takes(int button, bool down, lv_coord_t x, lv_coord_t y) {
@@ -364,11 +492,12 @@ bool lock_numpad_mouse_takes(int button, bool down, lv_coord_t x, lv_coord_t y) 
         return true;
     }
     s_mouse_taken &= ~bit;   /* a press whose release never came */
-    if (!lock_numpad_close_at(x, y)) {
+    const char *on = button_at(x, y);
+    if (on == NULL) {
         return false;
     }
     s_mouse_taken |= bit;
-    mouse_note("the mouse pressed button %d on Close at %d,%d: Close's alone, the PC not told", button, (int) x,
+    mouse_note("the mouse pressed button %d on %s at %d,%d: Aurora's alone, the PC not told", button, on, (int) x,
                (int) y);
     return true;
 }

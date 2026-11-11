@@ -517,6 +517,8 @@ need "the buttons type, and the numpad shows, from the app's loop" \
      src/app/bridge_app.c "lock_keys_tick(app);"
 need "... the numpad" \
      src/app/bridge_app.c "lock_numpad_tick();"
+need "a mouse's click on the lock list's Close or its question stays off the PC" \
+     src/app/lvgl/input/lv_sdl_drv_pointer_input.c "!lock_numpad_mouse_takes(e.button.button"
 need "the typing is built" \
      src/app/ctmbridge/app_sources.cmake "src/app/stream/input/lock_keys.c"
 need "the numpad is built" \

@@ -3,6 +3,7 @@
 #include "lock_keys.h"
 
 #include <stdint.h>
+#include <stdio.h>
 #include <string.h>
 
 #include <Limelight.h>
@@ -60,6 +61,8 @@ typedef enum {
     LOCK_ACT_KEYBOARD,
     LOCK_ACT_NUMPAD_OPEN,
     LOCK_ACT_NUMPAD_CLOSE,
+    LOCK_ACT_ANSWER_OK,
+    LOCK_ACT_ANSWER_CANCEL,
 } lock_act_t;
 
 /* ⭐ THE ORDER OF THE PRESSES IS THE ORDER OF THE DIGITS. With the numpad open, three
@@ -95,6 +98,9 @@ static int s_fake_prompt = -1;
 /* Turned off by hand, and whether at a prompt (else at the lock). */
 static bool s_dismissed;
 static bool s_dismissed_prompt;
+/* A close's question waiting for its answer, and how it was asked. */
+static bool s_asking;
+static const char *s_asking_how;
 #if defined(TARGET_WEBOS)
 static uint32_t s_last_ask;
 static uint32_t s_last_press;
@@ -117,7 +123,7 @@ bool lock_keys_numpad_open(void) {
 }
 
 bool lock_keys_triggers_type(void) {
-    return lock_keys_numpad_open();
+    return lock_keys_numpad_open() || (s_asking && s_mode != LOCK_KEYS_OFF);
 }
 
 bool lock_keys_triggers_swapped(void) {
@@ -142,6 +148,7 @@ void lock_keys_dismiss(const char *how) {
     }
     s_dismissed = true;
     s_dismissed_prompt = mode_is_prompt(s_mode);
+    s_asking = false;
 #if defined(TARGET_WEBOS)
     ctm_bridge_gesture_note("lock keys: turned off by hand (%s): every controller is a plain controller until "
                             "the next %s", how != NULL ? how : "?",
@@ -264,9 +271,60 @@ static void pads_forget(stream_input_t *input) {
     }
 }
 
+/* The question has the pads now, or has just given them back: what is down on them
+ * is forgotten, and a click the triggers hold is let go. */
+static void pads_rest(void) {
+    stream_input_t *input = global != NULL && global->session != NULL ? session_get_input(global->session) : NULL;
+    if (input == NULL) {
+        return;
+    }
+    pads_forget(input);
+    vmouse_set_trigger(&input->vmouse, 0, 0);
+}
+
+void lock_keys_ask_dismiss(const char *how) {
+    if (s_mode == LOCK_KEYS_OFF || s_dismissed || s_asking) {
+        return;
+    }
+    s_asking = true;
+    s_asking_how = how != NULL ? how : "?";
+    pads_rest();
+#if defined(TARGET_WEBOS)
+    ctm_bridge_gesture_note("lock keys: %s: asking whether to turn the rebinds off", s_asking_how);
+#endif
+}
+
+bool lock_keys_asking(void) {
+    return s_asking && s_mode != LOCK_KEYS_OFF;
+}
+
+void lock_keys_answer(bool ok, const char *by) {
+    if (!lock_keys_asking()) {
+        return;
+    }
+    s_asking = false;
+    pads_rest();
+    char how[128];
+    snprintf(how, sizeof how, "%s, then %s %s", s_asking_how, ok ? "OK" : "Cancel", by != NULL ? by : "?");
+    if (ok) {
+        lock_keys_dismiss(how);
+        return;
+    }
+#if defined(TARGET_WEBOS)
+    ctm_bridge_gesture_note("lock keys: kept on (%s)", how);
+#endif
+}
+
 /* What a press does, in the state it went down in. */
 static lock_act_t action_for(uint8_t what, bool numpad_open, short *key) {
     *key = 0;
+    if (s_asking) {
+        /* ⭐ A close's question has the pad: Cross is its OK and Circle its Cancel (A
+         * and B on an Xbox pad), and nothing else acts. */
+        return what == SDL_CONTROLLER_BUTTON_A   ? LOCK_ACT_ANSWER_OK
+               : what == SDL_CONTROLLER_BUTTON_B ? LOCK_ACT_ANSWER_CANCEL
+                                                 : LOCK_ACT_NONE;
+    }
     if (numpad_open) {
         switch (what) {
             case SDL_CONTROLLER_BUTTON_DPAD_UP:
@@ -377,6 +435,12 @@ static void act(stream_input_t *input, const lock_press_t *press) {
             break;
         case LOCK_ACT_NUMPAD_CLOSE:
             numpad_set(input, false);
+            break;
+        case LOCK_ACT_ANSWER_OK:
+            lock_keys_answer(true, "on a pad");
+            break;
+        case LOCK_ACT_ANSWER_CANCEL:
+            lock_keys_answer(false, "on a pad");
             break;
         default:
             break;
@@ -499,8 +563,9 @@ void lock_keys_axis(stream_input_t *input, app_gamepad_state_t *gamepad, const S
     }
     if (!s_numpad_open) {
         /* ⛔ And a trigger dropping straight to rest would leave the mouse's button
-         * down on the host. ⓘ Its first is the left button: R2's, at a lock. */
-        vmouse_set_trigger(&input->vmouse, gamepad->rightTrigger, gamepad->leftTrigger);
+         * down on the host. ⓘ Its first is the left button: R2's, at a lock. None
+         * while a close's question waits: it has the pad. */
+        vmouse_set_trigger(&input->vmouse, s_asking ? 0 : gamepad->rightTrigger, s_asking ? 0 : gamepad->leftTrigger);
         return;
     }
     lock_pad_t *pad = pad_for(gamepad);
@@ -517,6 +582,7 @@ void lock_keys_axis(stream_input_t *input, app_gamepad_state_t *gamepad, const S
 static void lock_begin(stream_input_t *input, lock_keys_mode_t mode) {
     s_mode = mode;
     s_numpad_open = false;
+    s_asking = false;
     s_interface_had_input = false;
     s_quiet_until = 0;
     memset(s_pads, 0, sizeof s_pads);
@@ -551,6 +617,7 @@ static void lock_end(stream_input_t *input) {
     const bool prompt = mode_is_prompt(s_mode);
     s_mode = LOCK_KEYS_OFF;
     s_numpad_open = false;
+    s_asking = false;
     memset(s_pads, 0, sizeof s_pads);
     /* The bridged pads stay held until what is down on them is let go. */
     s_quiet_until = prompt ? SDL_GetTicks() + LOCK_QUIET_MS : 0;
@@ -646,13 +713,13 @@ void lock_keys_tick(app_t *app) {
         vmouse_set_scroll(&input->vmouse, 0, 0);
         vmouse_set_trigger(&input->vmouse, 0, 0);
     }
-    /* Options held LOCK_DISMISS_MS alone, on any pad this takes: off by hand. Ended
-     * on the next pass, as an unlock is. */
+    /* Options held LOCK_DISMISS_MS alone, on any pad this takes: a close, which asks
+     * first. Its OK ends this on the next pass, as an unlock does. */
     const uint32_t held_at = SDL_GetTicks();
     for (int i = 0; i < LOCK_SLOTS; ++i) {
         if (s_pads[i].options_since != 0 && held_at - s_pads[i].options_since >= LOCK_DISMISS_MS) {
             s_pads[i].options_since = 0;
-            lock_keys_dismiss("Options held 4 s");
+            lock_keys_ask_dismiss("Options held 4 s");
             break;
         }
     }
