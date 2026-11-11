@@ -42,9 +42,10 @@
 /* The most a bridged pad stays held after a prompt, waiting for what was down on it
  * to be let go: a reading stuck down must not leave it dead in the game. */
 #define LOCK_QUIET_MS 5000
-/* Options held this long with nothing else turns this off, as Select held as long
- * pins the stats (GAMEPAD_HOLD_STATS_MS). */
-#define LOCK_DISMISS_MS 4000
+/* Options held this long with nothing else asks to turn this off (rhoquinn8217,
+ * 2026-11-10: "change the 4 seconds to 2 seconds"). Until then 4 s, as long as Select
+ * is held to pin the stats (GAMEPAD_HOLD_STATS_MS). */
+#define LOCK_DISMISS_MS 2000
 
 /* The triggers, as two more buttons, while they type. */
 #define LOCK_L2 (SDL_CONTROLLER_BUTTON_MAX)
@@ -719,7 +720,7 @@ void lock_keys_tick(app_t *app) {
     for (int i = 0; i < LOCK_SLOTS; ++i) {
         if (s_pads[i].options_since != 0 && held_at - s_pads[i].options_since >= LOCK_DISMISS_MS) {
             s_pads[i].options_since = 0;
-            lock_keys_ask_dismiss("Options held 4 s");
+            lock_keys_ask_dismiss("Options held 2 s");
             break;
         }
     }

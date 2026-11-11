@@ -25,7 +25,7 @@
  *
  * ⭐ AND CLOSE AT THE RIGHT OF THE LIST'S HEADING (2026-11-10), which turns these
  * controls off until the next lock or prompt, after a question at the screen's centre:
- * "Are you sure?", with OK and Cancel. Options held 4 s raises the same question. So a
+ * "Are you sure?", with OK and Cancel. Options held 2 s raises the same question. So a
  * click is taken after all, on those two alone; a pad answers the question through
  * stream/input/lock_keys.h. The why is in lock_numpad.c. */
 

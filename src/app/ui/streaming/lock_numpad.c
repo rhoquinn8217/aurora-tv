@@ -69,7 +69,7 @@
  * be turned off and if they are sure ok or cancel"): a question at the screen's
  * centre, in the words of the third of three offered, with OK and Cancel, each with
  * the pad's button that answers the same (stream/input/lock_keys.h). Close clicked and
- * Options held 4 s alike.
+ * Options held 2 s alike.
  * ⓘ Clicked as the stats' pin is ("use the same functionality as the performance stats
  * pin button that removes it"): the TV's pointer reaches it during a stream as it
  * reaches the pin. A click on Close or the question is Aurora's alone, the touchpad's
@@ -156,9 +156,12 @@ static void mark_row_create(lv_obj_t *parent, pad_mark_t mark, pad_family_t fami
 }
 
 /* The last row of every legend, the list's and the numpad's: Options (Menu on an Xbox
- * pad) held 4 s turns these controls off, as Close does. */
+ * pad) held 2 s is a close, as Close is. Its words without the time (rhoquinn8217,
+ * 2026-11-10, as the hold went from 4 s to 2: "change the 4 seconds to 2 seconds and
+ * change the legend description for options symbol to "hold to close""); until then
+ * "hold for 4s to close". */
 static void options_row_create(lv_obj_t *parent, pad_family_t family) {
-    mark_row_create(parent, PAD_MARK_MENU, family, locstr("- hold for 4s to close"));
+    mark_row_create(parent, PAD_MARK_MENU, family, locstr("- hold to close"));
 }
 
 static lv_obj_t *dark_panel_create(lv_coord_t x, lv_coord_t y) {

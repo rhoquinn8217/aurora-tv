@@ -74,11 +74,12 @@
  * controller", "This is a fail safe option incase the rebinds happen
  * inappropriately. When someone closes it this way ... it needs to stay off until
  * the next time a login or UAC is detected"). A button "Close" at the right of the
- * list's heading, and the last row of the list says Options "- hold for 4s to close"
+ * list's heading, and the last row of the list says Options "- hold to close"
  * (ui/streaming/lock_numpad.c). A click on the button, as on the stats' pin, or Options
- * held 4 s on a pad this takes with nothing else pressed, as Select pins the stats,
- * asks first, and its OK ends this as an unlock or the prompt's end would. It stays
- * off until DS5-USBIP says neither, or says the other of the two.
+ * held 2 s on a pad this takes with nothing else pressed (4 s until 2026-11-10, as
+ * Select pins the stats), asks first, and its OK ends this as an unlock or the
+ * prompt's end would. It stays off until DS5-USBIP says neither, or says the other of
+ * the two.
  * ⭐ THE QUESTION (2026-11-10: "On a close, open pop up with warning that rebindings
  * will be turned off and if they are sure ok or cancel"): while it is up, Cross is its
  * OK and Circle its Cancel (A and B on an Xbox pad), no other button does anything, and
@@ -133,7 +134,7 @@ void lock_keys_dismiss(const char *how);
 /* Turned off by hand, and the lock or prompt it was turned off at still there? */
 bool lock_keys_dismissed(void);
 
-/* A close: Close clicked, or Options held 4 s, with how in the log. It asks first
+/* A close: Close clicked, or Options held 2 s, with how in the log. It asks first
  * whether to turn this off (the header). Nothing while off, turned off already, or
  * asking already. */
 void lock_keys_ask_dismiss(const char *how);
