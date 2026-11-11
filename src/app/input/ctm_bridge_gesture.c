@@ -2259,6 +2259,18 @@ static void arrival_check(struct app_input_t *input) {
             continue;
         }
 
+        /* ⭐ EVERY SLOT TAKEN IS NOT A MISSED ARRIVAL (2026-11-11). The app
+         * opens as many controllers as it has slots and ignores the rest, so
+         * neither the scan nor a reconnect can help; this used to end in
+         * "reconnect it", three replugs of a DS4 on the C1 did nothing, and
+         * the slots were the cause. Bridged pads keep their slots. */
+        const int slots = (int) app_input_get_max_gamepads(input);
+        if (app_input_get_gamepads_count(input) >= slots) {
+            gesture_log("arrival watch: all %d controller slots are taken, so %s gets none -- "
+                        "unplug a controller to make room for it", slots, d->node);
+            continue;
+        }
+
         /* ⭐ Upstream's scan: it opens what SDL has and the app has not, and
          * disturbs nothing at all, so nothing gates it. */
         const int opened = app_input_scan_gamepads(input);
@@ -2289,6 +2301,40 @@ static void arrival_watch_tick(struct app_input_t *input) {
 
 bool ctm_bridge_gesture_path_is_node(const char *dev_path, const char *node) {
     return controller_path_is_node(dev_path, node);
+}
+
+/* Said once per connection: every scan offers the same part again (at a
+ * stream's start, after each arrival), and each is refused the same way. SDL's
+ * instance ids start at 0, so a slot holds id + 1 and 0 is empty. */
+#define NOT_A_PAD_SAID 8
+static SDL_JoystickID s_not_a_pad_said[NOT_A_PAD_SAID];
+static int s_not_a_pad_next;
+
+bool ctm_bridge_gesture_not_a_pad(int device_index) {
+#if SDL_VERSION_ATLEAST(2, 24, 0)
+    const char *path = SDL_JoystickPathForIndex(device_index);
+    const char *says = ctm_bridge_node_says(path);
+    if (says == NULL || (strcmp(says, "keyboard") != 0 && strcmp(says, "mouse") != 0)) {
+        return false;
+    }
+    const SDL_JoystickID id = SDL_JoystickGetDeviceInstanceID(device_index);
+    bool said = false;
+    for (int i = 0; i < NOT_A_PAD_SAID && !said; ++i) {
+        said = s_not_a_pad_said[i] == id + 1;
+    }
+    if (!said) {
+        s_not_a_pad_said[s_not_a_pad_next] = id + 1;
+        s_not_a_pad_next = (s_not_a_pad_next + 1) % NOT_A_PAD_SAID;
+        const char *name = SDL_JoystickNameForIndex(device_index);
+        gesture_log("controller %d offered: name=[%s] path=[%s] -- its HID description says %s, so it is a "
+                    "part of a device and takes no controller slot; the bridge still takes it with its device",
+                    (int) id, name ? name : "?", path, says);
+    }
+    return true;
+#else
+    (void) device_index;
+    return false;
+#endif
 }
 
 int ctm_bridge_gesture_player_for_node(const char *node) {

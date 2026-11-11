@@ -125,6 +125,19 @@ void ctm_bridge_gesture_note(const char *fmt, ...);
  * the same flush, never inside SDL_FilterEvents (see the .c file). */
 void ctm_bridge_gesture_flush_device_added(void);
 
+/* ⭐ True when SDL offers a controller at this device index that is really a
+ * KEYBOARD OR MOUSE PART of a device (2026-11-11): its hidraw node's HID
+ * description says so, by the core's own rule (ctm_bridge_node_says). The app
+ * then does not open it, so it holds none of the app's controller slots. The
+ * bridge is unaffected: it lists and takes that part with its device from the
+ * kernel, never through SDL.
+ * ⓘ The case it was made for: SDL's PlayStation driver opens EVERY interface of
+ * 054c:0df2 as a DualSense Edge, so the DS5Dongle's keyboard part was player 2
+ * with serial 00-00-00-00-00-00, and with a DualSense, the Edge and an Xbox pad
+ * a DS4 found all four slots taken. Anything the description does not name as a
+ * keyboard or a mouse is opened as before. */
+bool ctm_bridge_gesture_not_a_pad(int device_index);
+
 #else
 
 /* ⓘ The desktop build has no bridge gesture. Every call that code compiled for
@@ -137,6 +150,7 @@ void ctm_bridge_gesture_flush_device_added(void);
 #define ctm_bridge_gesture_light_busy(controller) ((void)(controller), 0)
 #define ctm_bridge_gesture_flush_device_added() \
     (SDL_FlushEvent(SDL_JOYDEVICEADDED), SDL_FlushEvent(SDL_CONTROLLERDEVICEADDED))
+#define ctm_bridge_gesture_not_a_pad(device_index) ((void)(device_index), false)
 
 #endif
 

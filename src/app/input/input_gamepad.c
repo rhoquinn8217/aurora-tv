@@ -45,6 +45,7 @@ bool app_input_init_gamepad(app_input_t *input, int device_index) {
     }
 #endif
     if (SDL_IsGameController(device_index)) {
+        if (ctm_bridge_gesture_not_a_pad(device_index)) { return false; }   /* This fork: a keyboard or mouse part is no controller. Why: ctmbridge/NOTES.md, "A keyboard part is no controller". */
         SDL_GameController *controller = SDL_GameControllerOpen(device_index);
         if (!controller) {
             commons_log_error("Input", "Could not open gamecontroller %i. GUID: %s, error: %s", device_index, guidstr,
