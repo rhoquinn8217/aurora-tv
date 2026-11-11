@@ -33,8 +33,13 @@ typedef enum {
 #endif
 
 static const void *s_session;     /* the stream last seen, to tell a new one */
-static bool s_start_looked;       /* this stream's start was looked at */
+static bool s_start_looked;       /* this stream's start was looked at, or needs no question */
+static bool s_verdict_seen;       /* DS5-USBIP's first answer in this stream came */
 static bool s_was_online;         /* DS5-USBIP answered, at the last look */
+/* The stream it was last switched by hand in: that stream's start asks nothing (found
+ * on the rooted monitor, 2026-11-11: turned on in a stream's first seconds, before
+ * DS5-USBIP's first answer, it asked straight away whether to turn it off). */
+static const void *s_set_in_session;
 static desktop_ask_t s_pending = DESKTOP_ASK_NONE;
 static uint32_t s_pending_since;
 static const char *s_pending_why = "";
@@ -62,8 +67,12 @@ void desktop_mode_set(bool on, const char *how) {
             }
         }
     }
-    /* A question about it means nothing now. */
+    /* A question about it means nothing now, and this stream's start asks none. */
     s_pending = DESKTOP_ASK_NONE;
+    s_set_in_session = global != NULL ? (const void *) global->session : NULL;
+    if (s_set_in_session != NULL && s_set_in_session == s_session) {
+        s_start_looked = true;
+    }
     if (was == on) {
         return;
     }
@@ -125,6 +134,7 @@ void desktop_mode_tick(app_t *app) {
     const void *session = app != NULL ? (const void *) app->session : NULL;
     if (session == NULL) {
         s_session = NULL;
+        s_set_in_session = NULL;
         s_pending = DESKTOP_ASK_NONE;
         return;
     }
@@ -132,7 +142,8 @@ void desktop_mode_tick(app_t *app) {
     if (session != s_session) {
         /* A stream started, or resumed. */
         s_session = session;
-        s_start_looked = false;
+        s_start_looked = s_set_in_session == session;
+        s_verdict_seen = false;
         s_was_online = false;
         s_pending = DESKTOP_ASK_NONE;
     }
@@ -142,12 +153,15 @@ void desktop_mode_tick(app_t *app) {
         return;
     }
     const bool online = ctm_bridge_agent_online();
-    if (!s_start_looked) {
-        s_start_looked = true;
-        if (desktop_mode_on()) {
-            ask(online ? DESKTOP_ASK_OFF : DESKTOP_ASK_NONE, now, "the stream's start, DS5-USBIP answering");
-        } else {
-            ask(online ? DESKTOP_ASK_NONE : DESKTOP_ASK_ON, now, "the stream's start, DS5-USBIP not answering");
+    if (!s_verdict_seen) {
+        s_verdict_seen = true;
+        if (!s_start_looked) {
+            s_start_looked = true;
+            if (desktop_mode_on()) {
+                ask(online ? DESKTOP_ASK_OFF : DESKTOP_ASK_NONE, now, "the stream's start, DS5-USBIP answering");
+            } else {
+                ask(online ? DESKTOP_ASK_NONE : DESKTOP_ASK_ON, now, "the stream's start, DS5-USBIP not answering");
+            }
         }
     } else if (online && !s_was_online && desktop_mode_on()) {
         ask(DESKTOP_ASK_OFF, now, "DS5-USBIP came online");

@@ -291,7 +291,10 @@ static lv_obj_t *list_create(pad_family_t family, lock_keys_mode_t mode) {
      * by its content gives a grown child no room. A box of 100% would come out with no
      * width at all in a panel sized by its content. */
     lv_obj_t *heading = row_create(panel);
-    lv_obj_set_flex_align(heading, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    /* ⓘ Desktop Mode's has no Close, and a lone child spaced between sits in the
+     * middle: its title starts at the left, as the others' do. */
+    lv_obj_set_flex_align(heading, desktop ? LV_FLEX_ALIGN_START : LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER,
+                          LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_column(heading, NUMPAD_HEADING_GAP, 0);
     lv_obj_set_style_pad_bottom(heading, LV_DPX(4), 0);
     lv_obj_set_style_border_side(heading, LV_BORDER_SIDE_BOTTOM, 0);
