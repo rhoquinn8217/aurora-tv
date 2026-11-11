@@ -361,9 +361,10 @@ static void cmd_numpad(control_job_t *job, const char *args)
     }
     lv_area_t area = {0, 0, 0, 0};
     const bool up = lock_numpad_area(&area);
-    reply(job, "OK numpad=%s close=%s dismissed=%s after_sign_in=%s locked=%s prompt=%s pad=%s marks=%s typed=%u size=%dx%d at=%d,%d kbd_place=%s\n",
+    reply(job, "OK numpad=%s close=%s dismissed=%s after_sign_in=%s after_at=%d locked=%s prompt=%s pad=%s marks=%s typed=%u size=%dx%d at=%d,%d kbd_place=%s\n",
           lock_numpad_state(), lock_numpad_close_up() ? "up" : "down", lock_keys_dismissed() ? "yes" : "no",
-          lock_numpad_after_up() ? "yes" : "no", lock_keys_mode() == LOCK_KEYS_LOCK ? "yes" : "no",
+          lock_numpad_after_up() ? "yes" : "no", (int) lock_numpad_after_at(),
+          lock_keys_mode() == LOCK_KEYS_LOCK ? "yes" : "no",
           lock_keys_mode() == LOCK_KEYS_PROMPT ? "yes" : lock_keys_mode() == LOCK_KEYS_PROMPT_PASSWORD ? "password" : "no",
           lock_keys_pad_on_stream() ? "yes" : "no",
           pad_family_current() == PAD_FAMILY_XBOX ? "xbox" : "ps", lock_keys_typed(),

@@ -73,11 +73,14 @@
  * disable the overrides as well so each controller controls like a plain
  * controller", "This is a fail safe option incase the rebinds happen
  * inappropriately. When someone closes it this way ... it needs to stay off until
- * the next time a login or UAC is detected"). A button at the top right says "Click
- * this or hold Options for 4 seconds to disable <the list's name> rebinds"; a click on
- * it, as on the stats' pin, or Options held 4 s on a pad this takes with nothing else
- * pressed, as Select pins the stats, ends this as an unlock or the prompt's end would.
- * It stays off until DS5-USBIP says neither, or says the other of the two. */
+ * the next time a login or UAC is detected"). A button at the top right says "Turn off
+ * rebind overrides", and the last row of the list says Options "- hold for 4s to
+ * close" (ui/streaming/lock_numpad.c); a click on the button, as on the stats' pin, or
+ * Options held 4 s on a pad this takes with nothing else pressed, as Select pins the
+ * stats, ends this as an unlock or the prompt's end would. It stays off until
+ * DS5-USBIP says neither, or says the other of the two.
+ * ⓘ While this is on, a bridge raises no Virtual Mouse pop-up
+ * (ui/streaming/bridge_prompt.h): this turns Virtual Mouse on itself. */
 
 #pragma once
 

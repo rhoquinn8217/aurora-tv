@@ -3,7 +3,7 @@
 
 #include "lock_numpad.h"
 
-#include <stdio.h>
+#include <stdint.h>
 
 #include "stream/input/lock_keys.h"
 #include "ui/common/pad_marks.h"
@@ -11,6 +11,7 @@
 #include "util/i18n.h"
 #if defined(TARGET_WEBOS)
 #include "input/auto_bridge.h"
+#include "input/ctm_bridge_gesture.h"
 #endif
 
 /* The keyboard's own colours (soft_keyboard.c), as this gives way to it. */
@@ -48,20 +49,25 @@
  * legend with the added create button symbol increased the box area and is now
  * touching the message below it. Push the message down."): a constant sat under a
  * list of twelve rows, and the thirteenth, Create - Tab, ran into it. ⓘ The constant
- * stays for a lock with no list up yet, one row lower than it was. */
+ * stays for a lock with no list up yet, one row lower than it was, and one more for
+ * the Options row (2026-11-10). */
 #define NUMPAD_AFTER_GAP LV_DPX(10)
-#define NUMPAD_AFTER_Y (NUMPAD_MARGIN_Y + LV_DPX(306))
+#define NUMPAD_AFTER_Y (NUMPAD_MARGIN_Y + LV_DPX(327))
 
 /* ⭐ THE CLOSE BUTTON, top right, level with the list (rhoquinn8217, 2026-11-10: "a
- * close button to right of screen" ... "Click this or hold options for 4 seconds to
- * disable <name of the legend, Window Login or UAC> rebinds"). A fail-safe that only
- * closes: it turns these controls off until the next lock or prompt
- * (lock_keys_dismiss), and nothing brings them back meanwhile ("holding the options
- * button for 4 seconds does not bring it back. It's a close only path"). Clicked as
- * the stats' pin is ("use the same functionality as the performance stats pin button
- * that removes it"): the TV's pointer reaches it during a stream as it reaches the
- * pin, the click going on to the PC as well. Its words wrap at this width. */
-#define NUMPAD_CLOSE_W LV_DPX(230)
+ * close button to right of screen"). A fail-safe that only closes: it turns these
+ * controls off until the next lock or prompt (lock_keys_dismiss), and nothing brings
+ * them back meanwhile ("holding the options button for 4 seconds does not bring it
+ * back. It's a close only path"). Clicked as the stats' pin is ("use the same
+ * functionality as the performance stats pin button that removes it"): the TV's
+ * pointer reaches it during a stream as it reaches the pin. A click on it is
+ * Aurora's alone, the touchpad's (input/touchpad_pointer.h) and a mouse's
+ * (lock_numpad_mouse_takes) alike: the PC is not told.
+ * ⭐ ITS WORDS ARE ONE LINE, and the Options hold has its row in the legends
+ * (2026-11-10, at build 667: "Label should just be "Turn off rebind overrides"" and
+ * "In the legend add the options symbol", its words "hold for 4s to close"). Until
+ * then the button carried both, "Click this or hold Options for 4 seconds to disable
+ * <the list's name> rebinds", wrapped over four lines. */
 
 static lv_obj_t *s_after;
 static lv_obj_t *s_close;
@@ -71,6 +77,14 @@ static lv_obj_t *s_up;
 static bool s_up_open;
 static pad_family_t s_shown_family;
 static lock_keys_mode_t s_shown_mode;
+static uint32_t s_mouse_taken;   /* the mouse's buttons pressed on Close, one bit each, until let go */
+
+/* Into the gesture log, beside the lock keys' own lines. */
+#if defined(TARGET_WEBOS)
+#define mouse_note(...) ctm_bridge_gesture_note("lock list: " __VA_ARGS__)
+#else
+#define mouse_note(...) ((void) 0)
+#endif
 
 static lv_obj_t *box_create(lv_obj_t *parent) {
     lv_obj_t *box = lv_obj_create(parent);
@@ -128,6 +142,12 @@ static void mark_row_create(lv_obj_t *parent, pad_mark_t mark, pad_family_t fami
     words_create(row, words, lv_theme_get_font_small(parent));
 }
 
+/* The last row of every legend, the list's and the numpad's: Options (Menu on an Xbox
+ * pad) held 4 s turns these controls off, as Close does. */
+static void options_row_create(lv_obj_t *parent, pad_family_t family) {
+    mark_row_create(parent, PAD_MARK_MENU, family, locstr("- hold for 4s to close"));
+}
+
 static lv_obj_t *dark_panel_create(lv_coord_t x, lv_coord_t y) {
     lv_obj_t *panel = box_create(lv_layer_sys());
     lv_obj_set_style_bg_color(panel, NUMPAD_PANEL_BG, 0);
@@ -166,6 +186,7 @@ static lv_obj_t *numpad_create(pad_family_t family) {
     key_create(grid, locstr("Bksp"), false, PAD_MARK_VIEW, family);
 
     mark_row_create(panel, PAD_MARK_EAST, family, locstr("- close numpad"));
+    options_row_create(panel, family);
     return panel;
 }
 
@@ -185,8 +206,10 @@ static lv_obj_t *list_create(pad_family_t family, lock_keys_mode_t mode) {
     const bool lock = mode == LOCK_KEYS_LOCK;
 
     /* A line under the heading, to set it off from the rebinds. ⓘ The heading's own
-     * border: it is the list's widest line, so the rule runs the list's width. A box of
-     * 100% would come out with no width at all in a panel sized by its content. */
+     * border, the heading made as wide as the list once its rows are laid out (below),
+     * so the rule runs the list's width whichever line is the widest: the Options row
+     * can be wider than "Windows Sign In: Controller". A box of 100% would come out
+     * with no width at all in a panel sized by its content. */
     lv_obj_t *title = words_create(panel, lock ? locstr("Windows Sign In: Controller")
                                                : locstr("User Account Control: Controller"), font);
     lv_obj_set_style_pad_bottom(title, LV_DPX(4), 0);
@@ -210,6 +233,9 @@ static lv_obj_t *list_create(pad_family_t family, lock_keys_mode_t mode) {
     if (lock) {
         mark_row_create(panel, PAD_MARK_NORTH, family, locstr("- numpad"));
     }
+    options_row_create(panel, family);
+    lv_obj_update_layout(panel);
+    lv_obj_set_width(title, lv_obj_get_content_width(panel));
     return panel;
 }
 
@@ -222,8 +248,8 @@ static void close_clicked(lv_event_t *event) {
     lock_numpad_close_click();
 }
 
-/* The button: the list's name, and Options by its name on the pad in hand. */
-static lv_obj_t *close_create(pad_family_t family, lock_keys_mode_t mode) {
+/* The button, its words on one line and as wide as they are. */
+static lv_obj_t *close_create(void) {
     lv_obj_t *button = box_create(lv_layer_sys());
     lv_obj_add_flag(button, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_set_style_bg_color(button, NUMPAD_PANEL_BG, 0);
@@ -235,13 +261,7 @@ static lv_obj_t *close_create(pad_family_t family, lock_keys_mode_t mode) {
     lv_obj_set_style_pad_all(button, NUMPAD_PAD, 0);
     lv_obj_set_size(button, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
     lv_obj_align(button, LV_ALIGN_TOP_RIGHT, -NUMPAD_MARGIN_X, NUMPAD_MARGIN_Y);
-    char words[160];
-    snprintf(words, sizeof words, locstr("Click this or hold %s for 4 seconds to disable %s rebinds"),
-             family == PAD_FAMILY_XBOX ? locstr("Menu") : locstr("Options"),
-             mode == LOCK_KEYS_LOCK ? locstr("Windows Sign In") : locstr("User Account Control"));
-    lv_obj_t *label = words_create(button, words, lv_theme_get_font_small(button));
-    lv_label_set_long_mode(label, LV_LABEL_LONG_WRAP);
-    lv_obj_set_width(label, NUMPAD_CLOSE_W);
+    words_create(button, locstr("Turn off rebind overrides"), lv_theme_get_font_small(button));
     lv_obj_add_event_cb(button, close_clicked, LV_EVENT_CLICKED, NULL);
     return button;
 }
@@ -297,7 +317,7 @@ void lock_numpad_tick(void) {
     if (s_up == NULL || s_up_open != open || s_shown_family != family || s_shown_mode != mode) {
         take_down();
         s_up = open ? numpad_create(family) : list_create(family, mode);
-        s_close = close_create(family, mode);
+        s_close = close_create();
         s_up_open = open;
         s_shown_family = family;
         s_shown_mode = mode;
@@ -327,6 +347,34 @@ bool lock_numpad_close_at(lv_coord_t x, lv_coord_t y) {
     lv_area_t area;
     lv_obj_get_coords(s_close, &area);
     return x >= area.x1 && x <= area.x2 && y >= area.y1 && y <= area.y2;
+}
+
+bool lock_numpad_mouse_takes(int button, bool down, lv_coord_t x, lv_coord_t y) {
+    if (button < 0 || button >= 32) {
+        return false;
+    }
+    const uint32_t bit = 1u << (unsigned) button;
+    if (!down) {
+        /* Let go: the stream is told only if it was told of the press. */
+        if ((s_mouse_taken & bit) == 0) {
+            return false;
+        }
+        s_mouse_taken &= ~bit;
+        mouse_note("the mouse let go of button %d at %d,%d: the PC not told", button, (int) x, (int) y);
+        return true;
+    }
+    s_mouse_taken &= ~bit;   /* a press whose release never came */
+    if (!lock_numpad_close_at(x, y)) {
+        return false;
+    }
+    s_mouse_taken |= bit;
+    mouse_note("the mouse pressed button %d on Close at %d,%d: Close's alone, the PC not told", button, (int) x,
+               (int) y);
+    return true;
+}
+
+lv_coord_t lock_numpad_after_at(void) {
+    return s_after != NULL ? s_after_at : -1;
 }
 
 const char *lock_numpad_state(void) {

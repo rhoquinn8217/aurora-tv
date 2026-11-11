@@ -9,6 +9,7 @@
 #include "lvgl.h"
 #include "stream/session.h"
 #include "stream/session_events.h"
+#include "ui/streaming/lock_numpad.h"   /* This fork: the lock list's Close. */
 
 static void indev_pointer_read(lv_indev_drv_t *drv, lv_indev_data_t *data);
 
@@ -39,7 +40,8 @@ static void indev_pointer_read(lv_indev_drv_t *drv, lv_indev_data_t *data) {
         state = data->state = e.motion.state;
         point = data->point = (lv_point_t) {.x = e.motion.x, .y = e.motion.y};
     } else {
-        if (app->session != NULL) {
+        /* This fork: a press on the lock list's Close is Close's alone, and its release; see ui/streaming/lock_numpad.h. */
+        if (app->session != NULL && !lock_numpad_mouse_takes(e.button.button, e.button.state == SDL_PRESSED, (lv_coord_t) e.button.x, (lv_coord_t) e.button.y)) {
             session_handle_input_event(app->session, &e);
         }
         state = data->state = e.button.state;

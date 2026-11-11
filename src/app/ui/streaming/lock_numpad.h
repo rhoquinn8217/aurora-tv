@@ -47,6 +47,18 @@ bool lock_numpad_close_up(void);
  * which only Aurora's own pointer can bring to Close (input/touchpad_pointer.h). */
 bool lock_numpad_close_at(lv_coord_t x, lv_coord_t y);
 
+/* A mouse's button went down or up at this point of the screen, in the interface's
+ * own frame, as the pointer's driver reads it (lvgl/input/lv_sdl_drv_pointer_input.c).
+ * True: the press was on Close, so it and its release are Close's alone, and the
+ * stream is not told (rhoquinn8217, 2026-11-10: a mouse's click on Close goes to Close
+ * only). ⓘ The driver hands every button to the interface as a press, so every button
+ * is taken on Close, not the left alone. */
+bool lock_numpad_mouse_takes(int button, bool down, lv_coord_t x, lv_coord_t y);
+
+/* Where the line about Auto Bridge is, its top, or -1 while it is not up. For the
+ * control port. */
+lv_coord_t lock_numpad_after_at(void);
+
 /* What a click on Close does: these controls off until the next lock or prompt
  * (lock_keys_dismiss). The control port's `numpad close` as well. */
 void lock_numpad_close_click(void);
