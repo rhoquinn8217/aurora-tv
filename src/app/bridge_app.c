@@ -29,6 +29,7 @@
 #include "input/auto_bridge.h"      /* a ticked device that connects, bridged */
 #include "input/webos_popup.h"      /* a webOS pop-up answered from a controller */
 #include "stream/input/lock_keys.h" /* a controller's buttons type at a lock */
+#include "ui/streaming/desktop_mode.h"   /* Desktop Mode's questions */
 #include "ui/streaming/lock_numpad.h"
 #include "ui/streaming/cursor_align.h"   /* cursor_align_shown */
 
@@ -282,6 +283,10 @@ void bridge_app_events(app_t *app) {
      * (stream/input/lock_keys.h). ⓘ Before Auto Bridge below and the touchpad's tick:
      * at the unlock Virtual Mouse is back as it was before either reads it. */
     lock_keys_tick(app);
+    /* ⭐ Desktop Mode's questions as a stream starts, and when DS5-USBIP comes online
+     * (ui/streaming/desktop_mode.h). ⓘ Before Auto Bridge below, whose message about a
+     * DS5-USBIP not answering waits while a question is up. */
+    desktop_mode_tick(app);
     /* ⛔⛔ streaming_overlay_shown(), NOT app_ui_is_opened(). Third attempt, and
      * this one has evidence rather than reasoning behind it.
      *

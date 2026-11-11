@@ -11,7 +11,7 @@
 #include "ctm_bridge_glue.h"
 #include "ctm_panel.h"
 #include "bridge_prompt.h"
-#include "stream/bridge_session.h"   /* is Virtual Mouse on */
+#include "desktop_mode.h"
 #include "ui/common/bt_panel.h"
 
 /* The points of the Bluetooth button's mark, which the line goes on reading. */
@@ -19,7 +19,8 @@ static lv_point_t s_bt_mark[6];
 
 static void open_listener_config(lv_event_t *event);
 static void open_bt_devices(lv_event_t *event);
-static void vmouse_badge_look(void);
+static void toggle_desktop_mode(lv_event_t *event);
+static void desktop_badge_look(void);
 
 /* ⭐ DS5-USBIP IS GREYED OUT WHILE NOTHING IS BRIDGED, AND STILL SELECTABLE
  * (rhoquinn8217, 2026-10-02). Grey and faded, as the USB Bridge panel greys a
@@ -65,66 +66,58 @@ static void ds5usbip_tick(lv_timer_t *timer) {
     if (ready >= 0) {
         ds5usbip_look(ready == 0);
     }
-    /* And Virtual Mouse's check, on the same timer (below). */
-    vmouse_badge_look();
+    /* And Desktop Mode's check, on the same timer (below). */
+    desktop_badge_look();
 }
 
-/* ⭐ A CHECK ON VIRTUAL MOUSE WHILE IT IS ON (rhoquinn8217, 2026-10-28: "Lets
- * add a check in the mouse mode button in the overlay when it is on", and of
- * three pictures, B: a small white circle with a green check on the button's
- * top right corner, and nothing while it is off). Virtual Mouse is kept from
- * one stream to the next now (input/bridge_override.h), so the button says
- * whether it is on.
- * ⓘ Asked with DS5-USBIP's look, four times a second, so every way Virtual
- * Mouse is switched (its button, the remote, the control port, the pop-up)
- * shows, with no hook in each.
- * ⓘ The button is upstream's, made just before this file's two
- * (streaming.view.c; the merge guard keeps that order). The badge is a child
- * of it that takes no layout, no focus and no click. */
-#define VMOUSE_TICK_COLOUR lv_color_hex(0x2e7d32)
+/* ⭐ A CHECK ON DESKTOP MODE WHILE IT IS ON (rhoquinn8217, 2026-11-11: "replace the full
+ * keyboard and virtual mouse buttons with a Desktop Mode button that shows a check when
+ * it's on like how virtual mouse did"): the check Virtual Mouse's button had since
+ * 2026-10-28 ("Lets add a check in the mouse mode button in the overlay when it is on",
+ * and of three pictures, B: a small white circle with a green check on the button's top
+ * right corner, and nothing while it is off).
+ * ⓘ Asked with DS5-USBIP's look, four times a second, so every way Desktop Mode is
+ * switched (its button, a pop-up, the control port) shows, with no hook in each.
+ * ⓘ The badge is a child of the button that takes no layout, no focus and no click. */
+#define DESKTOP_TICK_COLOUR lv_color_hex(0x2e7d32)
 
-static lv_obj_t *s_vmouse_badge = NULL;
+static lv_obj_t *s_desktop_badge = NULL;
 /* The check's three points: lv_line keeps a pointer to them, not a copy. */
-static lv_point_t s_vmouse_tick[3];
+static lv_point_t s_desktop_tick[3];
 /* 1 shown, 0 hidden, -1 not yet decided. */
-static int s_vmouse_shown = -1;
+static int s_desktop_shown = -1;
 
-static void vmouse_badge_look(void) {
-    if (s_vmouse_badge == NULL) {
+static void desktop_badge_look(void) {
+    if (s_desktop_badge == NULL) {
         return;
     }
-    const bool on = global != NULL && bridge_session_vmouse_active(global->session);
-    if ((int) on == s_vmouse_shown) {
+    const bool on = desktop_mode_on();
+    if ((int) on == s_desktop_shown) {
         return;
     }
-    s_vmouse_shown = on;
+    s_desktop_shown = on;
     if (on) {
-        lv_obj_clear_flag(s_vmouse_badge, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_clear_flag(s_desktop_badge, LV_OBJ_FLAG_HIDDEN);
     } else {
-        lv_obj_add_flag(s_vmouse_badge, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(s_desktop_badge, LV_OBJ_FLAG_HIDDEN);
     }
 }
 
-static void vmouse_badge_deleted(lv_event_t *event) {
-    if (lv_event_get_target(event) == s_vmouse_badge) {
-        s_vmouse_badge = NULL;
-        s_vmouse_shown = -1;
+static void desktop_badge_deleted(lv_event_t *event) {
+    if (lv_event_get_target(event) == s_desktop_badge) {
+        s_desktop_badge = NULL;
+        s_desktop_shown = -1;
     }
 }
 
-static void vmouse_badge_create(lv_obj_t *vmouse_btn) {
-    lv_obj_t *label = vmouse_btn != NULL ? lv_obj_get_child(vmouse_btn, 0) : NULL;
-    if (label == NULL || !lv_obj_check_type(label, &lv_label_class) ||
-        strcmp(lv_label_get_text(label), locstr("Virtual Mouse")) != 0) {
-        commons_log_warn("Streaming", "the overlay's Virtual Mouse button was not found: no check on it");
-        return;
-    }
+static void desktop_badge_create(lv_obj_t *desktop_btn) {
+    lv_obj_t *label = lv_obj_get_child(desktop_btn, 0);
     /* As in the picture: 1.35 times the height of the button's words. */
-    const lv_font_t *font = lv_obj_get_style_text_font(label, 0);
+    const lv_font_t *font = label != NULL ? lv_obj_get_style_text_font(label, 0) : NULL;
     const lv_coord_t text_h = font != NULL ? lv_font_get_line_height(font) : LV_DPX(20);
     const lv_coord_t size = text_h * 135 / 100;
     const lv_coord_t ring = LV_MAX(1, size / 14);
-    lv_obj_t *badge = lv_obj_create(vmouse_btn);
+    lv_obj_t *badge = lv_obj_create(desktop_btn);
     lv_obj_remove_style_all(badge);
     lv_obj_add_flag(badge, LV_OBJ_FLAG_FLOATING | LV_OBJ_FLAG_HIDDEN);
     lv_obj_clear_flag(badge, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
@@ -138,29 +131,39 @@ static void vmouse_badge_create(lv_obj_t *vmouse_btn) {
      * button's own edge: an aligned child starts inside its padding and
      * border. The gap between buttons is wider than the third, so the next
      * button does not cover it. */
-    const lv_coord_t edge = lv_obj_get_style_border_width(vmouse_btn, 0);
+    const lv_coord_t edge = lv_obj_get_style_border_width(desktop_btn, 0);
     lv_obj_align(badge, LV_ALIGN_TOP_RIGHT,
-                 lv_obj_get_style_pad_right(vmouse_btn, 0) + edge + size / 3,
-                 -(lv_obj_get_style_pad_top(vmouse_btn, 0) + edge + size / 3));
-    lv_obj_add_flag(vmouse_btn, LV_OBJ_FLAG_OVERFLOW_VISIBLE);
+                 lv_obj_get_style_pad_right(desktop_btn, 0) + edge + size / 3,
+                 -(lv_obj_get_style_pad_top(desktop_btn, 0) + edge + size / 3));
+    lv_obj_add_flag(desktop_btn, LV_OBJ_FLAG_OVERFLOW_VISIBLE);
 
     /* The check: the picture's path (5,12.5) (9.4,16.9) (19,7.4) on a 24 grid,
      * in the middle 70% of the circle. ⓘ The points start inside its ring. */
     const lv_coord_t box = size * 70 / 100;
     const lv_coord_t off = (size - box) / 2 - ring;
-    s_vmouse_tick[0] = (lv_point_t) {(lv_coord_t) (off + box * 50 / 240), (lv_coord_t) (off + box * 125 / 240)};
-    s_vmouse_tick[1] = (lv_point_t) {(lv_coord_t) (off + box * 94 / 240), (lv_coord_t) (off + box * 169 / 240)};
-    s_vmouse_tick[2] = (lv_point_t) {(lv_coord_t) (off + box * 190 / 240), (lv_coord_t) (off + box * 74 / 240)};
+    s_desktop_tick[0] = (lv_point_t) {(lv_coord_t) (off + box * 50 / 240), (lv_coord_t) (off + box * 125 / 240)};
+    s_desktop_tick[1] = (lv_point_t) {(lv_coord_t) (off + box * 94 / 240), (lv_coord_t) (off + box * 169 / 240)};
+    s_desktop_tick[2] = (lv_point_t) {(lv_coord_t) (off + box * 190 / 240), (lv_coord_t) (off + box * 74 / 240)};
     lv_obj_t *tick = lv_line_create(badge);
-    lv_line_set_points(tick, s_vmouse_tick, 3);
+    lv_line_set_points(tick, s_desktop_tick, 3);
     lv_obj_set_style_line_width(tick, LV_MAX(2, box * 34 / 240), 0);
-    lv_obj_set_style_line_color(tick, VMOUSE_TICK_COLOUR, 0);
+    lv_obj_set_style_line_color(tick, DESKTOP_TICK_COLOUR, 0);
     lv_obj_set_style_line_rounded(tick, true, 0);
 
-    s_vmouse_badge = badge;
-    s_vmouse_shown = -1;
-    lv_obj_add_event_cb(badge, vmouse_badge_deleted, LV_EVENT_DELETE, NULL);
-    vmouse_badge_look();
+    s_desktop_badge = badge;
+    s_desktop_shown = -1;
+    lv_obj_add_event_cb(badge, desktop_badge_deleted, LV_EVENT_DELETE, NULL);
+    desktop_badge_look();
+}
+
+/* ⓘ Upstream's button in the overlay's row, if it is the one with these words. */
+static lv_obj_t *upstream_button(lv_obj_t *candidate, const char *words) {
+    lv_obj_t *label = candidate != NULL ? lv_obj_get_child(candidate, 0) : NULL;
+    if (label == NULL || !lv_obj_check_type(label, &lv_label_class) || strcmp(lv_label_get_text(label), words) != 0) {
+        commons_log_warn("Streaming", "the overlay's %s button was not found: it stays", words);
+        return NULL;
+    }
+    return candidate;
 }
 
 /* The timer goes with the button, or it would fire at a freed one. */
@@ -194,9 +197,22 @@ static lv_obj_t *overlay_button(streaming_controller_t *controller, lv_obj_t *ac
 }
 
 void bridge_overlay_buttons_create(streaming_controller_t *controller, lv_obj_t *actions) {
-    /* ⓘ Upstream's Virtual Mouse button is the row's last child at this
-     * point, for its check (below). */
-    lv_obj_t *vmouse_btn = lv_obj_get_child(actions, -1);
+    /* ⓘ Upstream's Full keyboard and Virtual Mouse are the row's last two children at
+     * this point (streaming.view.c; the merge guard keeps that order). */
+    lv_obj_t *kbd_btn = upstream_button(lv_obj_get_child(actions, -2), locstr("Full keyboard"));
+    lv_obj_t *vmouse_btn = upstream_button(lv_obj_get_child(actions, -1), locstr("Virtual Mouse"));
+
+    /* ⭐⭐ DESKTOP MODE, FIRST IN THE ROW, IN PLACE OF FULL KEYBOARD AND VIRTUAL MOUSE
+     * (rhoquinn8217, 2026-11-11: "I want to replace the full keyboard and virtual mouse
+     * buttons with a Desktop Mode button that shows a check when it's on like how
+     * virtual mouse did"): ui/streaming/desktop_mode.h. In Virtual Mouse's green, and
+     * shown with bridging off: it needs no bridge. Upstream's two are HIDDEN rather than
+     * removed, as USB Bridge is with bridging off: their file stays as upstream wrote it,
+     * and a hidden button keeps its place and takes no focus. ⓘ Square opens the Full
+     * Keyboard in Desktop Mode. */
+    lv_obj_t *desktop = overlay_button(controller, actions, locstr("Desktop Mode"), LV_PALETTE_GREEN);
+    lv_obj_clear_flag(desktop, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_event_cb(desktop, toggle_desktop_mode, LV_EVENT_CLICKED, NULL);
 
     /* ⓘ The panel takes the streaming screen from the click, to know whose
      * overlay it opens over. */
@@ -235,10 +251,32 @@ void bridge_overlay_buttons_create(streaming_controller_t *controller, lv_obj_t 
     s_ds5usbip = ds5usbip;
     s_ds5usbip_greyed = -1;
     lv_obj_add_event_cb(ds5usbip, ds5usbip_deleted, LV_EVENT_DELETE, NULL);
+    desktop_badge_create(desktop);
     ds5usbip_tick(NULL);
     s_ds5usbip_timer = lv_timer_create(ds5usbip_tick, DS5USBIP_CHECK_MS, NULL);
 
-    vmouse_badge_create(vmouse_btn);
+    /* Last, so the focus they had moves on to Desktop Mode: hiding the focused one
+     * passes it to the next that is shown. */
+    if (vmouse_btn != NULL) {
+        lv_obj_add_flag(vmouse_btn, LV_OBJ_FLAG_HIDDEN);
+    }
+    if (kbd_btn != NULL) {
+        lv_obj_add_flag(kbd_btn, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
+/* ⭐ The button turns Desktop Mode on or off, and the overlay stays open: its check and
+ * its list show the change at once (ui/streaming/lock_numpad.h). Turned on, its warning
+ * comes, as every time (bridge_prompt.h). */
+static void toggle_desktop_mode(lv_event_t *event) {
+    lv_event_stop_bubbling(event);
+    const bool on = !desktop_mode_on();
+    commons_log_info("Streaming", "The Desktop Mode button: Desktop Mode %s", on ? "on" : "off");
+    desktop_mode_set(on, "the overlay's button");
+    if (on) {
+        bridge_prompt_say_desktop_on();
+    }
+    desktop_badge_look();
 }
 
 /* ⭐ THE DS5-USBIP BUTTON (rhoquinn8217, 2026-09-28: "I want the DS5-USBIP

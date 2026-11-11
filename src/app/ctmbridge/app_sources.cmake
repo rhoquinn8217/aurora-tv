@@ -50,6 +50,7 @@ target_sources(moonlight-lib PRIVATE
         ${CMAKE_SOURCE_DIR}/src/app/ui/streaming/connecting_cancel.c
         ${CMAKE_SOURCE_DIR}/src/app/ui/streaming/ctm_panel.c
         ${CMAKE_SOURCE_DIR}/src/app/ui/streaming/cursor_align.c
+        ${CMAKE_SOURCE_DIR}/src/app/ui/streaming/desktop_mode.c
         ${CMAKE_SOURCE_DIR}/src/app/ui/streaming/keyboard_place.c
         ${CMAKE_SOURCE_DIR}/src/app/ui/streaming/keyboard_tabs.c
         ${CMAKE_SOURCE_DIR}/src/app/ui/streaming/lock_numpad.c)

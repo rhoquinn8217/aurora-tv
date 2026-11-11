@@ -31,19 +31,12 @@
  * is open or not: a bridge from the USB Bridge panel raises it with the
  * overlay open, and lower down it lay across the overlay's buttons.
  *
- * ⭐ ITS FIRST BUTTON IS ANSWERED, IN THE SAME PLACE, AND NOTHING ELSE IS:
- *
- *     Virtual Mouse has turned off. Toggle it back on in the streaming overlay.
- *
- * (rhoquinn8217's wording, 2026-10-01.) Only that button raises it. The second
- * button, the count running out and a dismissal change nothing and say
- * nothing, and nothing is said when Virtual Mouse brings the TV's controls
- * back. It takes no input,
- * goes by itself, and goes at once if what it says stops being true.
- * ⓘ The history: build 460 had a notice at the top left listing everything
- * that had gone off, and another when the Input settings applied again. Both
- * were taken out the same day, "for now", to have the pop-up alone, and this
- * one came back in the pop-up's place with its own words.
+ * ⓘ ITS FIRST BUTTON IS NOT ANSWERED ANY MORE (rhoquinn8217, 2026-11-11: "Remove
+ * the Toggle Virtual Mouse on in the streaming overlay message. We are effectively
+ * phasing out mouse mode"). From 2026-10-01 a message in its place said what went
+ * off and to toggle Virtual Mouse back on in the overlay, whose button Desktop Mode
+ * replaced. The other pop-ups' messages after their first button stay: the TV
+ * cursor's, and Desktop Mode's warning (below).
  *
  * ⓘ IT IS WIDE, SHORT AND SEE-THROUGH, because it shares the picture with a
  * game: as wide as its one sentence on one line, so a line of text and a row
@@ -66,9 +59,23 @@
  * a Cross in the game as well. That is three places asking whether it is up:
  * ui_should_block_input() in ui/root.c, and the two ticks in app.c.
  *
- * ⓘ IT NEVER SAYS THE SWITCH'S NAME. To a person it turns Virtual Mouse off,
- * and turning Virtual Mouse on again, from the overlay, is how it comes back.
- * The switch had a button of its own beside USB Bridge until 2026-10-01. */
+ * ⓘ IT NEVER SAYS THE SWITCH'S NAME. To a person it turns Virtual Mouse off.
+ * The switch had a button of its own beside USB Bridge until 2026-10-01.
+ *
+ * ⭐⭐ AND DESKTOP MODE'S (rhoquinn8217, 2026-11-11; ui/streaming/desktop_mode.h), in
+ * the same place, one at a time, each with its second button selected so that an
+ * accidental press changes nothing:
+ *
+ *     Turn on Desktop Mode?                  (or "Turn off Desktop Mode?")
+ *                       [ Yes ]  [ No (3) ]
+ *
+ *     Unable to bridge device. DS5-USBIP is offline. If you are at the sign-in
+ *     screen, please sign in first.
+ *                       [ Turn on Desktop Mode ]  [ Close (4) ]
+ *
+ * The second is a refusal, which until then was the words alone, and still is with
+ * Desktop Mode on. Turning Desktop Mode on, from either or from the overlay, leaves its
+ * warning in the same place for four seconds. */
 
 #ifndef BRIDGE_PROMPT_H
 #define BRIDGE_PROMPT_H
@@ -125,8 +132,20 @@ bool bridge_prompt_note_up(void);
 
 /* A bridge somebody asked for did not reach DS5-USBIP, or met a locked Windows,
  * said on the screen (rhoquinn8217, 2026-11-01). The TV cannot tell a PC at its
- * sign-in screen from one with DS5-USBIP not running, so those words cover both. */
+ * sign-in screen from one with DS5-USBIP not running, so those words cover both.
+ * With Desktop Mode offered while it is off (above). */
 void bridge_prompt_note_bridge_refused(bool locked);
+
+/* "Turn on Desktop Mode?" (`on`) or "Turn off Desktop Mode?", for three seconds, No
+ * selected. False, and nothing raised, outside a stream or with another pop-up up. */
+bool bridge_prompt_request_desktop(bool on);
+
+/* Desktop Mode's warning, in the pop-up's place for four seconds: for the overlay's
+ * button. Nothing outside a stream or while a pop-up is up. */
+void bridge_prompt_say_desktop_on(void);
+
+/* For the control port: the pop-up's words, "" when it is not up. */
+const char *bridge_prompt_words(void);
 
 /* For the control port: the seconds left on the count, 0 when it is not up;
  * and its first button, the one that turns it off, pressed without a hand.

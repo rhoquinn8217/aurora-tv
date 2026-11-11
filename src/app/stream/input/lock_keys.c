@@ -116,12 +116,26 @@ static bool mode_is_prompt(lock_keys_mode_t mode) {
     return mode == LOCK_KEYS_PROMPT || mode == LOCK_KEYS_PROMPT_PASSWORD;
 }
 
+/* Every controller, bridged ones too, their reports held from the PC: at a prompt, and
+ * in Desktop Mode. */
+static bool mode_takes_all(lock_keys_mode_t mode) {
+    return mode_is_prompt(mode) || mode == LOCK_KEYS_DESKTOP;
+}
+
+static bool desktop_mode_wanted(void) {
+    return app_configuration != NULL && app_configuration->bridge.desktop_mode;
+}
+
 bool lock_keys_active(void) {
     return s_mode != LOCK_KEYS_OFF;
 }
 
 lock_keys_mode_t lock_keys_mode(void) {
     return s_mode;
+}
+
+bool lock_keys_desktop_wanted(void) {
+    return desktop_mode_wanted();
 }
 
 bool lock_keys_numpad_open(void) {
@@ -162,7 +176,8 @@ static void r2_let_go(void) {
 }
 
 void lock_keys_dismiss(const char *how) {
-    if (s_mode == LOCK_KEYS_OFF || s_dismissed) {
+    /* ⓘ Not Desktop Mode: it has no Close; it is turned off where it was turned on. */
+    if (s_mode == LOCK_KEYS_OFF || s_mode == LOCK_KEYS_DESKTOP || s_dismissed) {
         return;
     }
     s_dismissed = true;
@@ -170,8 +185,8 @@ void lock_keys_dismiss(const char *how) {
     s_asking = false;
     r2_let_go();
 #if defined(TARGET_WEBOS)
-    ctm_bridge_gesture_note("lock keys: turned off by hand (%s): every controller is a plain controller until "
-                            "the next %s", how != NULL ? how : "?",
+    ctm_bridge_gesture_note("lock keys: turned off by hand (%s): %s until the next %s", how != NULL ? how : "?",
+                            desktop_mode_wanted() ? "Desktop Mode again" : "every controller is a plain controller",
                             s_dismissed_prompt ? "User Account Control prompt or lock" : "lock or prompt");
 #else
     (void) how;
@@ -191,9 +206,10 @@ static bool pad_on_stream(const stream_input_t *input, const app_gamepad_state_t
  * bridged one types the PIN with Windows' own map (the header). At a User Account
  * Control prompt, every one, bridged or not: a bridged pad's buttons may be bound to
  * keys on the PC that answer nothing there, so it is read here through SDL and its
- * reports to the PC are held at rest meanwhile (lock_keys_holds_bridged). */
+ * reports to the PC are held at rest meanwhile (lock_keys_holds_bridged). In Desktop
+ * Mode every one as well, over its config on the PC (the header). */
 static bool pad_taken(const stream_input_t *input, const app_gamepad_state_t *gamepad) {
-    if (mode_is_prompt(s_mode)) {
+    if (mode_takes_all(s_mode)) {
         return gamepad != NULL && gamepad->controller != NULL && gamepad->gs_id >= 0 && gamepad->gs_id < LOCK_SLOTS;
     }
     return pad_on_stream(input, gamepad);
@@ -220,7 +236,7 @@ static bool bridged_pad_held(const stream_input_t *input, const app_gamepad_stat
  * at once: it would press Cross in the game. So the hold stays until nothing is down
  * on any bridged pad, at most LOCK_QUIET_MS. */
 bool lock_keys_holds_bridged(void) {
-    if (mode_is_prompt(s_mode)) {
+    if (mode_takes_all(s_mode)) {
         return true;
     }
     if (s_quiet_until == 0) {
@@ -303,7 +319,7 @@ static void pads_rest(void) {
 }
 
 void lock_keys_ask_dismiss(const char *how) {
-    if (s_mode == LOCK_KEYS_OFF || s_dismissed || s_asking) {
+    if (s_mode == LOCK_KEYS_OFF || s_mode == LOCK_KEYS_DESKTOP || s_dismissed || s_asking) {
         return;
     }
     s_asking = true;
@@ -629,7 +645,9 @@ static void lock_begin(stream_input_t *input, lock_keys_mode_t mode) {
     s_interface_had_input = false;
     s_quiet_until = 0;
     memset(s_pads, 0, sizeof s_pads);
-    s_vmouse_was = session_input_is_vmouse_active(&input->vmouse);
+    /* ⓘ Desktop Mode gives Virtual Mouse back OFF, whatever it was: turning it on
+     * turns Virtual Mouse off (the header). */
+    s_vmouse_was = mode == LOCK_KEYS_DESKTOP ? false : session_input_is_vmouse_active(&input->vmouse);
     session_input_set_vmouse_active(&input->vmouse, true);
     const short max = app_input_get_max_gamepads(input->input);
     for (short i = 0; i < max; ++i) {
@@ -651,22 +669,28 @@ static void lock_begin(stream_input_t *input, lock_keys_mode_t mode) {
                                 : mode == LOCK_KEYS_PROMPT
                                 ? "lock keys: a User Account Control prompt, Yes or No: every controller is a mouse, "
                                   "or keys, the bridged ones held from the PC"
+                                : mode == LOCK_KEYS_DESKTOP
+                                ? "lock keys: Desktop Mode: every controller is a mouse, or keys, Square the keyboard, "
+                                  "the bridged ones held from the PC"
                                 : "lock keys: a User Account Control prompt that can ask for a password or PIN: every "
                                   "controller is a mouse, or keys, Square the keyboard, the bridged ones held from the PC");
 #endif
 }
 
 static void lock_end(stream_input_t *input) {
-    const bool prompt = mode_is_prompt(s_mode);
+    const lock_keys_mode_t was = s_mode;
+    const bool held = mode_takes_all(was);
     s_mode = LOCK_KEYS_OFF;
     s_numpad_open = false;
     s_asking = false;
     r2_let_go();
     memset(s_pads, 0, sizeof s_pads);
     /* The bridged pads stay held until what is down on them is let go. */
-    s_quiet_until = prompt ? SDL_GetTicks() + LOCK_QUIET_MS : 0;
+    s_quiet_until = held ? SDL_GetTicks() + LOCK_QUIET_MS : 0;
 #if defined(TARGET_WEBOS)
-    ctm_bridge_gesture_note(prompt ? "lock keys: the prompt is gone, the controllers are the stream's and the bridge's again"
+    ctm_bridge_gesture_note(was == LOCK_KEYS_DESKTOP ? "lock keys: Desktop Mode ends, the controllers are the stream's "
+                                                       "and the bridge's again"
+                            : held ? "lock keys: the prompt is gone, the controllers are the stream's and the bridge's again"
                                    : "lock keys: Windows is unlocked, the controllers are the stream's again");
 #endif
     if (input == NULL) {
@@ -773,10 +797,33 @@ void lock_keys_tick(app_t *app) {
     if (s_dismissed) {
         wanted = LOCK_KEYS_OFF;
     }
+    /* ⭐ DESKTOP MODE WHEN NEITHER IS UP (the header): under a lock or a prompt, and
+     * back as each goes, or as its Close turns it off. ⓘ Nothing asked of DS5-USBIP. */
+    if (wanted == LOCK_KEYS_OFF && desktop_mode_wanted() && input != NULL && keyboard_input_available(input)) {
+        wanted = LOCK_KEYS_DESKTOP;
+    }
     if (wanted != s_mode) {
-        if (mode_is_prompt(wanted) && mode_is_prompt(s_mode)) {
-            /* The prompt's kind said again, otherwise: only what Square does changes. */
+        if (mode_takes_all(wanted) && mode_takes_all(s_mode)) {
+            /* Every controller taken on both sides: the prompt's kind said again, a prompt
+             * over Desktop Mode, or Desktop Mode back after one. Only what the controls
+             * are up for changes, and nothing is handed back to the PC between. */
+            const lock_keys_mode_t was = s_mode;
             s_mode = wanted;
+            if (wanted == LOCK_KEYS_DESKTOP || was == LOCK_KEYS_DESKTOP) {
+                /* What is down was pressed for the other: its release does nothing. */
+                s_asking = false;
+                r2_let_go();
+                pads_forget(input);
+                if (wanted == LOCK_KEYS_DESKTOP) {
+                    s_vmouse_was = false;
+                }
+#if defined(TARGET_WEBOS)
+                ctm_bridge_gesture_note(wanted == LOCK_KEYS_DESKTOP
+                                            ? "lock keys: the prompt is gone, Desktop Mode again"
+                                            : "lock keys: a User Account Control prompt over Desktop Mode: its own "
+                                              "controls until it goes");
+#endif
+            }
         } else {
             if (s_mode != LOCK_KEYS_OFF) {
                 lock_end(input);
@@ -791,7 +838,9 @@ void lock_keys_tick(app_t *app) {
     }
 #if defined(TARGET_WEBOS)
     const uint32_t now = SDL_GetTicks();
-    if (now - s_last_ask >= LOCK_ASK_MS) {
+    /* ⓘ Not for Desktop Mode, which waits for nothing: the probe's own ask every
+     * second finds a lock or a prompt. */
+    if (s_mode != LOCK_KEYS_DESKTOP && now - s_last_ask >= LOCK_ASK_MS) {
         s_last_ask = now;
         ctm_bridge_agent_recheck();
     }
@@ -808,9 +857,10 @@ void lock_keys_tick(app_t *app) {
         vmouse_set_trigger(&input->vmouse, 0, 0);
     }
     /* Options held LOCK_DISMISS_MS alone, on any pad this takes: a close, which asks
-     * first. Its OK ends this on the next pass, as an unlock does. */
+     * first. Its OK ends this on the next pass, as an unlock does. ⓘ Not in Desktop
+     * Mode, which has no close. */
     const uint32_t held_at = SDL_GetTicks();
-    for (int i = 0; i < LOCK_SLOTS; ++i) {
+    for (int i = 0; i < LOCK_SLOTS && s_mode != LOCK_KEYS_DESKTOP; ++i) {
         if (s_pads[i].options_since != 0 && held_at - s_pads[i].options_since >= LOCK_DISMISS_MS) {
             s_pads[i].options_since = 0;
             lock_keys_ask_dismiss("Options held 2 s");

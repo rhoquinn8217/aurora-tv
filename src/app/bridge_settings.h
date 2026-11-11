@@ -50,6 +50,14 @@ typedef struct bridge_settings_t {
     bool lock_rebinds;
     bool uac_rebinds;
 
+    /* ⭐ DESKTOP MODE (rhoquinn8217, 2026-11-11): the User Account Control rebinds
+     * on every controller, bridged ones too, by hand, until it is turned off
+     * (stream/input/lock_keys.h, ui/streaming/desktop_mode.h). OFF by default, at
+     * their word: on, it would take every controller away from games. Works
+     * without DS5-USBIP, so it is the way through the first sign-in after a
+     * restart. Not tied to `enable`. */
+    bool desktop_mode;
+
     /* ⭐ THE SIGNALS AND THE MICROPHONE. All on for now.
      *
      * ⓘ These are "I do not want that" switches, not a battery feature. A

@@ -18,12 +18,21 @@
 #include "stream/input/lock_keys.h"
 #include "streaming.controller.h"
 #include "cursor_align.h"
+#include "desktop_mode.h"
 #include "input/tv_cursor.h"
 #include "util/i18n.h"
 
 /* How long it waits for an answer. ⓘ Three more than the notice it replaces,
  * which was set for reading two sentences: this one is read and then acted on. */
 #define PROMPT_SECONDS 10
+/* ⭐ Desktop Mode's questions, "Turn on Desktop Mode?" and "Turn off Desktop Mode?"
+ * (rhoquinn8217, 2026-11-11: "give a 3second timed pop up ... it has to be very brief
+ * and an accidental press should default to no"), and a refusal's, which offers to turn
+ * it on ("Refusal message should only be short, 4 seconds because it's easy to bring
+ * back the message by bridging and getting the refusal again or just turning it on in
+ * the overlay"). Both with the second button selected: No, and Close. */
+#define PROMPT_DESKTOP_SECONDS 3
+#define PROMPT_REFUSAL_SECONDS 4
 
 /* How far it sits from the left of the picture: in the corner, and clear of the
  * edge. 60 pixels of a 1920-wide picture. ⓘ Also how far from the bottom, when
@@ -105,12 +114,17 @@ typedef struct {
 enum {
     PROMPT_ABOUT_MOUSE_CONTROLS = 0,
     PROMPT_ABOUT_TV_CURSOR,
+    PROMPT_ABOUT_DESKTOP_ON,    /* "Turn on Desktop Mode?" (desktop_mode.h) */
+    PROMPT_ABOUT_DESKTOP_OFF,   /* "Turn off Desktop Mode?" */
+    PROMPT_ABOUT_REFUSAL,       /* a bridge refused, with Desktop Mode offered */
 };
 
 static lv_obj_t *s_mbox = NULL;
 static int s_about = PROMPT_ABOUT_MOUSE_CONTROLS;
 static lv_timer_t *s_timer = NULL;
 static int s_seconds = 0;
+/* What the count started from, for the widest the second button gets. */
+static int s_seconds_full = PROMPT_SECONDS;
 /* Why it is closing, for the log: set by whoever closes it, and "dismissed"
  * when the theme's own Back handling does. */
 static const char *s_outcome = NULL;
@@ -133,33 +147,33 @@ static uint32_t s_note_since = 0;
 static const char *s_note_what = "";
 static bool (*s_note_true)(void) = NULL;
 
+/* ⭐ NO MESSAGE AFTER ITS BUTTON ANY MORE (rhoquinn8217, 2026-11-11: "Remove the
+ * Toggle Virtual Mouse on in the streaming overlay message. We are effectively phasing
+ * out mouse mode unless we find a reason to keep it in the future"). Each of the three
+ * said to bring it back from the overlay's Virtual Mouse button, which Desktop Mode
+ * replaced. */
 static prompt_words_t prompt_words(bool vmouse, bool touchpad_mouse) {
-    /* ⓘ Virtual Mouse in the overlay is the way back for all three: pressing
-     * it turns Virtual Mouse on, and the touchpad's mouse mode with it
-     * (input/bridge_override.h). */
     if (vmouse && touchpad_mouse) {
         return (prompt_words_t) {
                 locstr("Warning: Turn off Virtual Mouse and the touchpad's mouse mode to prevent binding conflicts "
                        "with bridged controllers."),
                 locstr("Turn off both"),
                 locstr("Leave them on"),
-                locstr("Virtual Mouse and the touchpad's mouse mode have turned off. "
-                       "Toggle Virtual Mouse on in the streaming overlay to bring both back.")};
+                NULL};
     }
     if (vmouse) {
         return (prompt_words_t) {
                 locstr("Warning: Turn off Virtual Mouse to prevent binding conflicts with bridged controllers."),
                 locstr("Turn off Virtual Mouse"),
                 locstr("Leave it on"),
-                locstr("Virtual Mouse has turned off. Toggle it back on in the streaming overlay.")};
+                NULL};
     }
     return (prompt_words_t) {
             locstr("Warning: Turn off the touchpad's mouse mode to prevent binding conflicts with bridged "
                    "controllers."),
             locstr("Turn off touchpad mouse mode"),
             locstr("Leave it on"),
-            locstr("The touchpad's mouse mode has turned off. "
-                   "Toggle Virtual Mouse on in the streaming overlay to bring it back.")};
+            NULL};
 }
 
 /* ⭐ The TV cursor's (rhoquinn8217's wording, 2026-10-11: "Warning: Turn off TV
@@ -176,17 +190,6 @@ static prompt_words_t tv_cursor_words(void) {
 /* The message after the TV cursor's button stays while the cursor is off. */
 static bool tv_cursor_off(void) {
     return !tv_cursor_mode_on();
-}
-
-/* And the one after the first button, while Virtual Mouse and the touchpad's
- * mouse mode are both off: Virtual Mouse turned on again takes it away. */
-static bool mouse_controls_off(void) {
-    if (global == NULL || global->session == NULL) {
-        return false;
-    }
-    const stream_input_t *input = session_get_input(global->session);
-    return input != NULL && !bridge_session_vmouse_active(global->session) &&
-           input->touchpad_mode != TOUCHPAD_MODE_MOUSE;
 }
 
 /* The top of the overlay's row of buttons, in pixels down the picture, read
@@ -366,7 +369,7 @@ static void make_compact(lv_obj_t *mbox) {
 static void set_words(lv_obj_t *mbox, const prompt_words_t *words) {
     s_btn_map[PROMPT_BUTTON_TURN_OFF] = words->action;
     s_leave = words->leave;
-    s_done = words->done;
+    s_done = words->done != NULL ? words->done : "";
     /* The row of buttons first: the box may not be narrower than it. */
     lv_coord_t row_width = 0;
     lv_obj_t *btns = lv_msgbox_get_btns(mbox);
@@ -379,7 +382,7 @@ static void set_words(lv_obj_t *mbox, const prompt_words_t *words) {
         const lv_font_t *font = lv_obj_get_style_text_font(btns, LV_PART_ITEMS);
         const lv_coord_t space = lv_obj_get_style_text_letter_space(btns, LV_PART_ITEMS);
         char widest[sizeof(s_leave_label)];
-        snprintf(widest, sizeof(widest), "%s (%d)", words->leave, PROMPT_SECONDS);
+        snprintf(widest, sizeof(widest), "%s (%d)", words->leave, s_seconds_full);
         const lv_coord_t button = LV_MAX(line_width(words->action, font, space), line_width(widest, font, space)) +
                                   2 * PROMPT_BUTTON_PAD;
         row_width = 2 * button + lv_obj_get_style_pad_column(btns, LV_PART_MAIN) +
@@ -439,8 +442,22 @@ static void on_deleted(lv_event_t *event) {
     }
 }
 
-/* The button was pressed. ⚠️ Call it while the pop-up still stands: the message
- * that follows takes its look from the pop-up and its backdrop. */
+/* ⭐ THE WARNING EVERY TIME DESKTOP MODE GOES ON (rhoquinn8217, 2026-11-11: "Warning
+ * with turning on Desktop Mode. All controller included bridged controllers use it and
+ * it overrides DS5-USBIP configs", and "3. every time"), in the pop-up's place for the
+ * usual four seconds. `backdrop` as for note_show: the dim of the pop-up it follows, or
+ * NULL. Only in a stream: in Settings the setting's own words say it. */
+static void say_desktop_on(const lv_obj_t *backdrop) {
+    if (global == NULL || global->session == NULL) {
+        return;
+    }
+    note_show(locstr("Desktop Mode is on. All controllers, including bridged ones, use it, and it overrides "
+                     "DS5-USBIP configs."),
+              "Desktop Mode's warning", NULL, backdrop);
+}
+
+/* The first button was pressed. ⚠️ Call it while the pop-up still stands: the
+ * message that follows takes its look from the pop-up and its backdrop. */
 static void switch_off(const char *by) {
     if (s_about == PROMPT_ABOUT_TV_CURSOR) {
         commons_log_info("Streaming", "bridge prompt: accepted, %s -- the TV cursor goes off", by);
@@ -451,13 +468,19 @@ static void switch_off(const char *by) {
         note_show(s_done, "the message after the TV cursor's button", tv_cursor_off, lv_obj_get_parent(s_mbox));
         return;
     }
-    commons_log_info("Streaming", "bridge prompt: accepted, %s -- the TV's mouse controls go off", by);
-    bridge_override_mouse_off(global != NULL ? global->session : NULL);
-    /* ⓘ Said only if it is so. */
-    if (!mouse_controls_off() || s_mbox == NULL) {
+    if (s_about == PROMPT_ABOUT_DESKTOP_ON || s_about == PROMPT_ABOUT_REFUSAL) {
+        commons_log_info("Streaming", "bridge prompt: accepted, %s -- Desktop Mode goes on", by);
+        desktop_mode_set(true, s_about == PROMPT_ABOUT_REFUSAL ? "a refusal's pop-up" : "the question at the stream's start");
+        say_desktop_on(s_mbox != NULL ? lv_obj_get_parent(s_mbox) : NULL);
         return;
     }
-    note_show(s_done, "the message after the button", mouse_controls_off, lv_obj_get_parent(s_mbox));
+    if (s_about == PROMPT_ABOUT_DESKTOP_OFF) {
+        commons_log_info("Streaming", "bridge prompt: accepted, %s -- Desktop Mode goes off", by);
+        desktop_mode_set(false, "the question whether to turn it off");
+        return;
+    }
+    commons_log_info("Streaming", "bridge prompt: accepted, %s -- the TV's mouse controls go off", by);
+    bridge_override_mouse_off(global != NULL ? global->session : NULL);
 }
 
 static void on_button(lv_event_t *event) {
@@ -493,12 +516,15 @@ static void on_second(lv_timer_t *timer) {
     show_count();
 }
 
-/* Up it comes, with these words, about this, and the count at its start. */
-static void prompt_raise(const prompt_words_t *words, int about) {
+/* Up it comes, with these words, about this, counting from `seconds`, with the button
+ * `selected` (the first unless it says otherwise) highlighted. */
+static void prompt_raise(const prompt_words_t *words, int about, int seconds, int selected) {
     /* ⓘ The message a button left behind is in this same place, and what it
      * says stopped being true when the controls came back on. */
     note_remove();
     s_about = about;
+    s_seconds_full = seconds;
+    s_seconds = seconds;
     /* ⓘ Both buttons have their words before the box is made: the library
      * counts the buttons by their words, and an empty one ends the row. */
     s_btn_map[PROMPT_BUTTON_TURN_OFF] = words->action;
@@ -518,10 +544,13 @@ static void prompt_raise(const prompt_words_t *words, int about) {
      * first. ⭐ And it is SHOWN as selected. The highlight is the row's
      * focus-key state, which is set here outright rather than left to how the
      * row came by its focus: with two buttons, a row with no highlight gives
-     * no way to know which one Cross is about to press. */
+     * no way to know which one Cross is about to press.
+     * ⭐ Desktop Mode's questions and a refusal start on the SECOND, their No and
+     * their Close (rhoquinn8217, 2026-11-11: "Halo selector on No when it comes up
+     * ... an accidental press should default to no"). */
     lv_obj_t *btns = lv_msgbox_get_btns(s_mbox);
     if (btns != NULL) {
-        lv_btnmatrix_set_selected_btn(btns, PROMPT_BUTTON_TURN_OFF);
+        lv_btnmatrix_set_selected_btn(btns, (uint16_t) selected);
         lv_obj_add_state(btns, LV_STATE_FOCUS_KEY);
     }
     s_timer = lv_timer_create(on_second, 1000, NULL);
@@ -539,7 +568,7 @@ void bridge_prompt_request(void) {
         return;
     }
     if (s_mbox != NULL && s_about != PROMPT_ABOUT_MOUSE_CONTROLS) {
-        commons_log_info("Streaming", "bridge prompt: the TV cursor's is up, this one is not raised");
+        commons_log_info("Streaming", "bridge prompt: another pop-up is up, this one is not raised");
         return;
     }
     /* ⭐ NOT WHILE THE LOCK'S OR A PROMPT'S REBINDS ARE ON (rhoquinn8217, 2026-11-10,
@@ -571,7 +600,28 @@ void bridge_prompt_request(void) {
     }
     commons_log_info("Streaming", "bridge prompt: asking for %d s (virtual mouse %s, touchpad mouse %s)",
                      PROMPT_SECONDS, vmouse ? "on" : "off", touchpad_mouse ? "on" : "off");
-    prompt_raise(&words, PROMPT_ABOUT_MOUSE_CONTROLS);
+    prompt_raise(&words, PROMPT_ABOUT_MOUSE_CONTROLS, PROMPT_SECONDS, PROMPT_BUTTON_TURN_OFF);
+}
+
+bool bridge_prompt_request_desktop(bool on) {
+    if (global == NULL || global->session == NULL || s_mbox != NULL) {
+        return false;
+    }
+    const prompt_words_t words = {on ? locstr("Turn on Desktop Mode?") : locstr("Turn off Desktop Mode?"),
+                                  locstr("Yes"), locstr("No"), NULL};
+    commons_log_info("Streaming", "bridge prompt: asking for %d s whether to turn Desktop Mode %s",
+                     PROMPT_DESKTOP_SECONDS, on ? "on" : "off");
+    prompt_raise(&words, on ? PROMPT_ABOUT_DESKTOP_ON : PROMPT_ABOUT_DESKTOP_OFF, PROMPT_DESKTOP_SECONDS,
+                 PROMPT_BUTTON_LEAVE);
+    return true;
+}
+
+void bridge_prompt_say_desktop_on(void) {
+    /* ⓘ Not over a pop-up: it is in this same place. */
+    if (s_mbox != NULL) {
+        return;
+    }
+    say_desktop_on(NULL);
 }
 
 void bridge_prompt_request_tv_cursor(void) {
@@ -599,7 +649,7 @@ void bridge_prompt_request_tv_cursor(void) {
                      PROMPT_SECONDS);
     tv_cursor_log("the bridged mouse's pop-up: a bridged mouse was used with the TV cursor on, asking for %d s",
                   PROMPT_SECONDS);
-    prompt_raise(&words, PROMPT_ABOUT_TV_CURSOR);
+    prompt_raise(&words, PROMPT_ABOUT_TV_CURSOR, PROMPT_SECONDS, PROMPT_BUTTON_TURN_OFF);
 }
 
 bool bridge_prompt_shown(void) {
@@ -657,10 +707,32 @@ bool bridge_prompt_note_up(void) {
     return s_note != NULL;
 }
 
+/* ⭐ A REFUSAL OFFERS DESKTOP MODE (rhoquinn8217, 2026-11-11: "I want to add an option
+ * to turn on Desktop Mode when the refusal messages come up"; "Desktop Mode is the
+ * solution to first log in after a reboot, accessible with a bridge attempt or overlay
+ * button"). The same words, and two buttons, for four seconds as before ("Refusal
+ * message should only be short, 4 seconds"), Close selected so an accidental press
+ * changes nothing. With Desktop Mode on already, the words alone, as before. */
 void bridge_prompt_note_bridge_refused(bool locked) {
-    bridge_prompt_note(locked ? locstr("Unable to bridge device. Windows is locked. Please unlock it first.")
-                              : locstr("Unable to bridge device. DS5-USBIP is offline. "
-                                       "If you are at the sign-in screen, please sign in first."));
+    const char *words = locked ? locstr("Unable to bridge device. Windows is locked. Please unlock it first.")
+                               : locstr("Unable to bridge device. DS5-USBIP is offline. "
+                                        "If you are at the sign-in screen, please sign in first.");
+    if (desktop_mode_on() || s_mbox != NULL || global == NULL || global->session == NULL) {
+        bridge_prompt_note(words);
+        return;
+    }
+    const prompt_words_t prompt = {words, locstr("Turn on Desktop Mode"), locstr("Close"), NULL};
+    commons_log_info("Streaming", "bridge prompt: a refusal (%s), offering Desktop Mode for %d s",
+                     locked ? "Windows is locked" : "DS5-USBIP is offline", PROMPT_REFUSAL_SECONDS);
+    prompt_raise(&prompt, PROMPT_ABOUT_REFUSAL, PROMPT_REFUSAL_SECONDS, PROMPT_BUTTON_LEAVE);
+}
+
+const char *bridge_prompt_words(void) {
+    if (s_mbox == NULL) {
+        return "";
+    }
+    lv_obj_t *label = lv_msgbox_get_text(s_mbox);
+    return label != NULL ? lv_label_get_text(label) : "";
 }
 
 static void measure(const lv_obj_t *box, const lv_obj_t *label, bridge_prompt_measure_t *out) {

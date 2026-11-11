@@ -5,9 +5,13 @@
 
 #include <stdint.h>
 
+#include "lvgl/theme/lv_theme_moonlight.h"
 #include "stream/input/lock_keys.h"
+#include "ui/common/bt_panel.h"
 #include "ui/common/pad_marks.h"
 #include "ui/root.h"
+#include "ui/streaming/ctm_panel.h"
+#include "ui/streaming/streaming.controller.h"
 #include "util/i18n.h"
 #if defined(TARGET_WEBOS)
 #include "input/auto_bridge.h"
@@ -144,15 +148,38 @@ static lv_obj_t *row_create(lv_obj_t *parent) {
     return row;
 }
 
+/* ⭐ WORDS WITH THEIR LAST PART IN BOLD, one line: in Desktop Mode's list only, the
+ * clicks and the Full Keyboard (rhoquinn8217, 2026-11-11: "Only in the Desktop Mode
+ * legend bold left click, right click and Full Keyboard so it's noticeable. Our rebind
+ * are slightly different since we are mimicking steams rebinds"). ⓘ Two labels with no
+ * gap, the plain part ending in its own space: a label has no bold of its own. */
+static lv_obj_t *words_bold_create(lv_obj_t *parent, const char *plain, const char *bold, const lv_font_t *font) {
+    lv_obj_t *line = row_create(parent);
+    lv_obj_set_style_pad_column(line, 0, 0);
+    words_create(line, plain, font);
+    const lv_font_t *heavy = lv_theme_moonlight_get_font_small_bold(parent);
+    words_create(line, bold, heavy != NULL ? heavy : font);
+    return line;
+}
+
 /* A row of the list: a button's mark, in a cell as wide as a shoulder button's so
- * the words line up, then what it does. */
-static void mark_row_create(lv_obj_t *parent, pad_mark_t mark, pad_family_t family, const char *words) {
+ * the words line up, then what it does, its last part in bold when `bold` is given. */
+static void mark_row_bold_create(lv_obj_t *parent, pad_mark_t mark, pad_family_t family, const char *words,
+                                 const char *bold) {
     lv_obj_t *row = row_create(parent);
     lv_obj_t *cell = box_create(row);
     lv_obj_set_size(cell, NUMPAD_LEGEND_MARK * 6 / 5, NUMPAD_LEGEND_MARK);
     lv_obj_t *drawn = pad_mark_create(cell, mark, family, NUMPAD_LEGEND_MARK, NUMPAD_MARK);
     lv_obj_center(drawn);
-    words_create(row, words, lv_theme_get_font_small(parent));
+    if (bold != NULL) {
+        words_bold_create(row, words, bold, lv_theme_get_font_small(parent));
+    } else {
+        words_create(row, words, lv_theme_get_font_small(parent));
+    }
+}
+
+static void mark_row_create(lv_obj_t *parent, pad_mark_t mark, pad_family_t family, const char *words) {
+    mark_row_bold_create(parent, mark, family, words, NULL);
 }
 
 /* The last row of every legend, the list's and the numpad's: Options (Menu on an Xbox
@@ -241,11 +268,19 @@ static lv_obj_t *close_create(lv_obj_t *parent) {
  * prompt since 2026-11-10 ("lets just add square to all UAC prompts. there's no
  * downside of having it"), and Create is Tab in both lists ("create create button
  * binded to tab"), under the d-pad: both move the focus. */
+/* ⭐ AND DESKTOP MODE'S, the prompt's list under "Desktop: Controller" (rhoquinn8217,
+ * 2026-11-11: "Legend Title should be just Desktop: Controller"), without Close and
+ * without the Options row ("remove the close button and close button rebind"), its
+ * clicks and the Full Keyboard in bold. Only while the overlay is open, and not over the
+ * screen as the other two are ("It does not persist over the screen like windows log
+ * in, UAC and performance states"). ⓘ "Full Keyboard" in every list since then
+ * ("Change keyboard in all legend to Full Keyboard"). */
 static lv_obj_t *list_create(pad_family_t family, lock_keys_mode_t mode) {
     lv_obj_t *panel = dark_panel_create(NUMPAD_MARGIN_X, NUMPAD_MARGIN_Y);
     lv_obj_set_style_pad_row(panel, NUMPAD_LIST_GAP, 0);
     const lv_font_t *font = lv_theme_get_font_small(panel);
     const bool lock = mode == LOCK_KEYS_LOCK;
+    const bool desktop = mode == LOCK_KEYS_DESKTOP;
 
     /* The heading, then Close, NUMPAD_HEADING_GAP apart at the least, and a line under
      * the two to set them off from the rebinds. ⓘ The heading's own border, the heading
@@ -262,26 +297,42 @@ static lv_obj_t *list_create(pad_family_t family, lock_keys_mode_t mode) {
     lv_obj_set_style_border_width(heading, LV_DPX(1), 0);
     lv_obj_set_style_border_color(heading, NUMPAD_MARK, 0);
     lv_obj_set_style_border_opa(heading, LV_OPA_COVER, 0);
-    lv_obj_t *title = words_create(
-        heading, lock ? locstr("Windows Sign In: Controller") : locstr("User Account Control: Controller"), font);
-    s_close = close_create(heading);
+    lv_obj_t *title = words_create(heading,
+                                   lock      ? locstr("Windows Sign In: Controller")
+                                   : desktop ? locstr("Desktop: Controller")
+                                             : locstr("User Account Control: Controller"),
+                                   font);
+    s_close = desktop ? NULL : close_create(heading);
     lv_obj_t *gap = box_create(panel);
     lv_obj_set_size(gap, 1, LV_DPX(2));
     words_create(panel, locstr("Right stick - mouse"), font);
     words_create(panel, locstr("Touchpad - mouse"), font);
-    words_create(panel, locstr("1 finger tap - left click"), font);
-    words_create(panel, locstr("2 finger tap - right click"), font);
-    mark_row_create(panel, PAD_MARK_R2, family, locstr("- left click"));
-    mark_row_create(panel, PAD_MARK_L2, family, locstr("- right click"));
+    if (desktop) {
+        words_bold_create(panel, locstr("1 finger tap - "), locstr("left click"), font);
+        words_bold_create(panel, locstr("2 finger tap - "), locstr("right click"), font);
+        mark_row_bold_create(panel, PAD_MARK_R2, family, locstr("- "), locstr("left click"));
+        mark_row_bold_create(panel, PAD_MARK_L2, family, locstr("- "), locstr("right click"));
+    } else {
+        words_create(panel, locstr("1 finger tap - left click"), font);
+        words_create(panel, locstr("2 finger tap - right click"), font);
+        mark_row_create(panel, PAD_MARK_R2, family, locstr("- left click"));
+        mark_row_create(panel, PAD_MARK_L2, family, locstr("- right click"));
+    }
     mark_row_create(panel, PAD_MARK_DPAD, family, locstr("- arrow keys"));
     mark_row_create(panel, PAD_MARK_VIEW, family, locstr("- Tab"));
     mark_row_create(panel, PAD_MARK_SOUTH, family, locstr("- Enter"));
     mark_row_create(panel, PAD_MARK_EAST, family, locstr("- Esc"));
-    mark_row_create(panel, PAD_MARK_WEST, family, locstr("- keyboard"));
+    if (desktop) {
+        mark_row_bold_create(panel, PAD_MARK_WEST, family, locstr("- "), locstr("Full Keyboard"));
+    } else {
+        mark_row_create(panel, PAD_MARK_WEST, family, locstr("- Full Keyboard"));
+    }
     if (lock) {
         mark_row_create(panel, PAD_MARK_NORTH, family, locstr("- numpad"));
     }
-    options_row_create(panel, family);
+    if (!desktop) {
+        options_row_create(panel, family);
+    }
     /* ⭐ THE LIST AS WIDE AS ITS WIDEST LINE, THE HEADING WITH CLOSE AMONG THEM
      * (rhoquinn8217, 2026-11-10, at build 669, where Close sat over the heading's last
      * word: "Expand the legend horizontally to fit the close button. Check the UAD
@@ -289,7 +340,8 @@ static lv_obj_t *list_create(pad_family_t family, lock_keys_mode_t mode) {
      * straight after a first layout, still had the heading as wide as its words alone.
      * And the list set to it as well, not left to follow its heading. */
     lv_obj_update_layout(panel);
-    lv_coord_t widest = (lv_coord_t) (lv_obj_get_width(title) + NUMPAD_HEADING_GAP + lv_obj_get_width(s_close));
+    lv_coord_t widest = (lv_coord_t) (lv_obj_get_width(title) +
+                                      (s_close != NULL ? NUMPAD_HEADING_GAP + lv_obj_get_width(s_close) : 0));
     const uint32_t lines = lv_obj_get_child_cnt(panel);
     for (uint32_t i = 0; i < lines; ++i) {
         lv_obj_t *line = lv_obj_get_child(panel, (int32_t) i);
@@ -351,10 +403,15 @@ static lv_obj_t *question_create(pad_family_t family) {
     lv_obj_center(panel);
 
     words_create(panel, locstr("Are you sure?"), lv_theme_get_font_normal(panel));
+    /* ⓘ With Desktop Mode on, its controls come back at once rather than plain ones
+     * (stream/input/lock_keys.h), so the words say so. */
     lv_obj_t *words = words_create(panel,
-                                   locstr("This turns off the rebinds in this list. Your controllers will work as "
-                                          "plain controllers until the next sign-in screen or User Account Control "
-                                          "prompt."),
+                                   lock_keys_desktop_wanted()
+                                       ? locstr("This turns off the rebinds in this list. Your controllers will go "
+                                                "back to Desktop Mode.")
+                                       : locstr("This turns off the rebinds in this list. Your controllers will work as "
+                                                "plain controllers until the next sign-in screen or User Account Control "
+                                                "prompt."),
                                    lv_theme_get_font_small(panel));
     lv_label_set_long_mode(words, LV_LABEL_LONG_WRAP);
     lv_obj_set_width(words, lv_pct(100));
@@ -422,9 +479,15 @@ static void after_show(bool show) {
     }
 }
 
+/* Desktop Mode's list is up with the overlay, and not over a panel it opened. */
+static bool desktop_list_wanted(void) {
+    return streaming_overlay_shown() && !ctm_panel_shown() && !bt_panel_shown();
+}
+
 void lock_numpad_tick(void) {
-    const bool showing = lock_keys_active() && !ui_should_block_input();
     const lock_keys_mode_t mode = lock_keys_mode();
+    const bool showing =
+        mode == LOCK_KEYS_DESKTOP ? desktop_list_wanted() : lock_keys_active() && !ui_should_block_input();
     /* ⓘ The line about Auto Bridge is the lock's: a prompt does not hold a bridge
      * back (rhoquinn8217, 2026-11-09: "If the UAC: controller legend is the same, we
      * don't need to have that message"). */

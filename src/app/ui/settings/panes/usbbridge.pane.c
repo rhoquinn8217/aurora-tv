@@ -31,6 +31,7 @@
 #if defined(TARGET_WEBOS)
 #include "ui/settings/auto_bridge_window.h"
 #endif
+#include "ui/streaming/desktop_mode.h"
 
 typedef struct {
     lv_fragment_t base;
@@ -130,6 +131,14 @@ static void usbb_auto_open_cb(lv_event_t *e)
         return;   /* the row is greyed with the rest, but never trust that alone */
     }
     auto_bridge_window_open();
+}
+
+/* Desktop Mode's box, after it has written the switch: on, it turns Virtual Mouse off
+ * as well (ui/streaming/desktop_mode.h). */
+static void usbb_desktop_changed(lv_event_t *e)
+{
+    lv_obj_t *box = lv_event_get_current_target(e);
+    desktop_mode_set(lv_obj_has_state(box, LV_STATE_CHECKED), "Settings");
 }
 
 #endif /* TARGET_WEBOS */
@@ -258,6 +267,25 @@ static lv_obj_t *create_obj(lv_fragment_t *self, lv_obj_t *container) {
             "stream starts."), false);
     /* ⓘ The pane's gap is zero so a description sits tight under its own
      * setting; without this the next heading sits tight under it too. */
+    usbb_gap(view);
+
+    /* ⭐ DESKTOP MODE (rhoquinn8217, 2026-11-11: "Desktop mode's toggle can be found in
+     * the USB Settings"; ui/streaming/desktop_mode.h), in a section of its own above the
+     * Windows State Rebind Overrides: it needs no DS5-USBIP, which their disclaimer says
+     * those do. With their warning ("Warning with turning on Desktop Mode. All
+     * controller included bridged controllers use it and it overrides DS5-USBIP
+     * configs"). A plain box: it runs with bridging off. Its handler turns Virtual Mouse
+     * off as it goes on. */
+    pref_title_label(view, locstr("Desktop Mode"));
+    lv_obj_t *desktop = pref_checkbox(view, locstr("Enable Desktop Mode"), &app_configuration->bridge.desktop_mode,
+                                      false);
+    lv_obj_add_event_cb(desktop, usbb_desktop_changed, LV_EVENT_VALUE_CHANGED, NULL);
+    pref_desc_label(view, locstr(
+            "Controllers work the Windows desktop with the rebinds in its legend, shown in the streaming "
+            "overlay, until it is turned off. Works without DS5-USBIP. Turns off Virtual Mouse."), false);
+    pref_desc_label(view, locstr(
+            "Warning: All controllers, including bridged controllers, use it, and it overrides DS5-USBIP "
+            "configs."), false);
     usbb_gap(view);
 
     /* ⭐ THE WINDOWS STATE REBIND OVERRIDES, in their words (rhoquinn8217,

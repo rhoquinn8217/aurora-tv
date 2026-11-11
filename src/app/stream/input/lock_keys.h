@@ -86,7 +86,25 @@
  * OK and Circle its Cancel (A and B on an Xbox pad), no other button does anything, and
  * the triggers do not click. The sticks and the touchpad go on as the mouse.
  * ⓘ While this is on, a bridge raises no Virtual Mouse pop-up
- * (ui/streaming/bridge_prompt.h): this turns Virtual Mouse on itself. */
+ * (ui/streaming/bridge_prompt.h): this turns Virtual Mouse on itself.
+ *
+ * ⭐⭐ AND DESKTOP MODE, BY HAND, UNTIL IT IS TURNED OFF (rhoquinn8217, 2026-11-11:
+ * "Desktop Mode rebinds the controller on the TV side using the same rebinds as the
+ * UAC mode but it persists until you turn it off"). A saved switch (bridge_settings.h,
+ * desktop_mode), turned on and off in the overlay, in Settings or from a pop-up
+ * (ui/streaming/desktop_mode.h). The prompt's controls, on every controller, bridged
+ * ones too ("doesn't mean you wouldn't want to use Desktop Mode over a config"), their
+ * reports held at rest from the PC. Needs nothing from DS5-USBIP, so it is the way
+ * through the first sign-in after a restart, where DS5-USBIP is not running yet.
+ *   - It is NOT the prompt's mode with another name: no Close and no Options hold
+ *     ("UAC mode has the close button and options rebind to close when held").
+ *   - A lock or a prompt takes over with its own controls and list, and Desktop Mode
+ *     comes back when it is gone ("Windows lock or UAC should override Desktop Mode").
+ *   - Their Close turns their controls off; with Desktop Mode on, Desktop Mode comes
+ *     back at once ("closing implies you need the controller plain. unless you had
+ *     desktop mode already on, then bring it back").
+ *   - Virtual Mouse is lent to it as to a lock, and given back OFF: turning Desktop
+ *     Mode on turns Virtual Mouse off. */
 
 #pragma once
 
@@ -113,9 +131,14 @@ typedef enum {
     LOCK_KEYS_LOCK,              /* Windows is locked */
     LOCK_KEYS_PROMPT,            /* a User Account Control prompt, Yes or No */
     LOCK_KEYS_PROMPT_PASSWORD,   /* one that can ask for a password or PIN */
+    LOCK_KEYS_DESKTOP,           /* Desktop Mode, by hand: neither of the others */
 } lock_keys_mode_t;
 
 lock_keys_mode_t lock_keys_mode(void);
+
+/* Is Desktop Mode switched on, whether or not a lock or a prompt has the controls
+ * now? */
+bool lock_keys_desktop_wanted(void);
 
 /* Are the bridged controllers' reports to be held at rest from the PC? While a
  * prompt is up, and after it until what was down on them is let go. */
