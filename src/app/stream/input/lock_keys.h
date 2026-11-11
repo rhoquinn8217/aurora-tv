@@ -12,7 +12,8 @@
  * ⭐ THE NUMPAD CLOSED, HOW A LOCK STARTS: the controller is a mouse. Virtual Mouse
  * as GuiDev1994 made it, turned on for the lock: the right stick moves the mouse; the
  * touchpad is the mouse, a one-finger tap a left click and a two-finger tap a right
- * click. The triggers are held as long as they are, so a drag works, and they are NOT
+ * click. With the TV cursor on, the right stick moves it as the touchpad does, so the
+ * list's Close can be reached (lock_keys_stick_moves_tv_cursor, 2026-11-10). The triggers are held as long as they are, so a drag works, and they are NOT
  * his: R2 is the left button and L2 the right, as DS5-USBIP's own configs have them
  * (their word, after a real lock: "Switch R2 and L2 mouse buttons to match ours"). His
  * stay his outside a lock. Beside his, as keys, since the lock screen often ignores a
@@ -165,6 +166,14 @@ bool lock_keys_triggers_type(void);
 /* Are the triggers the mouse's buttons, R2 the left and L2 the right? Virtual Mouse
  * then sees them the other way about from its own. */
 bool lock_keys_triggers_swapped(void);
+
+/* ⭐ Does the right stick move the TV cursor (input/touchpad_pointer.h), not the
+ * host's pointer alone? While this is on and the TV cursor is (rhoquinn8217,
+ * 2026-11-10: "during windows log in and UAC, right stick to mouse isn't using
+ * aurora-tv mouse and can't click the close button"). Virtual Mouse then sees the
+ * right stick at rest, and R2's click on the list's Close or its question is
+ * Aurora's, as the touchpad's is. */
+bool lock_keys_stick_moves_tv_cursor(void);
 
 /* Is a pad connected that can do this? The screen is about nothing without one. At a
  * prompt any pad counts, bridged ones too. */

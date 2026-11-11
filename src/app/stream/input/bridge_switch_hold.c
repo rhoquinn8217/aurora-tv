@@ -219,6 +219,12 @@ bridge_switch_axes_t bridge_switch_hold_axes(const app_gamepad_state_t *gamepad)
         out.lt = out.rt;
         out.rt = l2;
     }
+    /* And while the right stick moves the TV cursor at a lock or a prompt, Virtual Mouse does not move the host's
+     * pointer away from it (stream/input/lock_keys.h). No pad reaches the host as a controller meanwhile. */
+    if (lock_keys_stick_moves_tv_cursor()) {
+        out.rx = 0;
+        out.ry = 0;
+    }
     if (held_for(gamepad) == NULL) {
         return out;
     }

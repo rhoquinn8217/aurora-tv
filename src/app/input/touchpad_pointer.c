@@ -586,7 +586,9 @@ void touchpad_pointer_tick(struct app_input_t *input, bool ui_has_input) {
 #endif
 }
 
-bool touchpad_pointer_stream_move(stream_input_t *input, float dx, float dy) {
+/* The TV cursor moved by this many of the interface's pixels in a stream, and the
+ * host told the point; `what` moved it, for the log. */
+static bool stream_move_by(stream_input_t *input, float dx_px, float dy_px, const char *what) {
     if (!tv_cursor_mode_on() || s_indev == NULL || s_cursor == NULL || input == NULL || input->session == NULL) {
         return false;
     }
@@ -610,9 +612,8 @@ bool touchpad_pointer_stream_move(stream_input_t *input, float dx, float dy) {
         s_mouse_x = mx;
         s_mouse_y = my;
     }
-    const float k = screen_w * SPEED_SCREENS;
-    s_px += dx * k;
-    s_py += dy * k;
+    s_px += dx_px;
+    s_py += dy_px;
     if (s_px < 0) s_px = 0;
     if (s_py < 0) s_py = 0;
     if (s_px > screen_w - 1) s_px = screen_w - 1;
@@ -622,10 +623,19 @@ bool touchpad_pointer_stream_move(stream_input_t *input, float dx, float dy) {
     s_stream_used_at = SDL_GetTicks();
     if (!s_stream_shown) {
         s_stream_shown = true;
-        tp_log("stream: the touchpad moves the TV cursor, from %d,%d", (int) s_px, (int) s_py);
+        tp_log("stream: the %s moves the TV cursor, from %d,%d", what, (int) s_px, (int) s_py);
     }
     show(true);
     return true;
+}
+
+bool touchpad_pointer_stream_move(stream_input_t *input, float dx, float dy) {
+    const float k = (float) lv_disp_get_hor_res(NULL) * SPEED_SCREENS;
+    return stream_move_by(input, dx * k, dy * k, "touchpad");
+}
+
+bool touchpad_pointer_stream_stick(stream_input_t *input, float dx_px, float dy_px) {
+    return stream_move_by(input, dx_px, dy_px, "right stick");
 }
 
 bool touchpad_pointer_stream_tap(void) {
