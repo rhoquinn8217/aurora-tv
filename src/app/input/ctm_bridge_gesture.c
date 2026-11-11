@@ -770,20 +770,30 @@ static int flash_write(SDL_GameController *controller, uint8_t r, uint8_t g, uin
  * blue would tell a second controller it was player one: worse than leaving
  * the light alone, because it is a meaningful colour stated wrongly.
  *
+ * ⓘ Past four, orange, teal and white, the order SDL and the Linux kernel
+ * use, and round again from the eighth (2026-11-11). The app takes sixteen
+ * controllers, and a fifth one painted player one's blue said it was player
+ * one.
+ *
  * Set directly rather than by re-applying the index: SDL sees the same value
  * and repaints nothing, which left the light stuck on the signal colour.
  * Measured 2026-08-06 on both transports. */
 static int paint_player_colour(SDL_GameController *controller) {
-    static const uint8_t player_rgb[4][3] = {
+    static const uint8_t player_rgb[][3] = {
         { 0x00, 0x00, 0xff },   /* 1: blue   */
         { 0xff, 0x00, 0x00 },   /* 2: red    */
         { 0x00, 0xff, 0x00 },   /* 3: green  */
         { 0xff, 0x00, 0xff },   /* 4: purple */
+        { 0xff, 0x80, 0x00 },   /* 5: orange */
+        { 0x00, 0xff, 0xff },   /* 6: teal   */
+        { 0xff, 0xff, 0xff },   /* 7: white  */
     };
+    const int colours = (int) (sizeof player_rgb / sizeof player_rgb[0]);
     int slot = SDL_GameControllerGetPlayerIndex(controller);
-    if (slot < 0 || slot > 3) {
+    if (slot < 0) {
         slot = 0;
     }
+    slot %= colours;
     return flash_write(controller, player_rgb[slot][0],
                        player_rgb[slot][1], player_rgb[slot][2]);
 }
