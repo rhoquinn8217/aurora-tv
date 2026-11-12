@@ -284,13 +284,13 @@ static void open_async(void *p) {
         tv_cursor_log("align bar: not opened, the interface has the input already");
         return;
     }
+    /* ⓘ Neither says anything on the screen (rhoquinn8217, 2026-11-12: "you created
+     * too many messages about the cursor doesn't need explaining"). */
     if (!tv_cursor_mode_on()) {
-        bridge_prompt_note(locstr("TV cursor is off. Press Ctrl+Alt+Shift+M to turn it on."));
         tv_cursor_log("align bar: not opened, the TV cursor is off");
         return;
     }
     if (!tv_cursor_drawn()) {
-        bridge_prompt_note(locstr("The TV's own pointer is in use: there is nothing to align."));
         tv_cursor_log("align bar: not opened, the cursor is webOS's own");
         return;
     }

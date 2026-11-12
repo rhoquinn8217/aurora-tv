@@ -1,19 +1,17 @@
-/* Which mice the TV has seen move, so a bridge can tell a mouse in use from a
- * mouse part with nothing behind it.
+/* Which mice the TV has seen move, so a mouse in use can be told from a mouse
+ * part with nothing behind it.
  *
- * ⭐ WHY (rhoquinn8217, 2026-10-11): the pop-up that asks to turn the TV cursor
- * off "should appear immediately after a mouse is bridged just like the message
- * when a controller is bridge and virtual mouse is on". But a part that says it
- * is a mouse is not always one: the RONGYUAN keyboard's receiver has a mouse
- * part with no mouse behind it, and bridging that keyboard would ask about a
- * TV cursor its mouse never moved.
+ * ⭐ WHY: a part that says it is a mouse is not always one. The RONGYUAN
+ * keyboard's receiver has a mouse part with no mouse behind it, and a keyboard
+ * bridged with one must not count as a bridged mouse (mouse_seen_mouse_bridged).
+ * And webOS's own pointer can be moved by the app only once a mouse has moved
+ * since the app started (mouse_seen_any), and is woken through the mice seen
+ * moving (mouse_seen_wake).
+ * ⓘ Until 2026-11-12 a bridged mouse also raised a pop-up about the TV cursor,
+ * which rhoquinn8217 had removed with every message about the cursor.
  *
  * ➡️ So the app watches every pointer the TV has, without taking any, and
- * remembers which have moved. A mouse part bridged whose input node the TV saw
- * move asks at once (bridge_prompt.h). One the TV never saw move asks at its
- * first use instead, which the bridge core tells: a mouse Auto Bridge takes as
- * a stream starts, before anyone touched it; and a part with no mouse behind
- * it never asks at all.
+ * remembers which have moved.
  *
  * ⓘ Each node is read only until it first moves, then closed: nothing is read
  * from a mouse in use. What moved is forgotten when the input devices change,
@@ -30,20 +28,13 @@
  * each. */
 void mouse_seen_tick(void);
 
-/* A part was just bridged: if it is a mouse the TV saw move, the pop-up is due
- * (mouse_seen_take_bridged). */
-void mouse_seen_plugged(const ctm_bridge_dev_t *dev);
-
-/* Was a mouse the TV saw move just bridged? True once for each. */
-bool mouse_seen_take_bridged(void);
-
 /* ⭐ WEBOS'S POINTER WOKEN, for the bar that aligns the TV cursor
  * (ui/streaming/cursor_align.h). webOS hides a mouse's pointer after 5 seconds
  * without movement, and keys never count; so a movement of one pixel right and
  * one back is written into each mouse the TV has seen move, through the
  * mouse's own input node, which to webOS is that mouse moving.
  * ⓘ Only mice already seen moving: one still watched would take the movement
- * for its own and ask about the TV cursor when bridged. How many were woken. */
+ * for its own and count as seen moving. How many were woken. */
 int mouse_seen_wake(void);
 
 /* A test: webOS's pointer moved by `dx`, `dy` counts as the first mouse the TV saw

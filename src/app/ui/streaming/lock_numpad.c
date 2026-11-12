@@ -441,16 +441,10 @@ static lv_obj_t *question_create(pad_family_t family) {
     lv_obj_center(panel);
 
     words_create(panel, locstr("Are you sure?"), lv_theme_get_font_normal(panel));
-    /* ⓘ With Desktop Mode on, its controls come back at once rather than plain ones
-     * (stream/input/lock_keys.h), so the words say so. */
-    lv_obj_t *words = words_create(panel,
-                                   lock_keys_desktop_wanted()
-                                       ? locstr("This turns off the rebinds in this list. Your controllers will go "
-                                                "back to Desktop Mode.")
-                                       : locstr("This turns off the rebinds in this list. Your controllers will work as "
-                                                "plain controllers until the next sign-in screen or User Account Control "
-                                                "prompt."),
-                                   lv_theme_get_font_small(panel));
+    /* ⭐ One short line, whatever comes after (rhoquinn8217, 2026-11-12: "Are you sure?
+     * Reminds will be disabled OK, Cancel", read as rebinds). It said which controls came
+     * back until then: plain ones, or Desktop Mode's. */
+    lv_obj_t *words = words_create(panel, locstr("Rebinds will be disabled."), lv_theme_get_font_small(panel));
     lv_label_set_long_mode(words, LV_LABEL_LONG_WRAP);
     lv_obj_set_width(words, lv_pct(100));
 

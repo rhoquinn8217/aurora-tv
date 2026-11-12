@@ -6,8 +6,6 @@
 #include "app.h"   /* the app, its settings and the mouse grab */
 #include "stream/session.h"   /* whether the stream has the input */
 #include "mouse_seen.h"   /* whether a mouse is bridged */
-#include "ui/streaming/bridge_prompt.h"   /* bridge_prompt_note */
-#include "util/i18n.h"
 
 
 #if defined(TARGET_WEBOS)
@@ -805,16 +803,13 @@ bool tv_cursor_set_mode(bool on) {
         tv_cursor_log("the TV cursor cannot be switched while Use mouse hardware is on");
         return false;
     }
-    /* ⭐ NOT ON WHILE A MOUSE IS BRIDGED (rhoquinn8217, 2026-10-11: "When
-     * attempting to turn on TV cursor, if the mouse is bridged, create a pop up
-     * message saying that TV cursor can't be turned on with mouse is
-     * bridged"). That mouse moves the PC's cursor, and the TV's would stand
-     * still. ⓘ Said in the place of the bridge's pop-up, whichever way it was
-     * asked for: Ctrl+Alt+Shift+M on any keyboard, or the control port. */
+    /* ⭐ NOT ON WHILE A MOUSE IS BRIDGED (rhoquinn8217, 2026-10-11). That mouse
+     * moves the PC's cursor, and the TV's would stand still. ⓘ Without a word on
+     * the screen since 2026-11-12 ("you created too many messages about the cursor
+     * doesn't need explaining"): only the log says why. */
     char which[96];
     if (on && !tv_cursor_mode_on() && mouse_seen_mouse_bridged(which, sizeof(which))) {
         tv_cursor_log("the TV cursor stays off: a mouse is bridged (%s)", which);
-        bridge_prompt_note(locstr("TV cursor can't be turned on while the mouse is bridged."));
         return false;
     }
     if (app_configuration->absmouse != on) {

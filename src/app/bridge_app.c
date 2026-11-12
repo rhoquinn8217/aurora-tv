@@ -19,7 +19,7 @@
 #include "input/ctm_bridge_gesture.h"
 #if defined(TARGET_WEBOS)
 #include "input/bridge_keyboard.h"
-#include "ctm_bridge_glue.h"   /* bridge_set_shortcut_request, bridge_set_pointer_used_request */
+#include "ctm_bridge_glue.h"   /* bridge_set_shortcut_request */
 #endif
 #include "input/tv_cursor.h"
 #include "input/touchpad_pointer.h"   /* the touchpad as the TV's mouse */
@@ -32,22 +32,6 @@
 #include "ui/streaming/desktop_mode.h"   /* Desktop Mode's questions */
 #include "ui/streaming/lock_numpad.h"
 #include "ui/streaming/cursor_align.h"   /* cursor_align_shown */
-
-#if defined(TARGET_WEBOS)
-/* ⭐ The pop-up that asks to turn the TV cursor off (ui/streaming/bridge_prompt.h)
- * comes as soon as a mouse the TV saw move is bridged (rhoquinn8217,
- * 2026-10-11: "The message should appear immediately after a mouse is
- * bridged"), and is raised here, on the app's loop. A mouse part the TV never
- * saw move (input/mouse_seen.h) asks instead at its first use, which the
- * bridge core tells on the mouse's own thread. ⓘ Not both for one bridge: a
- * pop-up raised at the bridge takes the first use that follows it. */
-static SDL_atomic_t s_pointer_used;
-static int s_asked_at_bridge = 0;
-
-static void pointer_used(void) {
-    SDL_AtomicSet(&s_pointer_used, 1);
-}
-#endif
 
 /* ⓘ The bridge core's: <app>/logs/<name>, the folder every log of ours is in. */
 const char *ctm_log_path(const char *name);
@@ -173,9 +157,9 @@ void bridge_app_started(app_t *app) {
     overlay_volume_init();
 #if defined(TARGET_WEBOS)
     /* ⓘ What the bridge core finds in a bridged keyboard's reports, beside
-     * its S: Ctrl+Alt+Shift and A, C, M or N; and a bridged mouse's first use. */
+     * its S: Ctrl+Alt+Shift and A, C, M or N. ⓘ A bridged mouse's first use is
+     * not asked for since its pop-up went (rhoquinn8217, 2026-11-12). */
     bridge_set_shortcut_request(bridge_keyboard_bridged_shortcut);
-    bridge_set_pointer_used_request(pointer_used);
 #endif
 }
 
@@ -326,9 +310,7 @@ void bridge_app_events(app_t *app) {
 #if defined(TARGET_WEBOS)
     /* The TV's keyboard grab looking again after a bridge or a release. */
     bridge_keyboard_tick(interface_has_input);
-    /* The pointers the TV has seen move, and the pop-up that asks about the TV
-     * cursor: at the bridge for a mouse seen moving, at its first use for one
-     * never seen. */
+    /* The pointers the TV has seen move. */
     mouse_seen_tick();
     /* ⭐ A ticked device bridges itself: at a stream's start once DS5-USBIP
      * answers, and when it connects during the stream (input/auto_bridge.h).
@@ -344,21 +326,6 @@ void bridge_app_events(app_t *app) {
     /* A lock newer than the last probe's answer: what is ticked bridges at the unlock. */
     if (refused == CTM_BRIDGE_REFUSED_LOCKED) {
         auto_bridge_stream_started();
-    }
-    if (app->session == NULL) {
-        s_asked_at_bridge = 0;
-    }
-    if (mouse_seen_take_bridged()) {
-        s_asked_at_bridge++;
-        bridge_prompt_request_tv_cursor();
-    }
-    if (SDL_AtomicSet(&s_pointer_used, 0) != 0) {
-        if (s_asked_at_bridge > 0) {
-            s_asked_at_bridge--;
-            tv_cursor_log("the bridged mouse's first use: asked already, at its bridge");
-        } else {
-            bridge_prompt_request_tv_cursor();
-        }
     }
 #else
     (void) interface_has_input;

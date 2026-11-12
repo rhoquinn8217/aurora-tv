@@ -419,8 +419,8 @@ static void cmd_uac(control_job_t *job, const char *args)
 }
 
 /* ⭐ DESKTOP MODE (ui/streaming/desktop_mode.h): its switch, what the controls are up
- * for now, the question it waits to ask, and its list in the overlay. With `on` or
- * `off`, switched as the overlay's button does, warning included, and saved. */
+ * for now, and its list in the overlay. With `on` or `off`, switched as the overlay's
+ * button does, its message included, and saved. */
 static void cmd_desktop(control_job_t *job, const char *args)
 {
     if (args != NULL && (strcasecmp(args, "on") == 0 || strcasecmp(args, "off") == 0)) {
@@ -440,14 +440,14 @@ static void cmd_desktop(control_job_t *job, const char *args)
         return;
     }
     const lock_keys_mode_t mode = lock_keys_mode();
-    reply(job, "OK desktop=%s mode=%s vmouse_setting=%s pending=%s list=%s legend=%s window_select=%s\n",
+    reply(job, "OK desktop=%s mode=%s vmouse_setting=%s list=%s legend=%s window_select=%s\n",
           desktop_mode_on() ? "on" : "off",
           mode == LOCK_KEYS_LOCK                ? "lock"
           : mode == LOCK_KEYS_PROMPT            ? "prompt"
           : mode == LOCK_KEYS_PROMPT_PASSWORD   ? "prompt-password"
           : mode == LOCK_KEYS_DESKTOP           ? "desktop"
                                                 : "off",
-          app_configuration != NULL && app_configuration->virtual_mouse ? "on" : "off", desktop_mode_pending(),
+          app_configuration != NULL && app_configuration->virtual_mouse ? "on" : "off",
           mode == LOCK_KEYS_DESKTOP && strcmp(lock_numpad_state(), "off") != 0 ? "up" : "down",
           desktop_mode_legend_shown() ? "over-screen" : "overlay-only", window_select_held() ? "alt-held" : "off");
 }

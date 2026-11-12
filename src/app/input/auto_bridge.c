@@ -13,8 +13,6 @@
 #include "ctm_bridge_gesture.h"
 #include "bridge_request.h"
 #include "app.h"
-#include "ui/streaming/bridge_prompt.h"
-#include "util/i18n.h"
 
 /* ⭐⭐ THE MATCHING LIVES HERE, NOT IN THE GLUE, AND THAT IS DELIBERATE.
  *
@@ -403,7 +401,6 @@ int auto_bridge_run(const bridge_settings_t *s)
 #define AB_RECHECK_MS     2000   /* how often it asks again meanwhile */
 #define AB_LOST_SETTLE_MS 1500   /* what DS5-USBIP dropped finishes its release before it is asked for again */
 #define AB_RELEASE_WAIT_MS 8000  /* the longest such a release is waited for: after it, bridged by someone */
-#define AB_NOTE_AFTER_MS  3000   /* when the screen says so: a normal start has its answer long before */
 #define AB_SETTLE_MS      1000   /* after a connection's last node appears */
 #define AB_SDL_WAIT_MS    6000   /* the longest a controller waits for SDL to open it */
 #define AB_APPEARED_MAX     16
@@ -412,8 +409,6 @@ int auto_bridge_run(const bridge_settings_t *s)
 static SDL_atomic_t s_start_armed;      /* set by a stream's start, from its thread */
 static uint32_t s_start_since;          /* when the loop first saw it armed */
 static bool s_start_said;               /* its long wait is in the log */
-static bool s_waiting_said;             /* the message for a ticked device has been up */
-static bool s_offline_said;             /* the message for nothing ticked has been up */
 static bool s_after_sign_in;            /* a ticked device waits for the unlock */
 static uint32_t s_note_looked;          /* when the wait last looked for what to say */
 static uint32_t s_last_recheck;
@@ -518,47 +513,21 @@ static bool ab_ticked_connected(void)
     return found;
 }
 
-/* Is a stream's start still waiting? Asked by the message it raises. */
-static bool ab_start_waiting(void)
-{
-    return SDL_AtomicGet(&s_start_armed) && !ab_bridges_taken();
-}
-
 /* ⭐ WHAT THE SCREEN SAYS WHILE A STREAM'S START WAITS (rhoquinn8217, 2026-11-01).
  * Windows locked, with a ticked device connected: that it bridges after the sign in,
- * up until then, with the list of what the buttons do (ui/streaming/lock_numpad.h).
- * Otherwise, with a ticked device connected, that Auto Bridge waits; with none, that
- * DS5-USBIP is offline. Those each once in a stream, for the usual time, and the wait
- * goes on without them.
- * ⓘ The TV cannot tell a PC at its sign-in screen from one with DS5-USBIP not
- * running: neither answers, and Vibepollo tells no client about a held launch.
- * So the words cover both. */
+ * under the list of what the buttons do (ui/streaming/lock_numpad.h). Nothing else
+ * since 2026-11-12 ("Get rid of all of these messages"): the messages that Auto Bridge
+ * waits on DS5-USBIP, or that DS5-USBIP is offline, are gone, and the wait goes on
+ * without a word. */
 static void ab_say_waiting(uint32_t now)
 {
-    const bool locked = ctm_bridge_agent_locked();
-    if (locked) {
-        if (now - s_note_looked >= AB_RECHECK_MS) {
-            s_note_looked = now;
-            s_after_sign_in = ab_ticked_connected();
-        }
+    if (!ctm_bridge_agent_locked()) {
+        s_after_sign_in = false;
         return;
     }
-    s_after_sign_in = false;
-    if (s_waiting_said || now - s_start_since < AB_NOTE_AFTER_MS || !ctm_bridge_agent_probed() ||
-        now - s_note_looked < AB_RECHECK_MS || bridge_prompt_note_up() || bridge_prompt_shown()) {
-        return;
-    }
-    s_note_looked = now;
-    if (ab_ticked_connected()) {
-        s_waiting_said = true;
-        bridge_prompt_note_while(locstr("Auto Bridge is waiting on DS5-USBIP. If you are at the sign-in "
-                                        "screen, please sign in. Otherwise, start DS5-USBIP."),
-                                 ab_start_waiting);
-    } else if (!s_offline_said) {
-        s_offline_said = true;
-        bridge_prompt_note_while(locstr("DS5-USBIP is offline. If you are at the sign-in screen, please sign in. "
-                                        "Otherwise, start DS5-USBIP."),
-                                 ab_start_waiting);
+    if (now - s_note_looked >= AB_RECHECK_MS) {
+        s_note_looked = now;
+        s_after_sign_in = ab_ticked_connected();
     }
 }
 
@@ -715,16 +684,14 @@ void auto_bridge_poll(bool streaming)
      * screen and holds its start command, the one that starts DS5-USBIP, until
      * somebody signs in ("No active user session; deferring app launch until
      * sign-in"), and nothing says how long that takes. A ticked controller goes
-     * on working as a stream's controller until this run, with no refusal, and
-     * the screen says it waits (ab_say_waiting). So it lasts as long as the stream
+     * on working as a stream's controller until this run, with no refusal (and at
+     * a lock, the screen says it waits: ab_say_waiting). So it lasts as long as the stream
      * does: asked every two seconds for a minute, about what a sign-in takes, and
      * after that on the probe's own ten seconds. */
     if (SDL_AtomicGet(&s_start_armed)) {
         if (s_start_since == 0) {
             s_start_since = now;
             s_start_said = false;
-            s_waiting_said = false;
-            s_offline_said = false;
             s_note_looked = 0;
         }
         const bool asking = now - s_start_since < AB_START_ASK_MS;

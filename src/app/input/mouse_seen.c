@@ -48,7 +48,6 @@ static char s_seen[MOUSE_SEEN_MAX][24];
 static int s_seen_n = 0;
 static Uint32 s_scan_at = 0;
 static Uint32 s_hash = 0;
-static bool s_bridged_moving = false;
 
 /* Every input device the kernel has, as one number that changes when one
  * arrives, goes or comes back: the names in /sys/class/input, as
@@ -170,34 +169,12 @@ void mouse_seen_tick(void) {
             if (s_seen_n < MOUSE_SEEN_MAX) {
                 memcpy(s_seen[s_seen_n++], s_paths[i], sizeof(s_seen[0]));
             }
-            tv_cursor_log("the TV saw %s (%s) move: bridged, it asks about the TV cursor at once",
-                          s_paths[i], name[0] != '\0' ? name : "no name");
+            tv_cursor_log("the TV saw %s (%s) move", s_paths[i], name[0] != '\0' ? name : "no name");
             drop(i);
             i--;
             break;
         }
     }
-}
-
-void mouse_seen_plugged(const ctm_bridge_dev_t *dev) {
-    if (dev == NULL || strcmp(dev->type, "mouse") != 0) {
-        return;
-    }
-    for (int i = 0; i < s_seen_n; i++) {
-        if (ctm_bridge_gesture_event_on_node(s_seen[i], dev->node)) {
-            s_bridged_moving = true;
-            tv_cursor_log("a mouse the TV saw move is bridged (%s, %s): the pop-up is due", s_seen[i], dev->node);
-            return;
-        }
-    }
-    tv_cursor_log("a mouse part the TV never saw move is bridged (%s): the pop-up waits for its first use",
-                  dev->node);
-}
-
-bool mouse_seen_take_bridged(void) {
-    const bool due = s_bridged_moving;
-    s_bridged_moving = false;
-    return due;
 }
 
 /* ⓘ The kernel hands what is written to an input node to everything reading
@@ -282,14 +259,6 @@ bool mouse_seen_mouse_bridged(char *which, size_t len) {
 #else
 
 void mouse_seen_tick(void) {
-}
-
-void mouse_seen_plugged(const ctm_bridge_dev_t *dev) {
-    (void) dev;
-}
-
-bool mouse_seen_take_bridged(void) {
-    return false;
 }
 
 int mouse_seen_wake(void) {
