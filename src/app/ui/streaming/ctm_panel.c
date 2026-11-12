@@ -283,6 +283,8 @@ static lv_obj_t        *s_ctm_dev_rows[DEVICE_GROUPS_MAX];
  * moves: LVGL v8 does not give a child the parent's state, so this cannot be a
  * style. */
 static lv_obj_t        *s_ctm_dev_offbadge[DEVICE_GROUPS_MAX];
+/* The badge that IS lit on each row, the one the focus ring goes round. */
+static lv_obj_t        *s_ctm_dev_litbadge[DEVICE_GROUPS_MAX];
 static int  s_ctm_sel  = 0;
 
 /* A device's player number from SDL, from its first part that has one -- the
@@ -670,7 +672,40 @@ static lv_obj_t *ctm_nice_btn(lv_obj_t *parent, const char *text, lv_color_t bg)
 }
 
 
-/* A row was focused: move the selection highlight. Nothing else.
+/* ⭐⭐ THE FOCUS IS A RING ON THE ROW'S SET BADGE, NOT A BLUE ROW
+ * (rhoquinn8217, 2026-11-11: "focus should go on the either BASIC or FULL
+ * feature set and the row should not highlight blue", and of the picture,
+ * "the ring is good"). The lit badge of the focused row gets the light blue
+ * ring the panel's buttons get, and a row is rebuilt with its new state
+ * after a bridge or a release, so the ring follows to the badge now lit.
+ * ⓘ The row is still what the focus group walks and what the keys reach;
+ * only what shows it moved. ⛔ A state on the BADGE, set from here: LVGL v8
+ * does not give a child its parent's state, so the row's focus never reaches
+ * the badge by a style. -1 clears every row.
+ * ⛔ Not once the panel is closed: its rows are freed on the next loop, and the
+ * group's own teardown sends a last DEFOCUSED (lv_group_del). */
+static void ctm_paint_focus_ring(int row) {
+    if (!s_ctm_panel) {
+        return;
+    }
+    for (int i = 0; i < s_ctm_ngroup && i < DEVICE_GROUPS_MAX; ++i) {
+        const bool on = i == row;
+        if (s_ctm_dev_litbadge[i]) {
+            if (on) lv_obj_add_state(s_ctm_dev_litbadge[i], LV_STATE_USER_1);
+            else    lv_obj_clear_state(s_ctm_dev_litbadge[i], LV_STATE_USER_1);
+        }
+        /* ⭐ The unlit badge outlines in grey on the focused row only
+         * (rhoquinn8217, 2026-09-08), so the pair still reads as a switch
+         * there, and a single brighter grey on every row would make a list
+         * of four rows shout. */
+        if (s_ctm_dev_offbadge[i]) {
+            lv_obj_set_style_border_color(s_ctm_dev_offbadge[i],
+                                          on ? CTM_COL_SUB : CTM_COL_BORDER, 0);
+        }
+    }
+}
+
+/* A row was focused: move the ring to it. Nothing else.
  *
  * ⭐ This used to rebuild a detail pane on every focus change, which is what
  * made the crash possible. */
@@ -680,22 +715,15 @@ static void ctm_dev_focus_cb(lv_event_t *e) {
         return;
     }
     s_ctm_sel = row;
-    for (int i = 0; i < s_ctm_ngroup; ++i) {
-        if (!s_ctm_dev_rows[i]) continue;
-        if (i == row) lv_obj_add_state(s_ctm_dev_rows[i], LV_STATE_CHECKED);
-        else          lv_obj_clear_state(s_ctm_dev_rows[i], LV_STATE_CHECKED);
-        /* ⭐ The unlit badge outlines in grey on the SELECTED row only
-         * (rhoquinn8217, 2026-09-08). Its usual CTM_COL_BORDER goes muddy
-         * against the selected row's lighter back, and a single brighter grey
-         * on every row would make a list of four rows shout. ⛔ This CANNOT be
-         * a style state: LVGL v8 does not propagate a parent's state to its
-         * children, so the badge never sees LV_STATE_CHECKED and only this
-         * loop -- which already runs on every focus change -- can do it. */
-        if (s_ctm_dev_offbadge[i]) {
-            lv_obj_set_style_border_color(s_ctm_dev_offbadge[i],
-                                          i == row ? CTM_COL_SUB : CTM_COL_BORDER, 0);
-        }
-    }
+    ctm_paint_focus_ring(row);
+}
+
+/* ⭐ And off again when the focus leaves the rows, for Bridge All, Release All
+ * or the X: a ring left behind would say a row still has the focus.
+ * ⓘ Moving from row to row clears it here and paints the next one above. */
+static void ctm_dev_defocus_cb(lv_event_t *e) {
+    LV_UNUSED(e);
+    ctm_paint_focus_ring(-1);
 }
 
 /* A row was activated -> bridge or release it.
@@ -874,6 +902,14 @@ static lv_obj_t *ctm_make_badge(lv_obj_t *parent, const char *text, bool lit,
     lv_obj_set_style_bg_color(badge, lv_color_darken(lit ? lit_bg : CTM_COL_ROW, LV_OPA_40),
                               LV_STATE_PRESSED);
     lv_obj_set_style_bg_opa(badge, LV_OPA_COVER, LV_STATE_PRESSED);
+    /* ⭐ The focus ring (ctm_paint_focus_ring), on the lit badge of the focused
+     * row only: the light blue of the panel's own buttons' focus outline.
+     * ⓘ LV_DPX(2) wide and LV_DPX(1) out, inside the row's LV_DPX(4) of
+     * padding; the boxes between the badge and the row do not clip it. */
+    lv_obj_set_style_outline_color(badge, lv_palette_lighten(LV_PALETTE_BLUE, 3), LV_STATE_USER_1);
+    lv_obj_set_style_outline_width(badge, LV_DPX(2), LV_STATE_USER_1);
+    lv_obj_set_style_outline_pad(badge, LV_DPX(1), LV_STATE_USER_1);
+    lv_obj_set_style_outline_opa(badge, LV_OPA_COVER, LV_STATE_USER_1);
     lv_obj_add_flag(badge, LV_OBJ_FLAG_CLICKABLE);
     /* ⛔ Not click-focusable: the badge is outside the group, so taking focus
      * on a click would move it nowhere and steal it from the row. */
@@ -911,20 +947,26 @@ static lv_obj_t *ctm_make_dev_row(const device_group_t *g, int idx) {
     /* A border, so a row reads as a raised thing rather than a band of colour. */
     lv_obj_set_style_border_width(row, LV_DPX(1), 0);
     lv_obj_set_style_border_color(row, lv_color_hex(0x3a4854), 0);
-    lv_obj_set_style_border_color(row, CTM_COL_FOCUS, LV_STATE_FOCUS_KEY);
     lv_obj_set_style_bg_color(row, CTM_COL_ROW, 0);
     lv_obj_set_style_bg_opa(row, LV_OPA_COVER, 0);
-    lv_obj_set_style_bg_color(row, CTM_COL_FOCUS, LV_STATE_FOCUS_KEY);
-    lv_obj_set_style_bg_opa(row, LV_OPA_COVER, LV_STATE_FOCUS_KEY);
-    /* ⭐ A row a pointer focused lights up as one the keys focused
-     * (2026-10-11): a click on a row only focuses it now, so the light is
-     * all the click shows. ⓘ LVGL adds FOCUS_KEY only for a key's focus. */
-    lv_obj_set_style_border_color(row, CTM_COL_FOCUS, LV_STATE_FOCUSED);
-    lv_obj_set_style_bg_color(row, CTM_COL_FOCUS, LV_STATE_FOCUSED);
-    lv_obj_set_style_bg_opa(row, LV_OPA_COVER, LV_STATE_FOCUSED);
-    /* Persistent selection: the row last focused stays lit (ctm_dev_focus_cb). */
-    lv_obj_set_style_bg_color(row, lv_color_hex(0x223046), LV_STATE_CHECKED);
-    lv_obj_set_style_bg_opa(row, LV_OPA_COVER, LV_STATE_CHECKED);
+    /* ⭐ NO BLUE FILL ON THE ROW (2026-11-11). Focused, by the keys or by a
+     * pointer's click (2026-10-11), it shows as the ring on its set badge
+     * (ctm_paint_focus_ring) and the outline below. ⓘ The row last focused no
+     * longer stays tinted while the focus is on Bridge All, Release All or
+     * the X. */
+    /* ⭐ AND A DEEP BLUE OUTLINE ROUND THE DEVICE WHOSE BADGE HAS THE RING
+     * (rhoquinn8217, 2026-11-11: "Put a highlight around the Device when it's
+     * feature set is in focus", and of two pictures, "build B"). The deep
+     * focus blue the row used to fill with, as an outline only, so the two
+     * marks read apart: deep blue round the device, light blue round its
+     * badge. ⛔ Not purple: purple is FULL in this panel, and a purple ring
+     * melted into a FULL badge. ⓘ An outline sits outside the row, so the row
+     * neither grows nor shifts, and the list's LV_DPX(8) of padding and gap
+     * leave it room. ⓘ FOCUSED is the row's own state, so a plain style. */
+    lv_obj_set_style_outline_color(row, CTM_COL_FOCUS, LV_STATE_FOCUSED);
+    lv_obj_set_style_outline_width(row, LV_DPX(2), LV_STATE_FOCUSED);
+    lv_obj_set_style_outline_pad(row, 0, LV_STATE_FOCUSED);
+    lv_obj_set_style_outline_opa(row, LV_OPA_COVER, LV_STATE_FOCUSED);
     lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_flag(row, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_flag(row, LV_OBJ_FLAG_EVENT_BUBBLE);   /* Back bubbles to the sidebar */
@@ -963,6 +1005,9 @@ static lv_obj_t *ctm_make_dev_row(const device_group_t *g, int idx) {
     lv_obj_set_style_pad_gap(textcol, LV_DPX(8), 0);
     lv_obj_set_style_pad_all(textcol, 0, 0);
     lv_obj_clear_flag(textcol, LV_OBJ_FLAG_SCROLLABLE);
+    /* ⓘ The focus ring is drawn just outside its badge: this box, the state
+     * column and the badge pair let it show past their edges. */
+    lv_obj_add_flag(textcol, LV_OBJ_FLAG_OVERFLOW_VISIBLE);
 
     /* ⭐ "DualSense · 1st" -- which controller this is, not just what kind.
      *
@@ -1101,8 +1146,11 @@ static lv_obj_t *ctm_make_dev_row(const device_group_t *g, int idx) {
     lv_obj_set_flex_align(statecol, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER,
                           LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_all(statecol, 0, 0);
-    lv_obj_set_style_pad_gap(statecol, LV_DPX(2), 0);
+    /* ⓘ LV_DPX(4), up from 2, so the focus ring under a badge clears the
+     * arrow line beneath it. */
+    lv_obj_set_style_pad_gap(statecol, LV_DPX(4), 0);
     lv_obj_clear_flag(statecol, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(statecol, LV_OBJ_FLAG_OVERFLOW_VISIBLE);
 
     lv_obj_t *badgerow = lv_obj_create(statecol);
     lv_obj_remove_style_all(badgerow);
@@ -1113,6 +1161,7 @@ static lv_obj_t *ctm_make_dev_row(const device_group_t *g, int idx) {
     lv_obj_set_style_pad_all(badgerow, 0, 0);
     lv_obj_set_style_pad_gap(badgerow, LV_DPX(8), 0);
     lv_obj_clear_flag(badgerow, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(badgerow, LV_OBJ_FLAG_OVERFLOW_VISIBLE);
 
     /* ⭐ PARTIAL TAKES FULL'S PLACE, IN YELLOW (rhoquinn8217, 2026-09-14), when
      * only some of a device's parts are bridged -- one released on its own
@@ -1131,6 +1180,7 @@ static lv_obj_t *ctm_make_dev_row(const device_group_t *g, int idx) {
                                          ctm_badge_full_cb, idx);
     if (idx >= 0 && idx < DEVICE_GROUPS_MAX) {
         s_ctm_dev_offbadge[idx] = basic_lit ? b_full : b_basic;
+        s_ctm_dev_litbadge[idx] = basic_lit ? b_basic : b_full;
     }
 
     /* ⭐ CENTRED UNDER THE BADGES (rhoquinn8217, 2026-09-08), by living inside
@@ -1222,6 +1272,7 @@ static lv_obj_t *ctm_make_dev_row(const device_group_t *g, int idx) {
     lv_obj_add_event_cb(row, ctm_nav_key_cb, LV_EVENT_KEY, (void *) (intptr_t) idx);
     lv_obj_add_event_cb(row, ctm_nav_cancel_cb, LV_EVENT_CANCEL, NULL);
     lv_obj_add_event_cb(row, ctm_dev_focus_cb, LV_EVENT_FOCUSED, (void *) (intptr_t) idx);
+    lv_obj_add_event_cb(row, ctm_dev_defocus_cb, LV_EVENT_DEFOCUSED, (void *) (intptr_t) idx);
     lv_obj_add_event_cb(row, ctm_dev_click_cb, LV_EVENT_CLICKED, (void *) (intptr_t) idx);
     return row;
 }
@@ -1251,6 +1302,48 @@ static lv_obj_t *ctm_make_action(const char *label, lv_event_cb_t cb, lv_color_t
     lv_obj_add_event_cb(btn, ctm_nav_cancel_cb, LV_EVENT_CANCEL, NULL);
     lv_obj_add_event_cb(btn, cb, LV_EVENT_CLICKED, NULL);
     return btn;
+}
+
+/* ⭐ Two headings, laid out like the rows beneath them -- name on the left,
+ * status on the right -- so the FULL/BASIC column reads as something rather
+ * than a word floating at the end of a line.
+ *
+ * ⭐⭐ AND THEY STAY PUT WHILE THE LIST SCROLLS (rhoquinn8217, 2026-11-11:
+ * "The headers "Device and Feature Set" don't stay on top when scrolling
+ * down"). They were the list's first row, rebuilt with it, so they scrolled
+ * away with it. Made once now, in the frame above the list (open_ctm_panel). */
+static void ctm_make_headings(lv_obj_t *parent) {
+    lv_obj_t *caprow = lv_obj_create(parent);
+    lv_obj_remove_style_all(caprow);
+    lv_obj_set_size(caprow, LV_PCT(100), LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(caprow, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(caprow, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    /* ⓘ LV_DPX(13) across: a row's own 10 and the list's 3, so the headings
+     * line up with the rows' contents as they did inside the list. LV_DPX(3)
+     * on top, with the frame's 5, is the 8 the list used to start with. */
+    lv_obj_set_style_pad_hor(caprow, LV_DPX(13), 0);
+    lv_obj_set_style_pad_top(caprow, LV_DPX(3), 0);
+    lv_obj_clear_flag(caprow, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_clear_flag(caprow, LV_OBJ_FLAG_CLICKABLE);
+
+    /* ⛔ "Controllers" was wrong: the list carries mice, keyboards and wireless
+     * receivers as readily as pads. */
+    lv_obj_t *caption = lv_label_create(caprow);
+    lv_label_set_text(caption, "Device");
+    lv_obj_set_style_text_color(caption, CTM_COL_SUB, 0);
+    lv_obj_set_style_text_font(caption, lv_theme_get_font_small(caption), 0);
+
+    /* ⭐ Back on 2026-08-20 as "Feature Set", and now it sits over something:
+     * the tag is right-aligned on the row's first line, directly beneath it.
+     * ⛔ As "Features" it sat over the action button and named nothing. */
+    lv_obj_t *capfeat = lv_label_create(caprow);
+    lv_label_set_text(capfeat, "Feature Set");
+    /* ⭐ In from the right by about four characters (rhoquinn8217, 2026-09-08),
+     * so it sits over the BASIC/FULL pair instead of past the end of it. The
+     * badges stop short of the row's edge; hard right looked hung off it. */
+    lv_obj_set_style_pad_right(capfeat, LV_DPX(26), 0);
+    lv_obj_set_style_text_color(capfeat, CTM_COL_SUB, 0);
+    lv_obj_set_style_text_font(capfeat, lv_theme_get_font_small(capfeat), 0);
 }
 
 static void ctm_panel_refresh(void) {
@@ -1298,37 +1391,11 @@ static void ctm_panel_refresh(void) {
     for (int i = 0; i < DEVICE_GROUPS_MAX; ++i) {
         s_ctm_dev_rows[i] = NULL;
         s_ctm_dev_offbadge[i] = NULL;
+        s_ctm_dev_litbadge[i] = NULL;
     }
 
-    /* ⭐ Two headings, laid out like the rows beneath them -- name on the left,
-     * status on the right -- so the FULL/BASIC column reads as something rather
-     * than a word floating at the end of a line. */
-    lv_obj_t *caprow = lv_obj_create(s_ctm_sidebar);
-    lv_obj_remove_style_all(caprow);
-    lv_obj_set_size(caprow, LV_PCT(100), LV_SIZE_CONTENT);
-    lv_obj_set_flex_flow(caprow, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(caprow, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_hor(caprow, LV_DPX(10), 0);
-    lv_obj_clear_flag(caprow, LV_OBJ_FLAG_SCROLLABLE);
-
-    /* ⛔ "Controllers" was wrong: the list carries mice, keyboards and wireless
-     * receivers as readily as pads. */
-    lv_obj_t *caption = lv_label_create(caprow);
-    lv_label_set_text(caption, "Device");
-    lv_obj_set_style_text_color(caption, CTM_COL_SUB, 0);
-    lv_obj_set_style_text_font(caption, lv_theme_get_font_small(caption), 0);
-
-    /* ⭐ Back on 2026-08-20 as "Feature Set", and now it sits over something:
-     * the tag is right-aligned on the row's first line, directly beneath it.
-     * ⛔ As "Features" it sat over the action button and named nothing. */
-    lv_obj_t *capfeat = lv_label_create(caprow);
-    lv_label_set_text(capfeat, "Feature Set");
-    /* ⭐ In from the right by about four characters (rhoquinn8217, 2026-09-08),
-     * so it sits over the BASIC/FULL pair instead of past the end of it. The
-     * badges stop short of the row's edge; hard right looked hung off it. */
-    lv_obj_set_style_pad_right(capfeat, LV_DPX(26), 0);
-    lv_obj_set_style_text_color(capfeat, CTM_COL_SUB, 0);
-    lv_obj_set_style_text_font(capfeat, lv_theme_get_font_small(capfeat), 0);
+    /* ⓘ The two headings are above the list since 2026-11-11, made once when
+     * the panel opens (ctm_make_headings), so they stay while it scrolls. */
 
     if (s_ctm_status_lbl) {
         int plugged = 0;
@@ -1742,7 +1809,27 @@ static void open_ctm_panel(lv_event_t *event) {
 
     /* ⭐ ONE COLUMN. The panel was a sidebar and a detail pane side by side; the
      * detail pane is gone, so the list is the whole body and gets the width. */
-    s_ctm_sidebar = lv_obj_create(card);
+    /* ⭐ THE BOX IS A FRAME NOW, HOLDING THE HEADINGS AND, UNDER THEM, THE LIST
+     * THAT SCROLLS (2026-11-11), so the headings stay where they are
+     * (ctm_make_headings). ⓘ The frame's LV_DPX(5) and the list's own 3 put
+     * every row where the box's 8 used to; the list needs the 3 of its own so
+     * it does not clip the focus outline round a row. */
+    lv_obj_t *listbox = lv_obj_create(card);
+    lv_obj_remove_style_all(listbox);
+    lv_obj_set_width(listbox, LV_PCT(100));
+    lv_obj_set_height(listbox, LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(listbox, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_all(listbox, LV_DPX(5), 0);
+    lv_obj_set_style_pad_gap(listbox, LV_DPX(5), 0);
+    lv_obj_set_style_bg_color(listbox, CTM_COL_SIDEBAR, 0);
+    lv_obj_set_style_bg_opa(listbox, LV_OPA_COVER, 0);
+    lv_obj_set_style_radius(listbox, LV_DPX(8), 0);
+    lv_obj_set_style_border_width(listbox, LV_DPX(1), 0);
+    lv_obj_set_style_border_color(listbox, CTM_COL_BORDER, 0);
+    lv_obj_clear_flag(listbox, LV_OBJ_FLAG_SCROLLABLE);
+    ctm_make_headings(listbox);
+
+    s_ctm_sidebar = lv_obj_create(listbox);
     lv_obj_remove_style_all(s_ctm_sidebar);
     lv_obj_set_width(s_ctm_sidebar, LV_PCT(100));
 /* ⛔⛔ SIZE_CONTENT, NOT GROW -- and getting this wrong made the panel LOOK
@@ -1757,15 +1844,12 @@ static void open_ctm_panel(lv_event_t *event) {
      * until the cap bites, and past that the list scrolls inside the height it
      * has. A short list makes a short strip either way. */
     lv_obj_set_height(s_ctm_sidebar, LV_SIZE_CONTENT);
-    lv_obj_set_style_max_height(s_ctm_sidebar, LV_DPX(320), 0);
+    /* ⓘ LV_DPX(290): the whole box keeps its old cap of about 320, the
+     * headings and the frame's padding taking the rest. */
+    lv_obj_set_style_max_height(s_ctm_sidebar, LV_DPX(290), 0);
     lv_obj_set_flex_flow(s_ctm_sidebar, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_style_pad_all(s_ctm_sidebar, LV_DPX(8), 0);
+    lv_obj_set_style_pad_all(s_ctm_sidebar, LV_DPX(3), 0);
     lv_obj_set_style_pad_gap(s_ctm_sidebar, LV_DPX(8), 0);
-    lv_obj_set_style_bg_color(s_ctm_sidebar, CTM_COL_SIDEBAR, 0);
-    lv_obj_set_style_bg_opa(s_ctm_sidebar, LV_OPA_COVER, 0);
-    lv_obj_set_style_radius(s_ctm_sidebar, LV_DPX(8), 0);
-    lv_obj_set_style_border_width(s_ctm_sidebar, LV_DPX(1), 0);
-    lv_obj_set_style_border_color(s_ctm_sidebar, CTM_COL_BORDER, 0);
     lv_obj_set_scrollbar_mode(s_ctm_sidebar, LV_SCROLLBAR_MODE_AUTO);
     /* Back backstop: any focusable child bubbles CANCEL up here -> close panel. */
     lv_obj_add_event_cb(s_ctm_sidebar, ctm_nav_cancel_cb, LV_EVENT_CANCEL, NULL);
