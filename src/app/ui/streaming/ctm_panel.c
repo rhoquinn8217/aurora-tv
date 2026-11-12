@@ -283,6 +283,8 @@ static lv_obj_t        *s_ctm_dev_rows[DEVICE_GROUPS_MAX];
  * moves: LVGL v8 does not give a child the parent's state, so this cannot be a
  * style. */
 static lv_obj_t        *s_ctm_dev_offbadge[DEVICE_GROUPS_MAX];
+/* The badge that IS lit on each row, the one the focus ring goes round. */
+static lv_obj_t        *s_ctm_dev_litbadge[DEVICE_GROUPS_MAX];
 static int  s_ctm_sel  = 0;
 
 /* A device's player number from SDL, from its first part that has one -- the
@@ -670,7 +672,40 @@ static lv_obj_t *ctm_nice_btn(lv_obj_t *parent, const char *text, lv_color_t bg)
 }
 
 
-/* A row was focused: move the selection highlight. Nothing else.
+/* ⭐⭐ THE FOCUS IS A RING ON THE ROW'S SET BADGE, NOT A BLUE ROW
+ * (rhoquinn8217, 2026-11-11: "focus should go on the either BASIC or FULL
+ * feature set and the row should not highlight blue", and of the picture,
+ * "the ring is good"). The lit badge of the focused row gets the light blue
+ * ring the panel's buttons get, and a row is rebuilt with its new state
+ * after a bridge or a release, so the ring follows to the badge now lit.
+ * ⓘ The row is still what the focus group walks and what the keys reach;
+ * only what shows it moved. ⛔ A state on the BADGE, set from here: LVGL v8
+ * does not give a child its parent's state, so the row's focus never reaches
+ * the badge by a style. -1 clears every row.
+ * ⛔ Not once the panel is closed: its rows are freed on the next loop, and the
+ * group's own teardown sends a last DEFOCUSED (lv_group_del). */
+static void ctm_paint_focus_ring(int row) {
+    if (!s_ctm_panel) {
+        return;
+    }
+    for (int i = 0; i < s_ctm_ngroup && i < DEVICE_GROUPS_MAX; ++i) {
+        const bool on = i == row;
+        if (s_ctm_dev_litbadge[i]) {
+            if (on) lv_obj_add_state(s_ctm_dev_litbadge[i], LV_STATE_USER_1);
+            else    lv_obj_clear_state(s_ctm_dev_litbadge[i], LV_STATE_USER_1);
+        }
+        /* ⭐ The unlit badge outlines in grey on the focused row only
+         * (rhoquinn8217, 2026-09-08), so the pair still reads as a switch
+         * there, and a single brighter grey on every row would make a list
+         * of four rows shout. */
+        if (s_ctm_dev_offbadge[i]) {
+            lv_obj_set_style_border_color(s_ctm_dev_offbadge[i],
+                                          on ? CTM_COL_SUB : CTM_COL_BORDER, 0);
+        }
+    }
+}
+
+/* A row was focused: move the ring to it. Nothing else.
  *
  * ⭐ This used to rebuild a detail pane on every focus change, which is what
  * made the crash possible. */
@@ -680,22 +715,15 @@ static void ctm_dev_focus_cb(lv_event_t *e) {
         return;
     }
     s_ctm_sel = row;
-    for (int i = 0; i < s_ctm_ngroup; ++i) {
-        if (!s_ctm_dev_rows[i]) continue;
-        if (i == row) lv_obj_add_state(s_ctm_dev_rows[i], LV_STATE_CHECKED);
-        else          lv_obj_clear_state(s_ctm_dev_rows[i], LV_STATE_CHECKED);
-        /* ⭐ The unlit badge outlines in grey on the SELECTED row only
-         * (rhoquinn8217, 2026-09-08). Its usual CTM_COL_BORDER goes muddy
-         * against the selected row's lighter back, and a single brighter grey
-         * on every row would make a list of four rows shout. ⛔ This CANNOT be
-         * a style state: LVGL v8 does not propagate a parent's state to its
-         * children, so the badge never sees LV_STATE_CHECKED and only this
-         * loop -- which already runs on every focus change -- can do it. */
-        if (s_ctm_dev_offbadge[i]) {
-            lv_obj_set_style_border_color(s_ctm_dev_offbadge[i],
-                                          i == row ? CTM_COL_SUB : CTM_COL_BORDER, 0);
-        }
-    }
+    ctm_paint_focus_ring(row);
+}
+
+/* ⭐ And off again when the focus leaves the rows, for Bridge All, Release All
+ * or the X: a ring left behind would say a row still has the focus.
+ * ⓘ Moving from row to row clears it here and paints the next one above. */
+static void ctm_dev_defocus_cb(lv_event_t *e) {
+    LV_UNUSED(e);
+    ctm_paint_focus_ring(-1);
 }
 
 /* A row was activated -> bridge or release it.
@@ -874,6 +902,14 @@ static lv_obj_t *ctm_make_badge(lv_obj_t *parent, const char *text, bool lit,
     lv_obj_set_style_bg_color(badge, lv_color_darken(lit ? lit_bg : CTM_COL_ROW, LV_OPA_40),
                               LV_STATE_PRESSED);
     lv_obj_set_style_bg_opa(badge, LV_OPA_COVER, LV_STATE_PRESSED);
+    /* ⭐ The focus ring (ctm_paint_focus_ring), on the lit badge of the focused
+     * row only: the light blue of the panel's own buttons' focus outline.
+     * ⓘ LV_DPX(2) wide and LV_DPX(1) out, inside the row's LV_DPX(4) of
+     * padding; the boxes between the badge and the row do not clip it. */
+    lv_obj_set_style_outline_color(badge, lv_palette_lighten(LV_PALETTE_BLUE, 3), LV_STATE_USER_1);
+    lv_obj_set_style_outline_width(badge, LV_DPX(2), LV_STATE_USER_1);
+    lv_obj_set_style_outline_pad(badge, LV_DPX(1), LV_STATE_USER_1);
+    lv_obj_set_style_outline_opa(badge, LV_OPA_COVER, LV_STATE_USER_1);
     lv_obj_add_flag(badge, LV_OBJ_FLAG_CLICKABLE);
     /* ⛔ Not click-focusable: the badge is outside the group, so taking focus
      * on a click would move it nowhere and steal it from the row. */
@@ -911,20 +947,12 @@ static lv_obj_t *ctm_make_dev_row(const device_group_t *g, int idx) {
     /* A border, so a row reads as a raised thing rather than a band of colour. */
     lv_obj_set_style_border_width(row, LV_DPX(1), 0);
     lv_obj_set_style_border_color(row, lv_color_hex(0x3a4854), 0);
-    lv_obj_set_style_border_color(row, CTM_COL_FOCUS, LV_STATE_FOCUS_KEY);
     lv_obj_set_style_bg_color(row, CTM_COL_ROW, 0);
     lv_obj_set_style_bg_opa(row, LV_OPA_COVER, 0);
-    lv_obj_set_style_bg_color(row, CTM_COL_FOCUS, LV_STATE_FOCUS_KEY);
-    lv_obj_set_style_bg_opa(row, LV_OPA_COVER, LV_STATE_FOCUS_KEY);
-    /* ⭐ A row a pointer focused lights up as one the keys focused
-     * (2026-10-11): a click on a row only focuses it now, so the light is
-     * all the click shows. ⓘ LVGL adds FOCUS_KEY only for a key's focus. */
-    lv_obj_set_style_border_color(row, CTM_COL_FOCUS, LV_STATE_FOCUSED);
-    lv_obj_set_style_bg_color(row, CTM_COL_FOCUS, LV_STATE_FOCUSED);
-    lv_obj_set_style_bg_opa(row, LV_OPA_COVER, LV_STATE_FOCUSED);
-    /* Persistent selection: the row last focused stays lit (ctm_dev_focus_cb). */
-    lv_obj_set_style_bg_color(row, lv_color_hex(0x223046), LV_STATE_CHECKED);
-    lv_obj_set_style_bg_opa(row, LV_OPA_COVER, LV_STATE_CHECKED);
+    /* ⭐ NO BLUE ON THE ROW (2026-11-11). Focused, by the keys or by a
+     * pointer's click (2026-10-11), it shows as the ring on its set badge
+     * (ctm_paint_focus_ring). ⓘ The row last focused no longer stays tinted
+     * while the focus is on Bridge All, Release All or the X. */
     lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_flag(row, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_flag(row, LV_OBJ_FLAG_EVENT_BUBBLE);   /* Back bubbles to the sidebar */
@@ -963,6 +991,9 @@ static lv_obj_t *ctm_make_dev_row(const device_group_t *g, int idx) {
     lv_obj_set_style_pad_gap(textcol, LV_DPX(8), 0);
     lv_obj_set_style_pad_all(textcol, 0, 0);
     lv_obj_clear_flag(textcol, LV_OBJ_FLAG_SCROLLABLE);
+    /* ⓘ The focus ring is drawn just outside its badge: this box, the state
+     * column and the badge pair let it show past their edges. */
+    lv_obj_add_flag(textcol, LV_OBJ_FLAG_OVERFLOW_VISIBLE);
 
     /* ⭐ "DualSense · 1st" -- which controller this is, not just what kind.
      *
@@ -1101,8 +1132,11 @@ static lv_obj_t *ctm_make_dev_row(const device_group_t *g, int idx) {
     lv_obj_set_flex_align(statecol, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER,
                           LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_all(statecol, 0, 0);
-    lv_obj_set_style_pad_gap(statecol, LV_DPX(2), 0);
+    /* ⓘ LV_DPX(4), up from 2, so the focus ring under a badge clears the
+     * arrow line beneath it. */
+    lv_obj_set_style_pad_gap(statecol, LV_DPX(4), 0);
     lv_obj_clear_flag(statecol, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(statecol, LV_OBJ_FLAG_OVERFLOW_VISIBLE);
 
     lv_obj_t *badgerow = lv_obj_create(statecol);
     lv_obj_remove_style_all(badgerow);
@@ -1113,6 +1147,7 @@ static lv_obj_t *ctm_make_dev_row(const device_group_t *g, int idx) {
     lv_obj_set_style_pad_all(badgerow, 0, 0);
     lv_obj_set_style_pad_gap(badgerow, LV_DPX(8), 0);
     lv_obj_clear_flag(badgerow, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(badgerow, LV_OBJ_FLAG_OVERFLOW_VISIBLE);
 
     /* ⭐ PARTIAL TAKES FULL'S PLACE, IN YELLOW (rhoquinn8217, 2026-09-14), when
      * only some of a device's parts are bridged -- one released on its own
@@ -1131,6 +1166,7 @@ static lv_obj_t *ctm_make_dev_row(const device_group_t *g, int idx) {
                                          ctm_badge_full_cb, idx);
     if (idx >= 0 && idx < DEVICE_GROUPS_MAX) {
         s_ctm_dev_offbadge[idx] = basic_lit ? b_full : b_basic;
+        s_ctm_dev_litbadge[idx] = basic_lit ? b_basic : b_full;
     }
 
     /* ⭐ CENTRED UNDER THE BADGES (rhoquinn8217, 2026-09-08), by living inside
@@ -1222,6 +1258,7 @@ static lv_obj_t *ctm_make_dev_row(const device_group_t *g, int idx) {
     lv_obj_add_event_cb(row, ctm_nav_key_cb, LV_EVENT_KEY, (void *) (intptr_t) idx);
     lv_obj_add_event_cb(row, ctm_nav_cancel_cb, LV_EVENT_CANCEL, NULL);
     lv_obj_add_event_cb(row, ctm_dev_focus_cb, LV_EVENT_FOCUSED, (void *) (intptr_t) idx);
+    lv_obj_add_event_cb(row, ctm_dev_defocus_cb, LV_EVENT_DEFOCUSED, (void *) (intptr_t) idx);
     lv_obj_add_event_cb(row, ctm_dev_click_cb, LV_EVENT_CLICKED, (void *) (intptr_t) idx);
     return row;
 }
@@ -1298,6 +1335,7 @@ static void ctm_panel_refresh(void) {
     for (int i = 0; i < DEVICE_GROUPS_MAX; ++i) {
         s_ctm_dev_rows[i] = NULL;
         s_ctm_dev_offbadge[i] = NULL;
+        s_ctm_dev_litbadge[i] = NULL;
     }
 
     /* ⭐ Two headings, laid out like the rows beneath them -- name on the left,
