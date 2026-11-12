@@ -133,9 +133,9 @@ static void pointer_read(lv_indev_drv_t *drv, lv_indev_data_t *data) {
  * address, and would go on drawing the old. The old one is let go of, a few
  * kilobytes a switch. */
 static void take_picture(void) {
-    int tip_x = 0, tip_y = 0;
+    int hot_x = 0, hot_y = 0;
     unsigned generation = 0;
-    const SDL_Surface *image = tv_cursor_picture(&tip_x, &tip_y, &generation);
+    const SDL_Surface *image = tv_cursor_picture(&hot_x, &hot_y, &generation);
     if (s_cursor == NULL || image == NULL || (s_picture != NULL && generation == s_picture_generation)) {
         return;
     }
@@ -163,12 +163,16 @@ static void take_picture(void) {
     picture->data_size = (uint32_t) w * (uint32_t) h * 4;
     picture->data = data;
     lv_img_set_src(s_cursor, picture);
-    /* The tip, not the corner, on the point. */
-    lv_obj_set_style_translate_x(s_cursor, -tip_x, 0);
-    lv_obj_set_style_translate_y(s_cursor, -tip_y, 0);
+    /* ⭐ Its hot spot, not the corner, on the point, as SDL places the mouse's: the tip
+     * is drawn this TV's alignment away, so aligning moves this pointer too
+     * (rhoquinn8217, 2026-11-11: "Adjusting the cursor alignment only adjusts for the
+     * mouse and not the stick/touchpand's cursor"). Until then the drawn tip went on
+     * the point, which undid the alignment here. */
+    lv_obj_set_style_translate_x(s_cursor, -hot_x, 0);
+    lv_obj_set_style_translate_y(s_cursor, -hot_y, 0);
     s_picture = picture;
     s_picture_generation = generation;
-    tp_log("cursor: the TV cursor's picture, %dx%d, tip %d,%d", w, h, tip_x, tip_y);
+    tp_log("cursor: the TV cursor's picture, %dx%d, hot spot %d,%d", w, h, hot_x, hot_y);
 }
 
 void touchpad_pointer_init(app_t *app) {
@@ -285,13 +289,16 @@ static void show(bool on) {
     }
     if (on) {
         keep_in_front();
+        /* A picture made again since, an alignment step among them, taken as it shows
+         * or moves, so this pointer follows the alignment bar as the mouse's does. ⓘ
+         * Nothing is done when it is the same one. */
+        take_picture();
     }
     if (on == s_shown) {
         return;
     }
     s_shown = on;
     if (on) {
-        take_picture();
         lv_obj_clear_flag(s_cursor, LV_OBJ_FLAG_HIDDEN);
     } else {
         lv_obj_add_flag(s_cursor, LV_OBJ_FLAG_HIDDEN);

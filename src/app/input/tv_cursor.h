@@ -89,11 +89,15 @@ bool tv_cursor_set_look(bool regular);
 bool tv_cursor_toggle_look(void);
 
 /* The cursor's picture as it shows now, red, green, blue and alpha bytes, and
- * where its tip is drawn in it; NULL when there is none of Aurora's.
+ * its hot spot in it, as SDL has it: the point it stands for, with the tip
+ * drawn this TV's alignment away from it. NULL when there is none of Aurora's.
  * `generation` changes each time it is made again (its look switched, a shift
- * kept). For the touchpad's pointer, which Aurora draws itself in the same
- * look (input/touchpad_pointer.h). */
-const SDL_Surface *tv_cursor_picture(int *tip_x, int *tip_y, unsigned *generation);
+ * changed or kept). For the touchpad's and the stick's pointer, which Aurora
+ * draws itself in the same look (input/touchpad_pointer.h). ⭐ The hot spot and
+ * not the drawn tip, so the alignment moves that pointer as it moves the
+ * mouse's (rhoquinn8217, 2026-11-11: "Adjusting the cursor alignment only
+ * adjusts for the mouse and not the stick/touchpand's cursor"). */
+const SDL_Surface *tv_cursor_picture(int *hot_x, int *hot_y, unsigned *generation);
 
 /* Is the cursor Aurora's own? False where SDL refused it and webOS's own
  * pointer stays: there is nothing to shift. */
