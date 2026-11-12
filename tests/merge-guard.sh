@@ -523,6 +523,20 @@ need "... and Virtual Mouse's left click there, R2's at a lock, when the right s
      src/app/stream/input/session_virt_mouse.c "touchpad_pointer_stream_press(&s_left_auroras, true, ldown)"
 need "the typing is built" \
      src/app/ctmbridge/app_sources.cmake "src/app/stream/input/lock_keys.c"
+
+# --- Desktop Mode's Window Select: Alt held by L1 and R1 (rhoquinn8217, 2026-11-11) ---
+# Anything else pressed lets it go (stream/input/window_select.h). Losing one of these
+# compiles: Alt stays down on the PC after a key or a click, and the next key is Alt+key.
+need "Window Select is built" \
+     src/app/ctmbridge/app_sources.cmake "src/app/stream/input/window_select.c"
+need "a keyboard's key lets go of Window Select's Alt first" \
+     src/app/stream/input/session_keyboard.c "window_select_before_key(input, keyCode);"
+need "... a keyboard's key on webOS's own keyboard path too" \
+     src/app/stream/input/session_input.c "window_select_before_key(input, vk);"
+need "a mouse's click lets go of it after the click" \
+     src/app/stream/input/session_mouse.c "window_select_after_click();"
+need_count "... and the touchpad's press, tap and held tap" \
+     src/app/stream/input/session_gamepad.c "window_select_after_click();" 3
 need "the numpad is built" \
      src/app/ctmbridge/app_sources.cmake "src/app/ui/streaming/lock_numpad.c"
 need "the keyboard's place is built" \

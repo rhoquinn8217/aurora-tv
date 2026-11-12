@@ -12,6 +12,7 @@
 #include "stream/input/session_virt_mouse.h"
 #include "ui/streaming/bridge_prompt.h"
 #include "ui/streaming/streaming.controller.h"
+#include "util/i18n.h"
 #if defined(TARGET_WEBOS)
 #include "ctm_bridge_glue.h"
 #include "input/ctm_bridge_gesture.h"
@@ -43,9 +44,26 @@ static const void *s_set_in_session;
 static desktop_ask_t s_pending = DESKTOP_ASK_NONE;
 static uint32_t s_pending_since;
 static const char *s_pending_why = "";
+/* Triangle has its list over the screen; hidden again at each stream and as it is
+ * turned off (the header). */
+static bool s_legend;
 
 bool desktop_mode_on(void) {
     return app_configuration != NULL && app_configuration->bridge.desktop_mode;
+}
+
+bool desktop_mode_legend_shown(void) {
+    return s_legend;
+}
+
+void desktop_mode_legend_toggle(void) {
+    s_legend = !s_legend;
+    desktop_note("its list %s (Triangle)", s_legend ? "over the screen" : "in the overlay only again");
+}
+
+void desktop_mode_off_on_pad(void) {
+    desktop_mode_set(false, "Options held 2 s on a controller");
+    bridge_prompt_note(locstr("Desktop Mode is off."));
 }
 
 void desktop_mode_set(bool on, const char *how) {
@@ -67,8 +85,12 @@ void desktop_mode_set(bool on, const char *how) {
             }
         }
     }
-    /* A question about it means nothing now, and this stream's start asks none. */
+    /* A question about it means nothing now, and this stream's start asks none. Its
+     * list, turned off, starts hidden again. */
     s_pending = DESKTOP_ASK_NONE;
+    if (!on) {
+        s_legend = false;
+    }
     s_set_in_session = global != NULL ? (const void *) global->session : NULL;
     if (s_set_in_session != NULL && s_set_in_session == s_session) {
         s_start_looked = true;
@@ -136,12 +158,14 @@ void desktop_mode_tick(app_t *app) {
         s_session = NULL;
         s_set_in_session = NULL;
         s_pending = DESKTOP_ASK_NONE;
+        s_legend = false;
         return;
     }
     const uint32_t now = SDL_GetTicks();
     if (session != s_session) {
-        /* A stream started, or resumed. */
+        /* A stream started, or resumed: its list starts hidden ("5. hidden"). */
         s_session = session;
+        s_legend = false;
         s_start_looked = s_set_in_session == session;
         s_verdict_seen = false;
         s_was_online = false;

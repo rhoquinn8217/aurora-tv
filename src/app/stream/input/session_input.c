@@ -18,6 +18,7 @@
 
 #include "session_input.h"
 #include "stream/input/bridge_switch_hold.h"
+#include "stream/input/window_select.h"
 #include "session_pointer_gesture.h"
 #include "stream/session.h"
 #include "stream/session_priv.h"
@@ -40,6 +41,11 @@ static void session_keyboard_evdev_cb(short vk, bool down, char modifiers, void 
      * path goes around stream_input_handle_key(), where both used to live. */
     if (bridge_keyboard_evdev_key(input, vk, down, modifiers)) {
         return;
+    }
+    /* Desktop Mode's Window Select: its Alt let go first, unless the key is Tab, Shift or
+     * an arrow (stream/input/window_select.h). */
+    if (down) {
+        window_select_before_key(input, vk);
     }
     stream_input_send_key_event(input, vk, down, modifiers);
 }

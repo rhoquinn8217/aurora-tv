@@ -12,6 +12,7 @@
 #include "ui/common/pad_marks.h"
 #include "ui/root.h"
 #include "ui/streaming/ctm_panel.h"
+#include "ui/streaming/desktop_mode.h"
 #include "ui/streaming/streaming.controller.h"
 #include "util/i18n.h"
 #if defined(TARGET_WEBOS)
@@ -183,6 +184,21 @@ static void mark_row_create(lv_obj_t *parent, pad_mark_t mark, pad_family_t fami
     mark_row_bold_create(parent, mark, family, words, NULL);
 }
 
+/* A row of two marks, each in its own cell, then what both do: Desktop Mode's L1 and R1,
+ * Window Select (stream/input/window_select.h). */
+static void mark_pair_row_create(lv_obj_t *parent, pad_mark_t first, pad_mark_t second, pad_family_t family,
+                                 const char *words) {
+    lv_obj_t *row = row_create(parent);
+    const pad_mark_t marks[2] = {first, second};
+    for (int i = 0; i < 2; ++i) {
+        lv_obj_t *cell = box_create(row);
+        lv_obj_set_size(cell, NUMPAD_LEGEND_MARK * 6 / 5, NUMPAD_LEGEND_MARK);
+        lv_obj_t *drawn = pad_mark_create(cell, marks[i], family, NUMPAD_LEGEND_MARK, NUMPAD_MARK);
+        lv_obj_center(drawn);
+    }
+    words_create(row, words, lv_theme_get_font_small(parent));
+}
+
 /* The last row of every legend, the list's and the numpad's: Options (Menu on an Xbox
  * pad) held 2 s is a close, as Close is. Its words without the time (rhoquinn8217,
  * 2026-11-10, as the hold went from 4 s to 2: "change the 4 seconds to 2 seconds and
@@ -322,6 +338,11 @@ static lv_obj_t *list_create(pad_family_t family, lock_keys_mode_t mode) {
         mark_row_create(panel, PAD_MARK_R2, family, locstr("- left click"));
         mark_row_create(panel, PAD_MARK_L2, family, locstr("- right click"));
     }
+    if (desktop) {
+        /* ⭐ Window Select, L1 back and R1 forward (rhoquinn8217, 2026-11-11: "L1/R1:
+         * Window Select"). */
+        mark_pair_row_create(panel, PAD_MARK_L1, PAD_MARK_R1, family, locstr("- Window Select"));
+    }
     mark_row_create(panel, PAD_MARK_DPAD, family, locstr("- arrow keys"));
     mark_row_create(panel, PAD_MARK_VIEW, family, locstr("- Tab"));
     mark_row_create(panel, PAD_MARK_SOUTH, family, locstr("- Enter"));
@@ -334,7 +355,13 @@ static lv_obj_t *list_create(pad_family_t family, lock_keys_mode_t mode) {
     if (lock) {
         mark_row_create(panel, PAD_MARK_NORTH, family, locstr("- numpad"));
     }
-    if (!desktop) {
+    if (desktop) {
+        /* ⭐ Its list over the screen, and Options held to turn it off, in place of a
+         * Close (rhoquinn8217, 2026-11-11: "Triangle: Toggle Legend" and "Options: hold
+         * to turn off Desktop Mode"; ui/streaming/desktop_mode.h). */
+        mark_row_create(panel, PAD_MARK_NORTH, family, locstr("- Toggle Legend"));
+        mark_row_create(panel, PAD_MARK_MENU, family, locstr("- hold to turn off Desktop Mode"));
+    } else {
         options_row_create(panel, family);
     }
     /* ⭐ THE LIST AS WIDE AS ITS WIDEST LINE, THE HEADING WITH CLOSE AMONG THEM
@@ -483,9 +510,14 @@ static void after_show(bool show) {
     }
 }
 
-/* Desktop Mode's list is up with the overlay, and not over a panel it opened. */
+/* Desktop Mode's list is up with the overlay, and not over a panel it opened; and over
+ * the screen while Triangle has it shown and nothing else has the input
+ * (ui/streaming/desktop_mode.h). */
 static bool desktop_list_wanted(void) {
-    return streaming_overlay_shown() && !ctm_panel_shown() && !bt_panel_shown();
+    if (streaming_overlay_shown()) {
+        return !ctm_panel_shown() && !bt_panel_shown();
+    }
+    return desktop_mode_legend_shown() && !ui_should_block_input();
 }
 
 void lock_numpad_tick(void) {

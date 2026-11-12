@@ -1,7 +1,9 @@
 /* ⭐⭐ DESKTOP MODE: ITS SWITCH, AND THE QUESTIONS ABOUT IT (rhoquinn8217, 2026-11-11).
  * What the controllers do in it is stream/input/lock_keys.h's: the User Account Control
- * prompt's controls on every controller, bridged ones too, until it is turned off. Its
- * list is ui/streaming/lock_numpad.h's, in the overlay only.
+ * prompt's controls on every controller, bridged ones too, until it is turned off, with
+ * L1 and R1 stepping through Windows' window picker (stream/input/window_select.h),
+ * Triangle showing its list over the screen and Options held turning it off (below). Its
+ * list is ui/streaming/lock_numpad.h's, in the overlay, and over the screen by Triangle.
  *
  * WHY. "Desktop Mode is the solution to first log in after a reboot, accessible with a
  * bridge attempt or overlay button. It's evolved into a DS5-USBIP alternative ... In the
@@ -51,3 +53,15 @@ void desktop_mode_tick(app_t *app);
 
 /* What it waits to ask, for the control port: "on", "off" or "none". */
 const char *desktop_mode_pending(void);
+
+/* ⭐ ITS LIST OVER THE SCREEN, BY TRIANGLE (rhoquinn8217, 2026-11-11: "Triangle: Toggle
+ * Legend / Show the legend over the screen"). Until then only in the overlay, and still
+ * there whichever way this is. Hidden again at each stream ("5. hidden") and as Desktop
+ * Mode is turned off. Shown by ui/streaming/lock_numpad.c. */
+bool desktop_mode_legend_shown(void);
+void desktop_mode_legend_toggle(void);
+
+/* ⭐ OPTIONS HELD 2 S ON A CONTROLLER TURNS IT OFF, at once and with no question
+ * (rhoquinn8217, 2026-11-11: "Options: hold to turn off Desktop Mode", and "4. yes" to
+ * the UAC list's 2 s and no "Are you sure?"), saying so in a short message. */
+void desktop_mode_off_on_pad(void);

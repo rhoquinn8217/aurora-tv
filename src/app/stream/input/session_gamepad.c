@@ -12,6 +12,7 @@
 #include "stream/input/session_virt_mouse.h"
 #include "stream/input/bridge_switch_hold.h"
 #include "stream/input/lock_keys.h"
+#include "stream/input/window_select.h"
 #include "input/bridge_override.h"
 #include "input/touchpad_pointer.h"
 #include "logging.h"
@@ -273,6 +274,8 @@ void stream_input_handle_cbutton(stream_input_t *input, const SDL_ControllerButt
                 if (state != NULL && touchpad_pointer_stream_press(&state->press_auroras, mouse_button == BUTTON_LEFT, event->type == SDL_CONTROLLERBUTTONDOWN)) { return; }
                 LiSendMouseButtonEvent(event->type == SDL_CONTROLLERBUTTONDOWN ?
                                        BUTTON_ACTION_PRESS : BUTTON_ACTION_RELEASE, mouse_button);
+                /* This fork: the click first, then Window Select's Alt let go (stream/input/window_select.h). */
+                if (event->type != SDL_CONTROLLERBUTTONDOWN) { window_select_after_click(); }
                 return;
             }
             button = TOUCHPAD_FLAG;
@@ -944,6 +947,7 @@ static void touchpad_end_tap(session_input_touchpad_t *state) {
     if (touchpad_pointer_stream_press(&state->hold_auroras, false, false)) { state->tap_state = TOUCHPAD_TAP_NONE; }
     if (state->tap_state == TOUCHPAD_TAP_SINGLE_HOLD) {
         LiSendMouseButtonEvent(BUTTON_ACTION_RELEASE, BUTTON_LEFT);
+        window_select_after_click();   /* This fork: then Window Select's Alt let go (stream/input/window_select.h). */
     }
     state->tap_state = TOUCHPAD_TAP_NONE;
 }
@@ -978,6 +982,7 @@ static void touchpad_send_mouse_click(int mouse_button) {
     if (mouse_button == BUTTON_LEFT && touchpad_pointer_stream_tap()) { return; }
     LiSendMouseButtonEvent(BUTTON_ACTION_PRESS, mouse_button);
     LiSendMouseButtonEvent(BUTTON_ACTION_RELEASE, mouse_button);
+    window_select_after_click();   /* This fork: then Window Select's Alt let go (stream/input/window_select.h). */
 }
 
 static short touchpad_take_delta(float *remainder) {

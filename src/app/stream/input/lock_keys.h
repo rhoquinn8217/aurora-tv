@@ -96,8 +96,12 @@
  * ones too ("doesn't mean you wouldn't want to use Desktop Mode over a config"), their
  * reports held at rest from the PC. Needs nothing from DS5-USBIP, so it is the way
  * through the first sign-in after a restart, where DS5-USBIP is not running yet.
- *   - It is NOT the prompt's mode with another name: no Close and no Options hold
- *     ("UAC mode has the close button and options rebind to close when held").
+ *   - It is NOT the prompt's mode with another name: no Close ("UAC mode has the close
+ *     button and options rebind to close when held"). Options held 2 s turns Desktop
+ *     Mode itself off, at once ("Options: hold to turn off Desktop Mode";
+ *     ui/streaming/desktop_mode.h). L1 and R1 are Window Select, Windows' window picker
+ *     with Alt held (stream/input/window_select.h), and Triangle shows its list over the
+ *     screen ("Triangle: Toggle Legend").
  *   - A lock or a prompt takes over with its own controls and list, and Desktop Mode
  *     comes back when it is gone ("Windows lock or UAC should override Desktop Mode").
  *   - Their Close turns their controls off; with Desktop Mode on, Desktop Mode comes

@@ -41,6 +41,7 @@
 #include "ui/streaming/lock_numpad.h"
 #include "ui/common/pad_marks.h"
 #include "stream/input/lock_keys.h"
+#include "stream/input/window_select.h"
 #include "input/bridge_override.h"
 #include "input/bridge_keyboard.h"
 #include "input/tv_cursor.h"
@@ -148,7 +149,7 @@ static void cmd_help(control_job_t *job)
                "ui                      what is open on the screen: overlay, its keyboard, the panel, the align bar\n"
                "numpad [ps|xbox|auto]   the controller at a locked Windows: numpad open or closed, where, whose marks, keys typed (a count)\n"
                "uac [0|1|2|auto]        a User Account Control prompt: what DS5-USBIP says, what the controls are up for; 1 or 2 fakes one\n"
-               "desktop [on|off]        Desktop Mode: its switch, the controls, its question waiting, its list; on|off as its button\n"
+               "desktop [on|off|legend] Desktop Mode: its switch, the controls, its question, its list, Alt; on|off as its button, legend as Triangle\n"
                "press <key>[:ms] ...    keys into aurora-tv's own screens, as a keyboard types them; not once a stream is up\n"
                "                        keys: up down left right enter esc home end backspace; :ms holds it (a long press)\n"
                "type <text>             characters into aurora-tv's own screens, a key each, as a keyboard types them\n"
@@ -426,19 +427,24 @@ static void cmd_desktop(control_job_t *job, const char *args)
         if (on) {
             bridge_prompt_say_desktop_on();
         }
+    } else if (args != NULL && strcasecmp(args, "legend") == 0) {
+        /* Triangle's turn: its list over the screen, or back off it. */
+        desktop_mode_legend_toggle();
     } else if (args != NULL && args[0] != '\0') {
-        reply(job, "ERR try on or off\n");
+        reply(job, "ERR try on, off or legend\n");
         return;
     }
     const lock_keys_mode_t mode = lock_keys_mode();
-    reply(job, "OK desktop=%s mode=%s vmouse_setting=%s pending=%s list=%s\n", desktop_mode_on() ? "on" : "off",
+    reply(job, "OK desktop=%s mode=%s vmouse_setting=%s pending=%s list=%s legend=%s window_select=%s\n",
+          desktop_mode_on() ? "on" : "off",
           mode == LOCK_KEYS_LOCK                ? "lock"
           : mode == LOCK_KEYS_PROMPT            ? "prompt"
           : mode == LOCK_KEYS_PROMPT_PASSWORD   ? "prompt-password"
           : mode == LOCK_KEYS_DESKTOP           ? "desktop"
                                                 : "off",
           app_configuration != NULL && app_configuration->virtual_mouse ? "on" : "off", desktop_mode_pending(),
-          mode == LOCK_KEYS_DESKTOP && strcmp(lock_numpad_state(), "off") != 0 ? "up" : "down");
+          mode == LOCK_KEYS_DESKTOP && strcmp(lock_numpad_state(), "off") != 0 ? "up" : "down",
+          desktop_mode_legend_shown() ? "over-screen" : "overlay-only", window_select_held() ? "alt-held" : "off");
 }
 
 /* A webOS pop-up over the app (input/webos_popup.h): whether one has the

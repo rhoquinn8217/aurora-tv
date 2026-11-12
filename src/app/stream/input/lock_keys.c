@@ -18,9 +18,11 @@
 #include "stream/input/session_input.h"
 #include "stream/input/session_virt_mouse.h"
 #include "stream/input/vk.h"
+#include "stream/input/window_select.h"
 #include "stream/session.h"
 #include "ui/common/pad_marks.h"
 #include "ui/root.h"
+#include "ui/streaming/desktop_mode.h"
 #include "util/bus.h"
 #include "util/user_event.h"
 #if defined(TARGET_WEBOS)
@@ -66,6 +68,10 @@ typedef enum {
     LOCK_ACT_NUMPAD_CLOSE,
     LOCK_ACT_ANSWER_OK,
     LOCK_ACT_ANSWER_CANCEL,
+    LOCK_ACT_WINDOW_BACK,   /* L1 in Desktop Mode: Window Select, back */
+    LOCK_ACT_WINDOW_NEXT,   /* R1 in Desktop Mode: Window Select, forward */
+    LOCK_ACT_LEGEND,        /* Triangle in Desktop Mode: its list over the screen, or not */
+    LOCK_ACT_LET_GO,        /* any other button in Desktop Mode: Window Select's Alt let go */
 } lock_act_t;
 
 /* ⭐ THE ORDER OF THE PRESSES IS THE ORDER OF THE DIGITS. With the numpad open, three
@@ -107,6 +113,8 @@ static const char *s_asking_how;
 /* R2 down while the question waits, and whether its press went to Aurora's button. */
 static bool s_r2_down;
 static bool s_r2_auroras;
+/* A trigger's click is down on the host, so its release lets go of Window Select's Alt. */
+static bool s_trigger_clicked;
 #if defined(TARGET_WEBOS)
 static uint32_t s_last_ask;
 static uint32_t s_last_press;
@@ -439,10 +447,24 @@ static lock_act_t action_for(uint8_t what, bool numpad_open, short *key) {
              * a PIN. */
             return LOCK_ACT_KEYBOARD;
         case SDL_CONTROLLER_BUTTON_Y:
-            /* And no numpad at a prompt. */
-            return s_mode == LOCK_KEYS_LOCK ? LOCK_ACT_NUMPAD_OPEN : LOCK_ACT_NONE;
+            /* And no numpad at a prompt. In Desktop Mode, its list over the screen, or
+             * back off it (rhoquinn8217, 2026-11-11: "Triangle: Toggle Legend"). */
+            return s_mode == LOCK_KEYS_LOCK      ? LOCK_ACT_NUMPAD_OPEN
+                   : s_mode == LOCK_KEYS_DESKTOP ? LOCK_ACT_LEGEND
+                                                 : LOCK_ACT_NONE;
+        case SDL_CONTROLLER_BUTTON_LEFTSHOULDER:
+        case SDL_CONTROLLER_BUTTON_RIGHTSHOULDER:
+            /* ⭐ Window Select, in Desktop Mode only: L1 back and R1 forward through
+             * Windows' window picker (stream/input/window_select.h). ⓘ Both are of the
+             * overlay's chord, so they act as they go up (pad_press). */
+            if (s_mode != LOCK_KEYS_DESKTOP) {
+                return LOCK_ACT_NONE;
+            }
+            return what == SDL_CONTROLLER_BUTTON_LEFTSHOULDER ? LOCK_ACT_WINDOW_BACK : LOCK_ACT_WINDOW_NEXT;
         default:
-            return LOCK_ACT_NONE;
+            /* In Desktop Mode any other button still lets go of Window Select's Alt ("any
+             * other button"), Options as well: it does nothing else. */
+            return s_mode == LOCK_KEYS_DESKTOP ? LOCK_ACT_LET_GO : LOCK_ACT_NONE;
     }
     return LOCK_ACT_KEY;
 }
@@ -458,11 +480,45 @@ static void numpad_set(stream_input_t *input, bool open) {
 }
 
 static void act(stream_input_t *input, const lock_press_t *press) {
+    /* ⭐ WINDOW SELECT'S ALT (stream/input/window_select.h), settled as the press acts and
+     * not as it went down, since a press can wait behind L1 or R1: Cross picks the window
+     * and Circle cancels the picker, neither then doing its own job; the d-pad and Tab
+     * step on with Alt held; anything else lets Alt go first, then does its job. */
+    if (window_select_held()) {
+        if (press->act == LOCK_ACT_KEY && press->key == VK_RETURN) {
+            window_select_let_go(input, "Cross: the window picked");
+            return;
+        }
+        if (press->act == LOCK_ACT_KEY && press->key == VK_ESCAPE) {
+            window_select_cancel(input);
+            return;
+        }
+        const bool keeps = press->act == LOCK_ACT_WINDOW_BACK || press->act == LOCK_ACT_WINDOW_NEXT ||
+                           (press->act == LOCK_ACT_KEY && window_select_keeps(press->key));
+        if (!keeps) {
+            window_select_let_go(input, "another button");
+        }
+    }
     switch (press->act) {
-        case LOCK_ACT_KEY:
-            stream_input_send_key_event(input, press->key, true, 0);
-            stream_input_send_key_event(input, press->key, false, 0);
+        case LOCK_ACT_KEY: {
+            /* Said with Alt while it is held: an arrow or Tab through the picker. */
+            const char mods = window_select_held() ? (char) MODIFIER_ALT : 0;
+            stream_input_send_key_event(input, press->key, true, mods);
+            stream_input_send_key_event(input, press->key, false, mods);
             s_typed++;
+            break;
+        }
+        case LOCK_ACT_WINDOW_BACK:
+            window_select_step(input, true);
+            break;
+        case LOCK_ACT_WINDOW_NEXT:
+            window_select_step(input, false);
+            break;
+        case LOCK_ACT_LEGEND:
+            desktop_mode_legend_toggle();
+            break;
+        case LOCK_ACT_LET_GO:
+            /* Window Select's Alt, above: nothing more. */
             break;
         case LOCK_ACT_KEYBOARD:
             bus_pushevent(USER_OPEN_SOFT_KEYBOARD, NULL, NULL);
@@ -624,6 +680,14 @@ void lock_keys_axis(stream_input_t *input, app_gamepad_state_t *gamepad, const S
          * down on the host. ⓘ Its first is the left button: R2's, at a lock; on
          * Aurora's own button it is Aurora's (stream/input/session_virt_mouse.c). */
         vmouse_set_trigger(&input->vmouse, gamepad->rightTrigger, gamepad->leftTrigger);
+        /* ⭐ Window Select: a click goes through first, and Alt is let go after it
+         * (rhoquinn8217, 2026-11-11: "3. click first"; stream/input/window_select.h). */
+        if (input->vmouse.state.l || input->vmouse.state.r) {
+            s_trigger_clicked = true;
+        } else if (s_trigger_clicked) {
+            s_trigger_clicked = false;
+            window_select_after_click();
+        }
         return;
     }
     lock_pad_t *pad = pad_for(gamepad);
@@ -680,6 +744,9 @@ static void lock_begin(stream_input_t *input, lock_keys_mode_t mode) {
 static void lock_end(stream_input_t *input) {
     const lock_keys_mode_t was = s_mode;
     const bool held = mode_takes_all(was);
+    /* Window Select's Alt goes up with it (stream/input/window_select.h). */
+    window_select_let_go(input, was == LOCK_KEYS_DESKTOP ? "Desktop Mode ended" : "the rebinds ended");
+    s_trigger_clicked = false;
     s_mode = LOCK_KEYS_OFF;
     s_numpad_open = false;
     s_asking = false;
@@ -768,6 +835,7 @@ static void stick_moves_tv_cursor(stream_input_t *input) {
 }
 
 void lock_keys_tick(app_t *app) {
+    window_select_tick();
     stream_input_t *input = app->session != NULL ? session_get_input(app->session) : NULL;
     lock_keys_mode_t wanted = LOCK_KEYS_OFF;
 #if defined(TARGET_WEBOS)
@@ -810,7 +878,9 @@ void lock_keys_tick(app_t *app) {
             const lock_keys_mode_t was = s_mode;
             s_mode = wanted;
             if (wanted == LOCK_KEYS_DESKTOP || was == LOCK_KEYS_DESKTOP) {
-                /* What is down was pressed for the other: its release does nothing. */
+                /* What is down was pressed for the other: its release does nothing. And
+                 * Window Select's Alt goes up before a prompt has the controls. */
+                window_select_let_go(input, "a User Account Control prompt over Desktop Mode");
                 s_asking = false;
                 r2_let_go();
                 pads_forget(input);
@@ -850,6 +920,8 @@ void lock_keys_tick(app_t *app) {
     const bool interface_has_input = ui_should_block_input();
     if (interface_has_input != s_interface_had_input) {
         s_interface_had_input = interface_has_input;
+        /* And Window Select's Alt goes up: the overlay or the keyboard has the input. */
+        window_select_let_go(input, "the overlay or the keyboard took the input");
         pads_forget(input);
         /* Nor does the mouse go on moving, or stay down, behind them. */
         vmouse_set_vector(&input->vmouse, 0, 0);
@@ -857,13 +929,19 @@ void lock_keys_tick(app_t *app) {
         vmouse_set_trigger(&input->vmouse, 0, 0);
     }
     /* Options held LOCK_DISMISS_MS alone, on any pad this takes: a close, which asks
-     * first. Its OK ends this on the next pass, as an unlock does. ⓘ Not in Desktop
-     * Mode, which has no close. */
+     * first. Its OK ends this on the next pass, as an unlock does. ⭐ In Desktop Mode,
+     * which has no close, Desktop Mode turned off at once, with no question
+     * (rhoquinn8217, 2026-11-11: "Options: hold to turn off Desktop Mode", and "4. yes"
+     * to the same 2 s and no "Are you sure?"): this ends on the next pass. */
     const uint32_t held_at = SDL_GetTicks();
-    for (int i = 0; i < LOCK_SLOTS && s_mode != LOCK_KEYS_DESKTOP; ++i) {
+    for (int i = 0; i < LOCK_SLOTS; ++i) {
         if (s_pads[i].options_since != 0 && held_at - s_pads[i].options_since >= LOCK_DISMISS_MS) {
             s_pads[i].options_since = 0;
-            lock_keys_ask_dismiss("Options held 2 s");
+            if (s_mode == LOCK_KEYS_DESKTOP) {
+                desktop_mode_off_on_pad();
+            } else {
+                lock_keys_ask_dismiss("Options held 2 s");
+            }
             break;
         }
     }

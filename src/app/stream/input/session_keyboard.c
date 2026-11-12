@@ -12,6 +12,7 @@
 #include "vk.h"
 #include "input/tv_cursor.h"
 #include "ui/streaming/cursor_align.h"
+#include "stream/input/window_select.h"   /* This fork: Desktop Mode's Window Select */
 
 #if TARGET_WEBOS
 #include "platform/webos/keyboard_evdev.h"
@@ -566,6 +567,8 @@ void stream_input_handle_key(stream_input_t *input, const SDL_KeyboardEvent *eve
                              (unsigned) keyCode, (int) event->keysym.scancode,
                              (int) event->keysym.sym);
         }
+        /* This fork: a key lets go of Window Select's Alt first, unless it is Tab, Shift or an arrow (stream/input/window_select.h). */
+        if (event->state == SDL_PRESSED) { window_select_before_key(input, keyCode); }
         LiSendKeyboardEvent2(0x8000 | keyCode,
                              event->state == SDL_PRESSED ? KEY_ACTION_DOWN : KEY_ACTION_UP,
                              modifiers, keyFlags);
