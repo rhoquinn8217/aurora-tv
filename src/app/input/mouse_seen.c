@@ -256,6 +256,10 @@ int mouse_seen_nudge(int dx, int dy) {
     return 0;
 }
 
+bool mouse_seen_any(void) {
+    return s_seen_n > 0;
+}
+
 bool mouse_seen_mouse_bridged(char *which, size_t len) {
     ctm_bridge_pointer_t parts[MOUSE_NODES_MAX];
     const int n = ctm_bridge_bridged_pointers(parts, MOUSE_NODES_MAX);
@@ -296,6 +300,10 @@ int mouse_seen_nudge(int dx, int dy) {
     (void) dx;
     (void) dy;
     return 0;
+}
+
+bool mouse_seen_any(void) {
+    return false;
 }
 
 bool mouse_seen_mouse_bridged(char *which, size_t len) {

@@ -50,6 +50,10 @@ int mouse_seen_wake(void);
  * move, through its node (the control port's `cursor nudge`). 1 when a node took it. */
 int mouse_seen_nudge(int dx, int dy);
 
+/* Has the TV seen a mouse move since the app started? Then webOS has a pointer the
+ * app can move (input/touchpad_pointer.h, webos_pointer_move). */
+bool mouse_seen_any(void);
+
 /* ⭐ IS A MOUSE BRIDGED? For the TV cursor, which does not come on while one
  * is (input/tv_cursor.h). A bridged mouse part counts when the bridge core
  * says it has been used since its bridge, or when the TV saw it move before:

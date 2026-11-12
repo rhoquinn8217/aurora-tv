@@ -12,6 +12,7 @@
 
 #include "app.h"
 #include "app_input.h"
+#include "mouse_seen.h"                   /* a mouse webOS has a pointer for: the touchpad and the stick move it */
 #include "tv_cursor.h"
 #include "ui/root.h"
 #include "ui/ui_input.h"
@@ -100,6 +101,20 @@ static int s_mouse_x = -1, s_mouse_y = -1;
  * why): the pads holding it pressed in, and a tap's click held until then. */
 static int s_stream_holds = 0;
 static Uint32 s_stream_tap_until = 0;
+/* ⭐ In a stream, webOS's own pointer moved by the touchpad and the stick
+ * (webos_pointer_move): where it is to go and where it was last sent, when, the
+ * last places sent (so their movement coming back is not taken for a mouse's),
+ * and when the controller last moved it and woke it. */
+#define WARP_MIN_MS 8
+#define WARP_HISTORY 64
+#define WARP_WAKE_MS 1000
+static int s_warp_want_x = -1, s_warp_want_y = -1;
+static int s_warp_sent_x = -1, s_warp_sent_y = -1;
+static Uint32 s_warp_at = 0;
+static Uint32 s_warp_used_at = 0;
+static Uint32 s_warp_woken_at = 0;
+static int s_warp_hist_x[WARP_HISTORY], s_warp_hist_y[WARP_HISTORY];
+static int s_warp_hist_n = 0, s_warp_hist_i = 0;
 
 static void tp_log(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
 
@@ -312,9 +327,106 @@ static bool stream_on_auroras_button(void) {
     return lock_numpad_button_at((lv_coord_t) s_px, (lv_coord_t) s_py);
 }
 
+/* In a stream: is a controller's pointer up, Aurora's own or webOS's it moved? */
+static bool stream_pointer_up(void) {
+    return s_stream_shown || (s_warp_used_at != 0 && (Sint32) (SDL_GetTicks() - s_warp_used_at) < HIDE_AFTER_MS);
+}
+
 /* A click in a stream is Aurora's: the cursor above up, on Aurora's button. */
 static bool stream_click_is_auroras(void) {
-    return !s_active && s_stream_shown && s_indev != NULL && tv_cursor_mode_on() && stream_on_auroras_button();
+    return !s_active && stream_pointer_up() && s_indev != NULL && tv_cursor_mode_on() && stream_on_auroras_button();
+}
+
+/* Was webOS's pointer put here by a warp of ours, give or take the pixel a wake
+ * moves it? Then its movement coming back through SDL is the controller's own,
+ * not a mouse's. */
+static bool warp_was_ours(int x, int y) {
+    for (int i = 0; i < s_warp_hist_n; ++i) {
+        if (abs(s_warp_hist_x[i] - x) <= 2 && abs(s_warp_hist_y[i] - y) <= 2) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/* The place webOS's pointer is to go, sent: at most one each WARP_MIN_MS, the
+ * last one always, from the tick if not here; only while SDL has the pointer
+ * (asleep, a warp is lost), and dropped after half a second of waiting, as the
+ * host was told the point meanwhile. */
+static void warp_send(Uint32 now) {
+    SDL_Window *window = s_app != NULL ? s_app->ui.window : NULL;
+    if (s_warp_want_x < 0 || window == NULL) {
+        return;
+    }
+    if (s_warp_want_x == s_warp_sent_x && s_warp_want_y == s_warp_sent_y) {
+        s_warp_want_x = s_warp_want_y = -1;
+        return;
+    }
+    if (SDL_GetMouseFocus() != window) {
+        if ((Sint32) (now - s_warp_used_at) > 500) {
+            s_warp_want_x = s_warp_want_y = -1;
+        }
+        return;
+    }
+    if (s_warp_at != 0 && (Sint32) (now - s_warp_at) < WARP_MIN_MS) {
+        return;
+    }
+    s_warp_hist_x[s_warp_hist_i] = s_warp_want_x;
+    s_warp_hist_y[s_warp_hist_i] = s_warp_want_y;
+    s_warp_hist_i = (s_warp_hist_i + 1) % WARP_HISTORY;
+    if (s_warp_hist_n < WARP_HISTORY) {
+        s_warp_hist_n++;
+    }
+    SDL_WarpMouseInWindow(window, s_warp_want_x, s_warp_want_y);
+    s_warp_sent_x = s_warp_want_x;
+    s_warp_sent_y = s_warp_want_y;
+    s_warp_at = now;
+    s_warp_want_x = s_warp_want_y = -1;
+}
+
+/* ⭐⭐ WEBOS'S OWN POINTER, MOVED BY THE TOUCHPAD AND THE STICK (rhoquinn8217,
+ * 2026-11-11). Aurora's own cursor, drawn in the app's layer, drifted from the
+ * PC's pointer toward the right of the C1 ("It looks like the mouse and the
+ * touchpad stick might be two devices"): measured there, it is drawn on the very
+ * point the host is told, so the app's layer and the picture are scaled a little
+ * apart, while webOS draws a mouse's pointer in one that lines up with the
+ * picture. Then "test moving webOS's cursor first": on the C1 (build 685),
+ * SDL_WarpMouseInWindow put webOS's pointer at a point once a mouse had moved
+ * since the app started ("it was on the left side then ended up on the right
+ * side"), and SDL reported it there, which tells the host as a mouse does
+ * (stream/input/session_mouse.c). So with a mouse the TV has seen move, the
+ * touchpad and the stick move that one pointer, and Aurora's own goes. Without
+ * one, a warp does nothing (the same test, before the mouse moved), and Aurora's
+ * own cursor stays, as before.
+ * ⓘ webOS hides its pointer after 5 seconds without a mouse moving: the mouse is
+ * moved a pixel and back to wake it as the controller starts, and once a second
+ * while it goes on (mouse_seen_wake); while SDL has no pointer the host is told
+ * the point itself. `x`, `y`: the point, in the window's points. */
+static bool webos_pointer_move(short x, short y, short ref_w, short ref_h, Uint32 now, const char *what) {
+    SDL_Window *window = s_app != NULL ? s_app->ui.window : NULL;
+    if (window == NULL || !mouse_seen_any()) {
+        return false;
+    }
+    if (s_warp_used_at == 0 || (Sint32) (now - s_warp_used_at) >= HIDE_AFTER_MS) {
+        tp_log("stream: the %s moves webOS's pointer, from %d,%d", what, (int) x, (int) y);
+    }
+    if (s_warp_woken_at == 0 || (Sint32) (now - s_warp_woken_at) >= WARP_WAKE_MS) {
+        s_warp_woken_at = now;
+        mouse_seen_wake();
+    }
+    if (SDL_GetMouseFocus() != window) {
+        LiSendMousePositionEvent(x, y, ref_w, ref_h);
+    }
+    s_warp_want_x = x;
+    s_warp_want_y = y;
+    s_warp_used_at = now;
+    warp_send(now);
+    /* Aurora's own cursor goes: webOS's is the one now. */
+    if (s_stream_shown) {
+        s_stream_shown = false;
+        show(false);
+    }
+    return true;
 }
 
 /* Aurora's pointer pressed while a pad holds it in on Aurora's button, or while
@@ -484,6 +596,10 @@ void touchpad_pointer_tick(struct app_input_t *input, bool ui_has_input) {
             s_stream_shown = false;
             show(false);
         }
+        /* The last place webOS's pointer is to go, sent once its turn comes. */
+        if (!ui_has_input) {
+            warp_send(SDL_GetTicks());
+        }
         return;
     }
     if (s_stream_shown) {
@@ -608,11 +724,13 @@ static bool stream_move_by(stream_input_t *input, float dx_px, float dy_px, cons
      * (stream/input/session_mouse.c): the window's. */
     const float ref_w = input->session->display_width > 0 ? (float) input->session->display_width : screen_w;
     const float ref_h = input->session->display_height > 0 ? (float) input->session->display_height : screen_h;
-    /* A connected mouse moved since: carry on from where it left the pointer. */
+    /* A connected mouse moved since: carry on from where it left the pointer.
+     * ⓘ Not where a warp of ours put webOS's pointer: that is the controller's own
+     * movement coming back (webos_pointer_move). */
     int mx = 0, my = 0;
     SDL_GetMouseState(&mx, &my);
     if (mx != s_mouse_x || my != s_mouse_y) {
-        if (s_mouse_x >= 0) {
+        if (s_mouse_x >= 0 && !warp_was_ours(mx, my)) {
             s_px = (float) mx * screen_w / ref_w;
             s_py = (float) my * screen_h / ref_h;
         }
@@ -625,8 +743,14 @@ static bool stream_move_by(stream_input_t *input, float dx_px, float dy_px, cons
     if (s_py < 0) s_py = 0;
     if (s_px > screen_w - 1) s_px = screen_w - 1;
     if (s_py > screen_h - 1) s_py = screen_h - 1;
-    LiSendMousePositionEvent((short) (s_px * ref_w / screen_w), (short) (s_py * ref_h / screen_h), (short) ref_w,
-                             (short) ref_h);
+    const short tx = (short) (s_px * ref_w / screen_w);
+    const short ty = (short) (s_py * ref_h / screen_h);
+    /* ⭐ webOS's own pointer when there is one, lined up with the picture as a
+     * mouse's is; Aurora's own cursor only without (webos_pointer_move). */
+    if (webos_pointer_move(tx, ty, (short) ref_w, (short) ref_h, SDL_GetTicks(), what)) {
+        return true;
+    }
+    LiSendMousePositionEvent(tx, ty, (short) ref_w, (short) ref_h);
     s_stream_used_at = SDL_GetTicks();
     if (!s_stream_shown) {
         s_stream_shown = true;
