@@ -127,8 +127,10 @@ static bool mode_is_prompt(lock_keys_mode_t mode) {
 
 /* Every controller, bridged ones too, their reports held from the PC: at a prompt, and
  * in Desktop Mode. */
+/* Every controller, bridged ones too: at a prompt, in Desktop Mode, and since
+ * 2026-11-11 at the lock as well (pad_taken says why). */
 static bool mode_takes_all(lock_keys_mode_t mode) {
-    return mode_is_prompt(mode) || mode == LOCK_KEYS_DESKTOP;
+    return mode == LOCK_KEYS_LOCK || mode_is_prompt(mode) || mode == LOCK_KEYS_DESKTOP;
 }
 
 static bool desktop_mode_wanted(void) {
@@ -211,12 +213,16 @@ static bool pad_on_stream(const stream_input_t *input, const app_gamepad_state_t
            (input->moonlightExcludedMask & (1u << gamepad->gs_id)) == 0;
 }
 
-/* ⭐ WHICH CONTROLLERS THIS TAKES. At Windows' lock, those on the stream only: a
- * bridged one types the PIN with Windows' own map (the header). At a User Account
- * Control prompt, every one, bridged or not: a bridged pad's buttons may be bound to
- * keys on the PC that answer nothing there, so it is read here through SDL and its
- * reports to the PC are held at rest meanwhile (lock_keys_holds_bridged). In Desktop
- * Mode every one as well, over its config on the PC (the header). */
+/* ⭐ WHICH CONTROLLERS THIS TAKES: every one, bridged or not, read here through SDL,
+ * a bridged one's reports to the PC held at rest meanwhile (lock_keys_holds_bridged).
+ * At a User Account Control prompt, as a bridged pad's buttons may be bound to keys on
+ * the PC that answer nothing there; in Desktop Mode, over its config on the PC (the
+ * header); and ⭐ at Windows' lock since 2026-11-11 (rhoquinn8217, a bridged DualSense
+ * at a lock: "triangle is opening aurora-tv keyboard when it should be the numpad.
+ * Square does notthing when it should be the full keyboard"). Until then the lock took
+ * the stream's pads only and left a bridged one to type the PIN with Windows' own map,
+ * which a lock reached by a new stream ignores; and the list showed controls its
+ * buttons did not have. */
 static bool pad_taken(const stream_input_t *input, const app_gamepad_state_t *gamepad) {
     if (mode_takes_all(s_mode)) {
         return gamepad != NULL && gamepad->controller != NULL && gamepad->gs_id >= 0 && gamepad->gs_id < LOCK_SLOTS;
@@ -740,7 +746,8 @@ static void lock_begin(stream_input_t *input, lock_keys_mode_t mode) {
     }
 #if defined(TARGET_WEBOS)
     ctm_bridge_gesture_note(mode == LOCK_KEYS_LOCK
-                                ? "lock keys: Windows is locked, a controller on the stream is a mouse, or types"
+                                ? "lock keys: Windows is locked: every controller is a mouse, or types, the bridged "
+                                  "ones held from the PC"
                                 : mode == LOCK_KEYS_PROMPT
                                 ? "lock keys: a User Account Control prompt, Yes or No: every controller is a mouse, "
                                   "or keys, the bridged ones held from the PC"
@@ -768,8 +775,10 @@ static void lock_end(stream_input_t *input) {
 #if defined(TARGET_WEBOS)
     ctm_bridge_gesture_note(was == LOCK_KEYS_DESKTOP ? "lock keys: Desktop Mode ends, the controllers are the stream's "
                                                        "and the bridge's again"
-                            : held ? "lock keys: the prompt is gone, the controllers are the stream's and the bridge's again"
-                                   : "lock keys: Windows is unlocked, the controllers are the stream's again");
+                            : was == LOCK_KEYS_LOCK ? "lock keys: Windows is unlocked, the controllers are the stream's "
+                                                      "and the bridge's again"
+                                                    : "lock keys: the prompt is gone, the controllers are the stream's and "
+                                                      "the bridge's again");
 #endif
     if (input == NULL) {
         return;
@@ -883,26 +892,34 @@ void lock_keys_tick(app_t *app) {
     }
     if (wanted != s_mode) {
         if (mode_takes_all(wanted) && mode_takes_all(s_mode)) {
-            /* Every controller taken on both sides: the prompt's kind said again, a prompt
-             * over Desktop Mode, or Desktop Mode back after one. Only what the controls
-             * are up for changes, and nothing is handed back to the PC between. */
+            /* Every controller taken on both sides: the prompt's kind said again, a lock
+             * or a prompt over Desktop Mode or over each other, or Desktop Mode back
+             * after one. Only what the controls are up for changes, and nothing is
+             * handed back to the PC between. */
             const lock_keys_mode_t was = s_mode;
             s_mode = wanted;
-            if (wanted == LOCK_KEYS_DESKTOP || was == LOCK_KEYS_DESKTOP) {
+            if (!(mode_is_prompt(wanted) && mode_is_prompt(was))) {
                 /* What is down was pressed for the other: its release does nothing. And
-                 * Window Select's Alt goes up before a prompt has the controls. */
-                window_select_let_go(input, "a User Account Control prompt over Desktop Mode");
+                 * Window Select's Alt goes up before a lock or a prompt has the controls;
+                 * the numpad is the lock's alone. */
+                window_select_let_go(input, "a lock or a User Account Control prompt over Desktop Mode");
                 s_asking = false;
+                s_numpad_open = false;
                 r2_let_go();
                 pads_forget(input);
                 if (wanted == LOCK_KEYS_DESKTOP) {
                     s_vmouse_was = false;
                 }
 #if defined(TARGET_WEBOS)
-                ctm_bridge_gesture_note(wanted == LOCK_KEYS_DESKTOP
-                                            ? "lock keys: the prompt is gone, Desktop Mode again"
-                                            : "lock keys: a User Account Control prompt over Desktop Mode: its own "
-                                              "controls until it goes");
+                ctm_bridge_gesture_note(wanted == LOCK_KEYS_DESKTOP ? "lock keys: the %s is gone, Desktop Mode again"
+                                        : wanted == LOCK_KEYS_LOCK  ? "lock keys: Windows is locked, over the %s: every "
+                                                                      "controller is a mouse, or types, the bridged ones "
+                                                                      "held from the PC"
+                                                                    : "lock keys: a User Account Control prompt, over the "
+                                                                      "%s: its own controls until it goes",
+                                        was == LOCK_KEYS_DESKTOP ? "Desktop Mode"
+                                        : was == LOCK_KEYS_LOCK  ? "lock"
+                                                                 : "prompt");
 #endif
             }
         } else {

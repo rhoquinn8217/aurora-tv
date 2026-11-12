@@ -33,8 +33,11 @@
  *
  * WHEN. Only DS5-USBIP can see the lock, and it says so in its answer to the TV's
  * probe. So nothing of this happens at the first sign-in after a restart, where
- * DS5-USBIP has not started yet. A bridged pad is not read here at all: its reports
- * go straight to Windows.
+ * DS5-USBIP has not started yet. ⭐ Every controller, a bridged one too since
+ * 2026-11-11, its reports to the PC held at rest meanwhile, as at a prompt below
+ * (rhoquinn8217, a bridged DualSense at a lock: "triangle is opening aurora-tv keyboard
+ * when it should be the numpad"). Until then a bridged pad was left to type the PIN
+ * with Windows' own map, which a lock reached by a new stream ignores.
  *
  * ⛔ WHAT IS TYPED IS NEVER LOGGED, and there is no way to read it back: only a
  * count, on the control port.
