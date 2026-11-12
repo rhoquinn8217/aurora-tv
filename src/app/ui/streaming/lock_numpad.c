@@ -440,11 +440,16 @@ static lv_obj_t *question_create(pad_family_t family) {
     lv_obj_set_flex_flow(panel, LV_FLEX_FLOW_COLUMN);
     lv_obj_center(panel);
 
-    words_create(panel, locstr("Are you sure?"), lv_theme_get_font_normal(panel));
-    /* ⭐ One short line, whatever comes after (rhoquinn8217, 2026-11-12: "Are you sure?
-     * Reminds will be disabled OK, Cancel", read as rebinds). It said which controls came
-     * back until then: plain ones, or Desktop Mode's. */
-    lv_obj_t *words = words_create(panel, locstr("Rebinds will be disabled."), lv_theme_get_font_small(panel));
+    /* ⭐ THEIR WORDS (rhoquinn8217, 2026-11-12, on the C3: "Please confirm. Remove User
+     * Account Control Rebinds? Ok, Cancel"), in place of "Are you sure? Rebinds will be
+     * disabled." from earlier that day. At a lock, the lock list's own name in the same
+     * place, as its heading says it. Until then it also said which controls came back:
+     * plain ones, or Desktop Mode's. */
+    words_create(panel, locstr("Please confirm."), lv_theme_get_font_normal(panel));
+    lv_obj_t *words = words_create(panel,
+                                   lock_keys_mode() == LOCK_KEYS_LOCK ? locstr("Remove Windows Sign In Rebinds?")
+                                                                      : locstr("Remove User Account Control Rebinds?"),
+                                   lv_theme_get_font_small(panel));
     lv_label_set_long_mode(words, LV_LABEL_LONG_WRAP);
     lv_obj_set_width(words, lv_pct(100));
 
