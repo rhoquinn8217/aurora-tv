@@ -46,6 +46,10 @@ bool mouse_seen_take_bridged(void);
  * for its own and ask about the TV cursor when bridged. How many were woken. */
 int mouse_seen_wake(void);
 
+/* A test: webOS's pointer moved by `dx`, `dy` counts as the first mouse the TV saw
+ * move, through its node (the control port's `cursor nudge`). 1 when a node took it. */
+int mouse_seen_nudge(int dx, int dy);
+
 /* ⭐ IS A MOUSE BRIDGED? For the TV cursor, which does not come on while one
  * is (input/tv_cursor.h). A bridged mouse part counts when the bridge core
  * says it has been used since its bridge, or when the TV saw it move before:

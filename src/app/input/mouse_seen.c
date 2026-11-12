@@ -231,6 +231,31 @@ int mouse_seen_wake(void) {
     return woken;
 }
 
+/* ⭐ A TEST (rhoquinn8217, 2026-11-11: "test moving webOS's cursor first"): can the
+ * touchpad and the stick move webOS's own pointer, so a controller and a mouse share
+ * the one cursor that lines up with the picture? This moves it as the first mouse the
+ * TV has seen move, by `dx`, `dy` of that mouse's own counts, through its node, as
+ * mouse_seen_wake does. How many nodes took it: 0 or 1. */
+int mouse_seen_nudge(int dx, int dy) {
+    const struct evdev_event moves[3] = {
+            {0, 0, EVDEV_TYPE_REL, EVDEV_REL_X, dx},
+            {0, 0, EVDEV_TYPE_REL, EVDEV_REL_Y, dy},
+            {0, 0, EVDEV_TYPE_SYN, EVDEV_SYN_REPORT, 0},
+    };
+    for (int i = 0; i < s_seen_n; i++) {
+        const int fd = open(s_seen[i], O_WRONLY | O_NONBLOCK | O_CLOEXEC);
+        if (fd < 0) {
+            continue;
+        }
+        const bool wrote = write(fd, moves, sizeof(moves)) == (ssize_t) sizeof(moves);
+        close(fd);
+        if (wrote) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
 bool mouse_seen_mouse_bridged(char *which, size_t len) {
     ctm_bridge_pointer_t parts[MOUSE_NODES_MAX];
     const int n = ctm_bridge_bridged_pointers(parts, MOUSE_NODES_MAX);
@@ -264,6 +289,12 @@ bool mouse_seen_take_bridged(void) {
 }
 
 int mouse_seen_wake(void) {
+    return 0;
+}
+
+int mouse_seen_nudge(int dx, int dy) {
+    (void) dx;
+    (void) dy;
     return 0;
 }
 

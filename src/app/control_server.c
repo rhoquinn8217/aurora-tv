@@ -45,6 +45,7 @@
 #include "input/bridge_override.h"
 #include "input/bridge_keyboard.h"
 #include "input/tv_cursor.h"
+#include "input/mouse_seen.h"
 #include "input/webos_popup.h"
 #include "input/bt_pairing.h"
 #include "ui/common/bt_panel.h"
@@ -168,6 +169,7 @@ static void cmd_help(control_job_t *job)
                "cursor on|off           the TV cursor on or off, and saved, as Ctrl+Alt+Shift+M does\n"
                "cursor align            open the bar that aligns the TV cursor, as Ctrl+Alt+Shift+A does\n"
                "cursor sharp|regular    the drop or webOS's own pointer, and saved, as Ctrl+Alt+Shift+C does\n"
+               "cursor warp|nudge <x> <y>, cursor where  a test: webOS's pointer to a point, or moved as a mouse; where SDL has it\n"
                "shot [name]             the app's own screen (never the stream's picture) to logs/, as a .bmp\n"
                "crash                   the crash recorder: armed or not, and where its record goes\n"
                "crash test|thread       crash the app on purpose, on its own loop or on a thread, to prove it\n"
@@ -531,6 +533,42 @@ static void cmd_input(control_job_t *job)
  * Ctrl+Alt+Shift+C switches it. */
 static void cmd_cursor(control_job_t *job, const char *args)
 {
+    /* ⭐ A TEST of moving webOS's own pointer (rhoquinn8217, 2026-11-11: "test moving
+     * webOS's cursor first"): `warp` puts it at a point of the window through SDL,
+     * `nudge` moves it as the first mouse the TV saw move (input/mouse_seen.h), and
+     * `where` says where SDL has it now. */
+    int px = 0, py = 0;
+    if (strncasecmp(args, "warp ", 5) == 0) {
+        if (sscanf(args + 5, "%d %d", &px, &py) != 2 || global == NULL || global->ui.window == NULL) {
+            reply(job, "ERR usage: cursor warp <x> <y>, in the window's points\n");
+            return;
+        }
+        int bx = 0, by = 0, ax = 0, ay = 0;
+        SDL_GetMouseState(&bx, &by);
+        SDL_WarpMouseInWindow(global->ui.window, px, py);
+        SDL_GetMouseState(&ax, &ay);
+        reply(job, "OK warped to %d,%d: SDL's mouse %d,%d before, %d,%d after\n", px, py, bx, by, ax, ay);
+        return;
+    }
+    if (strncasecmp(args, "nudge ", 6) == 0) {
+        if (sscanf(args + 6, "%d %d", &px, &py) != 2) {
+            reply(job, "ERR usage: cursor nudge <dx> <dy>, in the mouse's own counts\n");
+            return;
+        }
+        int bx = 0, by = 0;
+        SDL_GetMouseState(&bx, &by);
+        const int took = mouse_seen_nudge(px, py);
+        reply(job, "OK nudged %d,%d through %d mouse node(s); SDL's mouse %d,%d before (`cursor where` for after)\n",
+              px, py, took, bx, by);
+        return;
+    }
+    if (strcasecmp(args, "where") == 0) {
+        int gx = 0, gy = 0;
+        SDL_GetMouseState(&px, &py);
+        SDL_GetGlobalMouseState(&gx, &gy);
+        reply(job, "OK SDL's mouse %d,%d in the window, %d,%d global\n", px, py, gx, gy);
+        return;
+    }
     if (strcasecmp(args, "align") == 0) {
         cursor_align_request();
         reply(job, "OK the align bar is asked for: it opens on the interface's next pass, or says why not\n");
