@@ -272,10 +272,10 @@ static lv_obj_t *create_obj(lv_fragment_t *self, lv_obj_t *container) {
     /* ⭐ DESKTOP MODE (rhoquinn8217, 2026-11-11: "Desktop mode's toggle can be found in
      * the USB Settings"; ui/streaming/desktop_mode.h), in a section of its own above the
      * Windows State Rebind Overrides: it needs no DS5-USBIP, which their disclaimer says
-     * those do. With their warning ("Warning with turning on Desktop Mode. All
-     * controller included bridged controllers use it and it overrides DS5-USBIP
-     * configs"). A plain box: it runs with bridging off. Its handler turns Virtual Mouse
-     * off as it goes on. */
+     * those do. With their warning, in the words of the message shown over a stream as
+     * it goes on (ui/streaming/bridge_prompt.h; rhoquinn8217, 2026-11-12: "yes, match
+     * it"). A plain box: it runs with bridging off. Its handler turns Virtual Mouse off
+     * as it goes on. */
     pref_title_label(view, locstr("Desktop Mode"));
     lv_obj_t *desktop = pref_checkbox(view, locstr("Enable Desktop Mode"), &app_configuration->bridge.desktop_mode,
                                       false);
@@ -283,9 +283,7 @@ static lv_obj_t *create_obj(lv_fragment_t *self, lv_obj_t *container) {
     pref_desc_label(view, locstr(
             "Controllers work the Windows desktop with the rebinds in its legend, shown in the streaming "
             "overlay, until it is turned off. Works without DS5-USBIP. Turns off Virtual Mouse."), false);
-    pref_desc_label(view, locstr(
-            "Warning: All controllers, including bridged controllers, use it, and it overrides DS5-USBIP "
-            "configs."), false);
+    pref_desc_label(view, locstr("Warning: DS5-USBIP configs are disabled when Desktop Mode is on."), false);
     usbb_gap(view);
 
     /* ⭐ THE WINDOWS STATE REBIND OVERRIDES, in their words (rhoquinn8217,
