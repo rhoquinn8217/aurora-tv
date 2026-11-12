@@ -1304,6 +1304,48 @@ static lv_obj_t *ctm_make_action(const char *label, lv_event_cb_t cb, lv_color_t
     return btn;
 }
 
+/* ⭐ Two headings, laid out like the rows beneath them -- name on the left,
+ * status on the right -- so the FULL/BASIC column reads as something rather
+ * than a word floating at the end of a line.
+ *
+ * ⭐⭐ AND THEY STAY PUT WHILE THE LIST SCROLLS (rhoquinn8217, 2026-11-11:
+ * "The headers "Device and Feature Set" don't stay on top when scrolling
+ * down"). They were the list's first row, rebuilt with it, so they scrolled
+ * away with it. Made once now, in the frame above the list (open_ctm_panel). */
+static void ctm_make_headings(lv_obj_t *parent) {
+    lv_obj_t *caprow = lv_obj_create(parent);
+    lv_obj_remove_style_all(caprow);
+    lv_obj_set_size(caprow, LV_PCT(100), LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(caprow, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(caprow, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    /* ⓘ LV_DPX(13) across: a row's own 10 and the list's 3, so the headings
+     * line up with the rows' contents as they did inside the list. LV_DPX(3)
+     * on top, with the frame's 5, is the 8 the list used to start with. */
+    lv_obj_set_style_pad_hor(caprow, LV_DPX(13), 0);
+    lv_obj_set_style_pad_top(caprow, LV_DPX(3), 0);
+    lv_obj_clear_flag(caprow, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_clear_flag(caprow, LV_OBJ_FLAG_CLICKABLE);
+
+    /* ⛔ "Controllers" was wrong: the list carries mice, keyboards and wireless
+     * receivers as readily as pads. */
+    lv_obj_t *caption = lv_label_create(caprow);
+    lv_label_set_text(caption, "Device");
+    lv_obj_set_style_text_color(caption, CTM_COL_SUB, 0);
+    lv_obj_set_style_text_font(caption, lv_theme_get_font_small(caption), 0);
+
+    /* ⭐ Back on 2026-08-20 as "Feature Set", and now it sits over something:
+     * the tag is right-aligned on the row's first line, directly beneath it.
+     * ⛔ As "Features" it sat over the action button and named nothing. */
+    lv_obj_t *capfeat = lv_label_create(caprow);
+    lv_label_set_text(capfeat, "Feature Set");
+    /* ⭐ In from the right by about four characters (rhoquinn8217, 2026-09-08),
+     * so it sits over the BASIC/FULL pair instead of past the end of it. The
+     * badges stop short of the row's edge; hard right looked hung off it. */
+    lv_obj_set_style_pad_right(capfeat, LV_DPX(26), 0);
+    lv_obj_set_style_text_color(capfeat, CTM_COL_SUB, 0);
+    lv_obj_set_style_text_font(capfeat, lv_theme_get_font_small(capfeat), 0);
+}
+
 static void ctm_panel_refresh(void) {
     if (!s_ctm_panel) {
         return;
@@ -1352,35 +1394,8 @@ static void ctm_panel_refresh(void) {
         s_ctm_dev_litbadge[i] = NULL;
     }
 
-    /* ⭐ Two headings, laid out like the rows beneath them -- name on the left,
-     * status on the right -- so the FULL/BASIC column reads as something rather
-     * than a word floating at the end of a line. */
-    lv_obj_t *caprow = lv_obj_create(s_ctm_sidebar);
-    lv_obj_remove_style_all(caprow);
-    lv_obj_set_size(caprow, LV_PCT(100), LV_SIZE_CONTENT);
-    lv_obj_set_flex_flow(caprow, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(caprow, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_hor(caprow, LV_DPX(10), 0);
-    lv_obj_clear_flag(caprow, LV_OBJ_FLAG_SCROLLABLE);
-
-    /* ⛔ "Controllers" was wrong: the list carries mice, keyboards and wireless
-     * receivers as readily as pads. */
-    lv_obj_t *caption = lv_label_create(caprow);
-    lv_label_set_text(caption, "Device");
-    lv_obj_set_style_text_color(caption, CTM_COL_SUB, 0);
-    lv_obj_set_style_text_font(caption, lv_theme_get_font_small(caption), 0);
-
-    /* ⭐ Back on 2026-08-20 as "Feature Set", and now it sits over something:
-     * the tag is right-aligned on the row's first line, directly beneath it.
-     * ⛔ As "Features" it sat over the action button and named nothing. */
-    lv_obj_t *capfeat = lv_label_create(caprow);
-    lv_label_set_text(capfeat, "Feature Set");
-    /* ⭐ In from the right by about four characters (rhoquinn8217, 2026-09-08),
-     * so it sits over the BASIC/FULL pair instead of past the end of it. The
-     * badges stop short of the row's edge; hard right looked hung off it. */
-    lv_obj_set_style_pad_right(capfeat, LV_DPX(26), 0);
-    lv_obj_set_style_text_color(capfeat, CTM_COL_SUB, 0);
-    lv_obj_set_style_text_font(capfeat, lv_theme_get_font_small(capfeat), 0);
+    /* ⓘ The two headings are above the list since 2026-11-11, made once when
+     * the panel opens (ctm_make_headings), so they stay while it scrolls. */
 
     if (s_ctm_status_lbl) {
         int plugged = 0;
@@ -1794,7 +1809,27 @@ static void open_ctm_panel(lv_event_t *event) {
 
     /* ⭐ ONE COLUMN. The panel was a sidebar and a detail pane side by side; the
      * detail pane is gone, so the list is the whole body and gets the width. */
-    s_ctm_sidebar = lv_obj_create(card);
+    /* ⭐ THE BOX IS A FRAME NOW, HOLDING THE HEADINGS AND, UNDER THEM, THE LIST
+     * THAT SCROLLS (2026-11-11), so the headings stay where they are
+     * (ctm_make_headings). ⓘ The frame's LV_DPX(5) and the list's own 3 put
+     * every row where the box's 8 used to; the list needs the 3 of its own so
+     * it does not clip the focus outline round a row. */
+    lv_obj_t *listbox = lv_obj_create(card);
+    lv_obj_remove_style_all(listbox);
+    lv_obj_set_width(listbox, LV_PCT(100));
+    lv_obj_set_height(listbox, LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(listbox, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_all(listbox, LV_DPX(5), 0);
+    lv_obj_set_style_pad_gap(listbox, LV_DPX(5), 0);
+    lv_obj_set_style_bg_color(listbox, CTM_COL_SIDEBAR, 0);
+    lv_obj_set_style_bg_opa(listbox, LV_OPA_COVER, 0);
+    lv_obj_set_style_radius(listbox, LV_DPX(8), 0);
+    lv_obj_set_style_border_width(listbox, LV_DPX(1), 0);
+    lv_obj_set_style_border_color(listbox, CTM_COL_BORDER, 0);
+    lv_obj_clear_flag(listbox, LV_OBJ_FLAG_SCROLLABLE);
+    ctm_make_headings(listbox);
+
+    s_ctm_sidebar = lv_obj_create(listbox);
     lv_obj_remove_style_all(s_ctm_sidebar);
     lv_obj_set_width(s_ctm_sidebar, LV_PCT(100));
 /* ⛔⛔ SIZE_CONTENT, NOT GROW -- and getting this wrong made the panel LOOK
@@ -1809,15 +1844,12 @@ static void open_ctm_panel(lv_event_t *event) {
      * until the cap bites, and past that the list scrolls inside the height it
      * has. A short list makes a short strip either way. */
     lv_obj_set_height(s_ctm_sidebar, LV_SIZE_CONTENT);
-    lv_obj_set_style_max_height(s_ctm_sidebar, LV_DPX(320), 0);
+    /* ⓘ LV_DPX(290): the whole box keeps its old cap of about 320, the
+     * headings and the frame's padding taking the rest. */
+    lv_obj_set_style_max_height(s_ctm_sidebar, LV_DPX(290), 0);
     lv_obj_set_flex_flow(s_ctm_sidebar, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_style_pad_all(s_ctm_sidebar, LV_DPX(8), 0);
+    lv_obj_set_style_pad_all(s_ctm_sidebar, LV_DPX(3), 0);
     lv_obj_set_style_pad_gap(s_ctm_sidebar, LV_DPX(8), 0);
-    lv_obj_set_style_bg_color(s_ctm_sidebar, CTM_COL_SIDEBAR, 0);
-    lv_obj_set_style_bg_opa(s_ctm_sidebar, LV_OPA_COVER, 0);
-    lv_obj_set_style_radius(s_ctm_sidebar, LV_DPX(8), 0);
-    lv_obj_set_style_border_width(s_ctm_sidebar, LV_DPX(1), 0);
-    lv_obj_set_style_border_color(s_ctm_sidebar, CTM_COL_BORDER, 0);
     lv_obj_set_scrollbar_mode(s_ctm_sidebar, LV_SCROLLBAR_MODE_AUTO);
     /* Back backstop: any focusable child bubbles CANCEL up here -> close panel. */
     lv_obj_add_event_cb(s_ctm_sidebar, ctm_nav_cancel_cb, LV_EVENT_CANCEL, NULL);
