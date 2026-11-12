@@ -149,7 +149,7 @@ static void cmd_help(control_job_t *job)
                "ui                      what is open on the screen: overlay, its keyboard, the panel, the align bar\n"
                "numpad [ps|xbox|auto]   the controller at a locked Windows: numpad open or closed, where, whose marks, keys typed (a count)\n"
                "uac [0|1|2|auto]        a User Account Control prompt: what DS5-USBIP says, what the controls are up for; 1 or 2 fakes one\n"
-               "desktop [on|off|legend] Desktop Mode: its switch, the controls, its question, its list, Alt; on|off as its button, legend as Triangle\n"
+               "desktop [on|off|legend|cursor] Desktop Mode: its switch, controls, question, list, Alt; on|off as its button, legend as PS, cursor as Triangle\n"
                "press <key>[:ms] ...    keys into aurora-tv's own screens, as a keyboard types them; not once a stream is up\n"
                "                        keys: up down left right enter esc home end backspace; :ms holds it (a long press)\n"
                "type <text>             characters into aurora-tv's own screens, a key each, as a keyboard types them\n"
@@ -428,10 +428,13 @@ static void cmd_desktop(control_job_t *job, const char *args)
             bridge_prompt_say_desktop_on();
         }
     } else if (args != NULL && strcasecmp(args, "legend") == 0) {
-        /* Triangle's turn: its list over the screen, or back off it. */
+        /* The PS button's turn: its list over the screen, or back off it. */
         desktop_mode_legend_toggle();
+    } else if (args != NULL && strcasecmp(args, "cursor") == 0) {
+        /* Triangle's turn: the TV cursor off, or on with its alignment bar. */
+        desktop_mode_cursor_toggle();
     } else if (args != NULL && args[0] != '\0') {
-        reply(job, "ERR try on, off or legend\n");
+        reply(job, "ERR try on, off, legend or cursor\n");
         return;
     }
     const lock_keys_mode_t mode = lock_keys_mode();

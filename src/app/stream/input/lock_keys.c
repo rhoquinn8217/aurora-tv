@@ -70,7 +70,8 @@ typedef enum {
     LOCK_ACT_ANSWER_CANCEL,
     LOCK_ACT_WINDOW_BACK,   /* L1 in Desktop Mode: Window Select, back */
     LOCK_ACT_WINDOW_NEXT,   /* R1 in Desktop Mode: Window Select, forward */
-    LOCK_ACT_LEGEND,        /* Triangle in Desktop Mode: its list over the screen, or not */
+    LOCK_ACT_LEGEND,        /* PS in Desktop Mode: its list over the screen, or not */
+    LOCK_ACT_CURSOR,        /* Triangle in Desktop Mode: the TV cursor on, with its alignment, or off */
     LOCK_ACT_LET_GO,        /* any other button in Desktop Mode: Window Select's Alt let go */
 } lock_act_t;
 
@@ -447,11 +448,18 @@ static lock_act_t action_for(uint8_t what, bool numpad_open, short *key) {
              * a PIN. */
             return LOCK_ACT_KEYBOARD;
         case SDL_CONTROLLER_BUTTON_Y:
-            /* And no numpad at a prompt. In Desktop Mode, its list over the screen, or
-             * back off it (rhoquinn8217, 2026-11-11: "Triangle: Toggle Legend"). */
+            /* And no numpad at a prompt. ⭐ In Desktop Mode, the TV cursor: off, or on
+             * with its alignment bar up (rhoquinn8217, 2026-11-11: "Triangle ... will
+             * toggle cursor on/off but will allow cursor alignment when turned on";
+             * ui/streaming/desktop_mode.h). */
             return s_mode == LOCK_KEYS_LOCK      ? LOCK_ACT_NUMPAD_OPEN
-                   : s_mode == LOCK_KEYS_DESKTOP ? LOCK_ACT_LEGEND
+                   : s_mode == LOCK_KEYS_DESKTOP ? LOCK_ACT_CURSOR
                                                  : LOCK_ACT_NONE;
+        case SDL_CONTROLLER_BUTTON_GUIDE:
+            /* ⭐ In Desktop Mode, its list over the screen, or back off it (rhoquinn8217,
+             * 2026-11-11: "Rebind the PS button to to the Legend instead"; Triangle's
+             * until then). */
+            return s_mode == LOCK_KEYS_DESKTOP ? LOCK_ACT_LEGEND : LOCK_ACT_NONE;
         case SDL_CONTROLLER_BUTTON_LEFTSHOULDER:
         case SDL_CONTROLLER_BUTTON_RIGHTSHOULDER:
             /* ⭐ Window Select, in Desktop Mode only: L1 back and R1 forward through
@@ -516,6 +524,9 @@ static void act(stream_input_t *input, const lock_press_t *press) {
             break;
         case LOCK_ACT_LEGEND:
             desktop_mode_legend_toggle();
+            break;
+        case LOCK_ACT_CURSOR:
+            desktop_mode_cursor_toggle();
             break;
         case LOCK_ACT_LET_GO:
             /* Window Select's Alt, above: nothing more. */

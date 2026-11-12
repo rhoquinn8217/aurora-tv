@@ -44,6 +44,11 @@ typedef enum {
     PAD_MARK_R2,
     PAD_MARK_VIEW,    /* Create, View */
     PAD_MARK_MENU,    /* Options, Menu */
+    /* The PS button: "PS" in a circle (rhoquinn8217, 2026-11-11: "create button symbol
+     * with "PS" in a circle ike the other symbol"). ⓘ An Xbox pad's Xbox button has no
+     * mark, only its circle: "we have to use the text "Xbox button" since there is not
+     * symbol we can use for it", so a legend writes those words in its place. */
+    PAD_MARK_HOME,
 } pad_mark_t;
 
 /* The mark, `height` pixels high, as an object in `parent` that takes no input.

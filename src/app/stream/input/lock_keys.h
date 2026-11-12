@@ -100,8 +100,8 @@
  *     button and options rebind to close when held"). Options held 2 s turns Desktop
  *     Mode itself off, at once ("Options: hold to turn off Desktop Mode";
  *     ui/streaming/desktop_mode.h). L1 and R1 are Window Select, Windows' window picker
- *     with Alt held (stream/input/window_select.h), and Triangle shows its list over the
- *     screen ("Triangle: Toggle Legend").
+ *     with Alt held (stream/input/window_select.h); the PS button shows its list over
+ *     the screen; Triangle turns the TV cursor off, or on with its alignment bar up.
  *   - A lock or a prompt takes over with its own controls and list, and Desktop Mode
  *     comes back when it is gone ("Windows lock or UAC should override Desktop Mode").
  *   - Their Close turns their controls off; with Desktop Mode on, Desktop Mode comes

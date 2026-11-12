@@ -356,10 +356,17 @@ static lv_obj_t *list_create(pad_family_t family, lock_keys_mode_t mode) {
         mark_row_create(panel, PAD_MARK_NORTH, family, locstr("- numpad"));
     }
     if (desktop) {
-        /* ⭐ Its list over the screen, and Options held to turn it off, in place of a
-         * Close (rhoquinn8217, 2026-11-11: "Triangle: Toggle Legend" and "Options: hold
-         * to turn off Desktop Mode"; ui/streaming/desktop_mode.h). */
-        mark_row_create(panel, PAD_MARK_NORTH, family, locstr("- Toggle Legend"));
+        /* ⭐ The TV cursor on Triangle, its list over the screen on the PS button, and
+         * Options held to turn it off, in place of a Close (rhoquinn8217, 2026-11-11;
+         * ui/streaming/desktop_mode.h). An Xbox pad's Xbox button has no mark, so its row
+         * is words, as the stick's and the touchpad's are ("we have to use the text "Xbox
+         * button" since there is not symbol we can use for it"). */
+        mark_row_create(panel, PAD_MARK_NORTH, family, locstr("- Toggle Cursor"));
+        if (family == PAD_FAMILY_XBOX) {
+            words_create(panel, locstr("Xbox button - Toggle Legend"), font);
+        } else {
+            mark_row_create(panel, PAD_MARK_HOME, family, locstr("- Toggle Legend"));
+        }
         mark_row_create(panel, PAD_MARK_MENU, family, locstr("- hold to turn off Desktop Mode"));
     } else {
         options_row_create(panel, family);
@@ -511,7 +518,7 @@ static void after_show(bool show) {
 }
 
 /* Desktop Mode's list is up with the overlay, and not over a panel it opened; and over
- * the screen while Triangle has it shown and nothing else has the input
+ * the screen while the PS button has it shown and nothing else has the input
  * (ui/streaming/desktop_mode.h). */
 static bool desktop_list_wanted(void) {
     if (streaming_overlay_shown()) {

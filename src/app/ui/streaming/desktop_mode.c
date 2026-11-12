@@ -10,7 +10,9 @@
 #include "stream/input/lock_keys.h"
 #include "stream/input/session_input.h"
 #include "stream/input/session_virt_mouse.h"
+#include "input/tv_cursor.h"
 #include "ui/streaming/bridge_prompt.h"
+#include "ui/streaming/cursor_align.h"
 #include "ui/streaming/streaming.controller.h"
 #include "util/i18n.h"
 #if defined(TARGET_WEBOS)
@@ -58,7 +60,29 @@ bool desktop_mode_legend_shown(void) {
 
 void desktop_mode_legend_toggle(void) {
     s_legend = !s_legend;
-    desktop_note("its list %s (Triangle)", s_legend ? "over the screen" : "in the overlay only again");
+    desktop_note("its list %s (PS)", s_legend ? "over the screen" : "in the overlay only again");
+}
+
+void desktop_mode_cursor_toggle(void) {
+    if (tv_cursor_mode_on()) {
+        if (tv_cursor_set_mode(false)) {
+            desktop_note("the TV cursor off (Triangle)");
+        }
+        return;
+    }
+    /* ⓘ A bridged mouse is refused with a message of its own (tv_cursor_set_mode); Use
+     * mouse hardware is refused with none, so it is said here. */
+    if (!tv_cursor_mode_switchable()) {
+        desktop_note("the TV cursor stays off: Use mouse hardware is on (Triangle)");
+        bridge_prompt_note(locstr("TV cursor can't be turned on while Use mouse hardware is on."));
+        return;
+    }
+    if (!tv_cursor_set_mode(true)) {
+        desktop_note("the TV cursor stays off (Triangle)");
+        return;
+    }
+    desktop_note("the TV cursor on, and its alignment bar (Triangle)");
+    cursor_align_request();
 }
 
 void desktop_mode_off_on_pad(void) {

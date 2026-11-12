@@ -100,6 +100,15 @@ static const int16_t VIEW_FRONT[4][2] = {{560, 870}, {1200, 870}, {1200, 1390}, 
  * with LVGL's arc, showed a step where each corner met the top line. */
 static const int16_t SHOULDER[12][2] = {{110, 1890}, {110, 710}, {156, 480}, {286, 286}, {480, 156}, {710, 110},
                                         {1690, 110}, {1920, 156}, {2114, 286}, {2244, 480}, {2290, 710}, {2290, 1890}};
+/* The PS button's two letters, drawn in strokes as the shapes are: the app's small type
+ * is too large for two letters inside the circle at a legend's height. Each 800 high,
+ * the pair centred: P's stem and its bowl, a half ellipse; S as two half ellipses. */
+static const int16_t LETTER_P[10][2] = {{560, 1400}, {560, 600}, {780, 600}, {885, 628}, {962, 705},
+                                        {990, 810}, {962, 915}, {885, 992}, {780, 1020}, {560, 1020}};
+static const int16_t LETTER_S[17][2] = {{1425, 700}, {1355, 627}, {1260, 600}, {1165, 627}, {1095, 700},
+                                        {1070, 800}, {1095, 900}, {1165, 973}, {1260, 1000}, {1355, 1027},
+                                        {1425, 1100}, {1450, 1200}, {1425, 1300}, {1355, 1373}, {1260, 1400},
+                                        {1165, 1373}, {1095, 1300}};
 
 static void draw_dpad(const pen_t *pen, pad_mark_t mark) {
     pen_path(pen, DPAD, 12, true);
@@ -147,6 +156,9 @@ static void draw_round(const pen_t *pen, const lv_font_t *font, pad_mark_t mark,
                 pen_path(pen, VIEW_BACK, 5, false);
                 pen_path(pen, VIEW_FRONT, 4, true);
                 return;
+            case PAD_MARK_HOME:
+                /* No mark of its own: the circle alone (the header). */
+                return;
             default:
                 break;
         }
@@ -170,6 +182,10 @@ static void draw_round(const pen_t *pen, const lv_font_t *font, pad_mark_t mark,
                 pen_line(pen, 534, 770, 690, 1280);
                 pen_line(pen, 1000, 480, 1000, 1160);
                 pen_line(pen, 1466, 770, 1310, 1280);
+                return;
+            case PAD_MARK_HOME:
+                pen_path(pen, LETTER_P, 10, false);
+                pen_path(pen, LETTER_S, 17, false);
                 return;
             default:
                 break;
