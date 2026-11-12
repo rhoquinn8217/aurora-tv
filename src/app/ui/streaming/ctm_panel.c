@@ -949,10 +949,24 @@ static lv_obj_t *ctm_make_dev_row(const device_group_t *g, int idx) {
     lv_obj_set_style_border_color(row, lv_color_hex(0x3a4854), 0);
     lv_obj_set_style_bg_color(row, CTM_COL_ROW, 0);
     lv_obj_set_style_bg_opa(row, LV_OPA_COVER, 0);
-    /* ⭐ NO BLUE ON THE ROW (2026-11-11). Focused, by the keys or by a
+    /* ⭐ NO BLUE FILL ON THE ROW (2026-11-11). Focused, by the keys or by a
      * pointer's click (2026-10-11), it shows as the ring on its set badge
-     * (ctm_paint_focus_ring). ⓘ The row last focused no longer stays tinted
-     * while the focus is on Bridge All, Release All or the X. */
+     * (ctm_paint_focus_ring) and the outline below. ⓘ The row last focused no
+     * longer stays tinted while the focus is on Bridge All, Release All or
+     * the X. */
+    /* ⭐ AND A DEEP BLUE OUTLINE ROUND THE DEVICE WHOSE BADGE HAS THE RING
+     * (rhoquinn8217, 2026-11-11: "Put a highlight around the Device when it's
+     * feature set is in focus", and of two pictures, "build B"). The deep
+     * focus blue the row used to fill with, as an outline only, so the two
+     * marks read apart: deep blue round the device, light blue round its
+     * badge. ⛔ Not purple: purple is FULL in this panel, and a purple ring
+     * melted into a FULL badge. ⓘ An outline sits outside the row, so the row
+     * neither grows nor shifts, and the list's LV_DPX(8) of padding and gap
+     * leave it room. ⓘ FOCUSED is the row's own state, so a plain style. */
+    lv_obj_set_style_outline_color(row, CTM_COL_FOCUS, LV_STATE_FOCUSED);
+    lv_obj_set_style_outline_width(row, LV_DPX(2), LV_STATE_FOCUSED);
+    lv_obj_set_style_outline_pad(row, 0, LV_STATE_FOCUSED);
+    lv_obj_set_style_outline_opa(row, LV_OPA_COVER, LV_STATE_FOCUSED);
     lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_flag(row, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_flag(row, LV_OBJ_FLAG_EVENT_BUBBLE);   /* Back bubbles to the sidebar */
