@@ -388,3 +388,38 @@ one.
 **Merge guard:** "a line draws with the argument LVGL reads: the drawing is
 wrapped once the display exists". Taking upstream's `root.c` back compiles, and
 any line in the app can write through a stray pointer again.
+
+## Sixteen controllers
+
+**Where:** `src/app/input/app_input.c`, `app_input_init()`, where upstream sets
+`max_num_gamepads` to four.
+
+The app opens as many controllers as it has slots and ignores the rest. Four
+was NVIDIA GameStream's limit. Sunshine and its forks, Vibepollo among them,
+take sixteen, and the streaming library already folds a GameStream host back to
+four (`controllerNumber %= 4` in moonlight-common-c's `InputStream.c`). A
+bridged pad keeps its slot, because the app still reads it at a Windows lock
+and a User Account Control prompt. So on an LG C1 on 2026-11-11, with a
+DualSense and an Edge bridged and an Xbox pad on the stream, a DS4 found all
+four taken and was ignored, and reconnecting it could not help. Everything the
+fork keeps per slot already holds sixteen (`gamepads[16]`, `PADS` in
+`touchpad_pointer.c`, `LOCK_SLOTS` in `lock_keys.c`).
+
+**Merge guard:** "sixteen controllers, as the host takes".
+
+## A keyboard part is no controller
+
+**Where:** `src/app/input/input_gamepad.c`, `app_input_init_gamepad()`, before
+upstream opens the controller.
+
+SDL's PlayStation driver opens every HID interface with a PlayStation id as a
+pad. A DualSense Edge on a DS5Dongle has a keyboard part beside its pad
+(interface 4 of `054c:0df2`), and SDL offered it as a second "DualSense Edge
+Wireless Controller" with the serial `00-00-00-00-00-00`, which took one of the
+app's slots. `ctm_bridge_gesture_not_a_pad()` reads the HID description of the
+node SDL offers, by the core's own rule (`ctm_bridge_node_says()`), and the app
+does not open a part that says keyboard or mouse. The bridge never needed SDL
+for it: it lists that part from the kernel and takes it with its device, as it
+takes any keyboard (2026-11-11).
+
+**Merge guard:** "a keyboard or mouse part is not opened as a controller".

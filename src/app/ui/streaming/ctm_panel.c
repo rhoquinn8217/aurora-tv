@@ -285,6 +285,40 @@ static lv_obj_t        *s_ctm_dev_rows[DEVICE_GROUPS_MAX];
 static lv_obj_t        *s_ctm_dev_offbadge[DEVICE_GROUPS_MAX];
 static int  s_ctm_sel  = 0;
 
+/* A device's player number from SDL, from its first part that has one -- the
+ * pad half of a pad with a keyboard part -- or -1. ⓘ SDL numbers from zero and
+ * the bridge core knows nothing about SDL, so the hidraw node is the join. */
+static int ctm_group_player(const device_group_t *g) {
+    int player = -1;
+    for (int p = 0; p < g->part_count && player < 0; ++p) {
+        player = ctm_bridge_gesture_player_for_node(s_ctm_devs[g->part[p]].node);
+    }
+    return player;
+}
+
+/* ⭐ NUMBERED CONTROLLERS FIRST, BY THEIR NUMBER, THEN EVERY OTHER DEVICE BY
+ * NAME (rhoquinn8217, 2026-11-11). device_groups_build hands the list over in
+ * name order, so a stable sort on the number alone leaves the rest in it. */
+static void ctm_order_groups(void) {
+    int player[DEVICE_GROUPS_MAX];
+    for (int i = 0; i < s_ctm_ngroup; ++i) {
+        player[i] = ctm_group_player(&s_ctm_groups[i]);
+    }
+    for (int k = 1; k < s_ctm_ngroup; ++k) {
+        const device_group_t held = s_ctm_groups[k];
+        const int held_player = player[k];
+        int at = k;
+        /* Up past a device with no number, or with a higher one. */
+        while (at > 0 && held_player >= 0 && (player[at - 1] < 0 || player[at - 1] > held_player)) {
+            s_ctm_groups[at] = s_ctm_groups[at - 1];
+            player[at] = player[at - 1];
+            at--;
+        }
+        s_ctm_groups[at] = held;
+        player[at] = held_player;
+    }
+}
+
 /* ⭐ THE DETAIL PANE IS GONE, AND THE CRASH IT CAUSED WITH IT.
  *
  * A guard used to live here: leaving the pane focused a sidebar row, focusing
@@ -960,13 +994,10 @@ static lv_obj_t *ctm_make_dev_row(const device_group_t *g, int idx) {
         /* ⭐ "(1) DualSense" -- the number prepended rather than given a column
          * of its own. ⛔ A separate column was tried and wasted width the name
          * needed. ⓘ Anything without a player number just shows its name. */
-        /* ⓘ A device's number is its first part's that has one: the pad half
-         * of a pad with a keyboard part. */
-        int player = -1;
-        for (int p = 0; p < g->part_count && player < 0; ++p) {
-            player = ctm_bridge_gesture_player_for_node(s_ctm_devs[g->part[p]].node);
-        }
-        if (player >= 0 && player < 4) {
+        /* ⓘ Every player SDL numbers, up to the sixteen controllers the app
+         * takes (2026-11-11). It stopped at four while the app did. */
+        const int player = ctm_group_player(g);
+        if (player >= 0) {
             lv_label_set_text_fmt(name, "(%d) %s", player + 1, g->name);
         } else {
             lv_label_set_text(name, g->name);
@@ -1226,8 +1257,25 @@ static void ctm_panel_refresh(void) {
     if (!s_ctm_panel) {
         return;
     }
+    /* ⭐ THE SELECTION FOLLOWS ITS DEVICE (2026-11-11). Numbered controllers
+     * lead the list, so a device can change places with nothing arriving or
+     * leaving -- a pad SDL numbers a moment after the core lists it moves up --
+     * and a selection kept by position would land on its neighbour. Kept by the
+     * device's group instead, as the pending rows are. */
+    char sel_group[sizeof s_ctm_devs[0].group];
+    sel_group[0] = '\0';
+    if (s_ctm_sel >= 0 && s_ctm_sel < s_ctm_ngroup) {
+        snprintf(sel_group, sizeof sel_group, "%s", s_ctm_devs[s_ctm_groups[s_ctm_sel].part[0]].group);
+    }
     s_ctm_ndev = ctm_bridge_list(s_ctm_devs, DEVICE_PARTS_MAX);
     s_ctm_ngroup = device_groups_build(s_ctm_devs, s_ctm_ndev, s_ctm_groups, DEVICE_GROUPS_MAX);
+    ctm_order_groups();
+    for (int i = 0; i < s_ctm_ngroup && sel_group[0] != '\0'; ++i) {
+        if (strcmp(s_ctm_devs[s_ctm_groups[i].part[0]].group, sel_group) == 0) {
+            s_ctm_sel = i;
+            break;
+        }
+    }
 
     /* ⭐ WHAT HAD THE FOCUS, so the refresh can give it back (code review,
      * 2026-10-05). The end of this function put the focus on the last row
@@ -1534,6 +1582,9 @@ static void open_ctm_panel(lv_event_t *event) {
     }
     s_ctm_owner = controller;
     s_ctm_sel = 0;
+    /* ⓘ The last opening's list is forgotten, so the first refresh starts on
+     * the first row rather than following a device selected back then. */
+    s_ctm_ngroup = 0;
 
     s_ctm_nav_group = lv_group_create();
     lv_group_set_wrap(s_ctm_nav_group, false);

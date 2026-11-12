@@ -225,6 +225,14 @@ uint64_t ctm_bridge_scan_age_ms(void);
  * genuinely refused. */
 bool ctm_bridge_node_is_plugged(const char *node);
 
+/* What the HID description behind a hidraw node says the part is, by the
+ * core's own rule (the one each row's type comes from): "controller",
+ * "keyboard", "mouse", or "" for anything else. NULL when the node is not a
+ * hidraw node or cannot be read. ⓘ It opens the node for its description and
+ * nothing else: no scan and no report, cheap enough for the moment SDL offers
+ * a controller (2026-11-11). */
+const char *ctm_bridge_node_says(const char *node);
+
 /* Every bridged mouse part: its hidraw node, and whether a report of it has
  * said something since its bridge. ⓘ A receiver's mouse part with nothing
  * behind it is one too, and is never used. Fills out[0..max-1], returns the

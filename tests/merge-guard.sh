@@ -348,6 +348,12 @@ esac
 # points to it, and these checks take over the warnings it carried.
 need "a pad already opened is not opened again" \
      src/app/input/input_event.c "app_input_gamepad_state_by_instance_id(input, joy_instance_id) != NULL"
+need "sixteen controllers, as the host takes" \
+     src/app/input/app_input.c "input->max_num_gamepads = 16;"
+in_order "a keyboard or mouse part is not opened as a controller" \
+     src/app/input/input_gamepad.c "bool app_input_init_gamepad(" \
+     "if (ctm_bridge_gesture_not_a_pad(device_index)) { return false; }" \
+     "SDL_GameControllerOpen(device_index)"
 need "the pad scan's flush waits until SDL's walk of its event queue is over" \
      src/app/input/input_gamepad.c "ctm_bridge_gesture_flush_device_added();"
 absent "the pad scan does NOT flush SDL's event queue itself (inside the walk, it tangles the queue)" \
