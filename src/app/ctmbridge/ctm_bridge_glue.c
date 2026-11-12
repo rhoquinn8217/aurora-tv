@@ -7,6 +7,7 @@
 
 #include "ctm_bridge_glue.h"
 
+#include <fcntl.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -16,6 +17,7 @@
 #include <unistd.h>
 
 #include "ctm_state.h"   /* core API + shared globals (g_running, g_scan, ...) */
+#include "ctm_hid.h"     /* a node's HID description, read as the core reads it */
 #include "ctm_hostmouse.h" /* TV-pointer synthesizer feed (kind "hid") */
 #include "device_identity.inl" /* the identity rules, shared with the core */
 #include "protocol_level.inl"   /* whether this app and the listener can work together */
@@ -543,6 +545,26 @@ bool ctm_bridge_node_is_plugged(const char *node)
     const bool plugged = item != NULL && session_index_for_key(item->key) >= 0;
     pthread_mutex_unlock(&s_dev_mutex);
     return plugged;
+}
+
+const char *ctm_bridge_node_says(const char *node)
+{
+    if (!node || strncmp(node, "/dev/hidraw", 11) != 0) {
+        return NULL;
+    }
+    const int fd = open(node, O_RDONLY | O_NONBLOCK | O_CLOEXEC);
+    if (fd < 0) {
+        return NULL;
+    }
+    uint8_t desc[4096];
+    const uint32_t len = read_report_descriptor(fd, desc, sizeof(desc));
+    close(fd);
+    if (len == 0) {
+        return NULL;
+    }
+    uint16_t page = 0, usage = 0;
+    ctm_hid_top_usage(desc, len, &page, &usage, NULL);
+    return identity_type_for_usage(page, usage);
 }
 
 /* The bridge kind of the row behind a node, or NULL. Caller holds s_dev_mutex
