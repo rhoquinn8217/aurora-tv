@@ -48,6 +48,7 @@ void vmouse_set_trigger(session_input_vmouse_t *vmouse, char l, char r) {
     const char trigger_threshold = 64;
     bool ldown = l > trigger_threshold, rdown = r > trigger_threshold;
     static bool s_left_auroras;   /* This fork: the left press went to Aurora's own button */
+    static bool s_right_auroras;  /* This fork: the right press was on Aurora's own button */
     if (vmouse->state.l != ldown) {
         /* This fork: with the TV cursor on Aurora's own button, the left press and its release are Aurora's; see input/touchpad_pointer.h. */
         if (!touchpad_pointer_stream_press(&s_left_auroras, true, ldown)) {
@@ -55,7 +56,10 @@ void vmouse_set_trigger(session_input_vmouse_t *vmouse, char l, char r) {
         }
     }
     if (vmouse->state.r != rdown) {
-        LiSendMouseButtonEvent(rdown ? BUTTON_ACTION_PRESS : BUTTON_ACTION_RELEASE, BUTTON_RIGHT);
+        /* This fork: and a right press there, and its release, are nobody's; see input/touchpad_pointer.h. */
+        if (!touchpad_pointer_stream_press(&s_right_auroras, false, rdown)) {
+            LiSendMouseButtonEvent(rdown ? BUTTON_ACTION_PRESS : BUTTON_ACTION_RELEASE, BUTTON_RIGHT);
+        }
     }
     vmouse->state.l = ldown;
     vmouse->state.r = rdown;

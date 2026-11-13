@@ -791,6 +791,30 @@ bool touchpad_pointer_stream_tap(void) {
     return true;
 }
 
+bool touchpad_pointer_stream_right_tap(void) {
+    if (!stream_click_is_auroras()) {
+        return false;
+    }
+    s_stream_used_at = SDL_GetTicks();
+    tp_log("stream: a right tap on Aurora's button at %d,%d: the host not told", (int) s_px, (int) s_py);
+    return true;
+}
+
+/* The presses taken as a right button's (touchpad_pointer_stream_press): nobody's, and
+ * no press of Aurora's pointer, so their release lets go of nothing here. */
+#define RIGHT_TAKEN 8
+static bool *s_right_taken[RIGHT_TAKEN];
+
+static bool right_taken_drop(const bool *taken) {
+    for (int i = 0; i < RIGHT_TAKEN; ++i) {
+        if (s_right_taken[i] == taken) {
+            s_right_taken[i] = NULL;
+            return true;
+        }
+    }
+    return false;
+}
+
 bool touchpad_pointer_stream_press(bool *taken, bool left_button, bool down) {
     if (taken == NULL) {
         return false;
@@ -800,6 +824,10 @@ bool touchpad_pointer_stream_press(bool *taken, bool left_button, bool down) {
             return false;
         }
         *taken = false;
+        if (right_taken_drop(taken)) {
+            tp_log("stream: a right button let go on Aurora's button, the host not told");
+            return true;
+        }
         if (s_stream_holds > 0) {
             --s_stream_holds;
         }
@@ -811,7 +839,21 @@ bool touchpad_pointer_stream_press(bool *taken, bool left_button, bool down) {
     if (*taken) {
         touchpad_pointer_stream_press(taken, left_button, false);
     }
-    if (!left_button || !stream_click_is_auroras()) {
+    if (!stream_click_is_auroras()) {
+        return false;
+    }
+    if (!left_button) {
+        /* A right press: taken, and nothing pressed here (the header). */
+        for (int i = 0; i < RIGHT_TAKEN; ++i) {
+            if (s_right_taken[i] == NULL) {
+                s_right_taken[i] = taken;
+                *taken = true;
+                s_stream_used_at = SDL_GetTicks();
+                tp_log("stream: a right press on Aurora's button at %d,%d: the host not told", (int) s_px,
+                       (int) s_py);
+                return true;
+            }
+        }
         return false;
     }
     *taken = true;

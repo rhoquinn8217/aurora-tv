@@ -993,6 +993,8 @@ static void touchpad_send_mouse_click(int mouse_button) {
     }
     /* This fork: a tap on Aurora's own button clicks it, and the host is not told (input/touchpad_pointer.h). */
     if (mouse_button == BUTTON_LEFT && touchpad_pointer_stream_tap()) { return; }
+    /* This fork: and a two-finger tap's right click there is nobody's (input/touchpad_pointer.h). */
+    if (mouse_button == BUTTON_RIGHT && touchpad_pointer_stream_right_tap()) { return; }
     LiSendMouseButtonEvent(BUTTON_ACTION_PRESS, mouse_button);
     LiSendMouseButtonEvent(BUTTON_ACTION_RELEASE, mouse_button);
     window_select_after_click();   /* This fork: then Window Select's Alt let go (stream/input/window_select.h). */

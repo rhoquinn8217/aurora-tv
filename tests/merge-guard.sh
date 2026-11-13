@@ -576,6 +576,13 @@ need "the pinned stats' pin is one of Aurora's buttons over the stream" \
      src/app/ui/streaming/lock_numpad.c "{streaming_stats_pin_shown(), \"the stats' pin\"}"
 need "... found while the stats are pinned" \
      src/app/ui/streaming/streaming.controller.c "streaming_stats_pin_shown() {"
+# --- A right click on Aurora's button over the stream is nobody's (rhoquinn8217, 2026-11-13) ---
+# Losing either compiles, and a two-finger tap or a trigger's right click on Aurora's
+# button right-clicks the PC behind it.
+need "a two-finger tap's right click on Aurora's button is not the host's" \
+     src/app/stream/input/session_gamepad.c "if (mouse_button == BUTTON_RIGHT && touchpad_pointer_stream_right_tap()) { return; }"
+need "... nor a trigger's right press there" \
+     src/app/stream/input/session_virt_mouse.c "if (!touchpad_pointer_stream_press(&s_right_auroras, false, rdown)) {"
 # --- PS and the Xbox button to Windows, the list by a two-finger press or Share (rhoquinn8217, 2026-11-13) ---
 # Losing the first compiles, and a two-finger press right-clicks again; losing the second
 # compiles, and a bridged pad's PS button is held from the PC again.

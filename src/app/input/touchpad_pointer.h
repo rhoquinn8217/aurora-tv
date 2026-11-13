@@ -124,8 +124,15 @@ void touchpad_pointer_stream_hide(void);
  * `touchpad_pointer_stream_press`: the pad pressed in (`down`) or let go, the
  * press `left_button` or not. `taken` is the pad's own note of whether its
  * press was Aurora's, so its release goes the same way, and only its own.
- * True when the press or release was Aurora's. */
+ * True when the press or release was Aurora's.
+ * ⭐ A RIGHT CLICK ON AURORA'S BUTTON IS NOBODY'S (rhoquinn8217, 2026-11-13,
+ * "Yes" to right clicks on Aurora's buttons staying on the TV too): not the
+ * host's, behind the button, and no press of the button either. So
+ * `touchpad_pointer_stream_press` takes a right press there (`left_button`
+ * false) and its release, and `touchpad_pointer_stream_right_tap` a two-finger
+ * tap's right click: true when taken, false and the host is told as before. */
 bool touchpad_pointer_stream_tap(void);
+bool touchpad_pointer_stream_right_tap(void);
 bool touchpad_pointer_stream_press(bool *taken, bool left_button, bool down);
 
 #endif
