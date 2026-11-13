@@ -12,10 +12,12 @@
  * scrolls and drags as that pad's does. The two-finger press that shows or hides the
  * list is read by lock_keys.c itself, and the handling makes no right click of it.
  *
- * ⓘ SDL's own copy of a bridged pad's click, where SDL still reads the pad, is not the
- * mouse's meanwhile (bridged_touchpad_owns): the click would come twice.
- * ⓘ Not while Virtual Mouse lends a bridged pad's touchpad (input/bridge_override.h),
- * which reads it through SDL: the mouse would move twice.
+ * ⓘ SDL's own copy of a bridged pad's touches and click, where SDL still reads them, is
+ * not the mouse's meanwhile (bridged_touchpad_owns): they would come twice. That covers
+ * Virtual Mouse's lending of a bridged pad's touchpad (input/bridge_override.h), which
+ * is on under the controls, as the controls run Virtual Mouse for the sticks and
+ * triggers; it reads SDL's copy, and in Build 700 this stood aside for it, so nothing
+ * was handed over at all.
  * ⓘ A DS4's touch is not read by the core yet, and a pad the stream has no state for is
  * not handed anything: their touchpads stay as they were. */
 

@@ -10,7 +10,6 @@
 #include "app_settings.h"
 #include "input/app_input.h"
 #include "input/input_gamepad.h"
-#include "input/bridge_override.h"
 #include "stream/input/session_input.h"
 #if defined(TARGET_WEBOS)
 #include "ctm_bridge_glue.h"
@@ -181,8 +180,7 @@ static bool fingers_of(const ctm_bridge_touch_t *t, finger_t now[2]) {
 
 void bridged_touchpad_tick(stream_input_t *input, bool on) {
 #if defined(TARGET_WEBOS)
-    on = on && input != NULL && !input->view_only && input->touchpad_mode == TOUCHPAD_MODE_MOUSE &&
-         !bridge_override_vmouse_lends_touchpad(input);
+    on = on && input != NULL && !input->view_only && input->touchpad_mode == TOUCHPAD_MODE_MOUSE;
     bool seen[FED_SLOTS] = {false};
     if (on) {
         ctm_bridge_touch_t touches[FED_SLOTS];

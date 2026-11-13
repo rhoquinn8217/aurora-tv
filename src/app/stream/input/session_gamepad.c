@@ -458,6 +458,8 @@ void stream_input_handle_ctouchpad(stream_input_t *input, const SDL_ControllerTo
     if (!stream_input_gamepad_sends_moonlight(input, gamepad) && !bridge_override_vmouse_lends_touchpad(input) && !bridged_touchpad_feeding()) {
         return;
     }
+    /* This fork: a bridged pad's touches handed over from the core are its only ones, not SDL's copy (stream/input/bridged_touchpad.h). */
+    if (bridged_touchpad_owns(gamepad) && !bridged_touchpad_feeding()) { return; }
     /* This fork: a finger already down as the pad came back from a bridge stays off the stream until lifted (bridge_switch_hold.c). */
     if (bridge_switch_hold_skips_finger(gamepad, event->finger, event->type == SDL_CONTROLLERTOUCHPADUP)) {
         return;

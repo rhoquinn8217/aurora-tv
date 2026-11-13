@@ -564,8 +564,8 @@ need "a bridged pad's touchpad is handed to the mouse" \
      src/app/ctmbridge/app_sources.cmake "src/app/stream/input/bridged_touchpad.c"
 need "... its touches are taken by the stream's touchpad handling" \
      src/app/stream/input/session_gamepad.c "&& !bridged_touchpad_feeding()) {"
-need "... and SDL's copy of its click is not" \
-     src/app/stream/input/session_gamepad.c "if (bridged_touchpad_owns(gamepad) && !bridged_touchpad_feeding()) { return; }"
+need_count "... and SDL's copy of its touches and its click is not" \
+     src/app/stream/input/session_gamepad.c "if (bridged_touchpad_owns(gamepad) && !bridged_touchpad_feeding()) { return; }" 2
 need "... handed over every pass the controls are up" \
      src/app/stream/input/lock_keys.c "bridged_touchpad_tick(input, input != NULL && !interface_has_input);"
 need "... and let go when they are off" \
