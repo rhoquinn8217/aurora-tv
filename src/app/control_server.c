@@ -420,10 +420,19 @@ static void cmd_uac(control_job_t *job, const char *args)
 
 /* ⭐ DESKTOP MODE (ui/streaming/desktop_mode.h): its switch, what the controls are up
  * for now, and its list in the overlay. With `on` or `off`, switched as the overlay's
- * button does, its message included, and saved. */
+ * button does, its message included. With `start on` or `start off`, the Settings box
+ * that says whether it starts by itself at a stream's start, saved. */
 static void cmd_desktop(control_job_t *job, const char *args)
 {
-    if (args != NULL && (strcasecmp(args, "on") == 0 || strcasecmp(args, "off") == 0)) {
+    if (args != NULL && strncasecmp(args, "start ", 6) == 0 && app_configuration != NULL) {
+        const char *value = args + 6;
+        if (strcasecmp(value, "on") != 0 && strcasecmp(value, "off") != 0) {
+            reply(job, "ERR try start on or start off\n");
+            return;
+        }
+        app_configuration->bridge.desktop_mode_start = strcasecmp(value, "on") == 0;
+        settings_save(app_configuration);
+    } else if (args != NULL && (strcasecmp(args, "on") == 0 || strcasecmp(args, "off") == 0)) {
         const bool on = strcasecmp(args, "on") == 0;
         desktop_mode_set(on, "the control port");
         if (on) {
@@ -436,12 +445,14 @@ static void cmd_desktop(control_job_t *job, const char *args)
         /* Triangle's turn: the TV cursor off, or on with its alignment bar. */
         desktop_mode_cursor_toggle();
     } else if (args != NULL && args[0] != '\0') {
-        reply(job, "ERR try on, off, legend or cursor\n");
+        reply(job, "ERR try on, off, start on, start off, legend or cursor\n");
         return;
     }
     const lock_keys_mode_t mode = lock_keys_mode();
-    reply(job, "OK desktop=%s mode=%s vmouse_setting=%s list=%s legend=%s window_select=%s\n",
+    reply(job, "OK desktop=%s start=%s handover=%s mode=%s vmouse_setting=%s list=%s legend=%s window_select=%s\n",
           desktop_mode_on() ? "on" : "off",
+          app_configuration != NULL && app_configuration->bridge.desktop_mode_start ? "on" : "off",
+          desktop_mode_handing_over() ? "yes" : "no",
           mode == LOCK_KEYS_LOCK                ? "lock"
           : mode == LOCK_KEYS_PROMPT            ? "prompt"
           : mode == LOCK_KEYS_PROMPT_PASSWORD   ? "prompt-password"

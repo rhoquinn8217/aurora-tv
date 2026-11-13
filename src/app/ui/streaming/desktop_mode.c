@@ -2,15 +2,20 @@
 
 #include "desktop_mode.h"
 
+#include <SDL.h>
+
 #include "app.h"
 #include "logging.h"
 #include "stream/session.h"
+#include "stream/session_priv.h"
 #include "stream/input/lock_keys.h"
 #include "stream/input/session_input.h"
 #include "stream/input/session_virt_mouse.h"
+#include "input/touchpad_pointer.h"
 #include "input/tv_cursor.h"
 #include "ui/streaming/cursor_align.h"
 #if defined(TARGET_WEBOS)
+#include "ctm_bridge_glue.h"
 #include "input/ctm_bridge_gesture.h"
 #endif
 
@@ -20,13 +25,29 @@
 #define desktop_note(...) ((void) 0)
 #endif
 
+/* ⭐ HOW LONG A STREAM'S START WAITS FOR DS5-USBIP before Desktop Mode starts by itself
+ * (the header), from the moment the stream plays. Measured on the C1, 2026-11-12: a
+ * DS5-USBIP already running answered within 0.1 s, and one started with the stream
+ * after 8.6 to 15.7 s. Any shorter, and an ordinary game's start would start it too. */
+#define START_WAIT_MS 20000
+
 static const void *s_session;     /* the stream last seen, to tell a new one */
+/* ⭐ Desktop Mode, for this stream and a resume of it: not saved since 2026-11-12. */
+static bool s_on;
 /* The PS button has its list over the screen; hidden again at each stream and as it is
- * turned off (the header). */
+ * turned off (the header), and up as Desktop Mode starts by itself. */
 static bool s_legend;
+/* A stream's start waits for DS5-USBIP to say whether Desktop Mode starts by itself;
+ * the wait counts from the moment the stream plays. */
+static bool s_start_waiting;
+static Uint32 s_start_since;
+/* Switched by hand in this stream: it does not start by itself after that. */
+static bool s_by_hand;
+/* Being handed over to DS5-USBIP (input/auto_bridge.c). */
+static bool s_handover;
 
 bool desktop_mode_on(void) {
-    return app_configuration != NULL && app_configuration->bridge.desktop_mode;
+    return s_on;
 }
 
 bool desktop_mode_legend_shown(void) {
@@ -64,17 +85,14 @@ void desktop_mode_off_on_pad(void) {
     desktop_mode_set(false, "Options held 2 s on a controller");
 }
 
-void desktop_mode_set(bool on, const char *how) {
-    if (app_configuration == NULL) {
-        return;
-    }
-    const bool was = app_configuration->bridge.desktop_mode;
-    app_configuration->bridge.desktop_mode = on;
-    if (on) {
-        /* ⭐ Virtual Mouse goes off (the header). The stream's own too, unless a lock or a
-         * prompt has it lent out: Desktop Mode gives it back off when it ends either way
-         * (stream/input/lock_keys.c, lock_begin). ⓘ Even when it was on already: Settings'
-         * box writes the switch before its handler asks for this. */
+/* On or off, with how in the log. On also turns Virtual Mouse off. */
+static void set_mode(bool on, const char *how) {
+    if (on && app_configuration != NULL) {
+        /* ⭐ Virtual Mouse goes off (the header), and stays off: its switch is saved. The
+         * stream's own too, unless a lock or a prompt has it lent out: Desktop Mode
+         * gives it back off when it ends either way (stream/input/lock_keys.c,
+         * lock_begin). */
+        const bool vmouse_was = app_configuration->virtual_mouse;
         app_configuration->virtual_mouse = false;
         if (global != NULL && global->session != NULL && !lock_keys_active()) {
             stream_input_t *input = session_get_input(global->session);
@@ -82,16 +100,65 @@ void desktop_mode_set(bool on, const char *how) {
                 session_input_set_vmouse_active(&input->vmouse, false);
             }
         }
-    } else {
+        if (vmouse_was) {
+            settings_save(app_configuration);
+        }
+    }
+    if (!on) {
         /* Its list, turned off, starts hidden again. */
         s_legend = false;
     }
-    if (was == on) {
+    if (s_on == on) {
         return;
     }
-    settings_save(app_configuration);
+    s_on = on;
     commons_log_info("Desktop", "Desktop Mode %s (%s)", on ? "on" : "off", how != NULL ? how : "?");
     desktop_note("%s (%s)", on ? "on" : "off", how != NULL ? how : "?");
+}
+
+void desktop_mode_set(bool on, const char *how) {
+    s_by_hand = true;
+    set_mode(on, how);
+}
+
+void desktop_mode_handover_begin(void) {
+    s_handover = true;
+}
+
+bool desktop_mode_handing_over(void) {
+    return s_handover;
+}
+
+void desktop_mode_handover_end(const char *why) {
+    if (!s_handover) {
+        return;
+    }
+    s_handover = false;
+    set_mode(false, why);
+    /* The cursor above stops following the controller now: it goes at once. */
+    touchpad_pointer_stream_hide();
+}
+
+/* Is DS5-USBIP there to take the controllers: answering, and able to work with this
+ * app? ⓘ None on a desktop build, where nothing starts by itself. */
+static bool ds5usbip_on(void) {
+#if defined(TARGET_WEBOS)
+    if (!ctm_bridge_agent_probed() || !ctm_bridge_agent_online()) {
+        return false;
+    }
+    const ctm_bridge_compat_t compat = ctm_bridge_agent_compat();
+    return compat != CTM_BRIDGE_COMPAT_UPDATE_PC && compat != CTM_BRIDGE_COMPAT_UPDATE_TV;
+#else
+    return true;
+#endif
+}
+
+/* A resume: the host is running the very app this stream asked for (gs_start_app resumes
+ * it then). */
+static bool stream_is_resume(const app_t *app) {
+    const session_t *session = app->session;
+    return session != NULL && session->server != NULL && session->server->currentGame != 0 &&
+           session->server->currentGame == session->app_id;
 }
 
 void desktop_mode_tick(app_t *app) {
@@ -100,5 +167,42 @@ void desktop_mode_tick(app_t *app) {
         /* A stream started, resumed or ended: its list starts hidden ("5. hidden"). */
         s_session = session;
         s_legend = false;
+        s_handover = false;
+        s_start_waiting = false;
+        if (session != NULL && stream_is_resume(app)) {
+            desktop_note("a resume: %s, as it was", s_on ? "on" : "off");
+        } else if (session != NULL) {
+            /* ⭐ A STREAM'S START: Desktop Mode starts off, and may start by itself
+             * below (the header). */
+            set_mode(false, "a stream's start");
+            s_by_hand = false;
+            s_start_waiting = app_configuration != NULL && app_configuration->bridge.desktop_mode_start;
+            s_start_since = 0;
+        }
     }
+    if (!s_start_waiting || app == NULL || app->session == NULL) {
+        return;
+    }
+    if (s_by_hand || s_on) {
+        s_start_waiting = false;   /* switched by hand meanwhile */
+        return;
+    }
+    if (!session_is_streaming(app->session)) {
+        return;   /* the wait counts from the moment the stream plays */
+    }
+    const Uint32 now = SDL_GetTicks();
+    if (s_start_since == 0) {
+        s_start_since = now != 0 ? now : 1;
+    }
+    if (ds5usbip_on()) {
+        s_start_waiting = false;
+        desktop_note("DS5-USBIP answered %u ms into the stream: not started", (unsigned) (now - s_start_since));
+        return;
+    }
+    if ((Sint32) (now - s_start_since) < START_WAIT_MS) {
+        return;
+    }
+    s_start_waiting = false;
+    set_mode(true, "a stream's start, DS5-USBIP not on");
+    s_legend = true;
 }

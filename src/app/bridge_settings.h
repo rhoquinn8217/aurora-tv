@@ -50,13 +50,16 @@ typedef struct bridge_settings_t {
     bool lock_rebinds;
     bool uac_rebinds;
 
-    /* ⭐ DESKTOP MODE (rhoquinn8217, 2026-11-11): the User Account Control rebinds
-     * on every controller, bridged ones too, by hand, until it is turned off
-     * (stream/input/lock_keys.h, ui/streaming/desktop_mode.h). OFF by default, at
-     * their word: on, it would take every controller away from games. Works
-     * without DS5-USBIP, so it is the way through the first sign-in after a
-     * restart. Not tied to `enable`. */
-    bool desktop_mode;
+    /* ⭐ DESKTOP MODE STARTS BY ITSELF AT A STREAM'S START WITHOUT DS5-USBIP
+     * (rhoquinn8217, 2026-11-12: "on a Stream Start(not a resume) if DS5-USBIP is
+     * not on, Desktop Mode starts automatically with legend up. The settings in
+     * the USB Bridge settings should not be whether it is on or off rather whether
+     * Desktop Mode starts or not on stream start"). Desktop Mode itself is no
+     * longer saved (ui/streaming/desktop_mode.h). On by default, as every feature
+     * is: it starts only where nothing else can drive the PC. Not tied to
+     * `enable`. ⓘ Until 2026-11-12 this was `desktop_mode`, the saved switch,
+     * off by default; its line in an old file is read and ignored. */
+    bool desktop_mode_start;
 
     /* ⭐ THE SIGNALS AND THE MICROPHONE. All on for now.
      *

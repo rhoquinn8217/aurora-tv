@@ -13,6 +13,8 @@
 #include "ctm_bridge_gesture.h"
 #include "bridge_request.h"
 #include "app.h"
+#include "ui/streaming/bridge_prompt.h"
+#include "ui/streaming/desktop_mode.h"
 
 /* ⭐⭐ THE MATCHING LIVES HERE, NOT IN THE GLUE, AND THAT IS DELIBERATE.
  *
@@ -345,6 +347,91 @@ void auto_bridge_set_ticked(bridge_settings_t *s, const ctm_bridge_dev_t *devs, 
     bridge_settings_set_auto_macs(s, out);
 }
 
+/* ------------------------------------- Desktop Mode handed over to DS5-USBIP -- */
+
+/* ⭐⭐ DESKTOP MODE HANDED OVER TO DS5-USBIP (rhoquinn8217, 2026-11-12: "if the stream
+ * starts and DS5-USBIP is not on, Desktop Mode starts however, when DS5-USBIP is started
+ * and auto bridge triggers even if there is nothing to auto bridge, Desktop Mode turns
+ * off", and "when desktop mode is on it transitions to DS5-USBIP with the same button
+ * rebinds"; ui/streaming/desktop_mode.h). DS5-USBIP coming up during the stream with
+ * Desktop Mode on -- the stream's start's run below, or what it dropped bridged again --
+ * begins it: the bridges asked for then carry "desktop_link=1" (the core's
+ * g_desktop_link_ask), and DS5-USBIP links each to default_windows_config, its config
+ * with Desktop Mode's rebinds, for that bridge alone. Desktop Mode stays on, holding
+ * them at rest from the PC as it does any bridged controller, until they are made; then
+ * it turns off without a word, and the controllers go on as they were, DS5-USBIP's now.
+ * ⓘ Not for a device that connects later in the stream: DS5-USBIP coming up is what
+ * hands it over, not a device. */
+#define AB_HANDOVER_MAX       8
+#define AB_HANDOVER_MS    15000   /* the longest its bridges are waited for */
+#define AB_HANDOVER_LOOK_MS 250   /* how often it looks whether they are made */
+
+static bool s_handover;
+static uint32_t s_handover_since;
+static uint32_t s_handover_looked;
+static char s_handover_nodes[AB_HANDOVER_MAX][64];
+static int s_handover_count;
+
+/* Begun, when Desktop Mode is on. */
+static void ab_handover_begin(uint32_t now, const char *when)
+{
+    if (s_handover || !desktop_mode_on()) {
+        return;
+    }
+    s_handover = true;
+    s_handover_since = now;
+    s_handover_looked = now;
+    s_handover_count = 0;
+    ctm_bridge_set_desktop_link(true);
+    desktop_mode_handover_begin();
+    ctm_bridge_gesture_note("auto bridge: %s with Desktop Mode on -- its bridges ask DS5-USBIP for "
+                            "default_windows_config, and Desktop Mode turns off once they are made", when);
+}
+
+/* A bridge asked for while it is begun, to be waited for. */
+static void ab_handover_asked(const ctm_bridge_dev_t *d)
+{
+    if (s_handover && s_handover_count < AB_HANDOVER_MAX && d != NULL && d->node[0] != '\0') {
+        snprintf(s_handover_nodes[s_handover_count++], sizeof s_handover_nodes[0], "%s", d->node);
+    }
+}
+
+/* Over: no more asking, and Desktop Mode off. */
+static void ab_handover_end(const char *why)
+{
+    if (!s_handover) {
+        return;
+    }
+    s_handover = false;
+    ctm_bridge_set_desktop_link(false);
+    ctm_bridge_gesture_note("auto bridge: Desktop Mode handed over to DS5-USBIP (%s)", why);
+    desktop_mode_handover_end("handed over to DS5-USBIP");
+}
+
+/* Once a pass: over once every bridge it asked for is made, or after AB_HANDOVER_MS
+ * whatever became of them. ⓘ Not while what DS5-USBIP dropped is still being taken back:
+ * more of it may be asked for. */
+static void ab_handover_tick(uint32_t now)
+{
+    if (!s_handover) {
+        return;
+    }
+    if (now - s_handover_since >= AB_HANDOVER_MS) {
+        ab_handover_end("its bridges were waited for 15 s");
+        return;
+    }
+    if (ctm_bridge_lost_pending() || now - s_handover_looked < AB_HANDOVER_LOOK_MS) {
+        return;
+    }
+    s_handover_looked = now;
+    for (int i = 0; i < s_handover_count; ++i) {
+        if (!ctm_bridge_node_is_plugged(s_handover_nodes[i])) {
+            return;
+        }
+    }
+    ab_handover_end(s_handover_count > 0 ? "its bridges are made" : "nothing to bridge");
+}
+
 int auto_bridge_run(const bridge_settings_t *s)
 {
     if (s == NULL) {
@@ -386,6 +473,7 @@ int auto_bridge_run(const bridge_settings_t *s)
              * bridge_request_device(), rather than a copy of the panel's
              * decision kept here. */
             (void) bridge_request_device(d);
+            ab_handover_asked(d);
             asked++;
         }
     }
@@ -638,6 +726,7 @@ static bool ab_take_back(uint32_t waited)
         (void) ctm_bridge_lost_take(d);
         ctm_bridge_gesture_note("auto bridge: DS5-USBIP answers again -- bridging %s %s again", d->name, d->node);
         (void) bridge_request_device(d);
+        ab_handover_asked(d);
         asked++;
     }
     if (!again) {
@@ -664,6 +753,7 @@ void auto_bridge_poll(bool streaming)
             ab_forget();
             ctm_bridge_lost_forget();   /* a bridge never outlives its stream */
         }
+        ab_handover_end("the stream ended");
         s_streaming = false;
         s_start_since = 0;
         s_lost_since = 0;
@@ -676,6 +766,7 @@ void auto_bridge_poll(bool streaming)
     }
     s_streaming = true;
     const uint32_t now = SDL_GetTicks();
+    ab_handover_tick(now);
 
     /* ⭐ 1. THE STREAM'S START: every ticked device, once DS5-USBIP answers.
      *
@@ -709,6 +800,7 @@ void auto_bridge_poll(bool streaming)
         const uint32_t waited = now - s_start_since;
         s_start_since = 0;
         ab_forget();   /* what connected meanwhile, this run takes */
+        ab_handover_begin(now, "DS5-USBIP answered at the stream's start");
         const int n = auto_bridge_run(&app_configuration->bridge);
         ctm_bridge_gesture_note("auto bridge at the stream's start: asked for %d part(s), DS5-USBIP "
                                 "answered after %u ms", n, (unsigned) waited);
@@ -731,10 +823,14 @@ void auto_bridge_poll(bool streaming)
             s_lost_looked = 0;
             ctm_bridge_gesture_note("auto bridge: DS5-USBIP stopped answering -- what it held bridges again once "
                                     "it answers");
+            /* ⭐ And said on the screen (ui/streaming/bridge_prompt.h): "it should be
+             * noticed". */
+            bridge_prompt_say_ds5usbip_stopped();
         }
         if (now - s_lost_since >= AB_LOST_SETTLE_MS && now - s_lost_looked >= AB_RECHECK_MS &&
             ab_listener_ready(now, now - s_lost_since < AB_START_ASK_MS)) {
             s_lost_looked = now;
+            ab_handover_begin(now, "DS5-USBIP answered again");
             if (!ab_take_back(now - s_lost_since)) {
                 s_lost_since = 0;
             }

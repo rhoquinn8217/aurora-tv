@@ -769,6 +769,16 @@ bool touchpad_pointer_stream_stick(stream_input_t *input, float dx_px, float dy_
     return stream_move_by(input, dx_px, dy_px, "right stick");
 }
 
+void touchpad_pointer_stream_hide(void) {
+    if (s_stream_shown) {
+        s_stream_shown = false;
+        show(false);
+        tp_log("stream: the cursor above goes at once, Desktop Mode handed over");
+    }
+    /* webOS's own pointer is no longer the controller's either: it goes by itself. */
+    s_warp_used_at = 0;
+}
+
 bool touchpad_pointer_stream_tap(void) {
     if (!stream_click_is_auroras()) {
         return false;

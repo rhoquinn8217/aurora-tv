@@ -12,12 +12,35 @@
  * Desktop mode is cleaner." It needs nothing from DS5-USBIP, which is not running at the
  * first sign-in after a restart.
  *
+ * ⭐⭐ WHAT IT IS FOR, SINCE 2026-11-12 (rhoquinn8217): "The common case is that the
+ * stream starts and the user relies solely on DS5-USBIP to manage controller rebinds.
+ * Desktop mode has the following purpose for existing: backup for when DS5-USBIP can't
+ * work, crashes or closes and the user need these basic rebinds to control the PC most
+ * likely to turn DS5-USBIP back on; the user doesn't want to use DS5-USBIP; edge cases
+ * like use in full screen games." And the one place to look is whether DS5-USBIP is on:
+ * on, the bridged controllers are its; off, Desktop Mode or plain controllers.
+ *   - IT STARTS BY ITSELF at a stream's start, not a resume, when DS5-USBIP has not
+ *     answered 20 s after the stream plays, with its list over the screen ("on a Stream
+ *     Start(not a resume) if DS5-USBIP is not on, Desktop Mode starts automatically
+ *     with legend up"). Settings > USB Bridge says whether it does
+ *     (bridge_settings.h, desktop_mode_start, on by default). It is not saved: every
+ *     stream's start begins with it off, and a resume keeps it as it was.
+ *   - ⭐ IT HANDS OVER TO DS5-USBIP when DS5-USBIP comes up during the stream and Auto
+ *     Bridge runs, at the stream's start or as DS5-USBIP comes back, "even if there is
+ *     nothing to auto bridge" (input/auto_bridge.c): its bridges ask DS5-USBIP for
+ *     default_windows_config, its config with these same rebinds ("The transition
+ *     between aurora-tv managing controllers and DS5-USBIP managing controllers needs
+ *     to be seemless"), and once they are made it turns off without a word. Its
+ *     warning at a bridge is not raised meanwhile. ⓘ A DS5-USBIP that does not know
+ *     the request links each bridge as usual.
+ *   - Turned on by hand with DS5-USBIP on, "the case I allow but it is rare", it takes
+ *     the bridged controllers too, and says so (below).
+ *
  * WHERE IT IS TURNED ON AND OFF: the overlay's Desktop Mode button, which took the place
- * of Full keyboard and Virtual Mouse (ui/streaming/bridge_overlay.c); Settings > USB
- * Bridge; Options held on a controller (below); and the two pop-ups
- * (ui/streaming/bridge_prompt.h): its warning when a controller is bridged with it on,
- * and a refusal with DS5-USBIP offline, which offers to turn it on. Saved at once, off
- * by default (bridge_settings.h).
+ * of Full keyboard and Virtual Mouse (ui/streaming/bridge_overlay.c); Options held on a
+ * controller (below); the two pop-ups (ui/streaming/bridge_prompt.h): its warning when
+ * a controller is bridged with it on, and a refusal with DS5-USBIP offline, which offers
+ * to turn it on; and by itself, as above.
  *   - Turned on in a stream with DS5-USBIP answering, it says "Warning: DS5-USBIP
  *     configs are disabled when Desktop Mode is on." for four seconds (rhoquinn8217,
  *     2026-11-12: "Whenever Desktop Mode is turned on and DS5-USBIP is on").
@@ -34,15 +57,25 @@
 
 typedef struct app_t app_t;
 
-/* Is it switched on (saved)? */
+/* Is it on, in this stream? */
 bool desktop_mode_on(void);
 
-/* Switched on or off, saved, with how in the log. On also turns Virtual Mouse off. Says
- * nothing on the screen: the caller says it (bridge_prompt_say_desktop_on). */
+/* Switched on or off BY HAND, with how in the log: it no longer starts by itself in this
+ * stream. On also turns Virtual Mouse off. Says nothing on the screen: the caller says
+ * it (bridge_prompt_say_desktop_on). */
 void desktop_mode_set(bool on, const char *how);
 
-/* Once a pass of the app's loop: its list hidden again at each stream. */
+/* Once a pass of the app's loop: its list hidden again at each stream, off at each
+ * stream's start, and started by itself when DS5-USBIP is not on (the header). */
 void desktop_mode_tick(app_t *app);
+
+/* ⭐ THE HANDOVER TO DS5-USBIP (the header), run by input/auto_bridge.c: begun as its
+ * bridges go out asking for default_windows_config, and ended once they are made, which
+ * turns Desktop Mode off and the cursor above away. `handing_over`: its warning at a
+ * bridge is not raised meanwhile (ui/streaming/bridge_prompt.c). */
+void desktop_mode_handover_begin(void);
+bool desktop_mode_handing_over(void);
+void desktop_mode_handover_end(const char *why);
 
 /* ⭐ ITS LIST OVER THE SCREEN, BY THE PS BUTTON (rhoquinn8217, 2026-11-11: "Show the
  * legend over the screen", on Triangle first, then "Rebind the PS button to to the

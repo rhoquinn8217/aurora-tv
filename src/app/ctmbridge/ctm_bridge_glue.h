@@ -152,6 +152,12 @@ bool ctm_bridge_agent_online(void);
  * takes no new bridge while it is. False when it has not said, or is offline. */
 bool ctm_bridge_agent_locked(void);
 
+/* ⭐ DESKTOP MODE HANDED OVER TO DS5-USBIP (rhoquinn8217, 2026-11-12;
+ * ui/streaming/desktop_mode.h): while on, each bridge asks DS5-USBIP for its desktop
+ * config, default_windows_config, for that bridge alone ("desktop_link=1", the core's
+ * g_desktop_link_ask). Off by default. */
+void ctm_bridge_set_desktop_link(bool on);
+
 /* ⭐ A User Account Control prompt up on the PC, and its kind, as DS5-USBIP last
  * said (rhoquinn8217, 2026-11-09: "insure that the controller will be able to
  * answer any UAC prompt in any case"). None when it has not said, is offline or

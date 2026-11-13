@@ -24,7 +24,16 @@
  *
  *     Bridge a device to use DS5-USBIP
  *
- * from the overlay's DS5-USBIP button with nothing bridged.
+ * from the overlay's DS5-USBIP button with nothing bridged. ⭐ And a third since later
+ * that day (rhoquinn8217: "The event where DS5-USBIP crashes or turns off is a notable
+ * one that shouldn't seemless rather it should be noticed", then "1. Yes", in my
+ * wording of theirs):
+ *
+ *     DS5-USBIP has stopped. All bridged devices have been released.
+ *
+ * when DS5-USBIP stops answering during a stream with devices bridged. ⓘ Desktop Mode's
+ * warning at a bridge is not raised while Desktop Mode is being handed over to
+ * DS5-USBIP (ui/streaming/desktop_mode.h): those bridges are the handover.
  * ⓘ Gone then: Virtual Mouse's warning at a bridge (Desktop Mode turns it off, and it is
  * being phased out), the TV cursor's at a bridged mouse, Desktop Mode's questions at a
  * stream's start, a refusal at a locked Windows (its lock list says devices bridge after
@@ -93,6 +102,10 @@ void bridge_prompt_note_bridge_refused(bool locked);
 /* Desktop Mode was just turned on: its message (above), with DS5-USBIP answering.
  * Nothing outside a stream or while a pop-up is up. */
 void bridge_prompt_say_desktop_on(void);
+
+/* DS5-USBIP stopped answering with devices bridged, which are released: the third
+ * message (above). Nothing outside a stream or while a pop-up is up. */
+void bridge_prompt_say_ds5usbip_stopped(void);
 
 /* For the control port: the pop-up's words, "" when it is not up. */
 const char *bridge_prompt_words(void);

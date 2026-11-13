@@ -1674,6 +1674,11 @@ bool ctm_bridge_agent_locked(void)
     return g_agent_locked != 0;
 }
 
+void ctm_bridge_set_desktop_link(bool on)
+{
+    g_desktop_link_ask = on ? 1 : 0;
+}
+
 /* ⓘ The core's kinds, in the same order. */
 _Static_assert((int) CTM_BRIDGE_UAC_NONE == PROTOCOL_UAC_NONE &&
                (int) CTM_BRIDGE_UAC_CONSENT == PROTOCOL_UAC_CONSENT &&

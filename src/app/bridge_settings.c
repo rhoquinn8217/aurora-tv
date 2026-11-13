@@ -28,7 +28,7 @@ void bridge_settings_defaults(bridge_settings_t *settings) {
     settings->touchpad_pointer = true;
     settings->lock_rebinds = true;
     settings->uac_rebinds = true;
-    settings->desktop_mode = false;
+    settings->desktop_mode_start = true;
     settings->signal_light = true;
     settings->signal_rumble = true;
     settings->signal_tone = true;
@@ -51,7 +51,7 @@ void bridge_settings_write(FILE *fp, const bridge_settings_t *settings) {
     ini_write_bool(fp, "bridge_touchpad_pointer", settings->touchpad_pointer);
     ini_write_bool(fp, "bridge_lock_rebinds", settings->lock_rebinds);
     ini_write_bool(fp, "bridge_uac_rebinds", settings->uac_rebinds);
-    ini_write_bool(fp, "bridge_desktop_mode", settings->desktop_mode);
+    ini_write_bool(fp, "bridge_desktop_mode_start", settings->desktop_mode_start);
     ini_write_bool(fp, "bridge_signal_light", settings->signal_light);
     ini_write_bool(fp, "bridge_signal_rumble", settings->signal_rumble);
     ini_write_bool(fp, "bridge_signal_tone", settings->signal_tone);
@@ -84,8 +84,11 @@ bool bridge_settings_parse(bridge_settings_t *settings, const char *name, const 
         settings->lock_rebinds = INI_IS_TRUE(value);
     } else if (INI_NAME_MATCH("bridge_uac_rebinds")) {
         settings->uac_rebinds = INI_IS_TRUE(value);
+    } else if (INI_NAME_MATCH("bridge_desktop_mode_start")) {
+        settings->desktop_mode_start = INI_IS_TRUE(value);
     } else if (INI_NAME_MATCH("bridge_desktop_mode")) {
-        settings->desktop_mode = INI_IS_TRUE(value);
+        /* ⓘ Desktop Mode's old saved switch (bridge_settings.h): read and ignored, so
+         * an old file does not warn and a stream does not start in it. */
     } else if (INI_NAME_MATCH("bridge_signal_light")) {
         settings->signal_light = INI_IS_TRUE(value);
     } else if (INI_NAME_MATCH("bridge_signal_rumble")) {

@@ -134,7 +134,7 @@ static bool mode_takes_all(lock_keys_mode_t mode) {
 }
 
 static bool desktop_mode_wanted(void) {
-    return app_configuration != NULL && app_configuration->bridge.desktop_mode;
+    return desktop_mode_on();
 }
 
 bool lock_keys_active(void) {

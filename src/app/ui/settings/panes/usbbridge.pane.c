@@ -133,14 +133,6 @@ static void usbb_auto_open_cb(lv_event_t *e)
     auto_bridge_window_open();
 }
 
-/* Desktop Mode's box, after it has written the switch: on, it turns Virtual Mouse off
- * as well (ui/streaming/desktop_mode.h). */
-static void usbb_desktop_changed(lv_event_t *e)
-{
-    lv_obj_t *box = lv_event_get_current_target(e);
-    desktop_mode_set(lv_obj_has_state(box, LV_STATE_CHECKED), "Settings");
-}
-
 #endif /* TARGET_WEBOS */
 
 static void pane_ctor(lv_fragment_t *self, void *args) {
@@ -272,18 +264,19 @@ static lv_obj_t *create_obj(lv_fragment_t *self, lv_obj_t *container) {
     /* ⭐ DESKTOP MODE (rhoquinn8217, 2026-11-11: "Desktop mode's toggle can be found in
      * the USB Settings"; ui/streaming/desktop_mode.h), in a section of its own above the
      * Windows State Rebind Overrides: it needs no DS5-USBIP, which their disclaimer says
-     * those do. With their warning, in the words of the message shown over a stream as
-     * it goes on (ui/streaming/bridge_prompt.h; rhoquinn8217, 2026-11-12: "yes, match
-     * it"). A plain box: it runs with bridging off. Its handler turns Virtual Mouse off
-     * as it goes on. */
+     * those do. ⭐ Since 2026-11-12 the box says whether it starts by itself at a
+     * stream's start without DS5-USBIP, not whether it is on ("The settings in the USB
+     * Bridge settings should not be whether it is on or off rather whether Desktop Mode
+     * starts or not on stream start"); it is turned on and off in the overlay. On by
+     * default. A plain box: it runs with bridging off. Its warning went with the switch:
+     * it starts only where DS5-USBIP is not on. */
     pref_title_label(view, locstr("Desktop Mode"));
-    lv_obj_t *desktop = pref_checkbox(view, locstr("Enable Desktop Mode"), &app_configuration->bridge.desktop_mode,
-                                      false);
-    lv_obj_add_event_cb(desktop, usbb_desktop_changed, LV_EVENT_VALUE_CHANGED, NULL);
+    pref_checkbox(view, locstr("Start Desktop Mode at stream start"), &app_configuration->bridge.desktop_mode_start,
+                  false);
+    pref_desc_label(view, locstr("When DS5-USBIP is not on."), false);
     pref_desc_label(view, locstr(
             "Controllers work the Windows desktop with the rebinds in its legend, shown in the streaming "
             "overlay, until it is turned off. Works without DS5-USBIP. Turns off Virtual Mouse."), false);
-    pref_desc_label(view, locstr("Warning: DS5-USBIP configs are disabled when Desktop Mode is on."), false);
     usbb_gap(view);
 
     /* ⭐ THE WINDOWS STATE REBIND OVERRIDES, in their words (rhoquinn8217,

@@ -93,8 +93,9 @@
  *
  * ⭐⭐ AND DESKTOP MODE, BY HAND, UNTIL IT IS TURNED OFF (rhoquinn8217, 2026-11-11:
  * "Desktop Mode rebinds the controller on the TV side using the same rebinds as the
- * UAC mode but it persists until you turn it off"). A saved switch (bridge_settings.h,
- * desktop_mode), turned on and off in the overlay, in Settings or from a pop-up
+ * UAC mode but it persists until you turn it off"). A switch for the stream, turned on
+ * and off in the overlay or from a pop-up, and since 2026-11-12 started by itself at a
+ * stream's start without DS5-USBIP and handed over to it when it comes up
  * (ui/streaming/desktop_mode.h). The prompt's controls, on every controller, bridged
  * ones too ("doesn't mean you wouldn't want to use Desktop Mode over a config"), their
  * reports held at rest from the PC. Needs nothing from DS5-USBIP, so it is the way

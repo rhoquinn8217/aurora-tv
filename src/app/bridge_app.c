@@ -267,9 +267,9 @@ void bridge_app_events(app_t *app) {
      * (stream/input/lock_keys.h). ⓘ Before Auto Bridge below and the touchpad's tick:
      * at the unlock Virtual Mouse is back as it was before either reads it. */
     lock_keys_tick(app);
-    /* ⭐ Desktop Mode's questions as a stream starts, and when DS5-USBIP comes online
-     * (ui/streaming/desktop_mode.h). ⓘ Before Auto Bridge below, whose message about a
-     * DS5-USBIP not answering waits while a question is up. */
+    /* ⭐ Desktop Mode off at a stream's start, and started by itself when DS5-USBIP is
+     * not on (ui/streaming/desktop_mode.h). ⓘ Before Auto Bridge below, which hands it
+     * over to DS5-USBIP when DS5-USBIP comes up. */
     desktop_mode_tick(app);
     /* ⛔⛔ streaming_overlay_shown(), NOT app_ui_is_opened(). Third attempt, and
      * this one has evidence rather than reasoning behind it.

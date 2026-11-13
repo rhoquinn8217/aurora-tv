@@ -504,6 +504,12 @@ void bridge_prompt_request(void) {
         commons_log_info("Streaming", "bridge prompt: Desktop Mode is off, nothing to warn of");
         return;
     }
+    /* ⓘ Not while Desktop Mode is being handed over to DS5-USBIP (desktop_mode.h): this
+     * bridge is the handover, and Desktop Mode turns off once it is made. */
+    if (desktop_mode_handing_over()) {
+        commons_log_info("Streaming", "bridge prompt: Desktop Mode is being handed over to DS5-USBIP, no warning");
+        return;
+    }
     /* ⓘ Not while a lock's or a User Account Control prompt's list has the controls
      * (rhoquinn8217, 2026-11-10, "yes" to skipping the pop-up then): they come before
      * Desktop Mode, and the pop-up only hid their list. */
@@ -528,6 +534,14 @@ void bridge_prompt_say_desktop_on(void) {
         return;
     }
     say_desktop_on(NULL);
+}
+
+void bridge_prompt_say_ds5usbip_stopped(void) {
+    if (global == NULL || global->session == NULL) {
+        return;
+    }
+    commons_log_info("Streaming", "bridge prompt: DS5-USBIP stopped, its devices released");
+    bridge_prompt_note(locstr("DS5-USBIP has stopped. All bridged devices have been released."));
 }
 
 bool bridge_prompt_shown(void) {
