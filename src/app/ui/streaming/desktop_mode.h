@@ -20,7 +20,7 @@
  * like use in full screen games." And the one place to look is whether DS5-USBIP is on:
  * on, the bridged controllers are its; off, Desktop Mode or plain controllers.
  *   - IT STARTS BY ITSELF at a stream's start, not a resume, when DS5-USBIP has not
- *     answered 20 s after the stream plays, with its list over the screen ("on a Stream
+ *     answered 3 s after the stream plays, with its list over the screen ("on a Stream
  *     Start(not a resume) if DS5-USBIP is not on, Desktop Mode starts automatically
  *     with legend up"). Settings > USB Bridge says whether it does
  *     (bridge_settings.h, desktop_mode_start, on by default). It is not saved: every

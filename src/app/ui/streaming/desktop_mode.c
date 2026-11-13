@@ -26,10 +26,16 @@
 #endif
 
 /* ⭐ HOW LONG A STREAM'S START WAITS FOR DS5-USBIP before Desktop Mode starts by itself
- * (the header), from the moment the stream plays. Measured on the C1, 2026-11-12: a
- * DS5-USBIP already running answered within 0.1 s, and one started with the stream
- * after 8.6 to 15.7 s. Any shorter, and an ordinary game's start would start it too. */
-#define START_WAIT_MS 20000
+ * (the header), from the moment the stream plays: three seconds (rhoquinn8217,
+ * 2026-11-12: "lets play it by ear and do a 3 second wait. If there is no response for
+ * 3 seconds turn on Desktop Mode."). The PC that streams answers only through
+ * DS5-USBIP, so no answer at all is the sign-in after a restart, which this is for.
+ * ⓘ Measured on the C1 the same day: a DS5-USBIP already running answered within
+ * 0.1 s, and ones just opened (by the stream's start or after an install) after 8.6 to
+ * 15.7 s. Such a start now turns Desktop Mode on and hands it over a few seconds later.
+ * ➡️ The log says how long DS5-USBIP took at every stream's start ("DS5-USBIP
+ * answered N ms into the stream"): read it before changing this. */
+#define START_WAIT_MS 3000
 
 static const void *s_session;     /* the stream last seen, to tell a new one */
 /* ⭐ Desktop Mode, for this stream and a resume of it: not saved since 2026-11-12. */
