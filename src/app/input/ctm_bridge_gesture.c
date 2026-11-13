@@ -2548,6 +2548,9 @@ void ctm_bridge_gesture_tick(struct app_input_t *input, struct session_t *sessio
     {
         const bool prompt = lock_keys_holds_bridged();
         const bool held = (overlay_open || prompt) && session != NULL;
+        /* ⭐ The PS button still goes to the PC while the hold is the TV's own controls',
+         * not the overlay's (ctm_bridge_glue.h, ctm_bridge_set_home_passes). */
+        ctm_bridge_set_home_passes(held && prompt && !overlay_open);
         static int s_last = -1;
         if ((int) held != s_last) {
             s_last = (int) held;

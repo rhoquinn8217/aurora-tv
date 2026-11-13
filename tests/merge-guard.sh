@@ -555,6 +555,13 @@ need "... the last finger lifted lets it go" \
      src/app/stream/input/session_gamepad.c "touchpad_drag_lock_finger_up(state, state->active_fingers);"
 need "... and the touchpad's reset lets it go" \
      src/app/stream/input/session_gamepad.c "touchpad_drag_lock_drop(state);"
+# --- PS and the Xbox button to Windows, the list by a two-finger press or Share (rhoquinn8217, 2026-11-13) ---
+# Losing the first compiles, and a two-finger press right-clicks again; losing the second
+# compiles, and a bridged pad's PS button is held from the PC again.
+need "a two-finger press is the list's at a lock, a prompt and in Desktop Mode, never a right click" \
+     src/app/stream/input/session_gamepad.c "if (two_finger_press && lock_keys_active())"
+need "the PS button goes through the bridge's hold while the TV's own controls hold the pads" \
+     src/app/input/ctm_bridge_gesture.c "ctm_bridge_set_home_passes(held && prompt && !overlay_open);"
 need "the numpad is built" \
      src/app/ctmbridge/app_sources.cmake "src/app/ui/streaming/lock_numpad.c"
 need "the keyboard's place is built" \

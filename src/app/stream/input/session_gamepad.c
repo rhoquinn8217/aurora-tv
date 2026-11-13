@@ -252,6 +252,8 @@ void stream_input_handle_cbutton(stream_input_t *input, const SDL_ControllerButt
                         bool two_finger_press = state->active_fingers == 0x3u;
                         /* This fork: two fingers pressed are the bridge gesture while Virtual Mouse lends the touchpad (input/bridge_override.h). */
                         if (two_finger_press && bridge_override_two_finger_press_is_gesture(input)) { state->physical_mouse_button = -1; touchpad_begin_settling(state); return; }
+                        /* This fork: at a lock, a prompt and in Desktop Mode a two-finger press shows or hides the list, never a right click (stream/input/lock_keys.h). */
+                        if (two_finger_press && lock_keys_active()) { state->physical_mouse_button = -1; touchpad_begin_settling(state); return; }
                         if (two_finger_press || touchpad_lower_right_press(state)) {
                             mouse_button = BUTTON_RIGHT;
                         }

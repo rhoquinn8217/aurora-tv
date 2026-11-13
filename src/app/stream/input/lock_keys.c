@@ -70,7 +70,7 @@ typedef enum {
     LOCK_ACT_ANSWER_CANCEL,
     LOCK_ACT_WINDOW_BACK,   /* L1: Window Select, back */
     LOCK_ACT_WINDOW_NEXT,   /* R1: Window Select, forward */
-    LOCK_ACT_LEGEND,        /* PS: the list over the screen, or hidden */
+    LOCK_ACT_LEGEND,        /* an Xbox pad's Share button: the list over the screen, or hidden */
     LOCK_ACT_CURSOR,        /* L3: the TV cursor on, with its alignment, or off */
     LOCK_ACT_LET_GO,        /* any other button: Window Select's Alt let go */
 } lock_act_t;
@@ -92,6 +92,7 @@ typedef struct {
     uint32_t down;   /* what has gone down since this began and not come up */
     uint32_t options_since;  /* when Options went down alone, held since; 0 if not */
     bool chord;      /* the chord was made: nothing acts until it is let go */
+    uint32_t two_since;  /* a two-finger press on its touchpad began then; 0 if not */
     lock_press_t queue[LOCK_QUEUE];
     int queued;
 } lock_pad_t;
@@ -459,9 +460,10 @@ static lock_act_t action_for(uint8_t what, bool numpad_open, short *key) {
                 break;
             case SDL_CONTROLLER_BUTTON_B:
                 return LOCK_ACT_NUMPAD_CLOSE;
-            case SDL_CONTROLLER_BUTTON_GUIDE:
-                /* The PS button hides the numpad's list as well; its keys still type. */
-                return LOCK_ACT_LEGEND;
+            case SDL_CONTROLLER_BUTTON_MISC1:
+                /* An Xbox pad's Share button hides the numpad's list as well; its keys
+                 * still type. */
+                return pad_family_current() == PAD_FAMILY_XBOX ? LOCK_ACT_LEGEND : LOCK_ACT_NONE;
             default:
                 return LOCK_ACT_NONE;
         }
@@ -509,10 +511,14 @@ static lock_act_t action_for(uint8_t what, bool numpad_open, short *key) {
             /* L3 the TV cursor: off, or on with its alignment bar up ("Lets move the
              * cursor->alignment button to L3"; ui/streaming/desktop_mode.h). */
             return LOCK_ACT_CURSOR;
-        case SDL_CONTROLLER_BUTTON_GUIDE:
-            /* The PS button the list, over the screen or hidden ("PS button sould be the
-             * legend button"; lock_keys_list_toggle). */
-            return LOCK_ACT_LEGEND;
+        case SDL_CONTROLLER_BUTTON_MISC1:
+            /* ⭐ An Xbox pad's Share button the list, over the screen or hidden
+             * (rhoquinn8217, 2026-11-13: "xbox share button in brings up the legend";
+             * lock_keys_list_toggle); a DualSense's is its two-finger press
+             * (two_press_tick). A DualSense's MISC1 is its microphone button: nothing, as
+             * before. ⓘ PS and the Xbox button go to Windows (lock_keys_button); the PS
+             * button was the list's until then. */
+            return pad_family_current() == PAD_FAMILY_XBOX ? LOCK_ACT_LEGEND : LOCK_ACT_LET_GO;
         case SDL_CONTROLLER_BUTTON_LEFTSHOULDER:
         case SDL_CONTROLLER_BUTTON_RIGHTSHOULDER:
             /* ⭐ Window Select: L1 back and R1 forward through Windows' window picker
@@ -689,6 +695,24 @@ bool lock_keys_button(stream_input_t *input, app_gamepad_state_t *gamepad, const
     /* ⓘ The touchpad's click stays the stream's: as the mouse, it clicks. */
     if (s_mode == LOCK_KEYS_OFF || !pad_taken(input, gamepad) || event->button == SDL_CONTROLLER_BUTTON_TOUCHPAD) {
         return false;
+    }
+    /* ⭐ PS AND THE XBOX BUTTON GO TO WINDOWS (rhoquinn8217, 2026-11-13: "PS button should
+     * go to windows(start steam) / Xbox button should go to windows(start steam)"), as
+     * they do outside these controls ("I'm pressing it outside of Desktop Mode and it
+     * brings up steam"): a pad on the stream presses the host's own, with nothing else
+     * pressed; a bridged one's goes by the bridge, which keeps it through the hold
+     * (ctm_bridge_set_home_passes in input/ctm_bridge_gesture.c). ⓘ A bridged Xbox pad's
+     * cannot: its report has no byte for it on a cable, and DS5-USBIP's Bluetooth map
+     * does not carry it. */
+    if (event->button == SDL_CONTROLLER_BUTTON_GUIDE) {
+        if (down) {
+            window_select_let_go(input, "PS");
+        }
+        if (pad_on_stream(input, gamepad)) {
+            LiSendMultiControllerEvent(gamepad->gs_id, input->input->activeGamepadMask, down ? SPECIAL_FLAG : 0, 0,
+                                       0, 0, 0, 0, 0);
+        }
+        return true;
     }
     lock_pad_t *pad = pad_for(gamepad);
     if (down) {
@@ -901,6 +925,104 @@ static void stick_moves_tv_cursor(stream_input_t *input) {
     }
 }
 
+/* ⭐ A DUALSENSE'S TWO-FINGER PRESS SHOWS OR HIDES THE LIST (rhoquinn8217, 2026-11-13:
+ * "DualSense two finger press in brings up the legend"): two fingers on the touchpad and
+ * the pad pressed in, let go within LOCK_TWO_PRESS_MS. Longer is the bridge gesture's (a
+ * second bridges). Read from SDL for a pad on the stream, and from the core for a
+ * bridged one (ctm_bridge_held_touches), the only reading of its touchpad the TV has
+ * while its input is held. ⓘ The stream's own handling makes no right click of it
+ * meanwhile (stream/input/session_gamepad.c). */
+#define LOCK_TWO_PRESS_MS 900
+
+/* One touchpad this pass: `fingers` on it and whether it is pressed in. True when a
+ * two-finger press was let go in time just now. */
+static bool two_press_step(uint32_t *since, int fingers, bool click, uint32_t now) {
+    if (click) {
+        if (fingers >= 2 && *since == 0) {
+            *since = now | 1u;
+        }
+        return false;
+    }
+    if (*since == 0) {
+        return false;
+    }
+    const bool quick = now - *since < LOCK_TWO_PRESS_MS;
+    *since = 0;
+    return quick;
+}
+
+#if defined(TARGET_WEBOS)
+/* A bridged pad's, kept by its node. */
+static struct {
+    char node[64];
+    uint32_t since;
+} s_bridged_two[LOCK_SLOTS];
+#endif
+
+static void two_press_tick(stream_input_t *input) {
+    const uint32_t now = SDL_GetTicks();
+    bool toggle = false;
+    const short max = app_input_get_max_gamepads(input->input);
+    for (short i = 0; i < max; ++i) {
+        app_gamepad_state_t *gamepad = app_input_gamepad_state_by_index(input->input, i);
+        if (!pad_taken(input, gamepad) || !pad_on_stream(input, gamepad) || gamepad->controller == NULL) {
+            continue;
+        }
+        int fingers = 0;
+        const int slots = SDL_GameControllerGetNumTouchpadFingers(gamepad->controller, 0);
+        for (int f = 0; f < slots && f < 2; ++f) {
+            Uint8 state = 0;
+            float x = 0, y = 0, pressure = 0;
+            if (SDL_GameControllerGetTouchpadFinger(gamepad->controller, 0, f, &state, &x, &y, &pressure) == 0 &&
+                state) {
+                fingers++;
+            }
+        }
+        const bool click = SDL_GameControllerGetButton(gamepad->controller, SDL_CONTROLLER_BUTTON_TOUCHPAD) != 0;
+        toggle = two_press_step(&pad_for(gamepad)->two_since, fingers, click, now) || toggle;
+    }
+#if defined(TARGET_WEBOS)
+    ctm_bridge_touch_t touches[LOCK_SLOTS];
+    const int n = ctm_bridge_held_touches(touches, LOCK_SLOTS);
+    bool seen[LOCK_SLOTS] = {false};
+    for (int t = 0; t < n; ++t) {
+        if (!touches[t].reading) {
+            continue;
+        }
+        int k = -1, unused = -1;
+        for (int j = 0; j < LOCK_SLOTS; ++j) {
+            if (s_bridged_two[j].node[0] != '\0' && strcmp(s_bridged_two[j].node, touches[t].node) == 0) {
+                k = j;
+                break;
+            }
+            if (unused < 0 && s_bridged_two[j].node[0] == '\0') {
+                unused = j;
+            }
+        }
+        if (k < 0) {
+            if (unused < 0) {
+                continue;
+            }
+            k = unused;
+            snprintf(s_bridged_two[k].node, sizeof s_bridged_two[k].node, "%s", touches[t].node);
+            s_bridged_two[k].since = 0;
+        }
+        seen[k] = true;
+        toggle = two_press_step(&s_bridged_two[k].since, touches[t].fingers, touches[t].click, now) || toggle;
+    }
+    for (int j = 0; j < LOCK_SLOTS; ++j) {
+        if (!seen[j]) {
+            s_bridged_two[j].node[0] = '\0';
+            s_bridged_two[j].since = 0;
+        }
+    }
+#endif
+    if (toggle) {
+        window_select_let_go(input, "a two-finger press");
+        lock_keys_list_toggle("a two-finger press");
+    }
+}
+
 void lock_keys_tick(app_t *app) {
     window_select_tick();
     stream_input_t *input = app->session != NULL ? session_get_input(app->session) : NULL;
@@ -1015,6 +1137,9 @@ void lock_keys_tick(app_t *app) {
             lock_keys_ask_dismiss("Options held 2 s");
             break;
         }
+    }
+    if (input != NULL && !interface_has_input) {
+        two_press_tick(input);
     }
     stick_moves_tv_cursor(input);
 }

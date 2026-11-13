@@ -1,10 +1,12 @@
 /* ⭐⭐ DESKTOP MODE: ITS SWITCH (rhoquinn8217, 2026-11-11).
  * What the controllers do in it is stream/input/lock_keys.h's: the User Account Control
  * prompt's controls on every controller, bridged ones too, until it is turned off, with
- * L1 and R1 stepping through Windows' window picker (stream/input/window_select.h), the
- * PS button showing its list over the screen, Triangle switching the TV cursor and
- * Options held turning it off (below). Its list is ui/streaming/lock_numpad.h's, in the
- * overlay, and over the screen by the PS button.
+ * L1 and R1 stepping through Windows' window picker (stream/input/window_select.h), a
+ * two-finger press (an Xbox pad's Share button) showing or hiding its list, L3 switching
+ * the TV cursor, PS going to Windows and Options held turning it off, after its question
+ * (all three the same at a lock and a prompt since 2026-11-12/13). Its list is
+ * ui/streaming/lock_numpad.h's, over the screen unless hidden, and always in the
+ * overlay.
  *
  * WHY. "Desktop Mode is the solution to first log in after a reboot, accessible with a
  * bridge attempt or overlay button. It's evolved into a DS5-USBIP alternative ... In the

@@ -58,6 +58,12 @@ void ctm_bridge_set_mic_capture(bool on);
  * dropped -- a held button is released rather than left stuck. */
 void ctm_bridge_set_input_held(bool held);
 
+/* ⭐ While the TV's own controls hold the bridged pads (a Windows lock, a User Account
+ * Control prompt, Desktop Mode: stream/input/lock_keys.h), their PS button still goes to
+ * the PC (rhoquinn8217, 2026-11-13: "PS button should go to windows(start steam)"): the
+ * core keeps it in each held report's blank. Not while the overlay holds input. */
+void ctm_bridge_set_home_passes(bool passes);
+
 /* Who to tell when a bridged keyboard presses the overlay's shortcut,
  * Ctrl+Alt+Shift+S. ⚠️ Called on the keyboard's input thread. */
 void bridge_set_overlay_request(void (*cb)(void));

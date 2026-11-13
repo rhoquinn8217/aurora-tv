@@ -193,15 +193,21 @@ static void options_row_create(lv_obj_t *parent, pad_family_t family) {
     mark_row_create(parent, PAD_MARK_MENU, family, locstr("- hold to turn off rebinds"));
 }
 
-/* The PS button's row, in every list and the numpad's (rhoquinn8217, 2026-11-12: "PS
- * button sould be the legend button"; "show/hide legend"). An Xbox pad's Xbox button has
- * no mark, so its row is words ("we have to use the text "Xbox button" since there is
- * not symbol we can use for it"). */
+/* The list's own two rows, in every list and the numpad's (rhoquinn8217, 2026-11-13):
+ * a DualSense's two-finger press and an Xbox pad's Share button show or hide it ("DualSense
+ * two finger press in brings up the legend", "xbox share button in brings up the
+ * legend"), and PS and the Xbox button go to Windows, to Steam ("PS button should go to
+ * windows(start steam)"). The PS button was the list's until then. An Xbox pad's buttons
+ * have no marks here, so their rows are words ("we have to use the text "Xbox button"
+ * since there is not symbol we can use for it"), and so is a two-finger press. */
 static void legend_row_create(lv_obj_t *parent, pad_family_t family) {
+    const lv_font_t *font = lv_theme_get_font_small(parent);
     if (family == PAD_FAMILY_XBOX) {
-        words_create(parent, locstr("Xbox button - show/hide legend"), lv_theme_get_font_small(parent));
+        words_create(parent, locstr("Share button - show/hide legend"), font);
+        words_create(parent, locstr("Xbox button - Steam"), font);
     } else {
-        mark_row_create(parent, PAD_MARK_HOME, family, locstr("- show/hide legend"));
+        words_create(parent, locstr("2 finger press - show/hide legend"), font);
+        mark_row_create(parent, PAD_MARK_HOME, family, locstr("- Steam"));
     }
 }
 

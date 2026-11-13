@@ -247,6 +247,11 @@ void ctm_bridge_set_input_held(bool held)
     ctm_input_set_held(held ? 1 : 0);
 }
 
+void ctm_bridge_set_home_passes(bool passes)
+{
+    ctm_input_set_home_passes(passes ? 1 : 0);
+}
+
 /* Defined below, with the pads that come straight back. */
 static void glue_pad_will_return(const ctm_controller_dev_t *dev);
 

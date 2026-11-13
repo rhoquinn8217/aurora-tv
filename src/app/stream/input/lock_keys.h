@@ -119,8 +119,11 @@
  * different."), on every controller: the right stick and the touchpad the mouse, R2 a
  * left click and L2 a right one, L1 and R1 Window Select, the d-pad the arrows, Create
  * Tab, Cross Enter, Circle Esc, Square the Full Keyboard, Triangle the numpad, L3 the
- * TV cursor and its alignment ("Lets move the cursor->alignment button to L3"), the PS
- * button the list, and Options held 2 s the rebinds off, after its question. Only the
+ * TV cursor and its alignment ("Lets move the cursor->alignment button to L3"), a
+ * DualSense's two-finger press and an Xbox pad's Share button the list, PS and the Xbox
+ * button Windows' own (2026-11-13: "PS button should go to windows(start steam)"; the
+ * PS button was the list's until then), and Options held 2 s the rebinds off, after its
+ * question. Only the
  * list's heading and the question's words say which of the three it is. Where the
  * notes above and below say a control is one mode's alone, this replaces them. */
 
@@ -196,9 +199,11 @@ bool lock_keys_numpad_open(void);
 
 /* ⭐ THE LIST OF WHAT THE BUTTONS DO, the same at a lock, at a prompt and in Desktop
  * Mode since 2026-11-12, under its own heading (ui/streaming/lock_numpad.h): over the
- * screen as each begins, and hidden by its Hide or the PS button, which brings it back
- * too (rhoquinn8217: "close need to change to hide", "PS button sould be the legend
- * button"). Hiding it changes nothing a button does. With how in the log; nothing
+ * screen as each begins, and hidden by its Hide, a DualSense's two-finger press or an
+ * Xbox pad's Share button, the two that bring it back too (rhoquinn8217: "close need to
+ * change to hide"; 2026-11-13: "DualSense two finger press in brings up the legend",
+ * "xbox share button in brings up the legend"; the PS button's until then). Hiding it
+ * changes nothing a button does. With how in the log; nothing
  * while off. */
 bool lock_keys_list_hidden(void);
 void lock_keys_list_toggle(const char *how);
