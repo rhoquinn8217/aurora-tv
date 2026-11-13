@@ -344,18 +344,18 @@ static void cmd_ui(control_job_t *job)
 
 /* What the screen shows over a locked Windows (ui/streaming/lock_numpad.h), and a
  * count of what was typed, never what. `ps`, `xbox` or `auto` sets whose marks it
- * draws, for a picture of the set not in hand; not saved. `close` does what a click
- * on the Close button does: it asks first, and the question is up from the app's
- * next pass (`question=asked` until then). `ok` and `cancel` answer it as its
- * buttons do; OK turns these controls off until the next lock or prompt. */
+ * draws, for a picture of the set not in hand; not saved. `hide` (or `close`, its old
+ * name) does what a click on the Hide button does: the list hidden. `ok` and `cancel`
+ * answer the question Options held 2 s raises, as its buttons do; OK turns these
+ * controls off until the next lock or prompt, or Desktop Mode off. */
 static void cmd_numpad(control_job_t *job, const char *args)
 {
-    if (args != NULL && strcasecmp(args, "close") == 0) {
-        if (!lock_numpad_close_up()) {
-            reply(job, "ERR the Close button is not up\n");
+    if (args != NULL && (strcasecmp(args, "hide") == 0 || strcasecmp(args, "close") == 0)) {
+        if (!lock_numpad_hide_up()) {
+            reply(job, "ERR the Hide button is not up\n");
             return;
         }
-        lock_numpad_close_click();
+        lock_numpad_hide_click();
     } else if (args != NULL && (strcasecmp(args, "ok") == 0 || strcasecmp(args, "cancel") == 0)) {
         if (!lock_keys_asking()) {
             reply(job, "ERR no question is up\n");
@@ -369,13 +369,13 @@ static void cmd_numpad(control_job_t *job, const char *args)
     } else if (args != NULL && strcasecmp(args, "auto") == 0) {
         pad_family_force(-1);
     } else if (args != NULL && args[0] != '\0') {
-        reply(job, "ERR try ps, xbox, auto, close, ok or cancel\n");
+        reply(job, "ERR try ps, xbox, auto, hide, ok or cancel\n");
         return;
     }
     lv_area_t area = {0, 0, 0, 0};
     const bool up = lock_numpad_area(&area);
-    reply(job, "OK numpad=%s close=%s question=%s dismissed=%s after_sign_in=%s after_at=%d locked=%s prompt=%s pad=%s marks=%s typed=%u size=%dx%d at=%d,%d kbd_place=%s\n",
-          lock_numpad_state(), lock_numpad_close_up() ? "up" : "down",
+    reply(job, "OK numpad=%s hide=%s question=%s dismissed=%s after_sign_in=%s after_at=%d locked=%s prompt=%s pad=%s marks=%s typed=%u size=%dx%d at=%d,%d kbd_place=%s\n",
+          lock_numpad_state(), lock_numpad_hide_up() ? "up" : "down",
           lock_numpad_question_up() ? "up" : lock_keys_asking() ? "asked" : "down", lock_keys_dismissed() ? "yes" : "no",
           lock_numpad_after_up() ? "yes" : "no", (int) lock_numpad_after_at(),
           lock_keys_mode() == LOCK_KEYS_LOCK ? "yes" : "no",
@@ -439,10 +439,10 @@ static void cmd_desktop(control_job_t *job, const char *args)
             bridge_prompt_say_desktop_on();
         }
     } else if (args != NULL && strcasecmp(args, "legend") == 0) {
-        /* The PS button's turn: its list over the screen, or back off it. */
-        desktop_mode_legend_toggle();
+        /* The PS button's turn: the list over the screen, or hidden. */
+        lock_keys_list_toggle("the control port");
     } else if (args != NULL && strcasecmp(args, "cursor") == 0) {
-        /* Triangle's turn: the TV cursor off, or on with its alignment bar. */
+        /* L3's turn: the TV cursor off, or on with its alignment bar. */
         desktop_mode_cursor_toggle();
     } else if (args != NULL && args[0] != '\0') {
         reply(job, "ERR try on, off, start on, start off, legend or cursor\n");
@@ -460,7 +460,7 @@ static void cmd_desktop(control_job_t *job, const char *args)
                                                 : "off",
           app_configuration != NULL && app_configuration->virtual_mouse ? "on" : "off",
           mode == LOCK_KEYS_DESKTOP && strcmp(lock_numpad_state(), "off") != 0 ? "up" : "down",
-          desktop_mode_legend_shown() ? "over-screen" : "overlay-only", window_select_held() ? "alt-held" : "off");
+          lock_keys_list_hidden() ? "hidden" : "shown", window_select_held() ? "alt-held" : "off");
 }
 
 /* A webOS pop-up over the app (input/webos_popup.h): whether one has the

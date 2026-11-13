@@ -81,13 +81,17 @@
  * reaches the pin. A click on Close or the question is Aurora's alone, the touchpad's
  * (input/touchpad_pointer.h) and a mouse's (lock_numpad_mouse_takes) alike: the PC is
  * not told. */
-/* Room after the heading's last word, before Close. */
+/* ⭐ HIDE, IN CLOSE'S PLACE, IN ALL THREE LISTS SINCE 2026-11-12 (rhoquinn8217: "close
+ * need to change to hide"): it hides the list, which the PS button brings back
+ * (lock_keys_list_toggle), and changes nothing a button does. Nothing asks: the
+ * question is Options held 2 s's alone now. What follows is Close's history. */
+/* Room after the heading's last word, before Hide. */
 #define NUMPAD_HEADING_GAP LV_DPX(12)
 /* The question's width: its words wrap to it. */
 #define NUMPAD_QUESTION_W LV_DPX(330)
 
 static lv_obj_t *s_after;
-static lv_obj_t *s_close;        /* the list's, gone with it; none with the numpad */
+static lv_obj_t *s_hide;         /* the list's, gone with it; none with the numpad */
 static lv_obj_t *s_question;
 static pad_family_t s_question_family;
 static lv_coord_t s_after_y = -1;   /* the list's foot plus the gap; -1 until a list is up */
@@ -96,7 +100,7 @@ static lv_obj_t *s_up;
 static bool s_up_open;
 static pad_family_t s_shown_family;
 static lock_keys_mode_t s_shown_mode;
-static uint32_t s_mouse_taken;   /* the mouse's buttons pressed on Close, one bit each, until let go */
+static uint32_t s_mouse_taken;   /* the mouse's buttons pressed on Hide, one bit each, until let go */
 
 /* Into the gesture log, beside the lock keys' own lines. */
 #if defined(TARGET_WEBOS)
@@ -150,38 +154,17 @@ static lv_obj_t *row_create(lv_obj_t *parent) {
     return row;
 }
 
-/* ⭐ WORDS WITH THEIR LAST PART IN BOLD, one line: in Desktop Mode's list only, the
- * clicks and the Full Keyboard (rhoquinn8217, 2026-11-11: "Only in the Desktop Mode
- * legend bold left click, right click and Full Keyboard so it's noticeable. Our rebind
- * are slightly different since we are mimicking steams rebinds"). ⓘ Two labels with no
- * gap, the plain part ending in its own space: a label has no bold of its own. */
-static lv_obj_t *words_bold_create(lv_obj_t *parent, const char *plain, const char *bold, const lv_font_t *font) {
-    lv_obj_t *line = row_create(parent);
-    lv_obj_set_style_pad_column(line, 0, 0);
-    words_create(line, plain, font);
-    const lv_font_t *heavy = lv_theme_moonlight_get_font_small_bold(parent);
-    words_create(line, bold, heavy != NULL ? heavy : font);
-    return line;
-}
-
-/* A row of the list: a button's mark, in a cell as wide as a shoulder button's so
- * the words line up, then what it does, its last part in bold when `bold` is given. */
-static void mark_row_bold_create(lv_obj_t *parent, pad_mark_t mark, pad_family_t family, const char *words,
-                                 const char *bold) {
+/* A row of the list: a button's mark, in a cell as wide as a shoulder button's so the
+ * words line up, then what it does. ⓘ Nothing in bold since 2026-11-12 (rhoquinn8217:
+ * "no more bold anything"); Desktop Mode's list had its clicks and the Full Keyboard in
+ * bold until then. */
+static void mark_row_create(lv_obj_t *parent, pad_mark_t mark, pad_family_t family, const char *words) {
     lv_obj_t *row = row_create(parent);
     lv_obj_t *cell = box_create(row);
     lv_obj_set_size(cell, NUMPAD_LEGEND_MARK * 6 / 5, NUMPAD_LEGEND_MARK);
     lv_obj_t *drawn = pad_mark_create(cell, mark, family, NUMPAD_LEGEND_MARK, NUMPAD_MARK);
     lv_obj_center(drawn);
-    if (bold != NULL) {
-        words_bold_create(row, words, bold, lv_theme_get_font_small(parent));
-    } else {
-        words_create(row, words, lv_theme_get_font_small(parent));
-    }
-}
-
-static void mark_row_create(lv_obj_t *parent, pad_mark_t mark, pad_family_t family, const char *words) {
-    mark_row_bold_create(parent, mark, family, words, NULL);
+    words_create(row, words, lv_theme_get_font_small(parent));
 }
 
 /* A row of two marks, each in its own cell, then what both do: Desktop Mode's L1 and R1,
@@ -205,7 +188,21 @@ static void mark_pair_row_create(lv_obj_t *parent, pad_mark_t first, pad_mark_t 
  * change the legend description for options symbol to "hold to close""); until then
  * "hold for 4s to close". */
 static void options_row_create(lv_obj_t *parent, pad_family_t family) {
-    mark_row_create(parent, PAD_MARK_MENU, family, locstr("- hold to close"));
+    /* ⭐ "- hold to turn off rebinds" since 2026-11-12 (rhoquinn8217: "options: hold to
+     * turn off rebinds"), in all three lists and the numpad's. */
+    mark_row_create(parent, PAD_MARK_MENU, family, locstr("- hold to turn off rebinds"));
+}
+
+/* The PS button's row, in every list and the numpad's (rhoquinn8217, 2026-11-12: "PS
+ * button sould be the legend button"; "show/hide legend"). An Xbox pad's Xbox button has
+ * no mark, so its row is words ("we have to use the text "Xbox button" since there is
+ * not symbol we can use for it"). */
+static void legend_row_create(lv_obj_t *parent, pad_family_t family) {
+    if (family == PAD_FAMILY_XBOX) {
+        words_create(parent, locstr("Xbox button - show/hide legend"), lv_theme_get_font_small(parent));
+    } else {
+        mark_row_create(parent, PAD_MARK_HOME, family, locstr("- show/hide legend"));
+    }
 }
 
 static lv_obj_t *dark_panel_create(lv_coord_t x, lv_coord_t y) {
@@ -246,21 +243,22 @@ static lv_obj_t *numpad_create(pad_family_t family) {
     key_create(grid, locstr("Bksp"), false, PAD_MARK_VIEW, family);
 
     mark_row_create(panel, PAD_MARK_EAST, family, locstr("- close numpad"));
+    legend_row_create(panel, family);
     options_row_create(panel, family);
     return panel;
 }
 
-void lock_numpad_close_click(void) {
-    lock_keys_ask_dismiss("Close clicked");
+void lock_numpad_hide_click(void) {
+    lock_keys_list_hide("Hide clicked");
 }
 
-static void close_clicked(lv_event_t *event) {
+static void hide_clicked(lv_event_t *event) {
     LV_UNUSED(event);
-    lock_numpad_close_click();
+    lock_numpad_hide_click();
 }
 
-/* Close, in the heading: its word in a frame, as small as the word. */
-static lv_obj_t *close_create(lv_obj_t *parent) {
+/* Hide, in the heading: its word in a frame, as small as the word. */
+static lv_obj_t *hide_create(lv_obj_t *parent) {
     lv_obj_t *button = box_create(parent);
     lv_obj_add_flag(button, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_set_style_bg_color(button, NUMPAD_KEY_BG, LV_STATE_PRESSED);
@@ -271,8 +269,8 @@ static lv_obj_t *close_create(lv_obj_t *parent) {
     lv_obj_set_style_pad_hor(button, LV_DPX(10), 0);
     lv_obj_set_style_pad_ver(button, LV_DPX(3), 0);
     lv_obj_set_size(button, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
-    words_create(button, locstr("Close"), lv_theme_get_font_small(button));
-    lv_obj_add_event_cb(button, close_clicked, LV_EVENT_CLICKED, NULL);
+    words_create(button, locstr("Hide"), lv_theme_get_font_small(button));
+    lv_obj_add_event_cb(button, hide_clicked, LV_EVENT_CLICKED, NULL);
     return button;
 }
 
@@ -307,10 +305,7 @@ static lv_obj_t *list_create(pad_family_t family, lock_keys_mode_t mode) {
      * by its content gives a grown child no room. A box of 100% would come out with no
      * width at all in a panel sized by its content. */
     lv_obj_t *heading = row_create(panel);
-    /* ⓘ Desktop Mode's has no Close, and a lone child spaced between sits in the
-     * middle: its title starts at the left, as the others' do. */
-    lv_obj_set_flex_align(heading, desktop ? LV_FLEX_ALIGN_START : LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER,
-                          LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_flex_align(heading, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_column(heading, NUMPAD_HEADING_GAP, 0);
     lv_obj_set_style_pad_bottom(heading, LV_DPX(4), 0);
     lv_obj_set_style_border_side(heading, LV_BORDER_SIDE_BOTTOM, 0);
@@ -322,55 +317,28 @@ static lv_obj_t *list_create(pad_family_t family, lock_keys_mode_t mode) {
                                    : desktop ? locstr("Desktop: Controller")
                                              : locstr("User Account Control: Controller"),
                                    font);
-    s_close = desktop ? NULL : close_create(heading);
+    s_hide = hide_create(heading);
     lv_obj_t *gap = box_create(panel);
     lv_obj_set_size(gap, 1, LV_DPX(2));
+    /* ⭐ THE SAME ROWS IN ALL THREE since 2026-11-12 (rhoquinn8217: "Lets consolidate
+     * windows lock, UAC and Desktop mode. It doesn't make sense to make them
+     * different."; stream/input/lock_keys.h), only the heading says which. */
     words_create(panel, locstr("Right stick - mouse"), font);
     words_create(panel, locstr("Touchpad - mouse"), font);
-    if (desktop) {
-        words_bold_create(panel, locstr("1 finger tap - "), locstr("left click"), font);
-        words_bold_create(panel, locstr("2 finger tap - "), locstr("right click"), font);
-        mark_row_bold_create(panel, PAD_MARK_R2, family, locstr("- "), locstr("left click"));
-        mark_row_bold_create(panel, PAD_MARK_L2, family, locstr("- "), locstr("right click"));
-    } else {
-        words_create(panel, locstr("1 finger tap - left click"), font);
-        words_create(panel, locstr("2 finger tap - right click"), font);
-        mark_row_create(panel, PAD_MARK_R2, family, locstr("- left click"));
-        mark_row_create(panel, PAD_MARK_L2, family, locstr("- right click"));
-    }
-    if (desktop) {
-        /* ⭐ Window Select, L1 back and R1 forward (rhoquinn8217, 2026-11-11: "L1/R1:
-         * Window Select"). */
-        mark_pair_row_create(panel, PAD_MARK_L1, PAD_MARK_R1, family, locstr("- Window Select"));
-    }
+    words_create(panel, locstr("1 finger tap - left click"), font);
+    words_create(panel, locstr("2 finger tap - right click"), font);
+    mark_row_create(panel, PAD_MARK_R2, family, locstr("- left click"));
+    mark_row_create(panel, PAD_MARK_L2, family, locstr("- right click"));
+    mark_pair_row_create(panel, PAD_MARK_L1, PAD_MARK_R1, family, locstr("- Window Select"));
     mark_row_create(panel, PAD_MARK_DPAD, family, locstr("- arrow keys"));
     mark_row_create(panel, PAD_MARK_VIEW, family, locstr("- Tab"));
     mark_row_create(panel, PAD_MARK_SOUTH, family, locstr("- Enter"));
     mark_row_create(panel, PAD_MARK_EAST, family, locstr("- Esc"));
-    if (desktop) {
-        mark_row_bold_create(panel, PAD_MARK_WEST, family, locstr("- "), locstr("Full Keyboard"));
-    } else {
-        mark_row_create(panel, PAD_MARK_WEST, family, locstr("- Full Keyboard"));
-    }
-    if (lock) {
-        mark_row_create(panel, PAD_MARK_NORTH, family, locstr("- numpad"));
-    }
-    if (desktop) {
-        /* ⭐ The TV cursor on Triangle, its list over the screen on the PS button, and
-         * Options held to turn it off, in place of a Close (rhoquinn8217, 2026-11-11;
-         * ui/streaming/desktop_mode.h). An Xbox pad's Xbox button has no mark, so its row
-         * is words, as the stick's and the touchpad's are ("we have to use the text "Xbox
-         * button" since there is not symbol we can use for it"). */
-        mark_row_create(panel, PAD_MARK_NORTH, family, locstr("- Toggle Cursor"));
-        if (family == PAD_FAMILY_XBOX) {
-            words_create(panel, locstr("Xbox button - Toggle Legend"), font);
-        } else {
-            mark_row_create(panel, PAD_MARK_HOME, family, locstr("- Toggle Legend"));
-        }
-        mark_row_create(panel, PAD_MARK_MENU, family, locstr("- hold to turn off Desktop Mode"));
-    } else {
-        options_row_create(panel, family);
-    }
+    mark_row_create(panel, PAD_MARK_WEST, family, locstr("- Full Keyboard"));
+    mark_row_create(panel, PAD_MARK_NORTH, family, locstr("- numpad"));
+    mark_row_create(panel, PAD_MARK_L3, family, locstr("- Toggle Cursor"));
+    legend_row_create(panel, family);
+    options_row_create(panel, family);
     /* ⭐ THE LIST AS WIDE AS ITS WIDEST LINE, THE HEADING WITH CLOSE AMONG THEM
      * (rhoquinn8217, 2026-11-10, at build 669, where Close sat over the heading's last
      * word: "Expand the legend horizontally to fit the close button. Check the UAD
@@ -379,7 +347,7 @@ static lv_obj_t *list_create(pad_family_t family, lock_keys_mode_t mode) {
      * And the list set to it as well, not left to follow its heading. */
     lv_obj_update_layout(panel);
     lv_coord_t widest = (lv_coord_t) (lv_obj_get_width(title) +
-                                      (s_close != NULL ? NUMPAD_HEADING_GAP + lv_obj_get_width(s_close) : 0));
+                                      (s_hide != NULL ? NUMPAD_HEADING_GAP + lv_obj_get_width(s_hide) : 0));
     const uint32_t lines = lv_obj_get_child_cnt(panel);
     for (uint32_t i = 0; i < lines; ++i) {
         lv_obj_t *line = lv_obj_get_child(panel, (int32_t) i);
@@ -446,9 +414,13 @@ static lv_obj_t *question_create(pad_family_t family) {
      * place, as its heading says it. Until then it also said which controls came back:
      * plain ones, or Desktop Mode's. */
     words_create(panel, locstr("Please confirm."), lv_theme_get_font_normal(panel));
+    /* ⓘ And in Desktop Mode, which asks too since 2026-11-12 ("keep the question"),
+     * its own name, my words. */
+    const lock_keys_mode_t mode = lock_keys_mode();
     lv_obj_t *words = words_create(panel,
-                                   lock_keys_mode() == LOCK_KEYS_LOCK ? locstr("Remove Windows Sign In Rebinds?")
-                                                                      : locstr("Remove User Account Control Rebinds?"),
+                                   mode == LOCK_KEYS_LOCK      ? locstr("Remove Windows Sign In Rebinds?")
+                                   : mode == LOCK_KEYS_DESKTOP ? locstr("Remove Desktop Mode Rebinds?")
+                                                               : locstr("Remove User Account Control Rebinds?"),
                                    lv_theme_get_font_small(panel));
     lv_label_set_long_mode(words, LV_LABEL_LONG_WRAP);
     lv_obj_set_width(words, lv_pct(100));
@@ -490,7 +462,7 @@ static void take_down(void) {
         lv_obj_del(s_up);
         s_up = NULL;
     }
-    s_close = NULL;
+    s_hide = NULL;
 }
 
 static bool after_sign_in(void) {
@@ -516,27 +488,21 @@ static void after_show(bool show) {
     }
 }
 
-/* Desktop Mode's list is up with the overlay, and not over a panel it opened; and over
- * the screen while the PS button has it shown and nothing else has the input
- * (ui/streaming/desktop_mode.h). */
-static bool desktop_list_wanted(void) {
-    if (streaming_overlay_shown()) {
-        return !ctm_panel_shown() && !bt_panel_shown();
-    }
-    return desktop_mode_legend_shown() && !ui_should_block_input();
-}
-
 void lock_numpad_tick(void) {
     const lock_keys_mode_t mode = lock_keys_mode();
-    const bool showing =
-        mode == LOCK_KEYS_DESKTOP ? desktop_list_wanted() : lock_keys_active() && !ui_should_block_input();
+    /* ⭐ Over the screen in all three since 2026-11-12, Desktop Mode's too ("Over the
+     * screen like window lock and UAC"; until then in the overlay, and over the screen
+     * only by the PS button), unless hidden (lock_keys_list_hidden). The question still
+     * comes up with the list hidden: Options held asks it. */
+    const bool up = lock_keys_active() && !ui_should_block_input();
+    const bool showing = up && !lock_keys_list_hidden();
     /* ⓘ The line about Auto Bridge is the lock's: a prompt does not hold a bridge
      * back (rhoquinn8217, 2026-11-09: "If the UAC: controller legend is the same, we
      * don't need to have that message"). */
     const bool after = showing && mode == LOCK_KEYS_LOCK && after_sign_in();
     if (!showing || !lock_keys_pad_on_stream()) {
         take_down();
-        question_show(false);
+        question_show(up && lock_keys_pad_on_stream() && lock_keys_asking());
         after_show(after);
         return;
     }
@@ -572,8 +538,8 @@ bool lock_numpad_after_up(void) {
     return s_after != NULL;
 }
 
-bool lock_numpad_close_up(void) {
-    return s_close != NULL;
+bool lock_numpad_hide_up(void) {
+    return s_hide != NULL;
 }
 
 /* What of Aurora's that asks to be clicked is at this point, by name, or NULL. The
@@ -582,7 +548,7 @@ static const char *button_at(lv_coord_t x, lv_coord_t y) {
     const struct {
         lv_obj_t *obj;
         const char *name;
-    } asks[] = {{s_question, "the question"}, {s_close, "Close"}};
+    } asks[] = {{s_question, "the question"}, {s_hide, "Hide"}};
     for (int i = 0; i < (int) (sizeof asks / sizeof asks[0]); ++i) {
         if (asks[i].obj == NULL) {
             continue;

@@ -40,9 +40,6 @@
 static const void *s_session;     /* the stream last seen, to tell a new one */
 /* ⭐ Desktop Mode, for this stream and a resume of it: not saved since 2026-11-12. */
 static bool s_on;
-/* The PS button has its list over the screen; hidden again at each stream and as it is
- * turned off (the header), and up as Desktop Mode starts by itself. */
-static bool s_legend;
 /* A stream's start waits for DS5-USBIP to say whether Desktop Mode starts by itself;
  * the wait counts from the moment the stream plays. */
 static bool s_start_waiting;
@@ -56,19 +53,10 @@ bool desktop_mode_on(void) {
     return s_on;
 }
 
-bool desktop_mode_legend_shown(void) {
-    return s_legend;
-}
-
-void desktop_mode_legend_toggle(void) {
-    s_legend = !s_legend;
-    desktop_note("its list %s (PS)", s_legend ? "over the screen" : "in the overlay only again");
-}
-
 void desktop_mode_cursor_toggle(void) {
     if (tv_cursor_mode_on()) {
         if (tv_cursor_set_mode(false)) {
-            desktop_note("the TV cursor off (Triangle)");
+            desktop_note("the TV cursor off (L3)");
         }
         return;
     }
@@ -76,19 +64,15 @@ void desktop_mode_cursor_toggle(void) {
      * (tv_cursor_set_mode): rhoquinn8217, 2026-11-12, "you created too many messages
      * about the cursor doesn't need explaining". */
     if (!tv_cursor_mode_switchable()) {
-        desktop_note("the TV cursor stays off: Use mouse hardware is on (Triangle)");
+        desktop_note("the TV cursor stays off: Use mouse hardware is on (L3)");
         return;
     }
     if (!tv_cursor_set_mode(true)) {
-        desktop_note("the TV cursor stays off (Triangle)");
+        desktop_note("the TV cursor stays off (L3)");
         return;
     }
-    desktop_note("the TV cursor on, and its alignment bar (Triangle)");
+    desktop_note("the TV cursor on, and its alignment bar (L3)");
     cursor_align_request();
-}
-
-void desktop_mode_off_on_pad(void) {
-    desktop_mode_set(false, "Options held 2 s on a controller");
 }
 
 /* On or off, with how in the log. On also turns Virtual Mouse off. */
@@ -109,10 +93,6 @@ static void set_mode(bool on, const char *how) {
         if (vmouse_was) {
             settings_save(app_configuration);
         }
-    }
-    if (!on) {
-        /* Its list, turned off, starts hidden again. */
-        s_legend = false;
     }
     if (s_on == on) {
         return;
@@ -170,9 +150,8 @@ static bool stream_is_resume(const app_t *app) {
 void desktop_mode_tick(app_t *app) {
     const void *session = app != NULL ? (const void *) app->session : NULL;
     if (session != s_session) {
-        /* A stream started, resumed or ended: its list starts hidden ("5. hidden"). */
+        /* A stream started, resumed or ended. */
         s_session = session;
-        s_legend = false;
         s_handover = false;
         s_start_waiting = false;
         if (session != NULL && stream_is_resume(app)) {
@@ -210,5 +189,4 @@ void desktop_mode_tick(app_t *app) {
     }
     s_start_waiting = false;
     set_mode(true, "a stream's start, DS5-USBIP not on");
-    s_legend = true;
 }

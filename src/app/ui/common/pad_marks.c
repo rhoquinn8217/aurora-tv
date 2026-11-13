@@ -110,6 +110,14 @@ static const int16_t LETTER_S[17][2] = {{1425, 700}, {1355, 627}, {1260, 600}, {
                                         {1425, 1100}, {1450, 1200}, {1425, 1300}, {1355, 1373}, {1260, 1400},
                                         {1165, 1373}, {1095, 1300}};
 
+/* L3's L, and its 3: S's lower bowl under its upper one turned round. As P and S, each
+ * 800 high, the pair centred; an Xbox pad's LS is the same L with the S above. */
+static const int16_t LETTER_L[3][2] = {{560, 600}, {560, 1400}, {960, 1400}};
+static const int16_t DIGIT_3[17][2] = {{1095, 700}, {1165, 627}, {1260, 600}, {1355, 627}, {1425, 700},
+                                       {1450, 800}, {1425, 900}, {1355, 973}, {1260, 1000}, {1355, 1027},
+                                       {1425, 1100}, {1450, 1200}, {1425, 1300}, {1355, 1373}, {1260, 1400},
+                                       {1165, 1373}, {1095, 1300}};
+
 static void draw_dpad(const pen_t *pen, pad_mark_t mark) {
     pen_path(pen, DPAD, 12, true);
     switch (mark) {
@@ -159,6 +167,10 @@ static void draw_round(const pen_t *pen, const lv_font_t *font, pad_mark_t mark,
             case PAD_MARK_HOME:
                 /* No mark of its own: the circle alone (the header). */
                 return;
+            case PAD_MARK_L3:
+                pen_path(pen, LETTER_L, 3, false);
+                pen_path(pen, LETTER_S, 17, false);
+                return;
             default:
                 break;
         }
@@ -186,6 +198,10 @@ static void draw_round(const pen_t *pen, const lv_font_t *font, pad_mark_t mark,
             case PAD_MARK_HOME:
                 pen_path(pen, LETTER_P, 10, false);
                 pen_path(pen, LETTER_S, 17, false);
+                return;
+            case PAD_MARK_L3:
+                pen_path(pen, LETTER_L, 3, false);
+                pen_path(pen, DIGIT_3, 17, false);
                 return;
             default:
                 break;

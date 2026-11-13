@@ -49,6 +49,10 @@ typedef enum {
      * mark, only its circle: "we have to use the text "Xbox button" since there is not
      * symbol we can use for it", so a legend writes those words in its place. */
     PAD_MARK_HOME,
+    /* L3, the left stick pressed: "L3" in a circle, an Xbox pad's "LS", drawn in strokes
+     * as the PS button's letters are (rhoquinn8217, 2026-11-12: "Lets move the
+     * cursor->alignment button to L3"), as DS5-USBIP's configs window marks it. */
+    PAD_MARK_L3,
 } pad_mark_t;
 
 /* The mark, `height` pixels high, as an object in `parent` that takes no input.

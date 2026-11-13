@@ -68,11 +68,11 @@ typedef enum {
     LOCK_ACT_NUMPAD_CLOSE,
     LOCK_ACT_ANSWER_OK,
     LOCK_ACT_ANSWER_CANCEL,
-    LOCK_ACT_WINDOW_BACK,   /* L1 in Desktop Mode: Window Select, back */
-    LOCK_ACT_WINDOW_NEXT,   /* R1 in Desktop Mode: Window Select, forward */
-    LOCK_ACT_LEGEND,        /* PS in Desktop Mode: its list over the screen, or not */
-    LOCK_ACT_CURSOR,        /* Triangle in Desktop Mode: the TV cursor on, with its alignment, or off */
-    LOCK_ACT_LET_GO,        /* any other button in Desktop Mode: Window Select's Alt let go */
+    LOCK_ACT_WINDOW_BACK,   /* L1: Window Select, back */
+    LOCK_ACT_WINDOW_NEXT,   /* R1: Window Select, forward */
+    LOCK_ACT_LEGEND,        /* PS: the list over the screen, or hidden */
+    LOCK_ACT_CURSOR,        /* L3: the TV cursor on, with its alignment, or off */
+    LOCK_ACT_LET_GO,        /* any other button: Window Select's Alt let go */
 } lock_act_t;
 
 /* ⭐ THE ORDER OF THE PRESSES IS THE ORDER OF THE DIGITS. With the numpad open, three
@@ -105,6 +105,12 @@ static unsigned s_typed;
 /* After a prompt, until when the bridged pads may stay held; 0 when they are not. */
 static uint32_t s_quiet_until;
 static int s_fake_prompt = -1;
+/* ⭐ THE LIST OF WHAT THE BUTTONS DO, over the screen unless hidden: by its Hide or by
+ * the PS button, which brings it back too (rhoquinn8217, 2026-11-12: "close need to
+ * change to hide", "PS button sould be the legend button"). Over the screen again as
+ * each lock, prompt and Desktop Mode begins ("Over the screen like window lock and
+ * UAC"). */
+static bool s_list_hidden;
 /* Turned off by hand, and whether at a prompt (else at the lock). */
 static bool s_dismissed;
 static bool s_dismissed_prompt;
@@ -150,7 +156,36 @@ bool lock_keys_desktop_wanted(void) {
 }
 
 bool lock_keys_numpad_open(void) {
-    return s_mode == LOCK_KEYS_LOCK && s_numpad_open;
+    return s_mode != LOCK_KEYS_OFF && s_numpad_open;
+}
+
+bool lock_keys_list_hidden(void) {
+    return s_list_hidden;
+}
+
+static void list_note(const char *how) {
+#if defined(TARGET_WEBOS)
+    ctm_bridge_gesture_note("lock keys: the list %s (%s)", s_list_hidden ? "hidden" : "over the screen",
+                            how != NULL ? how : "?");
+#else
+    (void) how;
+#endif
+}
+
+void lock_keys_list_toggle(const char *how) {
+    if (s_mode == LOCK_KEYS_OFF) {
+        return;
+    }
+    s_list_hidden = !s_list_hidden;
+    list_note(how);
+}
+
+void lock_keys_list_hide(const char *how) {
+    if (s_mode == LOCK_KEYS_OFF || s_list_hidden) {
+        return;
+    }
+    s_list_hidden = true;
+    list_note(how);
 }
 
 bool lock_keys_triggers_type(void) {
@@ -187,7 +222,8 @@ static void r2_let_go(void) {
 }
 
 void lock_keys_dismiss(const char *how) {
-    /* ⓘ Not Desktop Mode: it has no Close; it is turned off where it was turned on. */
+    /* ⓘ Not Desktop Mode: its question's OK turns Desktop Mode itself off
+     * (lock_keys_answer). */
     if (s_mode == LOCK_KEYS_OFF || s_mode == LOCK_KEYS_DESKTOP || s_dismissed) {
         return;
     }
@@ -334,7 +370,7 @@ static void pads_rest(void) {
 }
 
 void lock_keys_ask_dismiss(const char *how) {
-    if (s_mode == LOCK_KEYS_OFF || s_mode == LOCK_KEYS_DESKTOP || s_dismissed || s_asking) {
+    if (s_mode == LOCK_KEYS_OFF || s_dismissed || s_asking) {
         return;
     }
     s_asking = true;
@@ -359,6 +395,12 @@ void lock_keys_answer(bool ok, const char *by) {
     char how[128];
     snprintf(how, sizeof how, "%s, then %s %s", s_asking_how, ok ? "OK" : "Cancel", by != NULL ? by : "?");
     if (ok) {
+        /* ⭐ Desktop Mode asks too since 2026-11-12 (rhoquinn8217: "keep the question"),
+         * and its OK turns Desktop Mode off: this ends on the next pass. */
+        if (s_mode == LOCK_KEYS_DESKTOP) {
+            desktop_mode_set(false, how);
+            return;
+        }
         lock_keys_dismiss(how);
         return;
     }
@@ -417,6 +459,9 @@ static lock_act_t action_for(uint8_t what, bool numpad_open, short *key) {
                 break;
             case SDL_CONTROLLER_BUTTON_B:
                 return LOCK_ACT_NUMPAD_CLOSE;
+            case SDL_CONTROLLER_BUTTON_GUIDE:
+                /* The PS button hides the numpad's list as well; its keys still type. */
+                return LOCK_ACT_LEGEND;
             default:
                 return LOCK_ACT_NONE;
         }
@@ -454,31 +499,31 @@ static lock_act_t action_for(uint8_t what, bool numpad_open, short *key) {
              * a PIN. */
             return LOCK_ACT_KEYBOARD;
         case SDL_CONTROLLER_BUTTON_Y:
-            /* And no numpad at a prompt. ⭐ In Desktop Mode, the TV cursor: off, or on
-             * with its alignment bar up (rhoquinn8217, 2026-11-11: "Triangle ... will
-             * toggle cursor on/off but will allow cursor alignment when turned on";
-             * ui/streaming/desktop_mode.h). */
-            return s_mode == LOCK_KEYS_LOCK      ? LOCK_ACT_NUMPAD_OPEN
-                   : s_mode == LOCK_KEYS_DESKTOP ? LOCK_ACT_CURSOR
-                                                 : LOCK_ACT_NONE;
+            /* ⭐ THE SAME AT THE LOCK, AT A PROMPT AND IN DESKTOP MODE since 2026-11-12
+             * (rhoquinn8217: "Lets consolidate windows lock, UAC and Desktop mode. It
+             * doesn't make sense to make them different."): Triangle opens the numpad
+             * ("Triangle should always open the numpad"). Until then the numpad was the
+             * lock's alone, and Triangle the TV cursor in Desktop Mode. */
+            return LOCK_ACT_NUMPAD_OPEN;
+        case SDL_CONTROLLER_BUTTON_LEFTSTICK:
+            /* L3 the TV cursor: off, or on with its alignment bar up ("Lets move the
+             * cursor->alignment button to L3"; ui/streaming/desktop_mode.h). */
+            return LOCK_ACT_CURSOR;
         case SDL_CONTROLLER_BUTTON_GUIDE:
-            /* ⭐ In Desktop Mode, its list over the screen, or back off it (rhoquinn8217,
-             * 2026-11-11: "Rebind the PS button to to the Legend instead"; Triangle's
-             * until then). */
-            return s_mode == LOCK_KEYS_DESKTOP ? LOCK_ACT_LEGEND : LOCK_ACT_NONE;
+            /* The PS button the list, over the screen or hidden ("PS button sould be the
+             * legend button"; lock_keys_list_toggle). */
+            return LOCK_ACT_LEGEND;
         case SDL_CONTROLLER_BUTTON_LEFTSHOULDER:
         case SDL_CONTROLLER_BUTTON_RIGHTSHOULDER:
-            /* ⭐ Window Select, in Desktop Mode only: L1 back and R1 forward through
-             * Windows' window picker (stream/input/window_select.h). ⓘ Both are of the
-             * overlay's chord, so they act as they go up (pad_press). */
-            if (s_mode != LOCK_KEYS_DESKTOP) {
-                return LOCK_ACT_NONE;
-            }
+            /* ⭐ Window Select: L1 back and R1 forward through Windows' window picker
+             * (stream/input/window_select.h), Desktop Mode's alone until 2026-11-12. ⓘ
+             * Both are of the overlay's chord, so they act as they go up (pad_press). */
             return what == SDL_CONTROLLER_BUTTON_LEFTSHOULDER ? LOCK_ACT_WINDOW_BACK : LOCK_ACT_WINDOW_NEXT;
         default:
-            /* In Desktop Mode any other button still lets go of Window Select's Alt ("any
-             * other button"), Options as well: it does nothing else. */
-            return s_mode == LOCK_KEYS_DESKTOP ? LOCK_ACT_LET_GO : LOCK_ACT_NONE;
+            /* Any other button still lets go of Window Select's Alt ("any other button"),
+             * Options as well: its tap does nothing else, and its hold asks
+             * (lock_keys_tick). */
+            return LOCK_ACT_LET_GO;
     }
     return LOCK_ACT_KEY;
 }
@@ -529,7 +574,7 @@ static void act(stream_input_t *input, const lock_press_t *press) {
             window_select_step(input, false);
             break;
         case LOCK_ACT_LEGEND:
-            desktop_mode_legend_toggle();
+            lock_keys_list_toggle("PS");
             break;
         case LOCK_ACT_CURSOR:
             desktop_mode_cursor_toggle();
@@ -721,6 +766,8 @@ void lock_keys_axis(stream_input_t *input, app_gamepad_state_t *gamepad, const S
 static void lock_begin(stream_input_t *input, lock_keys_mode_t mode) {
     s_mode = mode;
     s_numpad_open = false;
+    /* Its list over the screen again (s_list_hidden). */
+    s_list_hidden = false;
     s_asking = false;
     r2_let_go();
     s_interface_had_input = false;
@@ -956,20 +1003,16 @@ void lock_keys_tick(app_t *app) {
         vmouse_set_scroll(&input->vmouse, 0, 0);
         vmouse_set_trigger(&input->vmouse, 0, 0);
     }
-    /* Options held LOCK_DISMISS_MS alone, on any pad this takes: a close, which asks
-     * first. Its OK ends this on the next pass, as an unlock does. ⭐ In Desktop Mode,
-     * which has no close, Desktop Mode turned off at once, with no question
-     * (rhoquinn8217, 2026-11-11: "Options: hold to turn off Desktop Mode", and "4. yes"
-     * to the same 2 s and no "Are you sure?"): this ends on the next pass. */
+    /* Options held LOCK_DISMISS_MS alone, on any pad this takes: the rebinds off, which
+     * asks first, in Desktop Mode as well since 2026-11-12 (rhoquinn8217: "holding
+     * options still should turn rebinds off", "keep the question"). Its OK ends this on
+     * the next pass, as an unlock does. Until then Desktop Mode went off at once, with
+     * no question. */
     const uint32_t held_at = SDL_GetTicks();
     for (int i = 0; i < LOCK_SLOTS; ++i) {
         if (s_pads[i].options_since != 0 && held_at - s_pads[i].options_since >= LOCK_DISMISS_MS) {
             s_pads[i].options_since = 0;
-            if (s_mode == LOCK_KEYS_DESKTOP) {
-                desktop_mode_off_on_pad();
-            } else {
-                lock_keys_ask_dismiss("Options held 2 s");
-            }
+            lock_keys_ask_dismiss("Options held 2 s");
             break;
         }
     }

@@ -114,6 +114,16 @@
  *   - Virtual Mouse is lent to it as to a lock, and given back OFF: turning Desktop
  *     Mode on turns Virtual Mouse off. */
 
+/* ⭐⭐ ONE SET OF CONTROLS FOR ALL THREE SINCE 2026-11-12 (rhoquinn8217: "Lets
+ * consolidate windows lock, UAC and Desktop mode. It doesn't make sense to make them
+ * different."), on every controller: the right stick and the touchpad the mouse, R2 a
+ * left click and L2 a right one, L1 and R1 Window Select, the d-pad the arrows, Create
+ * Tab, Cross Enter, Circle Esc, Square the Full Keyboard, Triangle the numpad, L3 the
+ * TV cursor and its alignment ("Lets move the cursor->alignment button to L3"), the PS
+ * button the list, and Options held 2 s the rebinds off, after its question. Only the
+ * list's heading and the question's words say which of the three it is. Where the
+ * notes above and below say a control is one mode's alone, this replaces them. */
+
 #pragma once
 
 #include <stdbool.h>
@@ -166,20 +176,33 @@ void lock_keys_dismiss(const char *how);
 /* Turned off by hand, and the lock or prompt it was turned off at still there? */
 bool lock_keys_dismissed(void);
 
-/* A close: Close clicked, or Options held 2 s, with how in the log. It asks first
- * whether to turn this off (the header). Nothing while off, turned off already, or
- * asking already. */
+/* Options held 2 s, with how in the log: it asks first whether to turn this off (the
+ * header), in Desktop Mode as well since 2026-11-12, where the OK turns Desktop Mode
+ * off. Until then the list's Close asked too; it is Hide now, and asks nothing. Nothing
+ * while off, turned off already, or asking already. */
 void lock_keys_ask_dismiss(const char *how);
 
 /* Is the question a close raises waiting for its answer? */
 bool lock_keys_asking(void);
 
 /* Its answer, with what gave it in the log: OK turns this off by hand
- * (lock_keys_dismiss), Cancel leaves it as it was. Nothing while no question waits. */
+ * (lock_keys_dismiss), or Desktop Mode off; Cancel leaves it as it was. Nothing while
+ * no question waits. */
 void lock_keys_answer(bool ok, const char *by);
 
-/* Is the numpad open? A lock starts with it closed. */
+/* Is the numpad open? Each lock, prompt and Desktop Mode starts with it closed;
+ * Triangle opens it in all three since 2026-11-12. */
 bool lock_keys_numpad_open(void);
+
+/* ⭐ THE LIST OF WHAT THE BUTTONS DO, the same at a lock, at a prompt and in Desktop
+ * Mode since 2026-11-12, under its own heading (ui/streaming/lock_numpad.h): over the
+ * screen as each begins, and hidden by its Hide or the PS button, which brings it back
+ * too (rhoquinn8217: "close need to change to hide", "PS button sould be the legend
+ * button"). Hiding it changes nothing a button does. With how in the log; nothing
+ * while off. */
+bool lock_keys_list_hidden(void);
+void lock_keys_list_toggle(const char *how);
+void lock_keys_list_hide(const char *how);
 
 /* A button of a pad on the stream went down or up. True: it was taken here, and the
  * stream's handling of it does not run. */
