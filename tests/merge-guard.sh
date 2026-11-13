@@ -555,6 +555,21 @@ need "... the last finger lifted lets it go" \
      src/app/stream/input/session_gamepad.c "touchpad_drag_lock_finger_up(state, state->active_fingers);"
 need "... and the touchpad's reset lets it go" \
      src/app/stream/input/session_gamepad.c "touchpad_drag_lock_drop(state);"
+# --- A bridged pad's touchpad as the PC's mouse under the TV's controls (rhoquinn8217, 2026-11-13) ---
+# The core's reading of it is handed to the stream's own touchpad handling
+# (stream/input/bridged_touchpad.h). Losing a hook compiles, and a bridged pad's
+# touchpad does nothing under the controls again, or SDL's copy of its click clicks
+# twice, or a finger stays down on the PC as the controls end.
+need "a bridged pad's touchpad is handed to the mouse" \
+     src/app/ctmbridge/app_sources.cmake "src/app/stream/input/bridged_touchpad.c"
+need "... its touches are taken by the stream's touchpad handling" \
+     src/app/stream/input/session_gamepad.c "&& !bridged_touchpad_feeding()) {"
+need "... and SDL's copy of its click is not" \
+     src/app/stream/input/session_gamepad.c "if (bridged_touchpad_owns(gamepad) && !bridged_touchpad_feeding()) { return; }"
+need "... handed over every pass the controls are up" \
+     src/app/stream/input/lock_keys.c "bridged_touchpad_tick(input, input != NULL && !interface_has_input);"
+need "... and let go when they are off" \
+     src/app/stream/input/lock_keys.c "bridged_touchpad_tick(input, false);"
 # --- PS and the Xbox button to Windows, the list by a two-finger press or Share (rhoquinn8217, 2026-11-13) ---
 # Losing the first compiles, and a two-finger press right-clicks again; losing the second
 # compiles, and a bridged pad's PS button is held from the PC again.

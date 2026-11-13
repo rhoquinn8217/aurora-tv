@@ -14,6 +14,7 @@
 #include "input/touchpad_pointer.h"
 #include "input/tv_cursor.h"
 #include "stream/input/bridge_switch_hold.h"
+#include "stream/input/bridged_touchpad.h"
 #include "stream/input/keyboard_input.h"
 #include "stream/input/session_input.h"
 #include "stream/input/session_virt_mouse.h"
@@ -1101,6 +1102,8 @@ void lock_keys_tick(app_t *app) {
         }
     }
     if (s_mode == LOCK_KEYS_OFF) {
+        /* A bridged pad's touchpad, the PC's mouse under the controls, let go. */
+        bridged_touchpad_tick(input, false);
         return;
     }
 #if defined(TARGET_WEBOS)
@@ -1141,5 +1144,9 @@ void lock_keys_tick(app_t *app) {
     if (input != NULL && !interface_has_input) {
         two_press_tick(input);
     }
+    /* ⭐ A bridged pad's touchpad as the PC's mouse, as a pad's on the stream is
+     * (stream/input/bridged_touchpad.h); let go while the overlay or the keyboard has
+     * the input. */
+    bridged_touchpad_tick(input, input != NULL && !interface_has_input);
     stick_moves_tv_cursor(input);
 }

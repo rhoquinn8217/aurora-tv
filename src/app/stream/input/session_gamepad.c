@@ -14,6 +14,7 @@
 #include "stream/input/lock_keys.h"
 #include "stream/input/window_select.h"
 #include "stream/input/touchpad_drag_lock.h"
+#include "stream/input/bridged_touchpad.h"
 #include "input/bridge_override.h"
 #include "input/touchpad_pointer.h"
 #include "logging.h"
@@ -239,6 +240,8 @@ void stream_input_handle_cbutton(stream_input_t *input, const SDL_ControllerButt
                 if (input->view_only) {
                     return;
                 }
+                /* This fork: under the TV's controls a bridged pad's click is the core's reading of it, not SDL's copy (stream/input/bridged_touchpad.h). */
+                if (bridged_touchpad_owns(gamepad) && !bridged_touchpad_feeding()) { return; }
 
                 session_input_touchpad_t *state = touchpad_state(input, gamepad);
                 int mouse_button = BUTTON_LEFT;
@@ -451,7 +454,8 @@ void stream_input_handle_ctouchpad(stream_input_t *input, const SDL_ControllerTo
         return;
     }
     /* This fork: Virtual Mouse takes a bridged pad's touchpad as the mouse, as it takes its sticks (input/bridge_override.h). */
-    if (!stream_input_gamepad_sends_moonlight(input, gamepad) && !bridge_override_vmouse_lends_touchpad(input)) {
+    /* This fork: and under the TV's controls the core's reading of a bridged pad's touchpad is handed here (stream/input/bridged_touchpad.h). */
+    if (!stream_input_gamepad_sends_moonlight(input, gamepad) && !bridge_override_vmouse_lends_touchpad(input) && !bridged_touchpad_feeding()) {
         return;
     }
     /* This fork: a finger already down as the pad came back from a bridge stays off the stream until lifted (bridge_switch_hold.c). */

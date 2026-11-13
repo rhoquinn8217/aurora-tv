@@ -1435,6 +1435,11 @@ int ctm_bridge_held_touches(ctm_bridge_touch_t *out, int max)
         out[count].x = HELD_TOUCH_X(w);
         out[count].y = HELD_TOUCH_Y(w);
         out[count].click = st.held_touch && HELD_TOUCH_CLICK(w);
+        const uint32_t w2 = st.held_touch ? st.held_touch_second : 0;
+        out[count].fingers2 = HELD_TOUCH_FINGERS(w2);
+        out[count].id2 = HELD_TOUCH_ID(w2);
+        out[count].x2 = HELD_TOUCH_X(w2);
+        out[count].y2 = HELD_TOUCH_Y(w2);
         ++count;
     }
     pthread_mutex_unlock(&g_sessions_mutex);
