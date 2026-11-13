@@ -493,9 +493,15 @@ void lock_numpad_tick(void) {
     /* ⭐ Over the screen in all three since 2026-11-12, Desktop Mode's too ("Over the
      * screen like window lock and UAC"; until then in the overlay, and over the screen
      * only by the PS button), unless hidden (lock_keys_list_hidden). The question still
-     * comes up with the list hidden: Options held asks it. */
+     * comes up with the list hidden: Options held asks it.
+     * ⭐ AND DESKTOP MODE'S IN THE OVERLAY, HIDDEN OR NOT (rhoquinn8217, 2026-11-12: "the
+     * legend should always be in the overlay when its turned on. Even if it's hidden, it
+     * should still be in the overlay when Desktop mode is turned on"), as it was before
+     * it went over the screen; not over a panel the overlay opened. */
     const bool up = lock_keys_active() && !ui_should_block_input();
-    const bool showing = up && !lock_keys_list_hidden();
+    const bool in_overlay =
+        mode == LOCK_KEYS_DESKTOP && streaming_overlay_shown() && !ctm_panel_shown() && !bt_panel_shown();
+    const bool showing = in_overlay || (up && !lock_keys_list_hidden());
     /* ⓘ The line about Auto Bridge is the lock's: a prompt does not hold a bridge
      * back (rhoquinn8217, 2026-11-09: "If the UAC: controller legend is the same, we
      * don't need to have that message"). */
