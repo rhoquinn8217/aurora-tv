@@ -16,3 +16,9 @@ void loop_watch_mark(const char *step);
 
 /* At the end of the pass: written to the log if it was slow. */
 void loop_watch_end(void);
+
+/* ⓘ Inside a step: the clock, and time spent on `what` (a string that lives on), added
+ * up through the pass and written after the steps when the pass is slow: where in
+ * LVGL's task handler the time went (2026-11-13: every stall at the C3 was in it). */
+unsigned long long loop_watch_now(void);
+void loop_watch_add(const char *what, unsigned long long ticks);

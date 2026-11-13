@@ -23,6 +23,7 @@
 #include <SDL_image.h>   /* the regular cursor: webOS's own picture */
 #include <pbnjson.h>
 #include "lunasynccall.h"   /* the TV's Pointer Size */
+#include "loop_watch.h"
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -472,6 +473,7 @@ static bool build(void) {
     int hot_y = (int) floor((tip_y + m) / scale);
     if (hot_x >= image->w) hot_x = image->w - 1;
     if (hot_y >= image->h) hot_y = image->h - 1;
+    const unsigned long long watch_at = loop_watch_now();   /* input/loop_watch.h */
     SDL_Cursor *cursor = SDL_CreateColorCursor(image, hot_x, hot_y);
     if (cursor == NULL) {
         tv_cursor_log("SDL refused the cursor (%s)", SDL_GetError());
@@ -482,6 +484,7 @@ static bool build(void) {
     if (s_cursor != NULL) {
         SDL_FreeCursor(s_cursor);
     }
+    loop_watch_add("the TV cursor's SDL cursor made and set", loop_watch_now() - watch_at);
     if (s_image != NULL) {
         SDL_FreeSurface(s_image);
     }

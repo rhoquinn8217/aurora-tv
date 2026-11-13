@@ -14,6 +14,7 @@
 #include "input/bridge_keyboard.h"
 #include "input/tv_cursor.h"
 #include "input/mouse_seen.h"     /* mouse_seen_wake */
+#include "input/loop_watch.h"
 
 /* The USB Bridge panel's colours (ctm_panel.c), so the two read as one family. */
 #define ALIGN_COL_CARD    lv_color_hex(0x12181d)
@@ -98,7 +99,9 @@ static void keep_awake(void) {
 static void awake_cb(lv_timer_t *timer) {
     LV_UNUSED(timer);
     if (s_aligning) {
+        const unsigned long long watch_at = loop_watch_now();   /* input/loop_watch.h */
         keep_awake();
+        loop_watch_add("the bar's keep-awake", loop_watch_now() - watch_at);
     }
 }
 
@@ -164,7 +167,9 @@ static void apply_pending(void) {
 
 static void apply_cb(lv_timer_t *timer) {
     if (s_pending && s_aligning) {
+        const unsigned long long watch_at = loop_watch_now();   /* input/loop_watch.h */
         apply_pending();
+        loop_watch_add("the bar's tip applied", loop_watch_now() - watch_at);
         return;
     }
     lv_timer_del(timer);

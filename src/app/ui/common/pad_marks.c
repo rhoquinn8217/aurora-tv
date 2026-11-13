@@ -5,6 +5,7 @@
 #include "app.h"
 #include "input/app_input.h"
 #include "input/input_gamepad.h"
+#include "input/loop_watch.h"
 
 /* The page's grid in hundredths of a unit: 20 high, 20 wide, a shoulder button 24. */
 #define GRID_HIGH 2000
@@ -277,7 +278,16 @@ static bool mark_is_dpad(pad_mark_t mark) {
            mark == PAD_MARK_DPAD;
 }
 
+static void mark_draw_body(lv_event_t *event);
+
+/* Timed for input/loop_watch.h. */
 static void mark_draw(lv_event_t *event) {
+    const unsigned long long watch_at = loop_watch_now();
+    mark_draw_body(event);
+    loop_watch_add("the pad marks' drawing", loop_watch_now() - watch_at);
+}
+
+static void mark_draw_body(lv_event_t *event) {
     lv_obj_t *obj = lv_event_get_target(event);
     const intptr_t packed = (intptr_t) lv_event_get_user_data(event);
     const pad_mark_t mark = (pad_mark_t) (packed >> 8);

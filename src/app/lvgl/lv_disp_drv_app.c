@@ -2,6 +2,7 @@
 #include "lv_disp_drv_app.h"
 
 #include "draw/sdl/lv_draw_sdl.h"
+#include "input/loop_watch.h"   /* This fork: the screen's present, timed */
 
 static void lv_sdl_drv_fb_flush(lv_disp_drv_t *disp_drv, const lv_area_t *area, lv_color_t *src);
 
@@ -67,6 +68,7 @@ void lv_app_display_resize(lv_disp_t *disp, int width, int height) {
 }
 
 void lv_app_redraw_now(lv_disp_drv_t *disp_drv) {
+    const unsigned long long watch_at = loop_watch_now();   /* This fork: input/loop_watch.h. */
     lv_draw_sdl_drv_param_t *param = disp_drv->user_data;
     SDL_Renderer *renderer = param->renderer;
     SDL_Texture *texture = disp_drv->draw_buf->buf1;
@@ -85,6 +87,7 @@ void lv_app_redraw_now(lv_disp_drv_t *disp_drv) {
     SDL_RenderCopy(renderer, texture, NULL, NULL);
     SDL_RenderPresent(renderer);
     SDL_SetRenderTarget(renderer, texture);
+    loop_watch_add("the screen's copy and present", loop_watch_now() - watch_at);   /* This fork: input/loop_watch.h. */
 }
 
 static void lv_sdl_drv_fb_flush(lv_disp_drv_t *disp_drv, const lv_area_t *area, lv_color_t *src) {
