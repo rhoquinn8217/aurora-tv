@@ -570,6 +570,12 @@ need "... handed over every pass the controls are up" \
      src/app/stream/input/lock_keys.c "bridged_touchpad_tick(input, input != NULL && !interface_has_input);"
 need "... and let go when they are off" \
      src/app/stream/input/lock_keys.c "bridged_touchpad_tick(input, false);"
+# --- A click on Aurora's button over the stream is Aurora's alone: the stats' pin (rhoquinn8217, 2026-11-13) ---
+# Losing either compiles, and a click on the pinned stats' pin clicks the PC behind it too.
+need "the pinned stats' pin is one of Aurora's buttons over the stream" \
+     src/app/ui/streaming/lock_numpad.c "{streaming_stats_pin_shown(), \"the stats' pin\"}"
+need "... found while the stats are pinned" \
+     src/app/ui/streaming/streaming.controller.c "streaming_stats_pin_shown() {"
 # --- PS and the Xbox button to Windows, the list by a two-finger press or Share (rhoquinn8217, 2026-11-13) ---
 # Losing the first compiles, and a two-finger press right-clicks again; losing the second
 # compiles, and a bridged pad's PS button is held from the PC again.

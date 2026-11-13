@@ -555,18 +555,24 @@ bool lock_numpad_hide_up(void) {
 }
 
 /* What of Aurora's that asks to be clicked is at this point, by name, or NULL. The
- * question first: it is drawn over the rest. */
+ * question first: it is drawn over the rest.
+ * ⭐ And the stats' pin while the stats are pinned over the stream (rhoquinn8217,
+ * 2026-11-13: "clicking buttons when they are presented over the stream (the stats pin
+ * button and the close button) ... stop the click from clicking what's behind the
+ * button"): a click on it went to the PC too. Each by its click area, which takes in
+ * a widened one, as the pin's is: the button's own box left a ring around it where the
+ * PC was clicked as well. */
 static const char *button_at(lv_coord_t x, lv_coord_t y) {
     const struct {
         lv_obj_t *obj;
         const char *name;
-    } asks[] = {{s_question, "the question"}, {s_hide, "Hide"}};
+    } asks[] = {{s_question, "the question"}, {s_hide, "Hide"}, {streaming_stats_pin_shown(), "the stats' pin"}};
     for (int i = 0; i < (int) (sizeof asks / sizeof asks[0]); ++i) {
         if (asks[i].obj == NULL) {
             continue;
         }
         lv_area_t area;
-        lv_obj_get_coords(asks[i].obj, &area);
+        lv_obj_get_click_area(asks[i].obj, &area);
         if (x >= area.x1 && x <= area.x2 && y >= area.y1 && y <= area.y2) {
             return asks[i].name;
         }
