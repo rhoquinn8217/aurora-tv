@@ -6,6 +6,7 @@
 #include "lvgl/util/lv_app_utils.h"
 
 #include "app.h"
+#include "input/loop_watch.h"   /* This fork: a slow pass of the loop, named by its steps. */
 #include "bridge_app.h"
 #include "config.h"
 
@@ -140,9 +141,12 @@ void app_deinit(app_t *app) {
 }
 
 void app_run_loop(app_t *app) {
+    loop_watch_begin();   /* This fork: a slow pass named by its steps (input/loop_watch.h). */
     app_process_events(app);
     lv_task_handler();
+    loop_watch_mark("LVGL's task handler (timers, drawing, the screen's present)");
     SDL_Delay(1);
+    loop_watch_end();
 }
 
 static int app_event_filter(void *userdata, SDL_Event *event) {
@@ -298,11 +302,14 @@ static int app_event_filter(void *userdata, SDL_Event *event) {
 
 void app_process_events(app_t *app) {
     SDL_PumpEvents();
+    loop_watch_mark("SDL_PumpEvents");   /* This fork: input/loop_watch.h. */
     bridge_app_filter_events(app_event_filter, app);   /* This fork: SDL's walk of its queue, and a change of the mouse's mode held until it ends. Why: ctmbridge/NOTES.md, "The mouse mode's flush". */
+    loop_watch_mark("SDL's event walk (the stream's input)");   /* This fork: input/loop_watch.h. */
     bridge_app_events(app);
     if (app->session != NULL) {
         session_update_touchpad_tap_hold(app->session);
     }
+    loop_watch_mark("the touchpad's tap hold");   /* This fork: input/loop_watch.h. */
 }
 
 void app_quit_confirm() {
