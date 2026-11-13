@@ -35,6 +35,7 @@ target_sources(moonlight-lib PRIVATE
         ${CMAKE_SOURCE_DIR}/src/app/stream/input/bridge_switch_hold.c
         ${CMAKE_SOURCE_DIR}/src/app/stream/input/lock_keys.c
         ${CMAKE_SOURCE_DIR}/src/app/stream/input/window_select.c
+        ${CMAKE_SOURCE_DIR}/src/app/stream/input/touchpad_drag_lock.c
         ${CMAKE_SOURCE_DIR}/src/app/ui/common/bt_panel.c
         ${CMAKE_SOURCE_DIR}/src/app/ui/common/click_away.c
         ${CMAKE_SOURCE_DIR}/src/app/ui/common/keyboard_text.c

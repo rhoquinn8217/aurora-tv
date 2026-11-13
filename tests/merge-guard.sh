@@ -543,6 +543,18 @@ need "a mouse's click lets go of it after the click" \
      src/app/stream/input/session_mouse.c "window_select_after_click();"
 need_count "... and the touchpad's press, tap and held tap" \
      src/app/stream/input/session_gamepad.c "window_select_after_click();" 3
+# --- Press and drag at the sign-in, a prompt and in Desktop Mode (rhoquinn8217, 2026-11-13) ---
+# The left button stays down until the last finger lifts (stream/input/touchpad_drag_lock.h).
+# Losing the click's hook compiles, and a drag stops as the click comes up; losing the
+# other two leaves the button down on the PC.
+need "press and drag is built" \
+     src/app/ctmbridge/app_sources.cmake "src/app/stream/input/touchpad_drag_lock.c"
+need "the touchpad's click keeps the left button down while a finger stays on the pad" \
+     src/app/stream/input/session_gamepad.c "touchpad_drag_lock_click(state, event->type == SDL_CONTROLLERBUTTONDOWN"
+need "... the last finger lifted lets it go" \
+     src/app/stream/input/session_gamepad.c "touchpad_drag_lock_finger_up(state, state->active_fingers);"
+need "... and the touchpad's reset lets it go" \
+     src/app/stream/input/session_gamepad.c "touchpad_drag_lock_drop(state);"
 need "the numpad is built" \
      src/app/ctmbridge/app_sources.cmake "src/app/ui/streaming/lock_numpad.c"
 need "the keyboard's place is built" \

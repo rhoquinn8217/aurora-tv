@@ -13,6 +13,7 @@
 #include "stream/input/bridge_switch_hold.h"
 #include "stream/input/lock_keys.h"
 #include "stream/input/window_select.h"
+#include "stream/input/touchpad_drag_lock.h"
 #include "input/bridge_override.h"
 #include "input/touchpad_pointer.h"
 #include "logging.h"
@@ -272,6 +273,8 @@ void stream_input_handle_cbutton(stream_input_t *input, const SDL_ControllerButt
 
                 /* This fork: pressed in on Aurora's own button, the press and its release are Aurora's, not the host's (input/touchpad_pointer.h). */
                 if (state != NULL && touchpad_pointer_stream_press(&state->press_auroras, mouse_button == BUTTON_LEFT, event->type == SDL_CONTROLLERBUTTONDOWN)) { return; }
+                /* This fork: press and drag, the left button kept down while a finger stays on the pad (stream/input/touchpad_drag_lock.h). */
+                if (mouse_button == BUTTON_LEFT && touchpad_drag_lock_click(state, event->type == SDL_CONTROLLERBUTTONDOWN, state != NULL ? state->active_fingers : 0)) { return; }
                 LiSendMouseButtonEvent(event->type == SDL_CONTROLLERBUTTONDOWN ?
                                        BUTTON_ACTION_PRESS : BUTTON_ACTION_RELEASE, mouse_button);
                 /* This fork: the click first, then Window Select's Alt let go (stream/input/window_select.h). */
@@ -518,6 +521,8 @@ void stream_input_handle_ctouchpad(stream_input_t *input, const SDL_ControllerTo
 
         if (event->type == SDL_CONTROLLERTOUCHPADUP) {
             state->active_fingers &= (uint8_t) ~finger_bit;
+            /* This fork: the last finger off the pad lets go of a press and drag's left button (stream/input/touchpad_drag_lock.h). */
+            touchpad_drag_lock_finger_up(state, state->active_fingers);
         } else {
             state->active_fingers |= finger_bit;
         }
@@ -1004,6 +1009,8 @@ static session_input_touchpad_t *touchpad_state(
 
 static void touchpad_reset_state(session_input_touchpad_t *state) {
     touchpad_end_tap(state);
+    /* This fork: a press and drag's left button is let go too (stream/input/touchpad_drag_lock.h). */
+    touchpad_drag_lock_drop(state);
     /* This fork: a press that was Aurora's is let go there, not on the host (input/touchpad_pointer.h). */
     if (touchpad_pointer_stream_press(&state->press_auroras, false, false)) { state->physical_mouse_button = 0; }
     if (state->physical_mouse_button > 0) {
