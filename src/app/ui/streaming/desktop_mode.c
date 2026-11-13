@@ -2,6 +2,9 @@
 
 #include "desktop_mode.h"
 
+#include <stdio.h>
+#include <string.h>
+
 #include <SDL.h>
 
 #include "app.h"
@@ -139,12 +142,41 @@ static bool ds5usbip_on(void) {
 #endif
 }
 
-/* A resume: the host is running the very app this stream asked for (gs_start_app resumes
- * it then). */
+/* ⭐ THIS APP'S OWN MEMORY OF THE STREAM BEFORE (2026-11-12, the C1, build 695: a
+ * Disconnect, then the same app again on the same host, was taken for a stream's start, and
+ * Desktop Mode turned itself on, though the host had kept the app running and ran no start
+ * command for it: the host's running app, as the host list held it, did not say so). The
+ * same host and app as the stream before, which ended without a quit: the app is still
+ * running there. Kept while a stream runs; forgotten when this app restarts, where only the
+ * host list's word is left. */
+static struct {
+    bool valid;
+    char uuid[64];
+    int app_id;
+    bool quit;
+} s_prev;
+
+static void prev_keep(const session_t *session) {
+    s_prev.valid = true;
+    snprintf(s_prev.uuid, sizeof s_prev.uuid, "%s",
+             session->server != NULL && session->server->uuid != NULL ? session->server->uuid : "");
+    s_prev.app_id = session->app_id;
+    s_prev.quit = session->quitapp;
+}
+
+/* A resume: the host is running the very app this stream asked for, by the host list's
+ * word (gs_start_app resumes it then) or by this app's memory of the stream before
+ * (s_prev). */
 static bool stream_is_resume(const app_t *app) {
     const session_t *session = app->session;
-    return session != NULL && session->server != NULL && session->server->currentGame != 0 &&
-           session->server->currentGame == session->app_id;
+    if (session == NULL || session->server == NULL) {
+        return false;
+    }
+    if (session->server->currentGame != 0 && session->server->currentGame == session->app_id) {
+        return true;
+    }
+    return s_prev.valid && !s_prev.quit && s_prev.app_id == session->app_id && session->server->uuid != NULL &&
+           strcmp(s_prev.uuid, session->server->uuid) == 0;
 }
 
 void desktop_mode_tick(app_t *app) {
@@ -154,6 +186,18 @@ void desktop_mode_tick(app_t *app) {
         s_session = session;
         s_handover = false;
         s_start_waiting = false;
+        /* ⓘ What it was decided on, in the log: the host's running app as the host list
+         * held it, this stream's app, and the stream before. */
+        if (session != NULL) {
+            const int host_says = app->session->server != NULL ? app->session->server->currentGame : -1;
+            if (s_prev.valid) {
+                desktop_note("a stream of app %d: the host list says app %d runs; the stream before was app %d, %s",
+                             app->session->app_id, host_says, s_prev.app_id, s_prev.quit ? "quit" : "not quit");
+            } else {
+                desktop_note("a stream of app %d: the host list says app %d runs; no stream before in this run",
+                             app->session->app_id, host_says);
+            }
+        }
         if (session != NULL && stream_is_resume(app)) {
             desktop_note("a resume: %s, as it was", s_on ? "on" : "off");
         } else if (session != NULL) {
@@ -164,6 +208,9 @@ void desktop_mode_tick(app_t *app) {
             s_start_waiting = app_configuration != NULL && app_configuration->bridge.desktop_mode_start;
             s_start_since = 0;
         }
+    }
+    if (app != NULL && app->session != NULL) {
+        prev_keep(app->session);   /* kept as it runs: a quit is known only at its end */
     }
     if (!s_start_waiting || app == NULL || app->session == NULL) {
         return;
