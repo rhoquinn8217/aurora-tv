@@ -33,6 +33,16 @@ static bool s_aligning = false;
 static bool s_open_queued = false;
 static int s_was_x = 0, s_was_y = 0;      /* the shift before aligning, which Esc puts back */
 
+/* ⭐ THE TIP'S MOVES TEN TIMES A SECOND AT MOST (rhoquinn8217, 2026-11-13, at the C3:
+ * "when it goes to aligning, the TV is very slow"). Each move remakes the TV cursor's
+ * picture and hands it to webOS (tv_cursor_adjust), and a held arrow or a stick gave one
+ * a frame: eight in a tenth of a second were logged. The first move is applied at once,
+ * the ones after it gathered and the latest applied every ALIGN_APPLY_MS. */
+#define ALIGN_APPLY_MS 100
+static lv_timer_t *s_apply = NULL;
+static bool s_pending = false;            /* a move not applied yet */
+static int s_pend_x = 0, s_pend_y = 0;    /* the shift it moves to */
+
 /* ⓘ A close hides at once and deletes on the next pass, as the USB Bridge
  * panel's does (ctm_panel.c): the key event that closed it is still being
  * handled, with its group, when the close returns. */
@@ -139,6 +149,35 @@ static void bar_refresh(void) {
                           x, y);
 }
 
+/* The gathered move, applied (the throttle above s_apply). */
+static void apply_pending(void) {
+    if (!s_pending) {
+        return;
+    }
+    s_pending = false;
+    tv_cursor_adjust(s_pend_x, s_pend_y, -1);
+    /* Where it was clamped to is where the next move starts. */
+    tv_cursor_get_shift(&s_pend_x, &s_pend_y);
+    bar_refresh();
+    keep_awake();
+}
+
+static void apply_cb(lv_timer_t *timer) {
+    if (s_pending && s_aligning) {
+        apply_pending();
+        return;
+    }
+    lv_timer_del(timer);
+    s_apply = NULL;
+}
+
+static void apply_stop(void) {
+    if (s_apply != NULL) {
+        lv_timer_del(s_apply);
+        s_apply = NULL;
+    }
+}
+
 /* Enter or A keeps it, Esc or B puts back what was there. */
 static void bar_close(bool keep) {
     if (!s_aligning) {
@@ -151,9 +190,12 @@ static void bar_close(bool keep) {
     s_aligning = false;
     SDL_DelEventWatch(align_motion_watch, NULL);
     stop_awake();
+    apply_stop();
     if (keep) {
+        apply_pending();   /* the last move, so it is the one kept */
         tv_cursor_keep();
     } else {
+        s_pending = false;
         tv_cursor_adjust(s_was_x, s_was_y, -1);
         tv_cursor_log("align bar: closed, nothing kept");
     }
@@ -174,7 +216,12 @@ static void bar_key_cb(lv_event_t *event) {
         return;
     }
     int x = 0, y = 0;
-    tv_cursor_get_shift(&x, &y);
+    if (s_pending) {
+        x = s_pend_x;
+        y = s_pend_y;
+    } else {
+        tv_cursor_get_shift(&x, &y);
+    }
     switch (lv_event_get_key(event)) {
         case LV_KEY_LEFT:
             x--;
@@ -194,9 +241,13 @@ static void bar_key_cb(lv_event_t *event) {
         default:
             return;
     }
-    tv_cursor_adjust(x, y, -1);
-    bar_refresh();
-    keep_awake();
+    s_pend_x = x;
+    s_pend_y = y;
+    s_pending = true;
+    if (s_apply == NULL) {
+        apply_pending();   /* the first at once */
+        s_apply = lv_timer_create(apply_cb, ALIGN_APPLY_MS, NULL);
+    }
 }
 
 /* ⓘ Enter and A come as a click when they come UP, as everywhere in this
