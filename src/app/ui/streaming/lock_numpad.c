@@ -213,30 +213,21 @@ static void options_row_create(lv_obj_t *parent, pad_family_t family) {
     mark_row_create(parent, PAD_MARK_MENU, family, locstr("- hold to turn off rebinds"));
 }
 
-/* The list's own two rows, in every list and the numpad's (rhoquinn8217, 2026-11-13):
- * a DualSense's two-finger press and an Xbox pad's Share button show or hide it ("DualSense
+/* The list's own row, in every list and the numpad's (rhoquinn8217, 2026-11-13): a
+ * DualSense's two-finger press and an Xbox pad's Share button show or hide it ("DualSense
  * two finger press in brings up the legend", "xbox share button in brings up the
- * legend"), and PS and the Xbox button go to Windows, to Steam ("PS button should go to
- * windows(start steam)"). The PS button was the list's until then. An Xbox pad's buttons
- * have no marks here, so their rows are words ("we have to use the text "Xbox button"
- * since there is not symbol we can use for it"), and so is a two-finger press. */
-/* ⭐ The two-finger press's row with the touchpad's mark since 2026-11-13, and the two
- * rows apart: the list's own row at the top of the list ("Move the legend key to the
- * top of the list"), Steam's lower down. */
+ * legend"), with the touchpad's mark, at the top of the list ("Move the legend key to the
+ * top of the list"). An Xbox pad's Share button has no mark here, so its row is words.
+ * ⓘ PS and the Xbox button have no row: they go to Windows as they are, not rebound
+ * (rhoquinn8217, 2026-11-13: "The button is pass through and windows will have an action
+ * for it that isn't necessarily steam. Removing it means it's not rebound and works as it
+ * should"). Their rows said "- Steam" from that morning until then. */
 static void legend_toggle_row_create(lv_obj_t *parent, pad_family_t family) {
     if (family == PAD_FAMILY_XBOX) {
         words_create(parent, locstr("Share button - show/hide legend"), lv_theme_get_font_small(parent));
     } else {
         const piece_t press[] = {PIECE_MARK(PAD_MARK_TOUCH_TWO), PIECE_WORDS(locstr("press - show/hide legend"))};
         pieces_row_create(parent, family, press, 2);
-    }
-}
-
-static void steam_row_create(lv_obj_t *parent, pad_family_t family) {
-    if (family == PAD_FAMILY_XBOX) {
-        words_create(parent, locstr("Xbox button - Steam"), lv_theme_get_font_small(parent));
-    } else {
-        mark_row_create(parent, PAD_MARK_HOME, family, locstr("- Steam"));
     }
 }
 
@@ -279,7 +270,6 @@ static lv_obj_t *numpad_create(pad_family_t family) {
 
     mark_row_create(panel, PAD_MARK_EAST, family, locstr("- close numpad"));
     legend_toggle_row_create(panel, family);
-    steam_row_create(panel, family);
     options_row_create(panel, family);
     return panel;
 }
@@ -361,16 +351,15 @@ static lv_obj_t *list_create(pad_family_t family, lock_keys_mode_t mode) {
      * different."; stream/input/lock_keys.h), only the heading says which. */
     /* ⭐ THE LIST'S OWN ROW FIRST, then the touchpad and the stick or trigger that do the
      * same thing, one row each, a | between (rhoquinn8217, 2026-11-13: the fifth draft,
-     * with "unbold it" and "up/down"). Holding R2 to drag and the left stick's scroll were
-     * there all along and are written now. An Xbox pad has no touchpad: its half of each
+     * with "unbold it"; then "remove the "hold R2" this is intuitive already just like hold
+     * L2 would be" and "remove up/down. scroll implies it"). The left stick's scroll was
+     * there all along and is written now. An Xbox pad has no touchpad: its half of each
      * row is left out. */
     legend_toggle_row_create(panel, family);
     if (family == PAD_FAMILY_XBOX) {
         words_create(panel, locstr("Right stick - mouse"), font);
         mark_row_create(panel, PAD_MARK_R2, family, locstr("- left click"));
         mark_row_create(panel, PAD_MARK_L2, family, locstr("- right click"));
-        const piece_t drag[] = {PIECE_WORDS(locstr("hold")), PIECE_MARK(PAD_MARK_R2), PIECE_WORDS(locstr("- drag"))};
-        pieces_row_create(panel, family, drag, 3);
         words_create(panel, locstr("Left stick - scroll"), font);
     } else {
         const piece_t mouse[] = {PIECE_MARK(PAD_MARK_TOUCH_ONE), PIECE_WORDS(locstr("| Right stick - mouse"))};
@@ -378,14 +367,12 @@ static lv_obj_t *list_create(pad_family_t family, lock_keys_mode_t mode) {
                                 PIECE_WORDS(locstr("- left click"))};
         const piece_t right[] = {PIECE_MARK(PAD_MARK_TOUCH_TWO), PIECE_WORDS(locstr("tap |")),
                                  PIECE_MARK(PAD_MARK_L2), PIECE_WORDS(locstr("- right click"))};
-        const piece_t drag[] = {PIECE_MARK(PAD_MARK_TOUCH_ONE), PIECE_WORDS(locstr("press, hold touch | hold")),
-                                PIECE_MARK(PAD_MARK_R2), PIECE_WORDS(locstr("- drag"))};
-        const piece_t scroll[] = {PIECE_MARK(PAD_MARK_TOUCH_TWO),
-                                  PIECE_WORDS(locstr("swipe up/down | Left stick - scroll"))};
+        const piece_t drag[] = {PIECE_MARK(PAD_MARK_TOUCH_ONE), PIECE_WORDS(locstr("press, hold touch - drag"))};
+        const piece_t scroll[] = {PIECE_MARK(PAD_MARK_TOUCH_TWO), PIECE_WORDS(locstr("swipe | Left stick - scroll"))};
         pieces_row_create(panel, family, mouse, 2);
         pieces_row_create(panel, family, left, 4);
         pieces_row_create(panel, family, right, 4);
-        pieces_row_create(panel, family, drag, 4);
+        pieces_row_create(panel, family, drag, 2);
         pieces_row_create(panel, family, scroll, 2);
     }
     const piece_t window[] = {PIECE_MARK(PAD_MARK_L1), PIECE_WORDS("|"), PIECE_MARK(PAD_MARK_R1),
@@ -398,7 +385,6 @@ static lv_obj_t *list_create(pad_family_t family, lock_keys_mode_t mode) {
     mark_row_create(panel, PAD_MARK_WEST, family, locstr("- Full Keyboard"));
     mark_row_create(panel, PAD_MARK_NORTH, family, locstr("- numpad"));
     mark_row_create(panel, PAD_MARK_L3, family, locstr("- Toggle Cursor"));
-    steam_row_create(panel, family);
     options_row_create(panel, family);
     /* ⭐ THE LIST AS WIDE AS ITS WIDEST LINE, THE HEADING WITH CLOSE AMONG THEM
      * (rhoquinn8217, 2026-11-10, at build 669, where Close sat over the heading's last
