@@ -32,6 +32,7 @@
 #include "ui/settings/auto_bridge_window.h"
 #endif
 #include "ui/streaming/desktop_mode.h"
+#include "ui/common/pad_marks.h"
 
 typedef struct {
     lv_fragment_t base;
@@ -74,6 +75,78 @@ static void usbb_gap(lv_obj_t *view)
     lv_obj_remove_style_all(sp);
     lv_obj_set_size(sp, LV_PCT(100), LV_DPX(14));
     lv_obj_clear_flag(sp, LV_OBJ_FLAG_SCROLLABLE);
+}
+
+/* ⭐ THE TOUCHPAD'S MARK IN THIS PANE (rhoquinn8217, 2026-11-13: "Use the symbol in the
+ * settings but ... keep the text", then "parens around 2-finger touchpad", "press and
+ * hold", and for the box "remove the [symbol] next to the checkbox. Place the symbol
+ * next to left of the word "touchpad" and put parens around the word "touchpad" ...
+ * use the touchpad without a dot"). The mark is ui/common/pad_marks.h's, as Desktop
+ * Mode's list draws it. */
+
+/* A line of words with the mark before them, laid out as pref_desc_label's lines are. */
+static void touch_desc_row(lv_obj_t *view, pad_mark_t mark, const char *words)
+{
+    lv_obj_t *row = lv_obj_create(view);
+    lv_obj_remove_style_all(row);
+    lv_obj_clear_flag(row, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_size(row, LV_PCT(100), LV_SIZE_CONTENT);
+    lv_obj_set_style_pad_left(row, LV_DPX(30), 0);
+    lv_obj_set_style_pad_bottom(row, LV_DPX(2), 0);
+    lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_column(row, LV_DPX(6), 0);
+    pad_mark_create(row, mark, PAD_FAMILY_PLAYSTATION, LV_DPX(18), lv_obj_get_style_text_color(view, LV_PART_MAIN));
+    lv_obj_t *label = lv_label_create(row);
+    lv_obj_set_style_text_font(label, lv_theme_get_font_small(view), 0);
+    lv_obj_set_style_text_line_space(label, 0, 0);
+    lv_label_set_text(label, words);
+}
+
+/* The touchpad-as-mouse box's words, written beside its box in its own type, the bare
+ * mark inside the first line: "Enable [mark] (touchpad) as mouse", then "in dashboard
+ * and streaming overlay". A checkbox's own text cannot hold a drawing, so the box is
+ * made with none and these sit where its text would: past the box by the box's width
+ * and its gap, as LVGL draws a checkbox's text. They take no input, so a click or the
+ * focus is still the box's. */
+static void touch_box_words(lv_obj_t *checkbox)
+{
+    const lv_font_t *font = lv_obj_get_style_text_font(checkbox, LV_PART_MAIN);
+    const lv_coord_t line = lv_font_get_line_height(font);
+    const lv_coord_t start = (lv_coord_t) (line + lv_obj_get_style_pad_left(checkbox, LV_PART_INDICATOR) +
+                                           lv_obj_get_style_pad_right(checkbox, LV_PART_INDICATOR) +
+                                           lv_obj_get_style_pad_column(checkbox, LV_PART_MAIN));
+    const lv_color_t color = lv_obj_get_style_text_color(checkbox, LV_PART_MAIN);
+
+    lv_obj_t *words = lv_obj_create(checkbox);
+    lv_obj_remove_style_all(words);
+    lv_obj_clear_flag(words, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(words, LV_OBJ_FLAG_IGNORE_LAYOUT);
+    lv_obj_set_size(words, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(words, LV_FLEX_FLOW_COLUMN);
+    /* As high as the box's own text would be: half the box's own padding down. */
+    lv_obj_align(words, LV_ALIGN_TOP_LEFT, start,
+                 (lv_coord_t) ((lv_obj_get_style_pad_top(checkbox, LV_PART_INDICATOR) +
+                                lv_obj_get_style_pad_bottom(checkbox, LV_PART_INDICATOR)) / 2));
+
+    lv_obj_t *first = lv_obj_create(words);
+    lv_obj_remove_style_all(first);
+    lv_obj_clear_flag(first, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_size(first, LV_SIZE_CONTENT, line);
+    lv_obj_set_flex_flow(first, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(first, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_column(first, LV_DPX(6), 0);
+    lv_obj_t *enable = lv_label_create(first);
+    lv_obj_set_style_text_font(enable, font, 0);
+    lv_label_set_text(enable, locstr("Enable"));
+    pad_mark_create(first, PAD_MARK_TOUCHPAD, PAD_FAMILY_PLAYSTATION, (lv_coord_t) (line * 3 / 4), color);
+    lv_obj_t *rest = lv_label_create(first);
+    lv_obj_set_style_text_font(rest, font, 0);
+    lv_label_set_text(rest, locstr("(touchpad) as mouse"));
+
+    lv_obj_t *second = lv_label_create(words);
+    lv_obj_set_style_text_font(second, font, 0);
+    lv_label_set_text(second, locstr("in dashboard and streaming overlay"));
 }
 
 static lv_obj_t *dependent_checkbox_ex(usbbridge_pane_t *pane, lv_obj_t *view,
@@ -354,8 +427,8 @@ static lv_obj_t *create_obj(lv_fragment_t *self, lv_obj_t *container) {
     dependent_checkbox(pane, view, locstr("Enable Gesture Bridging"),
                        &app_configuration->bridge.gesture);
     pref_desc_label(view, locstr("Allows the following:"), false);
-    pref_desc_label(view, locstr("2-finger touchpad hold: 1 sec. -- Bridge"), false);
-    pref_desc_label(view, locstr("2-finger touchpad hold: 4 sec. -- Release"), false);
+    touch_desc_row(view, PAD_MARK_TOUCH_TWO, locstr("(2-finger touchpad) press and hold: 1 sec. -- Bridge"));
+    touch_desc_row(view, PAD_MARK_TOUCH_TWO, locstr("(2-finger touchpad) press and hold: 4 sec. -- Release"));
 
     /* ⭐ THE TOUCHPAD AS THE TV'S MOUSE, in their words (rhoquinn8217,
      * 2026-10-20). A plain box, not a dependent one: it works with bridging
@@ -371,8 +444,7 @@ static lv_obj_t *create_obj(lv_fragment_t *self, lv_obj_t *container) {
      * the second line. ⓘ Still two with "DualSense" gone: as one line it is 59
      * characters, about all a row holds at 1920 wide. */
     usbb_gap(view);
-    pref_checkbox(view, locstr("Enable touchpad as mouse\nin dashboard and streaming overlay"),
-                  &app_configuration->bridge.touchpad_pointer, false);
+    touch_box_words(pref_checkbox(view, "", &app_configuration->bridge.touchpad_pointer, false));
     pref_desc_label(view, locstr("One finger moves the pointer; press the touchpad to click "
                                  "(DualSense/DualSense Edge/DualShock4)."), false);
 

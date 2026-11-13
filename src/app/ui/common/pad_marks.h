@@ -53,10 +53,20 @@ typedef enum {
      * as the PS button's letters are (rhoquinn8217, 2026-11-12: "Lets move the
      * cursor->alignment button to L3"), as DS5-USBIP's configs window marks it. */
     PAD_MARK_L3,
+    /* ⭐ THE TOUCHPAD (rhoquinn8217, 2026-11-13, of the mark DS5-USBIP's configs window
+     * was given that day, picked at its fourth brightness: "can we use this for both
+     * aurora-tv and DS5-USBIP"): DualSense's touchpad, its top a slight arch and its
+     * corners rounded, and the fingers on it as solid dots of the mark's own colour at
+     * 40% ("not as bright as the touchpad outline"). The same on every pad: bare, with
+     * one finger, with two. */
+    PAD_MARK_TOUCHPAD,
+    PAD_MARK_TOUCH_ONE,
+    PAD_MARK_TOUCH_TWO,
 } pad_mark_t;
 
 /* The mark, `height` pixels high, as an object in `parent` that takes no input.
- * A shoulder button's is a fifth wider than it is high, the others square. */
+ * A shoulder button's is a fifth wider than it is high, the touchpad's two fifths,
+ * the others square. */
 lv_obj_t *pad_mark_create(lv_obj_t *parent, pad_mark_t mark, pad_family_t family, lv_coord_t height,
                           lv_color_t color);
 

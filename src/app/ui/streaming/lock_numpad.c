@@ -154,32 +154,52 @@ static lv_obj_t *row_create(lv_obj_t *parent) {
     return row;
 }
 
-/* A row of the list: a button's mark, in a cell as wide as a shoulder button's so the
- * words line up, then what it does. ⓘ Nothing in bold since 2026-11-12 (rhoquinn8217:
- * "no more bold anything"); Desktop Mode's list had its clicks and the Full Keyboard in
- * bold until then. */
+/* The cell a row's first mark sits in: as wide as the touchpad's mark, the widest, so
+ * the words of every row line up. A shoulder button's was the widest until 2026-11-13. */
+#define NUMPAD_MARK_CELL_W (NUMPAD_LEGEND_MARK * 7 / 5)
+
+/* A row of the list: a button's mark, in its cell, then what it does. ⓘ Nothing in bold
+ * since 2026-11-12 (rhoquinn8217: "no more bold anything", and on 2026-11-13 of a bold
+ * |, "unbold it"); Desktop Mode's list had its clicks and the Full Keyboard in bold until
+ * then. */
 static void mark_row_create(lv_obj_t *parent, pad_mark_t mark, pad_family_t family, const char *words) {
     lv_obj_t *row = row_create(parent);
     lv_obj_t *cell = box_create(row);
-    lv_obj_set_size(cell, NUMPAD_LEGEND_MARK * 6 / 5, NUMPAD_LEGEND_MARK);
+    lv_obj_set_size(cell, NUMPAD_MARK_CELL_W, NUMPAD_LEGEND_MARK);
     lv_obj_t *drawn = pad_mark_create(cell, mark, family, NUMPAD_LEGEND_MARK, NUMPAD_MARK);
     lv_obj_center(drawn);
     words_create(row, words, lv_theme_get_font_small(parent));
 }
 
-/* A row of two marks, each in its own cell, then what both do: Desktop Mode's L1 and R1,
- * Window Select (stream/input/window_select.h). */
-static void mark_pair_row_create(lv_obj_t *parent, pad_mark_t first, pad_mark_t second, pad_family_t family,
-                                 const char *words) {
+/* One piece of a row: a mark, or words. */
+typedef struct {
+    pad_mark_t mark;     /* when `words` is NULL */
+    const char *words;
+} piece_t;
+
+#define PIECE_MARK(m) {(m), NULL}
+#define PIECE_WORDS(w) {PAD_MARK_UP, (w)}
+
+/* ⭐ A ROW OF PIECES IN ORDER, marks and words (rhoquinn8217, 2026-11-13: "combine Right
+ * stick and touchpad to mouse ... Do this for other that are similar", "use | instead of
+ * / and use | to separate L1 and R1 for window select"). A first mark sits in its cell,
+ * as mark_row_create's does; a mark after words sits as it is. */
+static void pieces_row_create(lv_obj_t *parent, pad_family_t family, const piece_t *pieces, int count) {
     lv_obj_t *row = row_create(parent);
-    const pad_mark_t marks[2] = {first, second};
-    for (int i = 0; i < 2; ++i) {
-        lv_obj_t *cell = box_create(row);
-        lv_obj_set_size(cell, NUMPAD_LEGEND_MARK * 6 / 5, NUMPAD_LEGEND_MARK);
-        lv_obj_t *drawn = pad_mark_create(cell, marks[i], family, NUMPAD_LEGEND_MARK, NUMPAD_MARK);
-        lv_obj_center(drawn);
+    const lv_font_t *font = lv_theme_get_font_small(parent);
+    for (int i = 0; i < count; ++i) {
+        if (pieces[i].words != NULL) {
+            words_create(row, pieces[i].words, font);
+            continue;
+        }
+        if (i == 0) {
+            lv_obj_t *cell = box_create(row);
+            lv_obj_set_size(cell, NUMPAD_MARK_CELL_W, NUMPAD_LEGEND_MARK);
+            lv_obj_center(pad_mark_create(cell, pieces[i].mark, family, NUMPAD_LEGEND_MARK, NUMPAD_MARK));
+        } else {
+            pad_mark_create(row, pieces[i].mark, family, NUMPAD_LEGEND_MARK, NUMPAD_MARK);
+        }
     }
-    words_create(row, words, lv_theme_get_font_small(parent));
 }
 
 /* The last row of every legend, the list's and the numpad's: Options (Menu on an Xbox
@@ -200,13 +220,22 @@ static void options_row_create(lv_obj_t *parent, pad_family_t family) {
  * windows(start steam)"). The PS button was the list's until then. An Xbox pad's buttons
  * have no marks here, so their rows are words ("we have to use the text "Xbox button"
  * since there is not symbol we can use for it"), and so is a two-finger press. */
-static void legend_row_create(lv_obj_t *parent, pad_family_t family) {
-    const lv_font_t *font = lv_theme_get_font_small(parent);
+/* ⭐ The two-finger press's row with the touchpad's mark since 2026-11-13, and the two
+ * rows apart: the list's own row at the top of the list ("Move the legend key to the
+ * top of the list"), Steam's lower down. */
+static void legend_toggle_row_create(lv_obj_t *parent, pad_family_t family) {
     if (family == PAD_FAMILY_XBOX) {
-        words_create(parent, locstr("Share button - show/hide legend"), font);
-        words_create(parent, locstr("Xbox button - Steam"), font);
+        words_create(parent, locstr("Share button - show/hide legend"), lv_theme_get_font_small(parent));
     } else {
-        words_create(parent, locstr("2 finger press - show/hide legend"), font);
+        const piece_t press[] = {PIECE_MARK(PAD_MARK_TOUCH_TWO), PIECE_WORDS(locstr("press - show/hide legend"))};
+        pieces_row_create(parent, family, press, 2);
+    }
+}
+
+static void steam_row_create(lv_obj_t *parent, pad_family_t family) {
+    if (family == PAD_FAMILY_XBOX) {
+        words_create(parent, locstr("Xbox button - Steam"), lv_theme_get_font_small(parent));
+    } else {
         mark_row_create(parent, PAD_MARK_HOME, family, locstr("- Steam"));
     }
 }
@@ -249,7 +278,8 @@ static lv_obj_t *numpad_create(pad_family_t family) {
     key_create(grid, locstr("Bksp"), false, PAD_MARK_VIEW, family);
 
     mark_row_create(panel, PAD_MARK_EAST, family, locstr("- close numpad"));
-    legend_row_create(panel, family);
+    legend_toggle_row_create(panel, family);
+    steam_row_create(panel, family);
     options_row_create(panel, family);
     return panel;
 }
@@ -329,13 +359,38 @@ static lv_obj_t *list_create(pad_family_t family, lock_keys_mode_t mode) {
     /* ⭐ THE SAME ROWS IN ALL THREE since 2026-11-12 (rhoquinn8217: "Lets consolidate
      * windows lock, UAC and Desktop mode. It doesn't make sense to make them
      * different."; stream/input/lock_keys.h), only the heading says which. */
-    words_create(panel, locstr("Right stick - mouse"), font);
-    words_create(panel, locstr("Touchpad - mouse"), font);
-    words_create(panel, locstr("1 finger tap - left click"), font);
-    words_create(panel, locstr("2 finger tap - right click"), font);
-    mark_row_create(panel, PAD_MARK_R2, family, locstr("- left click"));
-    mark_row_create(panel, PAD_MARK_L2, family, locstr("- right click"));
-    mark_pair_row_create(panel, PAD_MARK_L1, PAD_MARK_R1, family, locstr("- Window Select"));
+    /* ⭐ THE LIST'S OWN ROW FIRST, then the touchpad and the stick or trigger that do the
+     * same thing, one row each, a | between (rhoquinn8217, 2026-11-13: the fifth draft,
+     * with "unbold it" and "up/down"). Holding R2 to drag and the left stick's scroll were
+     * there all along and are written now. An Xbox pad has no touchpad: its half of each
+     * row is left out. */
+    legend_toggle_row_create(panel, family);
+    if (family == PAD_FAMILY_XBOX) {
+        words_create(panel, locstr("Right stick - mouse"), font);
+        mark_row_create(panel, PAD_MARK_R2, family, locstr("- left click"));
+        mark_row_create(panel, PAD_MARK_L2, family, locstr("- right click"));
+        const piece_t drag[] = {PIECE_WORDS(locstr("hold")), PIECE_MARK(PAD_MARK_R2), PIECE_WORDS(locstr("- drag"))};
+        pieces_row_create(panel, family, drag, 3);
+        words_create(panel, locstr("Left stick - scroll"), font);
+    } else {
+        const piece_t mouse[] = {PIECE_MARK(PAD_MARK_TOUCH_ONE), PIECE_WORDS(locstr("| Right stick - mouse"))};
+        const piece_t left[] = {PIECE_MARK(PAD_MARK_TOUCH_ONE), PIECE_WORDS(locstr("tap |")), PIECE_MARK(PAD_MARK_R2),
+                                PIECE_WORDS(locstr("- left click"))};
+        const piece_t right[] = {PIECE_MARK(PAD_MARK_TOUCH_TWO), PIECE_WORDS(locstr("tap |")),
+                                 PIECE_MARK(PAD_MARK_L2), PIECE_WORDS(locstr("- right click"))};
+        const piece_t drag[] = {PIECE_MARK(PAD_MARK_TOUCH_ONE), PIECE_WORDS(locstr("press, hold touch | hold")),
+                                PIECE_MARK(PAD_MARK_R2), PIECE_WORDS(locstr("- drag"))};
+        const piece_t scroll[] = {PIECE_MARK(PAD_MARK_TOUCH_TWO),
+                                  PIECE_WORDS(locstr("swipe up/down | Left stick - scroll"))};
+        pieces_row_create(panel, family, mouse, 2);
+        pieces_row_create(panel, family, left, 4);
+        pieces_row_create(panel, family, right, 4);
+        pieces_row_create(panel, family, drag, 4);
+        pieces_row_create(panel, family, scroll, 2);
+    }
+    const piece_t window[] = {PIECE_MARK(PAD_MARK_L1), PIECE_WORDS("|"), PIECE_MARK(PAD_MARK_R1),
+                              PIECE_WORDS(locstr("- Window Select"))};
+    pieces_row_create(panel, family, window, 4);
     mark_row_create(panel, PAD_MARK_DPAD, family, locstr("- arrow keys"));
     mark_row_create(panel, PAD_MARK_VIEW, family, locstr("- Tab"));
     mark_row_create(panel, PAD_MARK_SOUTH, family, locstr("- Enter"));
@@ -343,7 +398,7 @@ static lv_obj_t *list_create(pad_family_t family, lock_keys_mode_t mode) {
     mark_row_create(panel, PAD_MARK_WEST, family, locstr("- Full Keyboard"));
     mark_row_create(panel, PAD_MARK_NORTH, family, locstr("- numpad"));
     mark_row_create(panel, PAD_MARK_L3, family, locstr("- Toggle Cursor"));
-    legend_row_create(panel, family);
+    steam_row_create(panel, family);
     options_row_create(panel, family);
     /* ⭐ THE LIST AS WIDE AS ITS WIDEST LINE, THE HEADING WITH CLOSE AMONG THEM
      * (rhoquinn8217, 2026-11-10, at build 669, where Close sat over the heading's last
