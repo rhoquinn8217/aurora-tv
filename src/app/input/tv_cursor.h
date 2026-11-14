@@ -124,6 +124,11 @@ bool tv_cursor_toggle_mode(void);
 /* One line on the cursor that stands now. */
 void tv_cursor_describe(char *out, size_t len);
 
+/* ⓘ A TEST (2026-11-13): how a new picture is handed to webOS while its pointer shows.
+ * 0 directly, as always; 1 hidden for the change and shown at once; 2 hidden, then
+ * shown with it a moment later. The control port's `cursor change direct|hide|wait`. */
+void tv_cursor_set_change_mode(int mode);
+
 /* A line in logs/tv-cursor.log, where a set's developer account can read it:
  * the cursor's own, and the align bar's. */
 void tv_cursor_log(const char *fmt, ...) __attribute__((format(printf, 1, 2)));

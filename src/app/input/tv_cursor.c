@@ -421,47 +421,42 @@ static SDL_Surface *enlarge(SDL_Surface *src, double scale) {
     return dst;
 }
 
-/* ⭐ THE PICTURE BEFORE, FREED LATER (2026-11-13, at the C3 and the B4: with webOS's
- * pointer showing, a change of the picture made the app's next screen wait 4 to 6 s
- * for webOS, on webOS 23 and 24, and never with the pointer asleep; never on the
- * C1's webOS 6). The SDL cursor before was freed the moment the new one was set,
- * while webOS may still be drawing it. ⓘ A TEST of that: each is kept
- * TV_CURSOR_RETIRE_MS first, and freed on the app's loop (tv_cursor_tick). */
-#define TV_CURSOR_RETIRE_MS 2000
-#define TV_CURSOR_RETIRED_MAX 32
-static struct {
-    SDL_Cursor *cursor;
-    Uint32 at;
-} s_retired[TV_CURSOR_RETIRED_MAX];
-static int s_retired_n = 0;
+/* ⭐ HOW A NEW PICTURE IS HANDED TO webOS, A TEST (2026-11-13, at the C3 and the B4:
+ * with webOS's pointer showing, a change of the picture made the app's next screen
+ * wait 4 to 6 s for webOS, on webOS 23 and 24; with the pointer asleep, never; on the
+ * C1's webOS 6, never). Freeing the picture before 2 s later changed nothing (709).
+ * ⓘ Three ways, for the control port's `cursor change direct|hide|wait`: direct, as
+ * always; hide, the pointer hidden for the change and shown at once; wait, hidden,
+ * and shown with the new picture TV_CURSOR_HIDE_MS later (tv_cursor_tick). Only
+ * while it is shown: a hidden pointer is changed directly. */
+#define TV_CURSOR_HIDE_MS 50
+static int s_change_mode = 0;
+static bool s_hidden_for_change = false;
+static Uint32 s_hidden_at = 0;
 
-static void retire(SDL_Cursor *cursor) {
-    if (cursor == NULL) {
-        return;
-    }
-    if (s_retired_n == TV_CURSOR_RETIRED_MAX) {
-        /* The oldest goes now: at ten changes a second its time is nearly up. */
-        SDL_FreeCursor(s_retired[0].cursor);
-        memmove(&s_retired[0], &s_retired[1], sizeof(s_retired[0]) * (TV_CURSOR_RETIRED_MAX - 1));
-        s_retired_n--;
-    }
-    s_retired[s_retired_n].cursor = cursor;
-    s_retired[s_retired_n].at = SDL_GetTicks();
-    s_retired_n++;
+static const char *change_mode_name(int mode) {
+    return mode == 1 ? "hide" : (mode == 2 ? "wait" : "direct");
 }
 
-/* Those whose time is up, or every one. */
-static void retired_free(bool all) {
-    const Uint32 now = SDL_GetTicks();
-    int kept = 0;
-    for (int i = 0; i < s_retired_n; ++i) {
-        if (all || now - s_retired[i].at >= TV_CURSOR_RETIRE_MS) {
-            SDL_FreeCursor(s_retired[i].cursor);
-        } else {
-            s_retired[kept++] = s_retired[i];
+static void hand_over(SDL_Cursor *cursor) {
+    const bool shown = s_hidden_for_change || SDL_ShowCursor(SDL_QUERY) == SDL_ENABLE;
+    if (s_change_mode == 1 && shown) {
+        SDL_ShowCursor(SDL_DISABLE);
+        SDL_SetCursor(cursor);
+        SDL_ShowCursor(SDL_ENABLE);
+    } else if (s_change_mode == 2 && shown) {
+        if (!s_hidden_for_change) {
+            SDL_ShowCursor(SDL_DISABLE);
+            s_hidden_for_change = true;
         }
+        s_hidden_at = SDL_GetTicks();
+        SDL_SetCursor(cursor);   /* kept by SDL, and shown by tv_cursor_tick */
+    } else {
+        SDL_SetCursor(cursor);
     }
-    s_retired_n = kept;
+    if (s_cursor != NULL) {
+        SDL_FreeCursor(s_cursor);
+    }
 }
 
 /* The cursor showing, with its shift and the drop's line as they stand now.
@@ -523,8 +518,7 @@ static bool build(void) {
         SDL_FreeSurface(image);
         return false;
     }
-    SDL_SetCursor(cursor);
-    retire(s_cursor);   /* freed TV_CURSOR_RETIRE_MS later (s_retired) */
+    hand_over(cursor);
     loop_watch_add("the TV cursor's SDL cursor made and set", loop_watch_now() - watch_at);
     if (s_image != NULL) {
         SDL_FreeSurface(s_image);
@@ -623,7 +617,6 @@ void tv_cursor_deinit(void) {
         SDL_FreeCursor(s_cursor);
         s_cursor = NULL;
     }
-    retired_free(true);
     if (s_image != NULL) {
         SDL_FreeSurface(s_image);
         s_image = NULL;
@@ -637,8 +630,9 @@ void tv_cursor_deinit(void) {
 }
 
 void tv_cursor_tick(void) {
-    if (s_retired_n > 0) {
-        retired_free(false);
+    if (s_hidden_for_change && SDL_GetTicks() - s_hidden_at >= TV_CURSOR_HIDE_MS) {
+        s_hidden_for_change = false;
+        SDL_ShowCursor(SDL_ENABLE);
     }
     const int why = SDL_AtomicSet(&s_reapply, 0);
     if (why == 0 || !s_ready || s_cursor == NULL) {
@@ -753,9 +747,15 @@ void tv_cursor_describe(char *out, size_t len) {
                                 : (s_regular_size == 'S' ? "regular(small)"
                                                          : (s_regular_size == 'L' ? "regular(large)" : "regular(medium)"));
     snprintf(out, len,
-             "tv_cursor=%s look=%s shift=%d,%d saved=%d,%d thin=%d hot=%d,%d image=%dx%d scale=%.2f reapplied=%d",
+             "tv_cursor=%s look=%s shift=%d,%d saved=%d,%d thin=%d hot=%d,%d image=%dx%d scale=%.2f reapplied=%d"
+             " change=%s",
              mode, look, s_shift[s_look].x, s_shift[s_look].y, saved_x, saved_y, s_thin, s_hot_x, s_hot_y,
-             s_image->w, s_image->h, s_scale, s_reapplied);
+             s_image->w, s_image->h, s_scale, s_reapplied, change_mode_name(s_change_mode));
+}
+
+void tv_cursor_set_change_mode(int mode) {
+    s_change_mode = mode >= 0 && mode <= 2 ? mode : 0;
+    tv_cursor_log("a new picture is handed over: %s (a test)", change_mode_name(s_change_mode));
 }
 
 const SDL_Surface *tv_cursor_picture(int *hot_x, int *hot_y, unsigned *generation) {
@@ -828,6 +828,10 @@ bool tv_cursor_toggle_look(void) {
 
 void tv_cursor_describe(char *out, size_t len) {
     snprintf(out, len, "tv_cursor=%s, not on webOS", tv_cursor_mode_on() ? "on" : "off");
+}
+
+void tv_cursor_set_change_mode(int mode) {
+    (void) mode;
 }
 
 #endif

@@ -170,6 +170,7 @@ static void cmd_help(control_job_t *job)
                "cursor align            open the bar that aligns the TV cursor, as Ctrl+Alt+Shift+A does\n"
                "cursor sharp|regular    the drop or webOS's own pointer, and saved, as Ctrl+Alt+Shift+C does\n"
                "cursor warp|nudge <x> <y>, cursor where  a test: webOS's pointer to a point, or moved as a mouse; where SDL has it\n"
+               "cursor change direct|hide|wait  a test: how a new picture is handed to webOS while its pointer shows; not saved\n"
                "shot [name]             the app's own screen (never the stream's picture) to logs/, as a .bmp\n"
                "crash                   the crash recorder: armed or not, and where its record goes\n"
                "crash test|thread       crash the app on purpose, on its own loop or on a thread, to prove it\n"
@@ -581,7 +582,17 @@ static void cmd_cursor(control_job_t *job, const char *args)
         reply(job, "OK SDL's mouse %d,%d in the window, %d,%d global\n", px, py, gx, gy);
         return;
     }
-    if (strcasecmp(args, "align") == 0) {
+    /* ⓘ A TEST of the stall with webOS's pointer showing (input/tv_cursor.h). */
+    if (strncasecmp(args, "change ", 7) == 0) {
+        const char *how = args + 7;
+        const int mode = strcasecmp(how, "hide") == 0 ? 1 : (strcasecmp(how, "wait") == 0 ? 2 : 0);
+        if (mode == 0 && strcasecmp(how, "direct") != 0) {
+            reply(job, "ERR usage: cursor change direct|hide|wait\n");
+            return;
+        }
+        tv_cursor_set_change_mode(mode);
+        args = "";
+    } else if (strcasecmp(args, "align") == 0) {
         cursor_align_request();
         reply(job, "OK the align bar is asked for: it opens on the interface's next pass, or says why not\n");
         return;
