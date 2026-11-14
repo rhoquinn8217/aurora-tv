@@ -15,6 +15,13 @@
 #include "input/tv_cursor.h"
 #include "input/mouse_seen.h"     /* mouse_seen_wake */
 #include "input/loop_watch.h"     /* a diagnostic: where a slow pass of the app's loop went */
+#include "input/touchpad_pointer.h"   /* the touchpad moves the TV cursor (touchpad_pointer_stream_move) */
+#if defined(TARGET_WEBOS)
+#include "ctm_bridge_glue.h"   /* ctm_bridge_held_touches: a bridged pad's touchpad */
+#endif
+
+#include <stdio.h>
+#include <string.h>
 
 /* The USB Bridge panel's colours (ctm_panel.c), so the two read as one family. */
 #define ALIGN_COL_CARD    lv_color_hex(0x12181d)
@@ -91,6 +98,11 @@ static void awake_cb(lv_timer_t *timer) {
     if (s_aligning) {
         const unsigned long long watch_at = loop_watch_now();
         keep_awake();
+        /* With no mouse since the app started, the touchpad's own cursor is the TV
+         * cursor here: kept up while the bar is, as webOS's pointer is kept awake. */
+        if (!mouse_seen_any() && global != NULL && global->session != NULL) {
+            touchpad_pointer_stream_move(session_get_input(global->session), 0, 0);
+        }
         loop_watch_add("the bar's keep-awake", loop_watch_now() - watch_at);
     }
 }
@@ -129,6 +141,153 @@ static void host_cursor_to_tip(void) {
     stream_input_handle_mmotion(session_get_input(global->session), &event.motion, false);
 }
 
+/* ⭐ THE TOUCHPAD MOVES BOTH CURSORS WHILE THE BAR IS UP, as the mouse does
+ * (rhoquinn8217, 2026-11-14, at the B4, of a bar only the mouse moved: "the touchpad
+ * should move the webOS cursor too which is what the alignment is also meant for").
+ * The bar holds the input, so the stream reads no pad, and a bridged pad's touchpad
+ * is let go (stream/input/bridged_touchpad.h). So one finger's movement is read here,
+ * from SDL for a pad the TV holds and from the bridge core for a bridged one, and
+ * handed to the touchpad's own move (input/touchpad_pointer.h): webOS's pointer once
+ * a mouse has moved, Aurora's own cursor before that, and the host told the point.
+ * Taps, presses and a second finger do nothing here, as the mouse's clicks do nothing.
+ * ⓘ Gathered as SDL takes the events in, and moved on the bar's timer: a pointer jump
+ * from inside SDL's own taking in of events would add an event there. */
+#define ALIGN_TOUCH_MS 8
+#define ALIGN_PS5_ASPECT (1070.0f / 1920.0f)   /* a pad's height in its widths, as session_gamepad.c has it */
+#define ALIGN_PS4_ASPECT (920.0f / 1920.0f)
+static lv_timer_t *s_touch = NULL;
+static SDL_JoystickID s_touch_pad = -1;
+static int s_touch_finger = -1;
+static float s_touch_x = 0, s_touch_y = 0, s_touch_aspect = ALIGN_PS5_ASPECT;
+static float s_touch_dx = 0, s_touch_dy = 0;   /* gathered, in the pad's widths */
+
+static float pad_aspect(SDL_JoystickID which) {
+    SDL_GameController *pad = SDL_GameControllerFromInstanceID(which);
+    if (pad != NULL && SDL_GameControllerGetType(pad) == SDL_CONTROLLER_TYPE_PS4) {
+        return ALIGN_PS4_ASPECT;
+    }
+    return ALIGN_PS5_ASPECT;
+}
+
+static int SDLCALL align_touch_watch(void *userdata, SDL_Event *event) {
+    LV_UNUSED(userdata);
+    if (!s_aligning) {
+        return 1;
+    }
+    switch (event->type) {
+        case SDL_CONTROLLERTOUCHPADDOWN:
+            if (s_touch_finger < 0) {
+                s_touch_pad = event->ctouchpad.which;
+                s_touch_finger = event->ctouchpad.finger;
+                s_touch_x = event->ctouchpad.x;
+                s_touch_y = event->ctouchpad.y;
+                s_touch_aspect = pad_aspect(event->ctouchpad.which);
+            }
+            break;
+        case SDL_CONTROLLERTOUCHPADMOTION:
+            if (event->ctouchpad.which == s_touch_pad && event->ctouchpad.finger == s_touch_finger) {
+                s_touch_dx += event->ctouchpad.x - s_touch_x;
+                s_touch_dy += (event->ctouchpad.y - s_touch_y) * s_touch_aspect;
+                s_touch_x = event->ctouchpad.x;
+                s_touch_y = event->ctouchpad.y;
+            }
+            break;
+        case SDL_CONTROLLERTOUCHPADUP:
+            if (event->ctouchpad.which == s_touch_pad && event->ctouchpad.finger == s_touch_finger) {
+                s_touch_pad = -1;
+                s_touch_finger = -1;
+            }
+            break;
+        default:
+            break;
+    }
+    return 1;
+}
+
+#if defined(TARGET_WEBOS)
+/* A bridged pad's first touch, as the core reads it from the pad's own report: X 0 to
+ * 1919, Y 0 to 1079, a DualSense's. */
+#define ALIGN_BRIDGED 4
+static struct {
+    char node[64];
+    int id;
+    int x, y;   /* x -1: no touch down */
+} s_bridged[ALIGN_BRIDGED];
+
+static void bridged_touch_gather(void) {
+    ctm_bridge_touch_t touches[ALIGN_BRIDGED];
+    const int n = ctm_bridge_held_touches(touches, ALIGN_BRIDGED);
+    for (int t = 0; t < n; ++t) {
+        int k = -1, free_slot = -1;
+        for (int j = 0; j < ALIGN_BRIDGED; ++j) {
+            if (s_bridged[j].node[0] != '\0' && strcmp(s_bridged[j].node, touches[t].node) == 0) {
+                k = j;
+                break;
+            }
+            if (free_slot < 0 && s_bridged[j].node[0] == '\0') {
+                free_slot = j;
+            }
+        }
+        if (k < 0) {
+            if (free_slot < 0) {
+                continue;
+            }
+            k = free_slot;
+            snprintf(s_bridged[k].node, sizeof s_bridged[k].node, "%s", touches[t].node);
+            s_bridged[k].x = -1;
+        }
+        if (!touches[t].reading || touches[t].fingers < 1) {
+            s_bridged[k].x = -1;
+            continue;
+        }
+        if (s_bridged[k].x >= 0 && s_bridged[k].id == touches[t].id) {
+            s_touch_dx += (float) (touches[t].x - s_bridged[k].x) / 1920.0f;
+            s_touch_dy += (float) (touches[t].y - s_bridged[k].y) / 1080.0f * ALIGN_PS5_ASPECT;
+        }
+        s_bridged[k].id = touches[t].id;
+        s_bridged[k].x = touches[t].x;
+        s_bridged[k].y = touches[t].y;
+    }
+}
+#endif
+
+static void touch_cb(lv_timer_t *timer) {
+    LV_UNUSED(timer);
+    if (!s_aligning || global == NULL || global->session == NULL) {
+        return;
+    }
+#if defined(TARGET_WEBOS)
+    bridged_touch_gather();
+#endif
+    if (s_touch_dx == 0.0f && s_touch_dy == 0.0f) {
+        return;
+    }
+    const float dx = s_touch_dx, dy = s_touch_dy;
+    s_touch_dx = s_touch_dy = 0.0f;
+    touchpad_pointer_stream_move(session_get_input(global->session), dx, dy);
+}
+
+static void touch_start(void) {
+    s_touch_pad = -1;
+    s_touch_finger = -1;
+    s_touch_dx = s_touch_dy = 0.0f;
+#if defined(TARGET_WEBOS)
+    memset(s_bridged, 0, sizeof s_bridged);
+#endif
+    SDL_AddEventWatch(align_touch_watch, NULL);
+    if (s_touch == NULL) {
+        s_touch = lv_timer_create(touch_cb, ALIGN_TOUCH_MS, NULL);
+    }
+}
+
+static void touch_stop(void) {
+    SDL_DelEventWatch(align_touch_watch, NULL);
+    if (s_touch != NULL) {
+        lv_timer_del(s_touch);
+        s_touch = NULL;
+    }
+}
+
 static void bar_refresh(void) {
     if (s_title == NULL) {
         return;
@@ -153,6 +312,7 @@ static void bar_close(bool keep) {
     bridge_keyboard_take_bridged(false);
     s_aligning = false;
     SDL_DelEventWatch(align_motion_watch, NULL);
+    touch_stop();
     stop_awake();
     if (keep) {
         tv_cursor_keep();
@@ -268,7 +428,17 @@ static void bar_open(void) {
     app_input_set_group(&global->ui.input, s_group);
     lv_group_focus_obj(layer);
     SDL_AddEventWatch(align_motion_watch, NULL);
-    host_cursor_to_tip();
+    /* ⓘ With no mouse since the app started, webOS shows no pointer and SDL's is at
+     * 0,0, which sent the PC's cursor to the top left (rhoquinn8217, 2026-11-14, at
+     * the B4: "entering alignment mode throws the windows cursor to the top left
+     * corner and there is no webOS cursor"). Then the touchpad's own cursor shows,
+     * where it was last, and the host goes there. */
+    if (mouse_seen_any()) {
+        host_cursor_to_tip();
+    } else {
+        touchpad_pointer_stream_move(session_get_input(global->session), 0, 0);
+    }
+    touch_start();
     s_wake_said = -1;
     keep_awake();
     stop_awake();
@@ -325,10 +495,12 @@ void cursor_align_stream_ended(void) {
         bridge_keyboard_take_bridged(false);
         s_aligning = false;
         SDL_DelEventWatch(align_motion_watch, NULL);
+        touch_stop();
         tv_cursor_adjust(s_was_x, s_was_y, -1);   /* never kept, so not kept now */
         tv_cursor_log("align bar: closed with the stream, nothing kept");
     }
     stop_awake();
+    touch_stop();
     /* ⓘ The streaming screen takes its keys away before its objects go
      * (upstream's on_delete_obj); asked again here in case, and the group the
      * keys came from is the screen's, so it is not handed back. */
