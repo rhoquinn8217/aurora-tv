@@ -1,11 +1,5 @@
 /* The bar that aligns the TV cursor with the PC's, opened by Ctrl+Alt+Shift+A.
  *
- * ⭐ SINCE 2026-11-14 IT TAKES TWO STEPS, and the TV cursor's picture changes once, at
- * the end (cursor_align.c says why): the PC's arrow is put on a + and clicked, then a
- * second + is put on the TV arrow's tip with the arrows or the d-pad, and Enter or A
- * keeps the shift worked out of the two. What follows is the bar as it was built, a
- * press moving the TV cursor itself; its input, its keyboard and its keep-awake stand.
- *
  * ⭐ WHY (rhoquinn8217, 2026-10-11): the TV's cursor and the PC's sit apart by
  * a few of the TV's pixels, and how far is the TV's own business, so each TV
  * is aligned by eye and keeps its own. It was the Align row of a Mouse menu in

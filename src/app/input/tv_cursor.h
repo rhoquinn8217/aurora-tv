@@ -73,9 +73,6 @@ bool tv_cursor_adjust(int shift_x, int shift_y, int thin);
  * right and down. */
 void tv_cursor_get_shift(int *shift_x, int *shift_y);
 
-/* How many of the TV's own pixels one point of the app's is: 2 on a 4K set. */
-double tv_cursor_scale(void);
-
 /* Saves the shift that stands now as this TV's for the cursor showing, at
  * once. From the align bar's Enter or A. */
 bool tv_cursor_keep(void);
@@ -126,11 +123,6 @@ bool tv_cursor_toggle_mode(void);
 
 /* One line on the cursor that stands now. */
 void tv_cursor_describe(char *out, size_t len);
-
-/* ⓘ A TEST (2026-11-13): how a new picture is handed to webOS while its pointer shows.
- * 0 directly, as always; 1 hidden for the change and shown at once; 2 hidden, then
- * shown with it a moment later. The control port's `cursor change direct|hide|wait`. */
-void tv_cursor_set_change_mode(int mode);
 
 /* A line in logs/tv-cursor.log, where a set's developer account can read it:
  * the cursor's own, and the align bar's. */

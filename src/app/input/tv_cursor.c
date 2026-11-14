@@ -421,44 +421,6 @@ static SDL_Surface *enlarge(SDL_Surface *src, double scale) {
     return dst;
 }
 
-/* ⭐ HOW A NEW PICTURE IS HANDED TO webOS, A TEST (2026-11-13, at the C3 and the B4:
- * with webOS's pointer showing, a change of the picture made the app's next screen
- * wait 4 to 6 s for webOS, on webOS 23 and 24; with the pointer asleep, never; on the
- * C1's webOS 6, never). Freeing the picture before 2 s later changed nothing (709).
- * ⓘ Three ways, for the control port's `cursor change direct|hide|wait`: direct, as
- * always; hide, the pointer hidden for the change and shown at once; wait, hidden,
- * and shown with the new picture TV_CURSOR_HIDE_MS later (tv_cursor_tick). Only
- * while it is shown: a hidden pointer is changed directly. */
-#define TV_CURSOR_HIDE_MS 50
-static int s_change_mode = 0;
-static bool s_hidden_for_change = false;
-static Uint32 s_hidden_at = 0;
-
-static const char *change_mode_name(int mode) {
-    return mode == 1 ? "hide" : (mode == 2 ? "wait" : "direct");
-}
-
-static void hand_over(SDL_Cursor *cursor) {
-    const bool shown = s_hidden_for_change || SDL_ShowCursor(SDL_QUERY) == SDL_ENABLE;
-    if (s_change_mode == 1 && shown) {
-        SDL_ShowCursor(SDL_DISABLE);
-        SDL_SetCursor(cursor);
-        SDL_ShowCursor(SDL_ENABLE);
-    } else if (s_change_mode == 2 && shown) {
-        if (!s_hidden_for_change) {
-            SDL_ShowCursor(SDL_DISABLE);
-            s_hidden_for_change = true;
-        }
-        s_hidden_at = SDL_GetTicks();
-        SDL_SetCursor(cursor);   /* kept by SDL, and shown by tv_cursor_tick */
-    } else {
-        SDL_SetCursor(cursor);
-    }
-    if (s_cursor != NULL) {
-        SDL_FreeCursor(s_cursor);
-    }
-}
-
 /* The cursor showing, with its shift and the drop's line as they stand now.
  * False, and the cursor that was there stays, when it cannot be made. */
 static bool build(void) {
@@ -518,7 +480,10 @@ static bool build(void) {
         SDL_FreeSurface(image);
         return false;
     }
-    hand_over(cursor);
+    SDL_SetCursor(cursor);
+    if (s_cursor != NULL) {
+        SDL_FreeCursor(s_cursor);
+    }
     loop_watch_add("the TV cursor's SDL cursor made and set", loop_watch_now() - watch_at);
     if (s_image != NULL) {
         SDL_FreeSurface(s_image);
@@ -630,10 +595,6 @@ void tv_cursor_deinit(void) {
 }
 
 void tv_cursor_tick(void) {
-    if (s_hidden_for_change && SDL_GetTicks() - s_hidden_at >= TV_CURSOR_HIDE_MS) {
-        s_hidden_for_change = false;
-        SDL_ShowCursor(SDL_ENABLE);
-    }
     const int why = SDL_AtomicSet(&s_reapply, 0);
     if (why == 0 || !s_ready || s_cursor == NULL) {
         return;
@@ -677,10 +638,6 @@ bool tv_cursor_adjust(int shift_x, int shift_y, int thin) {
 void tv_cursor_get_shift(int *shift_x, int *shift_y) {
     if (shift_x != NULL) *shift_x = s_shift[s_look].x;
     if (shift_y != NULL) *shift_y = s_shift[s_look].y;
-}
-
-double tv_cursor_scale(void) {
-    return s_scale;
 }
 
 bool tv_cursor_keep(void) {
@@ -751,15 +708,9 @@ void tv_cursor_describe(char *out, size_t len) {
                                 : (s_regular_size == 'S' ? "regular(small)"
                                                          : (s_regular_size == 'L' ? "regular(large)" : "regular(medium)"));
     snprintf(out, len,
-             "tv_cursor=%s look=%s shift=%d,%d saved=%d,%d thin=%d hot=%d,%d image=%dx%d scale=%.2f reapplied=%d"
-             " change=%s",
+             "tv_cursor=%s look=%s shift=%d,%d saved=%d,%d thin=%d hot=%d,%d image=%dx%d scale=%.2f reapplied=%d",
              mode, look, s_shift[s_look].x, s_shift[s_look].y, saved_x, saved_y, s_thin, s_hot_x, s_hot_y,
-             s_image->w, s_image->h, s_scale, s_reapplied, change_mode_name(s_change_mode));
-}
-
-void tv_cursor_set_change_mode(int mode) {
-    s_change_mode = mode >= 0 && mode <= 2 ? mode : 0;
-    tv_cursor_log("a new picture is handed over: %s (a test)", change_mode_name(s_change_mode));
+             s_image->w, s_image->h, s_scale, s_reapplied);
 }
 
 const SDL_Surface *tv_cursor_picture(int *hot_x, int *hot_y, unsigned *generation) {
@@ -809,10 +760,6 @@ void tv_cursor_get_shift(int *shift_x, int *shift_y) {
     if (shift_y != NULL) *shift_y = 0;
 }
 
-double tv_cursor_scale(void) {
-    return 1.0;
-}
-
 bool tv_cursor_keep(void) {
     return false;
 }
@@ -836,10 +783,6 @@ bool tv_cursor_toggle_look(void) {
 
 void tv_cursor_describe(char *out, size_t len) {
     snprintf(out, len, "tv_cursor=%s, not on webOS", tv_cursor_mode_on() ? "on" : "off");
-}
-
-void tv_cursor_set_change_mode(int mode) {
-    (void) mode;
 }
 
 #endif
