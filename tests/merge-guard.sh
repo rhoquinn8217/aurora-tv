@@ -592,6 +592,8 @@ need "... a click on either half is Aurora's alone" \
      src/app/ui/streaming/lock_numpad.c "{s_tog_stick, \"the Stick choice\"}"
 need "the sticks are drawn" \
      src/app/ui/common/pad_marks.c "draw_stick_press(&pen);"
+need "R3 switches the Mouse category's choice" \
+     src/app/stream/input/lock_keys.c "lock_numpad_mouse_choice_toggle();"
 # --- PS and the Xbox button to Windows, the list by a two-finger press or Share (rhoquinn8217, 2026-11-13) ---
 # Losing the first compiles, and a two-finger press right-clicks again; losing the second
 # compiles, and a bridged pad's PS button is held from the PC again.

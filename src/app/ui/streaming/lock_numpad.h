@@ -39,6 +39,10 @@
 /* Once a pass of the app's loop. */
 void lock_numpad_tick(void);
 
+/* The list's Mouse category, from the touchpad's rows to the stick's or back: R3 does it
+ * (stream/input/lock_keys.h), as a click on the choice does. */
+void lock_numpad_mouse_choice_toggle(void);
+
 /* What it shows, for the control port: "off", "open" (the numpad) or "closed" (the
  * list of what the buttons do). */
 const char *lock_numpad_state(void);

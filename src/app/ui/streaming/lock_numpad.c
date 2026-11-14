@@ -330,6 +330,11 @@ static void toggle_stick_clicked(lv_event_t *event) {
     s_stick = true;
 }
 
+/* R3 (stream/input/lock_keys.h): the other of the two. */
+void lock_numpad_mouse_choice_toggle(void) {
+    s_stick = !s_stick;
+}
+
 static lv_obj_t *toggle_half(lv_obj_t *parent, const char *words, bool chosen, lv_event_cb_t clicked) {
     lv_obj_t *half = box_create(parent);
     lv_obj_add_flag(half, LV_OBJ_FLAG_CLICKABLE);
