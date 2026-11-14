@@ -421,6 +421,49 @@ static SDL_Surface *enlarge(SDL_Surface *src, double scale) {
     return dst;
 }
 
+/* ⭐ THE PICTURE BEFORE, FREED LATER (2026-11-13, at the C3 and the B4: with webOS's
+ * pointer showing, a change of the picture made the app's next screen wait 4 to 6 s
+ * for webOS, on webOS 23 and 24, and never with the pointer asleep; never on the
+ * C1's webOS 6). The SDL cursor before was freed the moment the new one was set,
+ * while webOS may still be drawing it. ⓘ A TEST of that: each is kept
+ * TV_CURSOR_RETIRE_MS first, and freed on the app's loop (tv_cursor_tick). */
+#define TV_CURSOR_RETIRE_MS 2000
+#define TV_CURSOR_RETIRED_MAX 32
+static struct {
+    SDL_Cursor *cursor;
+    Uint32 at;
+} s_retired[TV_CURSOR_RETIRED_MAX];
+static int s_retired_n = 0;
+
+static void retire(SDL_Cursor *cursor) {
+    if (cursor == NULL) {
+        return;
+    }
+    if (s_retired_n == TV_CURSOR_RETIRED_MAX) {
+        /* The oldest goes now: at ten changes a second its time is nearly up. */
+        SDL_FreeCursor(s_retired[0].cursor);
+        memmove(&s_retired[0], &s_retired[1], sizeof(s_retired[0]) * (TV_CURSOR_RETIRED_MAX - 1));
+        s_retired_n--;
+    }
+    s_retired[s_retired_n].cursor = cursor;
+    s_retired[s_retired_n].at = SDL_GetTicks();
+    s_retired_n++;
+}
+
+/* Those whose time is up, or every one. */
+static void retired_free(bool all) {
+    const Uint32 now = SDL_GetTicks();
+    int kept = 0;
+    for (int i = 0; i < s_retired_n; ++i) {
+        if (all || now - s_retired[i].at >= TV_CURSOR_RETIRE_MS) {
+            SDL_FreeCursor(s_retired[i].cursor);
+        } else {
+            s_retired[kept++] = s_retired[i];
+        }
+    }
+    s_retired_n = kept;
+}
+
 /* The cursor showing, with its shift and the drop's line as they stand now.
  * False, and the cursor that was there stays, when it cannot be made. */
 static bool build(void) {
@@ -481,9 +524,7 @@ static bool build(void) {
         return false;
     }
     SDL_SetCursor(cursor);
-    if (s_cursor != NULL) {
-        SDL_FreeCursor(s_cursor);
-    }
+    retire(s_cursor);   /* freed TV_CURSOR_RETIRE_MS later (s_retired) */
     loop_watch_add("the TV cursor's SDL cursor made and set", loop_watch_now() - watch_at);
     if (s_image != NULL) {
         SDL_FreeSurface(s_image);
@@ -582,6 +623,7 @@ void tv_cursor_deinit(void) {
         SDL_FreeCursor(s_cursor);
         s_cursor = NULL;
     }
+    retired_free(true);
     if (s_image != NULL) {
         SDL_FreeSurface(s_image);
         s_image = NULL;
@@ -595,6 +637,9 @@ void tv_cursor_deinit(void) {
 }
 
 void tv_cursor_tick(void) {
+    if (s_retired_n > 0) {
+        retired_free(false);
+    }
     const int why = SDL_AtomicSet(&s_reapply, 0);
     if (why == 0 || !s_ready || s_cursor == NULL) {
         return;
