@@ -36,11 +36,16 @@
  * press of the bar before this was one. Now nothing changes the picture until the end:
  * 1. The TV arrow hidden, a white + at the screen's middle: the PC's arrow is moved
  *    onto it and clicked (or Enter or A). Where the PC's tip shows, against the pointer.
- * 2. The TV arrow shown and still, the PC's arrow sent to a corner, a blue + moved onto
- *    the TV arrow's tip a TV pixel at a time. Where webOS paints its tip, which the app
- *    has no other way to know: it never sees the screen.
- * Enter or A: the shift that puts the one tip on the other, webOS's one new picture
- * (tv_cursor_adjust), kept as this TV's. ⓘ webOS's pointer moves a whole point of the
+ * 2. The TV arrow shown, the PC's arrow sent to a corner, a blue + in the same place:
+ *    the TV arrow is moved onto it and clicked (or Enter or A). Where webOS paints its
+ *    tip, which the app has no other way to know: it never sees the screen. As step 1
+ *    is, with the mouse and a click (rhoquinn8217, 2026-11-14, at the B4, of a step 2
+ *    that moved the + with the d-pad and saved on Enter: "the crosshair and the webOS
+ *    cursor are moving together and clicking doesn't end the alignment").
+ * In both, the arrows or the d-pad move the + a TV pixel, for the last bit: the mouse
+ * moves a pointer two TV pixels at a time. The second click works out the shift that
+ * puts the one tip on the other, webOS's one new picture (tv_cursor_adjust), kept as
+ * this TV's. ⓘ webOS's pointer moves a whole point of the
  * app's at a time, two TV pixels (2026-11-14, the B4), and Windows' at twice the app's
  * point: both measured, so this needs no guess about either. */
 typedef enum {
@@ -69,14 +74,9 @@ static int s_mark_x = 0, s_mark_y = 0;
 #define ALIGN_MARK_ARM 10    /* each arm's far end, in points from the middle */
 #define ALIGN_MARK_GAP 3     /* and its near end: the middle stays clear */
 
-/* Step 1's answer: the PC's tip against the pointer, in the TV's pixels. Step 2's: the +
- * moved from where the TV arrow's tip is drawn if webOS paints it where asked. */
+/* Step 1's answer: the PC's tip against the pointer, in the TV's pixels. */
 static int s_pc_dx = 0, s_pc_dy = 0;
-static int s_tv_dx = 0, s_tv_dy = 0;
 static int s_shift_x = 0, s_shift_y = 0;  /* the shift the TV arrow is drawn with */
-static int s_ptr_x = INT32_MIN, s_ptr_y = INT32_MIN;   /* the pointer the + follows, in points */
-static lv_timer_t *s_follow = NULL;
-#define ALIGN_FOLLOW_MS 30
 
 /* ⓘ A close hides at once and deletes on the next pass, as the USB Bridge
  * panel's does (ctm_panel.c): the key event that closed it is still being
@@ -266,29 +266,6 @@ static void mark_to(int x, int y) {
     lv_obj_invalidate(s_mark);
 }
 
-/* In step 2 the + goes where the TV arrow's tip is drawn if webOS paints it where it is
- * asked, plus how far it has been moved from there, and follows the pointer. */
-static void mark_follow(void) {
-    int x = 0, y = 0;
-    SDL_GetMouseState(&x, &y);
-    s_ptr_x = x;
-    s_ptr_y = y;
-    const double per = tv_per_point();
-    mark_to((int) lround(x * per) + s_shift_x + s_tv_dx, (int) lround(y * per) + s_shift_y + s_tv_dy);
-}
-
-static void follow_cb(lv_timer_t *timer) {
-    LV_UNUSED(timer);
-    if (!s_aligning || s_step != STEP_TV) {
-        return;
-    }
-    int x = 0, y = 0;
-    SDL_GetMouseState(&x, &y);
-    if (x != s_ptr_x || y != s_ptr_y) {
-        mark_follow();
-    }
-}
-
 static void step_words(void) {
     if (s_title == NULL || s_hint == NULL) {
         return;
@@ -296,11 +273,11 @@ static void step_words(void) {
     if (s_step == STEP_PC) {
         lv_label_set_text(s_title, locstr("Align the TV cursor   |   step 1 of 2: the PC's arrow"));
         lv_label_set_text(s_hint, locstr("Move the mouse until the tip of the PC's arrow is on the +, then click"
-                                         "   |   Esc or B: cancel"));
+                                         "   |   Arrows or d-pad: move the + 1 TV pixel   |   Esc or B: cancel"));
     } else {
         lv_label_set_text(s_title, locstr("Align the TV cursor   |   step 2 of 2: the TV's arrow"));
-        lv_label_set_text(s_hint, locstr("Arrows or d-pad: move the + 1 TV pixel   |   put it on the tip of the TV arrow"
-                                         "   |   Enter or A: save for this TV   |   Esc or B: cancel"));
+        lv_label_set_text(s_hint, locstr("Move the mouse until the tip of the TV arrow is on the +, then click to save"
+                                         "   |   Arrows or d-pad: move the + 1 TV pixel   |   Esc or B: cancel"));
     }
 }
 
@@ -315,14 +292,12 @@ static void step_pc_done(void) {
                   "of the app's points: the PC's tip %+d,%+d from the pointer",
                   s_mark_x, s_mark_y, px, py, s_pc_dx, s_pc_dy);
     s_step = STEP_TV;
-    s_tv_dx = 0;
-    s_tv_dy = 0;
     tv_cursor_get_shift(&s_shift_x, &s_shift_y);
-    /* The TV arrow back, as it is now, and the PC's out of its way. */
+    /* The TV arrow back, as it is now, and the PC's out of its way; the + stays, blue. */
     SDL_ShowCursor(SDL_ENABLE);
     host_cursor_to(0, lv_disp_get_ver_res(NULL) - 1);
     step_words();
-    mark_follow();
+    lv_obj_invalidate(s_mark);
     keep_awake();
 }
 
@@ -336,22 +311,25 @@ static void bar_close(bool keep) {
      * (input/bridge_keyboard.h). */
     bridge_keyboard_take_bridged(false);
     const align_step_t step = s_step;
+    int px = 0, py = 0;
+    SDL_GetMouseState(&px, &py);
     s_aligning = false;
     SDL_DelEventWatch(align_motion_watch, NULL);
     stop_awake();
-    if (s_follow != NULL) {
-        lv_timer_del(s_follow);
-        s_follow = NULL;
-    }
     SDL_ShowCursor(s_shown_was);
     if (keep && step == STEP_TV) {
-        /* The TV's tip, drawn with the shift it has, sits s_tv off where it was asked to
-         * be; the PC's sits s_pc off the pointer. So the shift that puts the one on the
-         * other is s_pc less s_tv: webOS's one new picture. */
-        const int right = s_pc_dx - s_tv_dx;
-        const int down = s_pc_dy - s_tv_dy;
-        tv_cursor_log("align: step 2, the + %+d,%+d from where the tip was asked to be: shifted %d,%d now, "
-                      "%d,%d before", s_tv_dx, s_tv_dy, right, down, s_shift_x, s_shift_y);
+        /* The TV's tip, drawn with the shift it has, is on the + with the pointer here: it
+         * sits tv off where it was asked to be. The PC's sits s_pc off the pointer. So
+         * the shift that puts the one on the other is s_pc less tv: webOS's one new
+         * picture. */
+        const double per = tv_per_point();
+        const int tv_dx = s_mark_x - (int) lround(px * per) - s_shift_x;
+        const int tv_dy = s_mark_y - (int) lround(py * per) - s_shift_y;
+        const int right = s_pc_dx - tv_dx;
+        const int down = s_pc_dy - tv_dy;
+        tv_cursor_log("align: step 2, the TV's tip on the + at %d,%d with the pointer at %d,%d: drawn %+d,%+d off "
+                      "where it was asked to be; shifted %d,%d now, %d,%d before",
+                      s_mark_x, s_mark_y, px, py, tv_dx, tv_dy, right, down, s_shift_x, s_shift_y);
         if (right != s_shift_x || down != s_shift_y) {
             tv_cursor_adjust(right, down, -1);
         }
@@ -383,33 +361,30 @@ static void bar_key_cb(lv_event_t *event) {
         bar_close(false);
         return;
     }
-    if (s_step != STEP_TV) {
-        return;   /* step 1 is the mouse's, and its click */
-    }
+    int x = s_mark_x, y = s_mark_y;
     switch (key) {
         case LV_KEY_LEFT:
-            s_tv_dx--;
+            x--;
             break;
         case LV_KEY_RIGHT:
-            s_tv_dx++;
+            x++;
             break;
         case LV_KEY_UP:
-            s_tv_dy--;
+            y--;
             break;
         case LV_KEY_DOWN:
-            s_tv_dy++;
+            y++;
             break;
         default:
             return;
     }
-    /* ⓘ Only the app's own + moves: webOS's picture is not touched until Enter. */
-    mark_follow();
+    /* ⓘ Only the app's own + moves: webOS's picture is not touched until the end. */
+    mark_to(x, y);
 }
 
 /* ⓘ Enter and A come as a click when they come UP, as everywhere in this
  * interface, and the mouse's click arrives here too, as the layer takes every
- * click. Step 1 takes either; step 2 only Enter or A, so a stray click of the
- * mouse saves nothing. */
+ * click: either ends either step. */
 static void bar_clicked_cb(lv_event_t *event) {
     LV_UNUSED(event);
     if (!s_aligning) {
@@ -417,10 +392,6 @@ static void bar_clicked_cb(lv_event_t *event) {
     }
     if (s_step == STEP_PC) {
         step_pc_done();
-        return;
-    }
-    lv_indev_t *indev = lv_indev_get_act();
-    if (indev == NULL || lv_indev_get_type(indev) != LV_INDEV_TYPE_KEYPAD) {
         return;
     }
     bar_close(true);
@@ -472,8 +443,7 @@ static void bar_open(void) {
     lv_obj_add_event_cb(s_mark, mark_draw, LV_EVENT_DRAW_MAIN, NULL);
 
     s_step = STEP_PC;
-    s_pc_dx = s_pc_dy = s_tv_dx = s_tv_dy = 0;
-    s_ptr_x = s_ptr_y = INT32_MIN;
+    s_pc_dx = s_pc_dy = 0;
     step_words();
     const double per = tv_per_point();
     mark_to((int) lround(lv_disp_get_hor_res(NULL) / 2 * per), (int) lround(lv_disp_get_ver_res(NULL) / 2 * per));
@@ -495,7 +465,6 @@ static void bar_open(void) {
     s_wake_said = -1;
     stop_awake();
     s_awake = lv_timer_create(awake_cb, ALIGN_AWAKE_MS, NULL);
-    s_follow = lv_timer_create(follow_cb, ALIGN_FOLLOW_MS, NULL);
     tv_cursor_log("align bar: open, step 1, the + at %d,%d of the TV's pixels", s_mark_x, s_mark_y);
 }
 
@@ -552,10 +521,6 @@ void cursor_align_stream_ended(void) {
         tv_cursor_log("align bar: closed with the stream, nothing kept");
     }
     stop_awake();
-    if (s_follow != NULL) {
-        lv_timer_del(s_follow);
-        s_follow = NULL;
-    }
     /* ⓘ The streaming screen takes its keys away before its objects go
      * (upstream's on_delete_obj); asked again here in case, and the group the
      * keys came from is the screen's, so it is not handed back. */
