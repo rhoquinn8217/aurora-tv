@@ -113,6 +113,11 @@ static int s_fake_prompt = -1;
  * each lock, prompt and Desktop Mode begins ("Over the screen like window lock and
  * UAC"). */
 static bool s_list_hidden;
+/* ⭐ DESKTOP MODE'S OWN LIST, hidden or not, kept while a lock or a prompt over it has
+ * the controls, and given back as Desktop Mode comes back (rhoquinn8217, 2026-11-13, at
+ * the C1: "the legend did not come up during UAC": a prompt over Desktop Mode took the
+ * controls without beginning them again, so the list hidden there stayed hidden). */
+static bool s_desktop_list_hidden;
 /* Turned off by hand, and whether at a prompt (else at the lock). */
 static bool s_dismissed;
 static bool s_dismissed_prompt;
@@ -791,8 +796,10 @@ void lock_keys_axis(stream_input_t *input, app_gamepad_state_t *gamepad, const S
 static void lock_begin(stream_input_t *input, lock_keys_mode_t mode) {
     s_mode = mode;
     s_numpad_open = false;
-    /* Its list over the screen again (s_list_hidden). */
+    /* Its list over the screen again (s_list_hidden), and nothing of an earlier Desktop
+     * Mode's kept for it (s_desktop_list_hidden). */
     s_list_hidden = false;
+    s_desktop_list_hidden = false;
     s_asking = false;
     r2_let_go();
     s_interface_had_input = false;
@@ -1091,6 +1098,17 @@ void lock_keys_tick(app_t *app) {
                                         : was == LOCK_KEYS_LOCK  ? "lock"
                                                                  : "prompt");
 #endif
+                /* ⭐ The list over the screen as a lock or a prompt begins, over Desktop
+                 * Mode too, and Desktop Mode's as it was when it comes back
+                 * (s_desktop_list_hidden). */
+                if (was == LOCK_KEYS_DESKTOP) {
+                    s_desktop_list_hidden = s_list_hidden;
+                }
+                const bool hidden = wanted == LOCK_KEYS_DESKTOP ? s_desktop_list_hidden : false;
+                if (hidden != s_list_hidden) {
+                    s_list_hidden = hidden;
+                    list_note(wanted == LOCK_KEYS_DESKTOP ? "Desktop Mode back, as it was" : "a lock or a prompt begins");
+                }
             }
         } else {
             if (s_mode != LOCK_KEYS_OFF) {
