@@ -53,7 +53,8 @@ bool lock_numpad_hide_up(void);
 /* Is the question a close raises up? For the control port. */
 bool lock_numpad_question_up(void);
 
-/* Is this point of the screen on what asks to be clicked: Close, or the question (all
+/* Is this point of the screen on what asks to be clicked: Hide, the Mouse category's two
+ * choices (the Touchpad's and the Stick's), or the question (all
  * of it, so a click on its words reaches nothing behind)? For the touchpad's click in a
  * stream, which only Aurora's own pointer can bring there (input/touchpad_pointer.h),
  * and a mouse's (lock_numpad_mouse_takes). */

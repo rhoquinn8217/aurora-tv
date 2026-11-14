@@ -156,6 +156,37 @@ static void draw_touchpad(const pen_t *pen, pad_mark_t mark) {
     }
 }
 
+/* A stick tilted: the stick's outline, an inner ring, and its letter in strokes, as the
+ * PS button's are (the app's small type is too large for a letter inside the ring). */
+static const int16_t LETTER_STICK_L[3][2] = {{860, 660}, {860, 1340}, {1150, 1340}};
+static const int16_t LETTER_STICK_R[10][2] = {{860, 1340}, {860, 660}, {1030, 660}, {1120, 695}, {1160, 775},
+                                              {1120, 855}, {1030, 890}, {860, 890}, {1030, 890}, {1180, 1340}};
+
+static void draw_stick(const pen_t *pen, pad_mark_t mark) {
+    pen_circle(pen, 1000, 1000, 900);
+    pen_circle(pen, 1000, 1000, 650);
+    if (mark == PAD_MARK_STICK_R) {
+        pen_path(pen, LETTER_STICK_R, 10, false);
+    } else {
+        pen_path(pen, LETTER_STICK_L, 3, false);
+    }
+}
+
+/* A stick pressed: a solid flat arrow, pointing down, over an outline of the stick's
+ * cap. The arrow's head is filled in short horizontal strokes, as the display has no
+ * filled triangle. */
+static const int16_t STICK_CAP[10][2] = {{400, 840}, {1600, 840}, {1860, 1060}, {1860, 1240}, {1600, 1240},
+                                         {1600, 1860}, {400, 1860}, {400, 1240}, {140, 1240}, {140, 1060}};
+
+static void draw_stick_press(const pen_t *pen) {
+    pen_fill(pen, 880, 220, 1120, 360);
+    for (int y = 360; y <= 690; y += 40) {
+        const int half = (690 - y) * 460 / 330;
+        pen_line(pen, 1000 - half, y, 1000 + half, y);
+    }
+    pen_path(pen, STICK_CAP, 10, true);
+}
+
 static void draw_dpad(const pen_t *pen, pad_mark_t mark) {
     pen_path(pen, DPAD, 12, true);
     switch (mark) {
@@ -269,6 +300,10 @@ static bool mark_is_shoulder(pad_mark_t mark) {
     return mark == PAD_MARK_L1 || mark == PAD_MARK_R1 || mark == PAD_MARK_L2 || mark == PAD_MARK_R2;
 }
 
+static bool mark_is_stick(pad_mark_t mark) {
+    return mark == PAD_MARK_STICK_R || mark == PAD_MARK_STICK_L || mark == PAD_MARK_STICK_PRESS;
+}
+
 static bool mark_is_touchpad(pad_mark_t mark) {
     return mark == PAD_MARK_TOUCHPAD || mark == PAD_MARK_TOUCH_ONE || mark == PAD_MARK_TOUCH_TWO;
 }
@@ -310,7 +345,13 @@ static void mark_draw_body(lv_event_t *event) {
     pen.line.round_end = 1;
 
     const lv_font_t *font = lv_obj_get_style_text_font(obj, LV_PART_MAIN);
-    if (mark_is_touchpad(mark)) {
+    if (mark_is_stick(mark)) {
+        if (mark == PAD_MARK_STICK_PRESS) {
+            draw_stick_press(&pen);
+        } else {
+            draw_stick(&pen, mark);
+        }
+    } else if (mark_is_touchpad(mark)) {
         draw_touchpad(&pen, mark);
     } else if (mark_is_dpad(mark)) {
         draw_dpad(&pen, mark);

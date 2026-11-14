@@ -62,6 +62,14 @@ typedef enum {
     PAD_MARK_TOUCHPAD,
     PAD_MARK_TOUCH_ONE,
     PAD_MARK_TOUCH_TWO,
+    /* ⭐ THE STICKS (rhoquinn8217, 2026-11-14): a stick tilted, drawn plain, an outline
+     * of the stick with its letter, R or L ("remove the arrow on the stick for mouse and
+     * scroll"; "make them a little bigger when you build it"); and a stick pressed, L3
+     * and R3: a solid flat arrow over an outline of the stick's cap ("outline of the
+     * stick but solid arrow", "the same as the text color"). The same on every pad. */
+    PAD_MARK_STICK_R,
+    PAD_MARK_STICK_L,
+    PAD_MARK_STICK_PRESS,
 } pad_mark_t;
 
 /* The mark, `height` pixels high, as an object in `parent` that takes no input.
