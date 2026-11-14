@@ -132,6 +132,15 @@ bool streaming_soft_keyboard_shown() {
     return current_controller != NULL && current_controller->soft_kbd != NULL;
 }
 
+/* This fork: the stats' pin while the stats are pinned over the stream, or NULL (ui/streaming/lock_numpad.h, lock_numpad_button_at). */
+lv_obj_t *streaming_stats_pin_shown() {
+    if (current_controller == NULL || current_controller->stats == NULL || current_controller->stats_pin == NULL ||
+        current_controller->stats->parent != lv_layer_top() || lv_obj_has_flag(current_controller->stats, LV_OBJ_FLAG_HIDDEN)) {
+        return NULL;
+    }
+    return current_controller->stats_pin;
+}
+
 bool streaming_stats_shown() {
     return overlay_showing || overlay_pinned;
 }

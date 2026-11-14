@@ -36,13 +36,16 @@
 #include "ui/streaming/streaming.controller.h"
 #include "ui/streaming/bridge_prompt.h"
 #include "ui/streaming/ctm_panel.h"
+#include "ui/streaming/desktop_mode.h"
 #include "ui/streaming/keyboard_place.h"
 #include "ui/streaming/lock_numpad.h"
 #include "ui/common/pad_marks.h"
 #include "stream/input/lock_keys.h"
+#include "stream/input/window_select.h"
 #include "input/bridge_override.h"
 #include "input/bridge_keyboard.h"
 #include "input/tv_cursor.h"
+#include "input/mouse_seen.h"
 #include "input/webos_popup.h"
 #include "input/bt_pairing.h"
 #include "ui/common/bt_panel.h"
@@ -147,6 +150,7 @@ static void cmd_help(control_job_t *job)
                "ui                      what is open on the screen: overlay, its keyboard, the panel, the align bar\n"
                "numpad [ps|xbox|auto]   the controller at a locked Windows: numpad open or closed, where, whose marks, keys typed (a count)\n"
                "uac [0|1|2|auto]        a User Account Control prompt: what DS5-USBIP says, what the controls are up for; 1 or 2 fakes one\n"
+               "desktop [on|off|legend|cursor] Desktop Mode: its switch, controls, question, list, Alt; on|off as its button, legend as a two-finger press or Share, cursor as L3\n"
                "press <key>[:ms] ...    keys into aurora-tv's own screens, as a keyboard types them; not once a stream is up\n"
                "                        keys: up down left right enter esc home end backspace; :ms holds it (a long press)\n"
                "type <text>             characters into aurora-tv's own screens, a key each, as a keyboard types them\n"
@@ -165,6 +169,7 @@ static void cmd_help(control_job_t *job)
                "cursor on|off           the TV cursor on or off, and saved, as Ctrl+Alt+Shift+M does\n"
                "cursor align            open the bar that aligns the TV cursor, as Ctrl+Alt+Shift+A does\n"
                "cursor sharp|regular    the drop or webOS's own pointer, and saved, as Ctrl+Alt+Shift+C does\n"
+               "cursor warp|nudge <x> <y>, cursor where  a test: webOS's pointer to a point, or moved as a mouse; where SDL has it\n"
                "shot [name]             the app's own screen (never the stream's picture) to logs/, as a .bmp\n"
                "crash                   the crash recorder: armed or not, and where its record goes\n"
                "crash test|thread       crash the app on purpose, on its own loop or on a thread, to prove it\n"
@@ -276,7 +281,7 @@ static void cmd_prompt(control_job_t *job, const char *args)
 {
     if (args != NULL && strcasecmp(args, "ok") == 0) {
         if (bridge_prompt_accept()) {
-            reply(job, "OK pressed: the TV's mouse controls are off\n");
+            reply(job, "OK pressed: its first button\n");
         } else {
             reply(job, "ERR the question is not up\n");
         }
@@ -298,11 +303,11 @@ static void cmd_prompt(control_job_t *job, const char *args)
         bridge_prompt_measure_t m;
         if (bridge_prompt_measure(&m)) {
             reply(job, "OK prompt=up seconds=%d size=%dx%d at=%d,%d bottom=%d buttons_top=%d lines=%d row=%d "
-                       "selected=%d highlighted=%s screen=%dx%d\n",
+                       "selected=%d highlighted=%s screen=%dx%d words=\"%s\"\n",
                   left, m.width, m.height, m.x, m.y, m.y + m.height, m.buttons_top, m.text_lines, m.row_width,
-                  m.selected, m.highlighted ? "yes" : "no", m.screen_width, m.screen_height);
+                  m.selected, m.highlighted ? "yes" : "no", m.screen_width, m.screen_height, bridge_prompt_words());
         } else {
-            reply(job, "OK prompt=up seconds=%d\n", left);
+            reply(job, "OK prompt=up seconds=%d words=\"%s\"\n", left, bridge_prompt_words());
         }
     } else {
         /* The message its button leaves, in the same place, for a few seconds. */
@@ -339,18 +344,18 @@ static void cmd_ui(control_job_t *job)
 
 /* What the screen shows over a locked Windows (ui/streaming/lock_numpad.h), and a
  * count of what was typed, never what. `ps`, `xbox` or `auto` sets whose marks it
- * draws, for a picture of the set not in hand; not saved. `close` does what a click
- * on the Close button does: it asks first, and the question is up from the app's
- * next pass (`question=asked` until then). `ok` and `cancel` answer it as its
- * buttons do; OK turns these controls off until the next lock or prompt. */
+ * draws, for a picture of the set not in hand; not saved. `hide` (or `close`, its old
+ * name) does what a click on the Hide button does: the list hidden. `ok` and `cancel`
+ * answer the question Options held 2 s raises, as its buttons do; OK turns these
+ * controls off until the next lock or prompt, or Desktop Mode off. */
 static void cmd_numpad(control_job_t *job, const char *args)
 {
-    if (args != NULL && strcasecmp(args, "close") == 0) {
-        if (!lock_numpad_close_up()) {
-            reply(job, "ERR the Close button is not up\n");
+    if (args != NULL && (strcasecmp(args, "hide") == 0 || strcasecmp(args, "close") == 0)) {
+        if (!lock_numpad_hide_up()) {
+            reply(job, "ERR the Hide button is not up\n");
             return;
         }
-        lock_numpad_close_click();
+        lock_numpad_hide_click();
     } else if (args != NULL && (strcasecmp(args, "ok") == 0 || strcasecmp(args, "cancel") == 0)) {
         if (!lock_keys_asking()) {
             reply(job, "ERR no question is up\n");
@@ -364,13 +369,13 @@ static void cmd_numpad(control_job_t *job, const char *args)
     } else if (args != NULL && strcasecmp(args, "auto") == 0) {
         pad_family_force(-1);
     } else if (args != NULL && args[0] != '\0') {
-        reply(job, "ERR try ps, xbox, auto, close, ok or cancel\n");
+        reply(job, "ERR try ps, xbox, auto, hide, ok or cancel\n");
         return;
     }
     lv_area_t area = {0, 0, 0, 0};
     const bool up = lock_numpad_area(&area);
-    reply(job, "OK numpad=%s close=%s question=%s dismissed=%s after_sign_in=%s after_at=%d locked=%s prompt=%s pad=%s marks=%s typed=%u size=%dx%d at=%d,%d kbd_place=%s\n",
-          lock_numpad_state(), lock_numpad_close_up() ? "up" : "down",
+    reply(job, "OK numpad=%s hide=%s question=%s dismissed=%s after_sign_in=%s after_at=%d locked=%s prompt=%s pad=%s marks=%s typed=%u size=%dx%d at=%d,%d kbd_place=%s\n",
+          lock_numpad_state(), lock_numpad_hide_up() ? "up" : "down",
           lock_numpad_question_up() ? "up" : lock_keys_asking() ? "asked" : "down", lock_keys_dismissed() ? "yes" : "no",
           lock_numpad_after_up() ? "yes" : "no", (int) lock_numpad_after_at(),
           lock_keys_mode() == LOCK_KEYS_LOCK ? "yes" : "no",
@@ -408,8 +413,55 @@ static void cmd_uac(control_job_t *job, const char *args)
           mode == LOCK_KEYS_LOCK                ? "lock"
           : mode == LOCK_KEYS_PROMPT            ? "prompt"
           : mode == LOCK_KEYS_PROMPT_PASSWORD   ? "prompt-password"
+          : mode == LOCK_KEYS_DESKTOP           ? "desktop"
                                                 : "off",
           lock_keys_holds_bridged() ? "yes" : "no", lock_keys_dismissed() ? "yes" : "no");
+}
+
+/* ⭐ DESKTOP MODE (ui/streaming/desktop_mode.h): its switch, what the controls are up
+ * for now, and its list in the overlay. With `on` or `off`, switched as the overlay's
+ * button does, its message included. With `start on` or `start off`, the Settings box
+ * that says whether it starts by itself at a stream's start, saved. */
+static void cmd_desktop(control_job_t *job, const char *args)
+{
+    if (args != NULL && strncasecmp(args, "start ", 6) == 0 && app_configuration != NULL) {
+        const char *value = args + 6;
+        if (strcasecmp(value, "on") != 0 && strcasecmp(value, "off") != 0) {
+            reply(job, "ERR try start on or start off\n");
+            return;
+        }
+        app_configuration->bridge.desktop_mode_start = strcasecmp(value, "on") == 0;
+        settings_save(app_configuration);
+    } else if (args != NULL && (strcasecmp(args, "on") == 0 || strcasecmp(args, "off") == 0)) {
+        const bool on = strcasecmp(args, "on") == 0;
+        desktop_mode_set(on, "the control port");
+        if (on) {
+            bridge_prompt_say_desktop_on();
+        }
+    } else if (args != NULL && strcasecmp(args, "legend") == 0) {
+        /* A two-finger press's turn, or an Xbox pad's Share button's: the list over the
+         * screen, or hidden. */
+        lock_keys_list_toggle("the control port");
+    } else if (args != NULL && strcasecmp(args, "cursor") == 0) {
+        /* L3's turn: the TV cursor's alignment bar, the cursor on with it if off. */
+        desktop_mode_cursor_toggle();
+    } else if (args != NULL && args[0] != '\0') {
+        reply(job, "ERR try on, off, start on, start off, legend or cursor\n");
+        return;
+    }
+    const lock_keys_mode_t mode = lock_keys_mode();
+    reply(job, "OK desktop=%s start=%s handover=%s mode=%s vmouse_setting=%s list=%s legend=%s window_select=%s\n",
+          desktop_mode_on() ? "on" : "off",
+          app_configuration != NULL && app_configuration->bridge.desktop_mode_start ? "on" : "off",
+          desktop_mode_handing_over() ? "yes" : "no",
+          mode == LOCK_KEYS_LOCK                ? "lock"
+          : mode == LOCK_KEYS_PROMPT            ? "prompt"
+          : mode == LOCK_KEYS_PROMPT_PASSWORD   ? "prompt-password"
+          : mode == LOCK_KEYS_DESKTOP           ? "desktop"
+                                                : "off",
+          app_configuration != NULL && app_configuration->virtual_mouse ? "on" : "off",
+          mode == LOCK_KEYS_DESKTOP && strcmp(lock_numpad_state(), "off") != 0 ? "up" : "down",
+          lock_keys_list_hidden() ? "hidden" : "shown", window_select_held() ? "alt-held" : "off");
 }
 
 /* A webOS pop-up over the app (input/webos_popup.h): whether one has the
@@ -493,6 +545,42 @@ static void cmd_input(control_job_t *job)
  * Ctrl+Alt+Shift+C switches it. */
 static void cmd_cursor(control_job_t *job, const char *args)
 {
+    /* ⭐ A TEST of moving webOS's own pointer (rhoquinn8217, 2026-11-11: "test moving
+     * webOS's cursor first"): `warp` puts it at a point of the window through SDL,
+     * `nudge` moves it as the first mouse the TV saw move (input/mouse_seen.h), and
+     * `where` says where SDL has it now. */
+    int px = 0, py = 0;
+    if (strncasecmp(args, "warp ", 5) == 0) {
+        if (sscanf(args + 5, "%d %d", &px, &py) != 2 || global == NULL || global->ui.window == NULL) {
+            reply(job, "ERR usage: cursor warp <x> <y>, in the window's points\n");
+            return;
+        }
+        int bx = 0, by = 0, ax = 0, ay = 0;
+        SDL_GetMouseState(&bx, &by);
+        SDL_WarpMouseInWindow(global->ui.window, px, py);
+        SDL_GetMouseState(&ax, &ay);
+        reply(job, "OK warped to %d,%d: SDL's mouse %d,%d before, %d,%d after\n", px, py, bx, by, ax, ay);
+        return;
+    }
+    if (strncasecmp(args, "nudge ", 6) == 0) {
+        if (sscanf(args + 6, "%d %d", &px, &py) != 2) {
+            reply(job, "ERR usage: cursor nudge <dx> <dy>, in the mouse's own counts\n");
+            return;
+        }
+        int bx = 0, by = 0;
+        SDL_GetMouseState(&bx, &by);
+        const int took = mouse_seen_nudge(px, py);
+        reply(job, "OK nudged %d,%d through %d mouse node(s); SDL's mouse %d,%d before (`cursor where` for after)\n",
+              px, py, took, bx, by);
+        return;
+    }
+    if (strcasecmp(args, "where") == 0) {
+        int gx = 0, gy = 0;
+        SDL_GetMouseState(&px, &py);
+        SDL_GetGlobalMouseState(&gx, &gy);
+        reply(job, "OK SDL's mouse %d,%d in the window, %d,%d global\n", px, py, gx, gy);
+        return;
+    }
     if (strcasecmp(args, "align") == 0) {
         cursor_align_request();
         reply(job, "OK the align bar is asked for: it opens on the interface's next pass, or says why not\n");
@@ -1558,6 +1646,8 @@ static void run_command(control_job_t *job)
         cmd_ui(job);
     } else if (strcasecmp(verb, "numpad") == 0) {
         cmd_numpad(job, args);
+    } else if (strcasecmp(verb, "desktop") == 0) {
+        cmd_desktop(job, args);
     } else if (strcasecmp(verb, "uac") == 0) {
         cmd_uac(job, args);
     } else if (strcasecmp(verb, "popup") == 0) {

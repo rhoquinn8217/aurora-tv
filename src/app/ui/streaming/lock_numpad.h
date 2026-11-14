@@ -25,7 +25,8 @@
  *
  * ⭐ AND CLOSE AT THE RIGHT OF THE LIST'S HEADING (2026-11-10), which turns these
  * controls off until the next lock or prompt, after a question at the screen's centre:
- * "Are you sure?", with OK and Cancel. Options held 2 s raises the same question. So a
+ * "Please confirm." over "Remove User Account Control Rebinds?" ("Remove Windows Sign In
+ * Rebinds?" at a lock), with OK and Cancel. Options held 2 s raises the same question. So a
  * click is taken after all, on those two alone; a pad answers the question through
  * stream/input/lock_keys.h. The why is in lock_numpad.c. */
 
@@ -45,9 +46,9 @@ const char *lock_numpad_state(void);
 /* Is the line about Auto Bridge up? For the control port. */
 bool lock_numpad_after_up(void);
 
-/* Is the Close button up (at the right of the list's heading; the numpad has none)?
- * For the control port. */
-bool lock_numpad_close_up(void);
+/* Is the Hide button up (at the right of the list's heading, in all three lists; the
+ * numpad has none)? For the control port. */
+bool lock_numpad_hide_up(void);
 
 /* Is the question a close raises up? For the control port. */
 bool lock_numpad_question_up(void);
@@ -70,10 +71,10 @@ bool lock_numpad_mouse_takes(int button, bool down, lv_coord_t x, lv_coord_t y);
  * control port. */
 lv_coord_t lock_numpad_after_at(void);
 
-/* What a click on Close does: the question, whose OK turns these controls off until
- * the next lock or prompt (lock_keys_ask_dismiss). The control port's `numpad close` as
- * well. */
-void lock_numpad_close_click(void);
+/* What a click on Hide does: the list hidden, until the PS button brings it back
+ * (lock_keys_list_hide). Nothing asks: the question is Options held 2 s's alone since
+ * 2026-11-12, when Close became Hide. The control port's `numpad hide` as well. */
+void lock_numpad_hide_click(void);
 
 /* Where it is, on the screen. False when nothing is up. */
 bool lock_numpad_area(lv_area_t *out);

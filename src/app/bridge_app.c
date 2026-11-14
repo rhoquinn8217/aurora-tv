@@ -19,7 +19,7 @@
 #include "input/ctm_bridge_gesture.h"
 #if defined(TARGET_WEBOS)
 #include "input/bridge_keyboard.h"
-#include "ctm_bridge_glue.h"   /* bridge_set_shortcut_request, bridge_set_pointer_used_request */
+#include "ctm_bridge_glue.h"   /* bridge_set_shortcut_request */
 #endif
 #include "input/tv_cursor.h"
 #include "input/touchpad_pointer.h"   /* the touchpad as the TV's mouse */
@@ -29,24 +29,10 @@
 #include "input/auto_bridge.h"      /* a ticked device that connects, bridged */
 #include "input/webos_popup.h"      /* a webOS pop-up answered from a controller */
 #include "stream/input/lock_keys.h" /* a controller's buttons type at a lock */
+#include "ui/streaming/desktop_mode.h"   /* Desktop Mode's questions */
 #include "ui/streaming/lock_numpad.h"
 #include "ui/streaming/cursor_align.h"   /* cursor_align_shown */
-
-#if defined(TARGET_WEBOS)
-/* ⭐ The pop-up that asks to turn the TV cursor off (ui/streaming/bridge_prompt.h)
- * comes as soon as a mouse the TV saw move is bridged (rhoquinn8217,
- * 2026-10-11: "The message should appear immediately after a mouse is
- * bridged"), and is raised here, on the app's loop. A mouse part the TV never
- * saw move (input/mouse_seen.h) asks instead at its first use, which the
- * bridge core tells on the mouse's own thread. ⓘ Not both for one bridge: a
- * pop-up raised at the bridge takes the first use that follows it. */
-static SDL_atomic_t s_pointer_used;
-static int s_asked_at_bridge = 0;
-
-static void pointer_used(void) {
-    SDL_AtomicSet(&s_pointer_used, 1);
-}
-#endif
+#include "input/loop_watch.h"   /* a slow pass of the app's loop, named by its steps */
 
 /* ⓘ The bridge core's: <app>/logs/<name>, the folder every log of ours is in. */
 const char *ctm_log_path(const char *name);
@@ -172,9 +158,9 @@ void bridge_app_started(app_t *app) {
     overlay_volume_init();
 #if defined(TARGET_WEBOS)
     /* ⓘ What the bridge core finds in a bridged keyboard's reports, beside
-     * its S: Ctrl+Alt+Shift and A, C, M or N; and a bridged mouse's first use. */
+     * its S: Ctrl+Alt+Shift and A, C, M or N. ⓘ A bridged mouse's first use is
+     * not asked for since its pop-up went (rhoquinn8217, 2026-11-12). */
     bridge_set_shortcut_request(bridge_keyboard_bridged_shortcut);
-    bridge_set_pointer_used_request(pointer_used);
 #endif
 }
 
@@ -270,18 +256,27 @@ bool bridge_app_mouse_grab_later(app_input_t *input, bool grab) {
 void bridge_app_events(app_t *app) {
     /* A crash asked for on purpose, from the control port's `crash test`. */
     crash_recorder_tick();
+    loop_watch_mark("crash_recorder_tick");
     /* ⭐ First: the bridge's start or stop that the stream asked for inside
      * SDL's event filter, now that the filter has let go of the event lock
      * (bridge_session.c). The tick below then sees the bridge as it is. */
     bridge_session_run_pending();
+    loop_watch_mark("bridge_session_run_pending (a bridge's start or stop)");
     /* ⭐ A webOS pop-up over the app, come or gone, and the presses kept for it
      * sent on as the remote's, now that SDL's walk is over
      * (input/webos_popup.h). Before the ticks below that read the pads. */
     webos_popup_tick();
+    loop_watch_mark("webos_popup_tick");
     /* ⭐ While Windows is locked a controller is a mouse, or types
      * (stream/input/lock_keys.h). ⓘ Before Auto Bridge below and the touchpad's tick:
      * at the unlock Virtual Mouse is back as it was before either reads it. */
     lock_keys_tick(app);
+    loop_watch_mark("lock_keys_tick");
+    /* ⭐ Desktop Mode off at a stream's start, and started by itself when DS5-USBIP is
+     * not on (ui/streaming/desktop_mode.h). ⓘ Before Auto Bridge below, which hands it
+     * over to DS5-USBIP when DS5-USBIP comes up. */
+    desktop_mode_tick(app);
+    loop_watch_mark("desktop_mode_tick");
     /* ⛔⛔ streaming_overlay_shown(), NOT app_ui_is_opened(). Third attempt, and
      * this one has evidence rather than reasoning behind it.
      *
@@ -306,6 +301,7 @@ void bridge_app_events(app_t *app) {
      * bridged pad's keys for it. ⓘ Not for the keyboard's tick below: that
      * would feed the overlay behind the pop-up. */
     ctm_bridge_gesture_tick(&app->input, app->session, interface_has_input || webos_popup_up());
+    loop_watch_mark("ctm_bridge_gesture_tick");
     /* ⭐ The TV's volume from the right stick while the overlay is up, from a
      * pad the TV holds or a bridged one (input/overlay_volume.h). After the
      * tick above, which is what holds a bridged pad's input for the overlay.
@@ -315,16 +311,18 @@ void bridge_app_events(app_t *app) {
      * right stick nor its click. ⓘ Not while a webOS pop-up has the focus:
      * the pads answer that (input/webos_popup.h). */
     overlay_volume_tick(&app->input, (app->session == NULL || streaming_overlay_shown()) && !webos_popup_up());
+    loop_watch_mark("overlay_volume_tick");
     /* ⭐ The touchpad as the host's mouse while Virtual Mouse is on
      * (input/bridge_override.h). */
     bridge_override_touchpad_tick(app->session);
+    loop_watch_mark("bridge_override_touchpad_tick");
 #if defined(TARGET_WEBOS)
     /* The TV's keyboard grab looking again after a bridge or a release. */
     bridge_keyboard_tick(interface_has_input);
-    /* The pointers the TV has seen move, and the pop-up that asks about the TV
-     * cursor: at the bridge for a mouse seen moving, at its first use for one
-     * never seen. */
+    loop_watch_mark("bridge_keyboard_tick");
+    /* The pointers the TV has seen move. */
     mouse_seen_tick();
+    loop_watch_mark("mouse_seen_tick");
     /* ⭐ A ticked device bridges itself: at a stream's start once DS5-USBIP
      * answers, and when it connects during the stream (input/auto_bridge.h).
      * ⛔ While the bridge is up, not while the session merely exists
@@ -332,6 +330,7 @@ void bridge_app_events(app_t *app) {
      * device that arrived then was bridged to the last stream's PC, with
      * nothing to release it until the next stream ended. */
     auto_bridge_poll(app->session != NULL && ctm_bridge_active());
+    loop_watch_mark("auto_bridge_poll");
     const ctm_bridge_refused_t refused = ctm_bridge_gesture_take_refused();
     if (refused != CTM_BRIDGE_REFUSED_NONE) {
         bridge_prompt_note_bridge_refused(refused == CTM_BRIDGE_REFUSED_LOCKED);
@@ -340,29 +339,17 @@ void bridge_app_events(app_t *app) {
     if (refused == CTM_BRIDGE_REFUSED_LOCKED) {
         auto_bridge_stream_started();
     }
-    if (app->session == NULL) {
-        s_asked_at_bridge = 0;
-    }
-    if (mouse_seen_take_bridged()) {
-        s_asked_at_bridge++;
-        bridge_prompt_request_tv_cursor();
-    }
-    if (SDL_AtomicSet(&s_pointer_used, 0) != 0) {
-        if (s_asked_at_bridge > 0) {
-            s_asked_at_bridge--;
-            tv_cursor_log("the bridged mouse's first use: asked already, at its bridge");
-        } else {
-            bridge_prompt_request_tv_cursor();
-        }
-    }
 #else
     (void) interface_has_input;
 #endif
     /* ⭐ What a controller does over a locked Windows, on the screen
      * (ui/streaming/lock_numpad.h). */
+    loop_watch_mark("the refused bridge's word");
     lock_numpad_tick();
+    loop_watch_mark("lock_numpad_tick (the list)");
     /* The TV's cursor, put back if the window has the screen again. */
     tv_cursor_tick();
+    loop_watch_mark("tv_cursor_tick");
     /* ⭐ The touchpad as the TV's mouse while Aurora's own screens have the
      * input: no stream, or the overlay or a bridge's question up
      * (input/touchpad_pointer.h). ⓘ Not while a webOS pop-up has the focus:
@@ -370,6 +357,7 @@ void bridge_app_events(app_t *app) {
     touchpad_pointer_tick(&app->input,
                           (app->session == NULL || streaming_overlay_shown() || bridge_prompt_shown()) &&
                           !webos_popup_up());
+    loop_watch_mark("touchpad_pointer_tick");
     /* ⓘ Upstream v1.2.9's touchpad tap-hold, for its touchpad mouse mode, runs
      * in app.c right after this. It reads the same SDL touchpad state the
      * gesture polls here; neither consumes events, so the two coexist.

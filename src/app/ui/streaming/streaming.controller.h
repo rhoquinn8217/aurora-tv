@@ -67,6 +67,10 @@ bool streaming_overlay_shown();
 
 bool streaming_soft_keyboard_shown();
 
+/* This fork: the stats' pin while the stats are pinned over the stream, or NULL, so a click
+ * on it is Aurora's alone (ui/streaming/lock_numpad.h, lock_numpad_button_at). */
+lv_obj_t *streaming_stats_pin_shown();
+
 bool streaming_stats_shown();
 
 bool streaming_refresh_stats();

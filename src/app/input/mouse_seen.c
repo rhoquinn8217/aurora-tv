@@ -48,7 +48,6 @@ static char s_seen[MOUSE_SEEN_MAX][24];
 static int s_seen_n = 0;
 static Uint32 s_scan_at = 0;
 static Uint32 s_hash = 0;
-static bool s_bridged_moving = false;
 
 /* Every input device the kernel has, as one number that changes when one
  * arrives, goes or comes back: the names in /sys/class/input, as
@@ -170,34 +169,12 @@ void mouse_seen_tick(void) {
             if (s_seen_n < MOUSE_SEEN_MAX) {
                 memcpy(s_seen[s_seen_n++], s_paths[i], sizeof(s_seen[0]));
             }
-            tv_cursor_log("the TV saw %s (%s) move: bridged, it asks about the TV cursor at once",
-                          s_paths[i], name[0] != '\0' ? name : "no name");
+            tv_cursor_log("the TV saw %s (%s) move", s_paths[i], name[0] != '\0' ? name : "no name");
             drop(i);
             i--;
             break;
         }
     }
-}
-
-void mouse_seen_plugged(const ctm_bridge_dev_t *dev) {
-    if (dev == NULL || strcmp(dev->type, "mouse") != 0) {
-        return;
-    }
-    for (int i = 0; i < s_seen_n; i++) {
-        if (ctm_bridge_gesture_event_on_node(s_seen[i], dev->node)) {
-            s_bridged_moving = true;
-            tv_cursor_log("a mouse the TV saw move is bridged (%s, %s): the pop-up is due", s_seen[i], dev->node);
-            return;
-        }
-    }
-    tv_cursor_log("a mouse part the TV never saw move is bridged (%s): the pop-up waits for its first use",
-                  dev->node);
-}
-
-bool mouse_seen_take_bridged(void) {
-    const bool due = s_bridged_moving;
-    s_bridged_moving = false;
-    return due;
 }
 
 /* ⓘ The kernel hands what is written to an input node to everything reading
@@ -231,6 +208,35 @@ int mouse_seen_wake(void) {
     return woken;
 }
 
+/* ⭐ A TEST (rhoquinn8217, 2026-11-11: "test moving webOS's cursor first"): can the
+ * touchpad and the stick move webOS's own pointer, so a controller and a mouse share
+ * the one cursor that lines up with the picture? This moves it as the first mouse the
+ * TV has seen move, by `dx`, `dy` of that mouse's own counts, through its node, as
+ * mouse_seen_wake does. How many nodes took it: 0 or 1. */
+int mouse_seen_nudge(int dx, int dy) {
+    const struct evdev_event moves[3] = {
+            {0, 0, EVDEV_TYPE_REL, EVDEV_REL_X, dx},
+            {0, 0, EVDEV_TYPE_REL, EVDEV_REL_Y, dy},
+            {0, 0, EVDEV_TYPE_SYN, EVDEV_SYN_REPORT, 0},
+    };
+    for (int i = 0; i < s_seen_n; i++) {
+        const int fd = open(s_seen[i], O_WRONLY | O_NONBLOCK | O_CLOEXEC);
+        if (fd < 0) {
+            continue;
+        }
+        const bool wrote = write(fd, moves, sizeof(moves)) == (ssize_t) sizeof(moves);
+        close(fd);
+        if (wrote) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+bool mouse_seen_any(void) {
+    return s_seen_n > 0;
+}
+
 bool mouse_seen_mouse_bridged(char *which, size_t len) {
     ctm_bridge_pointer_t parts[MOUSE_NODES_MAX];
     const int n = ctm_bridge_bridged_pointers(parts, MOUSE_NODES_MAX);
@@ -255,16 +261,18 @@ bool mouse_seen_mouse_bridged(char *which, size_t len) {
 void mouse_seen_tick(void) {
 }
 
-void mouse_seen_plugged(const ctm_bridge_dev_t *dev) {
-    (void) dev;
-}
-
-bool mouse_seen_take_bridged(void) {
-    return false;
-}
-
 int mouse_seen_wake(void) {
     return 0;
+}
+
+int mouse_seen_nudge(int dx, int dy) {
+    (void) dx;
+    (void) dy;
+    return 0;
+}
+
+bool mouse_seen_any(void) {
+    return false;
 }
 
 bool mouse_seen_mouse_bridged(char *which, size_t len) {

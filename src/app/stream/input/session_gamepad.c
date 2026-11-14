@@ -12,6 +12,9 @@
 #include "stream/input/session_virt_mouse.h"
 #include "stream/input/bridge_switch_hold.h"
 #include "stream/input/lock_keys.h"
+#include "stream/input/window_select.h"
+#include "stream/input/touchpad_drag_lock.h"
+#include "stream/input/bridged_touchpad.h"
 #include "input/bridge_override.h"
 #include "input/touchpad_pointer.h"
 #include "logging.h"
@@ -237,6 +240,8 @@ void stream_input_handle_cbutton(stream_input_t *input, const SDL_ControllerButt
                 if (input->view_only) {
                     return;
                 }
+                /* This fork: under the TV's controls a bridged pad's click is the core's reading of it, not SDL's copy (stream/input/bridged_touchpad.h). */
+                if (bridged_touchpad_owns(gamepad) && !bridged_touchpad_feeding()) { return; }
 
                 session_input_touchpad_t *state = touchpad_state(input, gamepad);
                 int mouse_button = BUTTON_LEFT;
@@ -250,6 +255,8 @@ void stream_input_handle_cbutton(stream_input_t *input, const SDL_ControllerButt
                         bool two_finger_press = state->active_fingers == 0x3u;
                         /* This fork: two fingers pressed are the bridge gesture while Virtual Mouse lends the touchpad (input/bridge_override.h). */
                         if (two_finger_press && bridge_override_two_finger_press_is_gesture(input)) { state->physical_mouse_button = -1; touchpad_begin_settling(state); return; }
+                        /* This fork: at a lock, a prompt and in Desktop Mode a two-finger press shows or hides the list, never a right click (stream/input/lock_keys.h). */
+                        if (two_finger_press && lock_keys_active()) { state->physical_mouse_button = -1; touchpad_begin_settling(state); return; }
                         if (two_finger_press || touchpad_lower_right_press(state)) {
                             mouse_button = BUTTON_RIGHT;
                         }
@@ -271,8 +278,12 @@ void stream_input_handle_cbutton(stream_input_t *input, const SDL_ControllerButt
 
                 /* This fork: pressed in on Aurora's own button, the press and its release are Aurora's, not the host's (input/touchpad_pointer.h). */
                 if (state != NULL && touchpad_pointer_stream_press(&state->press_auroras, mouse_button == BUTTON_LEFT, event->type == SDL_CONTROLLERBUTTONDOWN)) { return; }
+                /* This fork: press and drag, the left button kept down while a finger stays on the pad (stream/input/touchpad_drag_lock.h). */
+                if (mouse_button == BUTTON_LEFT && touchpad_drag_lock_click(state, event->type == SDL_CONTROLLERBUTTONDOWN, state != NULL ? state->active_fingers : 0)) { return; }
                 LiSendMouseButtonEvent(event->type == SDL_CONTROLLERBUTTONDOWN ?
                                        BUTTON_ACTION_PRESS : BUTTON_ACTION_RELEASE, mouse_button);
+                /* This fork: the click first, then Window Select's Alt let go (stream/input/window_select.h). */
+                if (event->type != SDL_CONTROLLERBUTTONDOWN) { window_select_after_click(); }
                 return;
             }
             button = TOUCHPAD_FLAG;
@@ -443,9 +454,12 @@ void stream_input_handle_ctouchpad(stream_input_t *input, const SDL_ControllerTo
         return;
     }
     /* This fork: Virtual Mouse takes a bridged pad's touchpad as the mouse, as it takes its sticks (input/bridge_override.h). */
-    if (!stream_input_gamepad_sends_moonlight(input, gamepad) && !bridge_override_vmouse_lends_touchpad(input)) {
+    /* This fork: and under the TV's controls the core's reading of a bridged pad's touchpad is handed here (stream/input/bridged_touchpad.h). */
+    if (!stream_input_gamepad_sends_moonlight(input, gamepad) && !bridge_override_vmouse_lends_touchpad(input) && !bridged_touchpad_feeding()) {
         return;
     }
+    /* This fork: a bridged pad's touches handed over from the core are its only ones, not SDL's copy (stream/input/bridged_touchpad.h). */
+    if (bridged_touchpad_owns(gamepad) && !bridged_touchpad_feeding()) { return; }
     /* This fork: a finger already down as the pad came back from a bridge stays off the stream until lifted (bridge_switch_hold.c). */
     if (bridge_switch_hold_skips_finger(gamepad, event->finger, event->type == SDL_CONTROLLERTOUCHPADUP)) {
         return;
@@ -515,6 +529,8 @@ void stream_input_handle_ctouchpad(stream_input_t *input, const SDL_ControllerTo
 
         if (event->type == SDL_CONTROLLERTOUCHPADUP) {
             state->active_fingers &= (uint8_t) ~finger_bit;
+            /* This fork: the last finger off the pad lets go of a press and drag's left button (stream/input/touchpad_drag_lock.h). */
+            touchpad_drag_lock_finger_up(state, state->active_fingers);
         } else {
             state->active_fingers |= finger_bit;
         }
@@ -944,6 +960,7 @@ static void touchpad_end_tap(session_input_touchpad_t *state) {
     if (touchpad_pointer_stream_press(&state->hold_auroras, false, false)) { state->tap_state = TOUCHPAD_TAP_NONE; }
     if (state->tap_state == TOUCHPAD_TAP_SINGLE_HOLD) {
         LiSendMouseButtonEvent(BUTTON_ACTION_RELEASE, BUTTON_LEFT);
+        window_select_after_click();   /* This fork: then Window Select's Alt let go (stream/input/window_select.h). */
     }
     state->tap_state = TOUCHPAD_TAP_NONE;
 }
@@ -976,8 +993,11 @@ static void touchpad_send_mouse_click(int mouse_button) {
     }
     /* This fork: a tap on Aurora's own button clicks it, and the host is not told (input/touchpad_pointer.h). */
     if (mouse_button == BUTTON_LEFT && touchpad_pointer_stream_tap()) { return; }
+    /* This fork: and a two-finger tap's right click there is nobody's (input/touchpad_pointer.h). */
+    if (mouse_button == BUTTON_RIGHT && touchpad_pointer_stream_right_tap()) { return; }
     LiSendMouseButtonEvent(BUTTON_ACTION_PRESS, mouse_button);
     LiSendMouseButtonEvent(BUTTON_ACTION_RELEASE, mouse_button);
+    window_select_after_click();   /* This fork: then Window Select's Alt let go (stream/input/window_select.h). */
 }
 
 static short touchpad_take_delta(float *remainder) {
@@ -999,6 +1019,8 @@ static session_input_touchpad_t *touchpad_state(
 
 static void touchpad_reset_state(session_input_touchpad_t *state) {
     touchpad_end_tap(state);
+    /* This fork: a press and drag's left button is let go too (stream/input/touchpad_drag_lock.h). */
+    touchpad_drag_lock_drop(state);
     /* This fork: a press that was Aurora's is let go there, not on the host (input/touchpad_pointer.h). */
     if (touchpad_pointer_stream_press(&state->press_auroras, false, false)) { state->physical_mouse_button = 0; }
     if (state->physical_mouse_button > 0) {

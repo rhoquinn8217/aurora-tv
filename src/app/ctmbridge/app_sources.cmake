@@ -34,6 +34,10 @@ target_sources(moonlight-lib PRIVATE
         ${CMAKE_SOURCE_DIR}/src/app/stream/connect_cancel.c
         ${CMAKE_SOURCE_DIR}/src/app/stream/input/bridge_switch_hold.c
         ${CMAKE_SOURCE_DIR}/src/app/stream/input/lock_keys.c
+        ${CMAKE_SOURCE_DIR}/src/app/stream/input/window_select.c
+        ${CMAKE_SOURCE_DIR}/src/app/stream/input/touchpad_drag_lock.c
+        ${CMAKE_SOURCE_DIR}/src/app/stream/input/bridged_touchpad.c
+        ${CMAKE_SOURCE_DIR}/src/app/input/loop_watch.c
         ${CMAKE_SOURCE_DIR}/src/app/ui/common/bt_panel.c
         ${CMAKE_SOURCE_DIR}/src/app/ui/common/click_away.c
         ${CMAKE_SOURCE_DIR}/src/app/ui/common/keyboard_text.c
@@ -50,6 +54,7 @@ target_sources(moonlight-lib PRIVATE
         ${CMAKE_SOURCE_DIR}/src/app/ui/streaming/connecting_cancel.c
         ${CMAKE_SOURCE_DIR}/src/app/ui/streaming/ctm_panel.c
         ${CMAKE_SOURCE_DIR}/src/app/ui/streaming/cursor_align.c
+        ${CMAKE_SOURCE_DIR}/src/app/ui/streaming/desktop_mode.c
         ${CMAKE_SOURCE_DIR}/src/app/ui/streaming/keyboard_place.c
         ${CMAKE_SOURCE_DIR}/src/app/ui/streaming/keyboard_tabs.c
         ${CMAKE_SOURCE_DIR}/src/app/ui/streaming/lock_numpad.c)

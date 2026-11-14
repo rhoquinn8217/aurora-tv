@@ -14,13 +14,16 @@
 #include "input/touchpad_pointer.h"
 #include "input/tv_cursor.h"
 #include "stream/input/bridge_switch_hold.h"
+#include "stream/input/bridged_touchpad.h"
 #include "stream/input/keyboard_input.h"
 #include "stream/input/session_input.h"
 #include "stream/input/session_virt_mouse.h"
 #include "stream/input/vk.h"
+#include "stream/input/window_select.h"
 #include "stream/session.h"
 #include "ui/common/pad_marks.h"
 #include "ui/root.h"
+#include "ui/streaming/desktop_mode.h"
 #include "util/bus.h"
 #include "util/user_event.h"
 #if defined(TARGET_WEBOS)
@@ -66,6 +69,11 @@ typedef enum {
     LOCK_ACT_NUMPAD_CLOSE,
     LOCK_ACT_ANSWER_OK,
     LOCK_ACT_ANSWER_CANCEL,
+    LOCK_ACT_WINDOW_BACK,   /* L1: Window Select, back */
+    LOCK_ACT_WINDOW_NEXT,   /* R1: Window Select, forward */
+    LOCK_ACT_LEGEND,        /* an Xbox pad's Share button: the list over the screen, or hidden */
+    LOCK_ACT_CURSOR,        /* L3: the TV cursor's alignment bar, the cursor on with it if off */
+    LOCK_ACT_LET_GO,        /* any other button: Window Select's Alt let go */
 } lock_act_t;
 
 /* ⭐ THE ORDER OF THE PRESSES IS THE ORDER OF THE DIGITS. With the numpad open, three
@@ -85,6 +93,7 @@ typedef struct {
     uint32_t down;   /* what has gone down since this began and not come up */
     uint32_t options_since;  /* when Options went down alone, held since; 0 if not */
     bool chord;      /* the chord was made: nothing acts until it is let go */
+    uint32_t two_since;  /* a two-finger press on its touchpad began then; 0 if not */
     lock_press_t queue[LOCK_QUEUE];
     int queued;
 } lock_pad_t;
@@ -98,6 +107,17 @@ static unsigned s_typed;
 /* After a prompt, until when the bridged pads may stay held; 0 when they are not. */
 static uint32_t s_quiet_until;
 static int s_fake_prompt = -1;
+/* ⭐ THE LIST OF WHAT THE BUTTONS DO, over the screen unless hidden: by its Hide or by
+ * the PS button, which brings it back too (rhoquinn8217, 2026-11-12: "close need to
+ * change to hide", "PS button sould be the legend button"). Over the screen again as
+ * each lock, prompt and Desktop Mode begins ("Over the screen like window lock and
+ * UAC"). */
+static bool s_list_hidden;
+/* ⭐ DESKTOP MODE'S OWN LIST, hidden or not, kept while a lock or a prompt over it has
+ * the controls, and given back as Desktop Mode comes back (rhoquinn8217, 2026-11-13, at
+ * the C1: "the legend did not come up during UAC": a prompt over Desktop Mode took the
+ * controls without beginning them again, so the list hidden there stayed hidden). */
+static bool s_desktop_list_hidden;
 /* Turned off by hand, and whether at a prompt (else at the lock). */
 static bool s_dismissed;
 static bool s_dismissed_prompt;
@@ -107,6 +127,8 @@ static const char *s_asking_how;
 /* R2 down while the question waits, and whether its press went to Aurora's button. */
 static bool s_r2_down;
 static bool s_r2_auroras;
+/* A trigger's click is down on the host, so its release lets go of Window Select's Alt. */
+static bool s_trigger_clicked;
 #if defined(TARGET_WEBOS)
 static uint32_t s_last_ask;
 static uint32_t s_last_press;
@@ -114,6 +136,18 @@ static uint32_t s_last_press;
 
 static bool mode_is_prompt(lock_keys_mode_t mode) {
     return mode == LOCK_KEYS_PROMPT || mode == LOCK_KEYS_PROMPT_PASSWORD;
+}
+
+/* Every controller, bridged ones too, their reports held from the PC: at a prompt, and
+ * in Desktop Mode. */
+/* Every controller, bridged ones too: at a prompt, in Desktop Mode, and since
+ * 2026-11-11 at the lock as well (pad_taken says why). */
+static bool mode_takes_all(lock_keys_mode_t mode) {
+    return mode == LOCK_KEYS_LOCK || mode_is_prompt(mode) || mode == LOCK_KEYS_DESKTOP;
+}
+
+static bool desktop_mode_wanted(void) {
+    return desktop_mode_on();
 }
 
 bool lock_keys_active(void) {
@@ -124,8 +158,41 @@ lock_keys_mode_t lock_keys_mode(void) {
     return s_mode;
 }
 
+bool lock_keys_desktop_wanted(void) {
+    return desktop_mode_wanted();
+}
+
 bool lock_keys_numpad_open(void) {
-    return s_mode == LOCK_KEYS_LOCK && s_numpad_open;
+    return s_mode != LOCK_KEYS_OFF && s_numpad_open;
+}
+
+bool lock_keys_list_hidden(void) {
+    return s_list_hidden;
+}
+
+static void list_note(const char *how) {
+#if defined(TARGET_WEBOS)
+    ctm_bridge_gesture_note("lock keys: the list %s (%s)", s_list_hidden ? "hidden" : "over the screen",
+                            how != NULL ? how : "?");
+#else
+    (void) how;
+#endif
+}
+
+void lock_keys_list_toggle(const char *how) {
+    if (s_mode == LOCK_KEYS_OFF) {
+        return;
+    }
+    s_list_hidden = !s_list_hidden;
+    list_note(how);
+}
+
+void lock_keys_list_hide(const char *how) {
+    if (s_mode == LOCK_KEYS_OFF || s_list_hidden) {
+        return;
+    }
+    s_list_hidden = true;
+    list_note(how);
 }
 
 bool lock_keys_triggers_type(void) {
@@ -162,7 +229,9 @@ static void r2_let_go(void) {
 }
 
 void lock_keys_dismiss(const char *how) {
-    if (s_mode == LOCK_KEYS_OFF || s_dismissed) {
+    /* ⓘ Not Desktop Mode: its question's OK turns Desktop Mode itself off
+     * (lock_keys_answer). */
+    if (s_mode == LOCK_KEYS_OFF || s_mode == LOCK_KEYS_DESKTOP || s_dismissed) {
         return;
     }
     s_dismissed = true;
@@ -170,8 +239,8 @@ void lock_keys_dismiss(const char *how) {
     s_asking = false;
     r2_let_go();
 #if defined(TARGET_WEBOS)
-    ctm_bridge_gesture_note("lock keys: turned off by hand (%s): every controller is a plain controller until "
-                            "the next %s", how != NULL ? how : "?",
+    ctm_bridge_gesture_note("lock keys: turned off by hand (%s): %s until the next %s", how != NULL ? how : "?",
+                            desktop_mode_wanted() ? "Desktop Mode again" : "every controller is a plain controller",
                             s_dismissed_prompt ? "User Account Control prompt or lock" : "lock or prompt");
 #else
     (void) how;
@@ -187,13 +256,18 @@ static bool pad_on_stream(const stream_input_t *input, const app_gamepad_state_t
            (input->moonlightExcludedMask & (1u << gamepad->gs_id)) == 0;
 }
 
-/* ⭐ WHICH CONTROLLERS THIS TAKES. At Windows' lock, those on the stream only: a
- * bridged one types the PIN with Windows' own map (the header). At a User Account
- * Control prompt, every one, bridged or not: a bridged pad's buttons may be bound to
- * keys on the PC that answer nothing there, so it is read here through SDL and its
- * reports to the PC are held at rest meanwhile (lock_keys_holds_bridged). */
+/* ⭐ WHICH CONTROLLERS THIS TAKES: every one, bridged or not, read here through SDL,
+ * a bridged one's reports to the PC held at rest meanwhile (lock_keys_holds_bridged).
+ * At a User Account Control prompt, as a bridged pad's buttons may be bound to keys on
+ * the PC that answer nothing there; in Desktop Mode, over its config on the PC (the
+ * header); and ⭐ at Windows' lock since 2026-11-11 (rhoquinn8217, a bridged DualSense
+ * at a lock: "triangle is opening aurora-tv keyboard when it should be the numpad.
+ * Square does notthing when it should be the full keyboard"). Until then the lock took
+ * the stream's pads only and left a bridged one to type the PIN with Windows' own map,
+ * which a lock reached by a new stream ignores; and the list showed controls its
+ * buttons did not have. */
 static bool pad_taken(const stream_input_t *input, const app_gamepad_state_t *gamepad) {
-    if (mode_is_prompt(s_mode)) {
+    if (mode_takes_all(s_mode)) {
         return gamepad != NULL && gamepad->controller != NULL && gamepad->gs_id >= 0 && gamepad->gs_id < LOCK_SLOTS;
     }
     return pad_on_stream(input, gamepad);
@@ -220,7 +294,7 @@ static bool bridged_pad_held(const stream_input_t *input, const app_gamepad_stat
  * at once: it would press Cross in the game. So the hold stays until nothing is down
  * on any bridged pad, at most LOCK_QUIET_MS. */
 bool lock_keys_holds_bridged(void) {
-    if (mode_is_prompt(s_mode)) {
+    if (mode_takes_all(s_mode)) {
         return true;
     }
     if (s_quiet_until == 0) {
@@ -328,6 +402,12 @@ void lock_keys_answer(bool ok, const char *by) {
     char how[128];
     snprintf(how, sizeof how, "%s, then %s %s", s_asking_how, ok ? "OK" : "Cancel", by != NULL ? by : "?");
     if (ok) {
+        /* ⭐ Desktop Mode asks too since 2026-11-12 (rhoquinn8217: "keep the question"),
+         * and its OK turns Desktop Mode off: this ends on the next pass. */
+        if (s_mode == LOCK_KEYS_DESKTOP) {
+            desktop_mode_set(false, how);
+            return;
+        }
         lock_keys_dismiss(how);
         return;
     }
@@ -386,6 +466,10 @@ static lock_act_t action_for(uint8_t what, bool numpad_open, short *key) {
                 break;
             case SDL_CONTROLLER_BUTTON_B:
                 return LOCK_ACT_NUMPAD_CLOSE;
+            case SDL_CONTROLLER_BUTTON_MISC1:
+                /* An Xbox pad's Share button hides the numpad's list as well; its keys
+                 * still type. */
+                return pad_family_current() == PAD_FAMILY_XBOX ? LOCK_ACT_LEGEND : LOCK_ACT_NONE;
             default:
                 return LOCK_ACT_NONE;
         }
@@ -423,10 +507,35 @@ static lock_act_t action_for(uint8_t what, bool numpad_open, short *key) {
              * a PIN. */
             return LOCK_ACT_KEYBOARD;
         case SDL_CONTROLLER_BUTTON_Y:
-            /* And no numpad at a prompt. */
-            return s_mode == LOCK_KEYS_LOCK ? LOCK_ACT_NUMPAD_OPEN : LOCK_ACT_NONE;
+            /* ⭐ THE SAME AT THE LOCK, AT A PROMPT AND IN DESKTOP MODE since 2026-11-12
+             * (rhoquinn8217: "Lets consolidate windows lock, UAC and Desktop mode. It
+             * doesn't make sense to make them different."): Triangle opens the numpad
+             * ("Triangle should always open the numpad"). Until then the numpad was the
+             * lock's alone, and Triangle the TV cursor in Desktop Mode. */
+            return LOCK_ACT_NUMPAD_OPEN;
+        case SDL_CONTROLLER_BUTTON_LEFTSTICK:
+            /* L3 the TV cursor's alignment bar, the cursor on with it if it is off ("Lets
+             * move the cursor->alignment button to L3"; ui/streaming/desktop_mode.h). */
+            return LOCK_ACT_CURSOR;
+        case SDL_CONTROLLER_BUTTON_MISC1:
+            /* ⭐ An Xbox pad's Share button the list, over the screen or hidden
+             * (rhoquinn8217, 2026-11-13: "xbox share button in brings up the legend";
+             * lock_keys_list_toggle); a DualSense's is its two-finger press
+             * (two_press_tick). A DualSense's MISC1 is its microphone button: nothing, as
+             * before. ⓘ PS and the Xbox button go to Windows (lock_keys_button); the PS
+             * button was the list's until then. */
+            return pad_family_current() == PAD_FAMILY_XBOX ? LOCK_ACT_LEGEND : LOCK_ACT_LET_GO;
+        case SDL_CONTROLLER_BUTTON_LEFTSHOULDER:
+        case SDL_CONTROLLER_BUTTON_RIGHTSHOULDER:
+            /* ⭐ Window Select: L1 back and R1 forward through Windows' window picker
+             * (stream/input/window_select.h), Desktop Mode's alone until 2026-11-12. ⓘ
+             * Both are of the overlay's chord, so they act as they go up (pad_press). */
+            return what == SDL_CONTROLLER_BUTTON_LEFTSHOULDER ? LOCK_ACT_WINDOW_BACK : LOCK_ACT_WINDOW_NEXT;
         default:
-            return LOCK_ACT_NONE;
+            /* Any other button still lets go of Window Select's Alt ("any other button"),
+             * Options as well: its tap does nothing else, and its hold asks
+             * (lock_keys_tick). */
+            return LOCK_ACT_LET_GO;
     }
     return LOCK_ACT_KEY;
 }
@@ -442,11 +551,48 @@ static void numpad_set(stream_input_t *input, bool open) {
 }
 
 static void act(stream_input_t *input, const lock_press_t *press) {
+    /* ⭐ WINDOW SELECT'S ALT (stream/input/window_select.h), settled as the press acts and
+     * not as it went down, since a press can wait behind L1 or R1: Cross picks the window
+     * and Circle cancels the picker, neither then doing its own job; the d-pad and Tab
+     * step on with Alt held; anything else lets Alt go first, then does its job. */
+    if (window_select_held()) {
+        if (press->act == LOCK_ACT_KEY && press->key == VK_RETURN) {
+            window_select_let_go(input, "Cross: the window picked");
+            return;
+        }
+        if (press->act == LOCK_ACT_KEY && press->key == VK_ESCAPE) {
+            window_select_cancel(input);
+            return;
+        }
+        const bool keeps = press->act == LOCK_ACT_WINDOW_BACK || press->act == LOCK_ACT_WINDOW_NEXT ||
+                           (press->act == LOCK_ACT_KEY && window_select_keeps(press->key));
+        if (!keeps) {
+            window_select_let_go(input, "another button");
+        }
+    }
     switch (press->act) {
-        case LOCK_ACT_KEY:
-            stream_input_send_key_event(input, press->key, true, 0);
-            stream_input_send_key_event(input, press->key, false, 0);
+        case LOCK_ACT_KEY: {
+            /* Said with Alt while it is held: an arrow or Tab through the picker. */
+            const char mods = window_select_held() ? (char) MODIFIER_ALT : 0;
+            stream_input_send_key_event(input, press->key, true, mods);
+            stream_input_send_key_event(input, press->key, false, mods);
             s_typed++;
+            break;
+        }
+        case LOCK_ACT_WINDOW_BACK:
+            window_select_step(input, true);
+            break;
+        case LOCK_ACT_WINDOW_NEXT:
+            window_select_step(input, false);
+            break;
+        case LOCK_ACT_LEGEND:
+            lock_keys_list_toggle("PS");
+            break;
+        case LOCK_ACT_CURSOR:
+            desktop_mode_cursor_toggle();
+            break;
+        case LOCK_ACT_LET_GO:
+            /* Window Select's Alt, above: nothing more. */
             break;
         case LOCK_ACT_KEYBOARD:
             bus_pushevent(USER_OPEN_SOFT_KEYBOARD, NULL, NULL);
@@ -556,6 +702,24 @@ bool lock_keys_button(stream_input_t *input, app_gamepad_state_t *gamepad, const
     if (s_mode == LOCK_KEYS_OFF || !pad_taken(input, gamepad) || event->button == SDL_CONTROLLER_BUTTON_TOUCHPAD) {
         return false;
     }
+    /* ⭐ PS AND THE XBOX BUTTON GO TO WINDOWS (rhoquinn8217, 2026-11-13: "PS button should
+     * go to windows(start steam) / Xbox button should go to windows(start steam)"), as
+     * they do outside these controls ("I'm pressing it outside of Desktop Mode and it
+     * brings up steam"): a pad on the stream presses the host's own, with nothing else
+     * pressed; a bridged one's goes by the bridge, which keeps it through the hold
+     * (ctm_bridge_set_home_passes in input/ctm_bridge_gesture.c). ⓘ A bridged Xbox pad's
+     * cannot: its report has no byte for it on a cable, and DS5-USBIP's Bluetooth map
+     * does not carry it. */
+    if (event->button == SDL_CONTROLLER_BUTTON_GUIDE) {
+        if (down) {
+            window_select_let_go(input, "PS");
+        }
+        if (pad_on_stream(input, gamepad)) {
+            LiSendMultiControllerEvent(gamepad->gs_id, input->input->activeGamepadMask, down ? SPECIAL_FLAG : 0, 0,
+                                       0, 0, 0, 0, 0);
+        }
+        return true;
+    }
     lock_pad_t *pad = pad_for(gamepad);
     if (down) {
         pad_press(input, pad, event->button);
@@ -608,6 +772,14 @@ void lock_keys_axis(stream_input_t *input, app_gamepad_state_t *gamepad, const S
          * down on the host. ⓘ Its first is the left button: R2's, at a lock; on
          * Aurora's own button it is Aurora's (stream/input/session_virt_mouse.c). */
         vmouse_set_trigger(&input->vmouse, gamepad->rightTrigger, gamepad->leftTrigger);
+        /* ⭐ Window Select: a click goes through first, and Alt is let go after it
+         * (rhoquinn8217, 2026-11-11: "3. click first"; stream/input/window_select.h). */
+        if (input->vmouse.state.l || input->vmouse.state.r) {
+            s_trigger_clicked = true;
+        } else if (s_trigger_clicked) {
+            s_trigger_clicked = false;
+            window_select_after_click();
+        }
         return;
     }
     lock_pad_t *pad = pad_for(gamepad);
@@ -624,12 +796,18 @@ void lock_keys_axis(stream_input_t *input, app_gamepad_state_t *gamepad, const S
 static void lock_begin(stream_input_t *input, lock_keys_mode_t mode) {
     s_mode = mode;
     s_numpad_open = false;
+    /* Its list over the screen again (s_list_hidden), and nothing of an earlier Desktop
+     * Mode's kept for it (s_desktop_list_hidden). */
+    s_list_hidden = false;
+    s_desktop_list_hidden = false;
     s_asking = false;
     r2_let_go();
     s_interface_had_input = false;
     s_quiet_until = 0;
     memset(s_pads, 0, sizeof s_pads);
-    s_vmouse_was = session_input_is_vmouse_active(&input->vmouse);
+    /* ⓘ Desktop Mode gives Virtual Mouse back OFF, whatever it was: turning it on
+     * turns Virtual Mouse off (the header). */
+    s_vmouse_was = mode == LOCK_KEYS_DESKTOP ? false : session_input_is_vmouse_active(&input->vmouse);
     session_input_set_vmouse_active(&input->vmouse, true);
     const short max = app_input_get_max_gamepads(input->input);
     for (short i = 0; i < max; ++i) {
@@ -647,27 +825,39 @@ static void lock_begin(stream_input_t *input, lock_keys_mode_t mode) {
     }
 #if defined(TARGET_WEBOS)
     ctm_bridge_gesture_note(mode == LOCK_KEYS_LOCK
-                                ? "lock keys: Windows is locked, a controller on the stream is a mouse, or types"
+                                ? "lock keys: Windows is locked: every controller is a mouse, or types, the bridged "
+                                  "ones held from the PC"
                                 : mode == LOCK_KEYS_PROMPT
                                 ? "lock keys: a User Account Control prompt, Yes or No: every controller is a mouse, "
                                   "or keys, the bridged ones held from the PC"
+                                : mode == LOCK_KEYS_DESKTOP
+                                ? "lock keys: Desktop Mode: every controller is a mouse, or keys, Square the keyboard, "
+                                  "the bridged ones held from the PC"
                                 : "lock keys: a User Account Control prompt that can ask for a password or PIN: every "
                                   "controller is a mouse, or keys, Square the keyboard, the bridged ones held from the PC");
 #endif
 }
 
 static void lock_end(stream_input_t *input) {
-    const bool prompt = mode_is_prompt(s_mode);
+    const lock_keys_mode_t was = s_mode;
+    const bool held = mode_takes_all(was);
+    /* Window Select's Alt goes up with it (stream/input/window_select.h). */
+    window_select_let_go(input, was == LOCK_KEYS_DESKTOP ? "Desktop Mode ended" : "the rebinds ended");
+    s_trigger_clicked = false;
     s_mode = LOCK_KEYS_OFF;
     s_numpad_open = false;
     s_asking = false;
     r2_let_go();
     memset(s_pads, 0, sizeof s_pads);
     /* The bridged pads stay held until what is down on them is let go. */
-    s_quiet_until = prompt ? SDL_GetTicks() + LOCK_QUIET_MS : 0;
+    s_quiet_until = held ? SDL_GetTicks() + LOCK_QUIET_MS : 0;
 #if defined(TARGET_WEBOS)
-    ctm_bridge_gesture_note(prompt ? "lock keys: the prompt is gone, the controllers are the stream's and the bridge's again"
-                                   : "lock keys: Windows is unlocked, the controllers are the stream's again");
+    ctm_bridge_gesture_note(was == LOCK_KEYS_DESKTOP ? "lock keys: Desktop Mode ends, the controllers are the stream's "
+                                                       "and the bridge's again"
+                            : was == LOCK_KEYS_LOCK ? "lock keys: Windows is unlocked, the controllers are the stream's "
+                                                      "and the bridge's again"
+                                                    : "lock keys: the prompt is gone, the controllers are the stream's and "
+                                                      "the bridge's again");
 #endif
     if (input == NULL) {
         return;
@@ -743,7 +933,106 @@ static void stick_moves_tv_cursor(stream_input_t *input) {
     }
 }
 
+/* ⭐ A DUALSENSE'S TWO-FINGER PRESS SHOWS OR HIDES THE LIST (rhoquinn8217, 2026-11-13:
+ * "DualSense two finger press in brings up the legend"): two fingers on the touchpad and
+ * the pad pressed in, let go within LOCK_TWO_PRESS_MS. Longer is the bridge gesture's (a
+ * second bridges). Read from SDL for a pad on the stream, and from the core for a
+ * bridged one (ctm_bridge_held_touches), the only reading of its touchpad the TV has
+ * while its input is held. ⓘ The stream's own handling makes no right click of it
+ * meanwhile (stream/input/session_gamepad.c). */
+#define LOCK_TWO_PRESS_MS 900
+
+/* One touchpad this pass: `fingers` on it and whether it is pressed in. True when a
+ * two-finger press was let go in time just now. */
+static bool two_press_step(uint32_t *since, int fingers, bool click, uint32_t now) {
+    if (click) {
+        if (fingers >= 2 && *since == 0) {
+            *since = now | 1u;
+        }
+        return false;
+    }
+    if (*since == 0) {
+        return false;
+    }
+    const bool quick = now - *since < LOCK_TWO_PRESS_MS;
+    *since = 0;
+    return quick;
+}
+
+#if defined(TARGET_WEBOS)
+/* A bridged pad's, kept by its node. */
+static struct {
+    char node[64];
+    uint32_t since;
+} s_bridged_two[LOCK_SLOTS];
+#endif
+
+static void two_press_tick(stream_input_t *input) {
+    const uint32_t now = SDL_GetTicks();
+    bool toggle = false;
+    const short max = app_input_get_max_gamepads(input->input);
+    for (short i = 0; i < max; ++i) {
+        app_gamepad_state_t *gamepad = app_input_gamepad_state_by_index(input->input, i);
+        if (!pad_taken(input, gamepad) || !pad_on_stream(input, gamepad) || gamepad->controller == NULL) {
+            continue;
+        }
+        int fingers = 0;
+        const int slots = SDL_GameControllerGetNumTouchpadFingers(gamepad->controller, 0);
+        for (int f = 0; f < slots && f < 2; ++f) {
+            Uint8 state = 0;
+            float x = 0, y = 0, pressure = 0;
+            if (SDL_GameControllerGetTouchpadFinger(gamepad->controller, 0, f, &state, &x, &y, &pressure) == 0 &&
+                state) {
+                fingers++;
+            }
+        }
+        const bool click = SDL_GameControllerGetButton(gamepad->controller, SDL_CONTROLLER_BUTTON_TOUCHPAD) != 0;
+        toggle = two_press_step(&pad_for(gamepad)->two_since, fingers, click, now) || toggle;
+    }
+#if defined(TARGET_WEBOS)
+    ctm_bridge_touch_t touches[LOCK_SLOTS];
+    const int n = ctm_bridge_held_touches(touches, LOCK_SLOTS);
+    bool seen[LOCK_SLOTS] = {false};
+    for (int t = 0; t < n; ++t) {
+        if (!touches[t].reading) {
+            continue;
+        }
+        int k = -1, unused = -1;
+        for (int j = 0; j < LOCK_SLOTS; ++j) {
+            if (s_bridged_two[j].node[0] != '\0' && strcmp(s_bridged_two[j].node, touches[t].node) == 0) {
+                k = j;
+                break;
+            }
+            if (unused < 0 && s_bridged_two[j].node[0] == '\0') {
+                unused = j;
+            }
+        }
+        if (k < 0) {
+            if (unused < 0) {
+                continue;
+            }
+            k = unused;
+            snprintf(s_bridged_two[k].node, sizeof s_bridged_two[k].node, "%s", touches[t].node);
+            s_bridged_two[k].since = 0;
+        }
+        seen[k] = true;
+        toggle = two_press_step(&s_bridged_two[k].since, touches[t].fingers, touches[t].click, now) || toggle;
+    }
+    for (int j = 0; j < LOCK_SLOTS; ++j) {
+        if (!seen[j]) {
+            s_bridged_two[j].node[0] = '\0';
+            s_bridged_two[j].since = 0;
+        }
+    }
+#endif
+    if (toggle) {
+        window_select_let_go(input, "a two-finger press");
+        lock_keys_list_toggle("a two-finger press");
+    }
+}
+
 void lock_keys_tick(app_t *app) {
+    window_select_tick();
     stream_input_t *input = app->session != NULL ? session_get_input(app->session) : NULL;
     lock_keys_mode_t wanted = LOCK_KEYS_OFF;
 #if defined(TARGET_WEBOS)
@@ -773,10 +1062,54 @@ void lock_keys_tick(app_t *app) {
     if (s_dismissed) {
         wanted = LOCK_KEYS_OFF;
     }
+    /* ⭐ DESKTOP MODE WHEN NEITHER IS UP (the header): under a lock or a prompt, and
+     * back as each goes, or as its Close turns it off. ⓘ Nothing asked of DS5-USBIP. */
+    if (wanted == LOCK_KEYS_OFF && desktop_mode_wanted() && input != NULL && keyboard_input_available(input)) {
+        wanted = LOCK_KEYS_DESKTOP;
+    }
     if (wanted != s_mode) {
-        if (mode_is_prompt(wanted) && mode_is_prompt(s_mode)) {
-            /* The prompt's kind said again, otherwise: only what Square does changes. */
+        if (mode_takes_all(wanted) && mode_takes_all(s_mode)) {
+            /* Every controller taken on both sides: the prompt's kind said again, a lock
+             * or a prompt over Desktop Mode or over each other, or Desktop Mode back
+             * after one. Only what the controls are up for changes, and nothing is
+             * handed back to the PC between. */
+            const lock_keys_mode_t was = s_mode;
             s_mode = wanted;
+            if (!(mode_is_prompt(wanted) && mode_is_prompt(was))) {
+                /* What is down was pressed for the other: its release does nothing. And
+                 * Window Select's Alt goes up before a lock or a prompt has the controls;
+                 * the numpad is the lock's alone. */
+                window_select_let_go(input, "a lock or a User Account Control prompt over Desktop Mode");
+                s_asking = false;
+                s_numpad_open = false;
+                r2_let_go();
+                pads_forget(input);
+                if (wanted == LOCK_KEYS_DESKTOP) {
+                    s_vmouse_was = false;
+                }
+#if defined(TARGET_WEBOS)
+                ctm_bridge_gesture_note(wanted == LOCK_KEYS_DESKTOP ? "lock keys: the %s is gone, Desktop Mode again"
+                                        : wanted == LOCK_KEYS_LOCK  ? "lock keys: Windows is locked, over the %s: every "
+                                                                      "controller is a mouse, or types, the bridged ones "
+                                                                      "held from the PC"
+                                                                    : "lock keys: a User Account Control prompt, over the "
+                                                                      "%s: its own controls until it goes",
+                                        was == LOCK_KEYS_DESKTOP ? "Desktop Mode"
+                                        : was == LOCK_KEYS_LOCK  ? "lock"
+                                                                 : "prompt");
+#endif
+                /* ⭐ The list over the screen as a lock or a prompt begins, over Desktop
+                 * Mode too, and Desktop Mode's as it was when it comes back
+                 * (s_desktop_list_hidden). */
+                if (was == LOCK_KEYS_DESKTOP) {
+                    s_desktop_list_hidden = s_list_hidden;
+                }
+                const bool hidden = wanted == LOCK_KEYS_DESKTOP ? s_desktop_list_hidden : false;
+                if (hidden != s_list_hidden) {
+                    s_list_hidden = hidden;
+                    list_note(wanted == LOCK_KEYS_DESKTOP ? "Desktop Mode back, as it was" : "a lock or a prompt begins");
+                }
+            }
         } else {
             if (s_mode != LOCK_KEYS_OFF) {
                 lock_end(input);
@@ -787,11 +1120,15 @@ void lock_keys_tick(app_t *app) {
         }
     }
     if (s_mode == LOCK_KEYS_OFF) {
+        /* A bridged pad's touchpad, the PC's mouse under the controls, let go. */
+        bridged_touchpad_tick(input, false);
         return;
     }
 #if defined(TARGET_WEBOS)
     const uint32_t now = SDL_GetTicks();
-    if (now - s_last_ask >= LOCK_ASK_MS) {
+    /* ⓘ Not for Desktop Mode, which waits for nothing: the probe's own ask every
+     * second finds a lock or a prompt. */
+    if (s_mode != LOCK_KEYS_DESKTOP && now - s_last_ask >= LOCK_ASK_MS) {
         s_last_ask = now;
         ctm_bridge_agent_recheck();
     }
@@ -801,14 +1138,19 @@ void lock_keys_tick(app_t *app) {
     const bool interface_has_input = ui_should_block_input();
     if (interface_has_input != s_interface_had_input) {
         s_interface_had_input = interface_has_input;
+        /* And Window Select's Alt goes up: the overlay or the keyboard has the input. */
+        window_select_let_go(input, "the overlay or the keyboard took the input");
         pads_forget(input);
         /* Nor does the mouse go on moving, or stay down, behind them. */
         vmouse_set_vector(&input->vmouse, 0, 0);
         vmouse_set_scroll(&input->vmouse, 0, 0);
         vmouse_set_trigger(&input->vmouse, 0, 0);
     }
-    /* Options held LOCK_DISMISS_MS alone, on any pad this takes: a close, which asks
-     * first. Its OK ends this on the next pass, as an unlock does. */
+    /* Options held LOCK_DISMISS_MS alone, on any pad this takes: the rebinds off, which
+     * asks first, in Desktop Mode as well since 2026-11-12 (rhoquinn8217: "holding
+     * options still should turn rebinds off", "keep the question"). Its OK ends this on
+     * the next pass, as an unlock does. Until then Desktop Mode went off at once, with
+     * no question. */
     const uint32_t held_at = SDL_GetTicks();
     for (int i = 0; i < LOCK_SLOTS; ++i) {
         if (s_pads[i].options_since != 0 && held_at - s_pads[i].options_since >= LOCK_DISMISS_MS) {
@@ -817,5 +1159,12 @@ void lock_keys_tick(app_t *app) {
             break;
         }
     }
+    if (input != NULL && !interface_has_input) {
+        two_press_tick(input);
+    }
+    /* ⭐ A bridged pad's touchpad as the PC's mouse, as a pad's on the stream is
+     * (stream/input/bridged_touchpad.h); let go while the overlay or the keyboard has
+     * the input. */
+    bridged_touchpad_tick(input, input != NULL && !interface_has_input);
     stick_moves_tv_cursor(input);
 }

@@ -6,8 +6,6 @@
 #include "app.h"   /* the app, its settings and the mouse grab */
 #include "stream/session.h"   /* whether the stream has the input */
 #include "mouse_seen.h"   /* whether a mouse is bridged */
-#include "ui/streaming/bridge_prompt.h"   /* bridge_prompt_note */
-#include "util/i18n.h"
 
 
 #if defined(TARGET_WEBOS)
@@ -25,6 +23,7 @@
 #include <SDL_image.h>   /* the regular cursor: webOS's own picture */
 #include <pbnjson.h>
 #include "lunasynccall.h"   /* the TV's Pointer Size */
+#include "loop_watch.h"
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -101,9 +100,8 @@ static int s_tip_x = 0, s_tip_y = 0;   /* its tip, in its own pixels */
 static SDL_Surface *s_image = NULL;    /* the cursor's picture */
 static SDL_Cursor *s_cursor = NULL;
 static int s_hot_x = 0, s_hot_y = 0;
-/* Where the tip is drawn in the picture, the shift taken in, and a count of
- * the pictures made, for a pointer Aurora draws itself (tv_cursor_picture). */
-static int s_drawn_x = 0, s_drawn_y = 0;
+/* A count of the pictures made, for a pointer Aurora draws itself
+ * (tv_cursor_picture). */
 static unsigned s_generation = 0;
 
 /* ⭐ PUT BACK WHEN THE WINDOW HAS THE SCREEN AGAIN (rhoquinn8217, 2026-10-11:
@@ -475,10 +473,7 @@ static bool build(void) {
     int hot_y = (int) floor((tip_y + m) / scale);
     if (hot_x >= image->w) hot_x = image->w - 1;
     if (hot_y >= image->h) hot_y = image->h - 1;
-    int drawn_x = (int) floor((tip_x + m + dx) / scale);
-    int drawn_y = (int) floor((tip_y + m + dy) / scale);
-    if (drawn_x >= image->w) drawn_x = image->w - 1;
-    if (drawn_y >= image->h) drawn_y = image->h - 1;
+    const unsigned long long watch_at = loop_watch_now();   /* input/loop_watch.h */
     SDL_Cursor *cursor = SDL_CreateColorCursor(image, hot_x, hot_y);
     if (cursor == NULL) {
         tv_cursor_log("SDL refused the cursor (%s)", SDL_GetError());
@@ -489,6 +484,7 @@ static bool build(void) {
     if (s_cursor != NULL) {
         SDL_FreeCursor(s_cursor);
     }
+    loop_watch_add("the TV cursor's SDL cursor made and set", loop_watch_now() - watch_at);
     if (s_image != NULL) {
         SDL_FreeSurface(s_image);
     }
@@ -496,8 +492,6 @@ static bool build(void) {
     s_image = image;
     s_hot_x = hot_x;
     s_hot_y = hot_y;
-    s_drawn_x = drawn_x;
-    s_drawn_y = drawn_y;
     s_generation++;
     s_ready = true;
     if (regular) {
@@ -719,13 +713,13 @@ void tv_cursor_describe(char *out, size_t len) {
              s_image->w, s_image->h, s_scale, s_reapplied);
 }
 
-const SDL_Surface *tv_cursor_picture(int *tip_x, int *tip_y, unsigned *generation) {
+const SDL_Surface *tv_cursor_picture(int *hot_x, int *hot_y, unsigned *generation) {
     if (generation != NULL) *generation = s_generation;
     if (!s_ready || s_image == NULL) {
         return NULL;
     }
-    if (tip_x != NULL) *tip_x = s_drawn_x;
-    if (tip_y != NULL) *tip_y = s_drawn_y;
+    if (hot_x != NULL) *hot_x = s_hot_x;
+    if (hot_y != NULL) *hot_y = s_hot_y;
     return s_image;
 }
 
@@ -733,9 +727,9 @@ const SDL_Surface *tv_cursor_picture(int *tip_x, int *tip_y, unsigned *generatio
 
 #include <stdio.h>
 
-const SDL_Surface *tv_cursor_picture(int *tip_x, int *tip_y, unsigned *generation) {
-    (void) tip_x;
-    (void) tip_y;
+const SDL_Surface *tv_cursor_picture(int *hot_x, int *hot_y, unsigned *generation) {
+    (void) hot_x;
+    (void) hot_y;
     if (generation != NULL) *generation = 0;
     return NULL;
 }
@@ -812,16 +806,13 @@ bool tv_cursor_set_mode(bool on) {
         tv_cursor_log("the TV cursor cannot be switched while Use mouse hardware is on");
         return false;
     }
-    /* ⭐ NOT ON WHILE A MOUSE IS BRIDGED (rhoquinn8217, 2026-10-11: "When
-     * attempting to turn on TV cursor, if the mouse is bridged, create a pop up
-     * message saying that TV cursor can't be turned on with mouse is
-     * bridged"). That mouse moves the PC's cursor, and the TV's would stand
-     * still. ⓘ Said in the place of the bridge's pop-up, whichever way it was
-     * asked for: Ctrl+Alt+Shift+M on any keyboard, or the control port. */
+    /* ⭐ NOT ON WHILE A MOUSE IS BRIDGED (rhoquinn8217, 2026-10-11). That mouse
+     * moves the PC's cursor, and the TV's would stand still. ⓘ Without a word on
+     * the screen since 2026-11-12 ("you created too many messages about the cursor
+     * doesn't need explaining"): only the log says why. */
     char which[96];
     if (on && !tv_cursor_mode_on() && mouse_seen_mouse_bridged(which, sizeof(which))) {
         tv_cursor_log("the TV cursor stays off: a mouse is bridged (%s)", which);
-        bridge_prompt_note(locstr("TV cursor can't be turned on while the mouse is bridged."));
         return false;
     }
     if (app_configuration->absmouse != on) {

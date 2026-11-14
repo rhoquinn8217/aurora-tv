@@ -1289,12 +1289,10 @@ static bool plug_answered(watched_t *w, SDL_GameController *controller, bool ok,
         if (whole_device) {
             gesture_whole_device(w->prep_node, true);
         }
-        /* A CONTROLLER IS NOW BRIDGED, so warn if the TV's own
-         * mouse mode is on. It will go on driving the host
-         * cursor, which is DELIBERATE -- without it a bridged pad
-         * cannot reach the settings page to choose a listener
-         * preset, and you would need a second device -- but it
-         * surprises anyone who then sets one.
+        /* A CONTROLLER IS NOW BRIDGED, so warn if Desktop Mode is
+         * on: its controls take the bridged pad too, over its
+         * DS5-USBIP config (ui/streaming/bridge_prompt.h). Until
+         * 2026-11-12 the warning was Virtual Mouse's.
          *
          * Only controllers reach this function at all: a keyboard
          * or mouse has no SDL controller behind its node and takes
@@ -1303,10 +1301,10 @@ static bool plug_answered(watched_t *w, SDL_GameController *controller, bool ok,
          * Bridge and the control port -- and nothing else does.
          *
          * Posted rather than called: this file includes no UI
-         * headers, and whether mouse mode is on is the streaming
+         * headers, and whether to warn is the streaming
          * controller's to answer. Same mechanism as the overlay
          * request below. */
-        gesture_log("mouse-mode warning: posting the event");
+        gesture_log("bridge warning: posting the event");
         bus_pushevent(USER_CTM_MOUSE_MODE_WARN, NULL, NULL);
         /* ⭐⭐ GREEN ON SUCCESS, FOR A PAD THE CORE WILL NOT PAINT.
          * The paragraph below is still true for a
@@ -2550,6 +2548,9 @@ void ctm_bridge_gesture_tick(struct app_input_t *input, struct session_t *sessio
     {
         const bool prompt = lock_keys_holds_bridged();
         const bool held = (overlay_open || prompt) && session != NULL;
+        /* ⭐ The PS button still goes to the PC while the hold is the TV's own controls',
+         * not the overlay's (ctm_bridge_glue.h, ctm_bridge_set_home_passes). */
+        ctm_bridge_set_home_passes(held && prompt && !overlay_open);
         static int s_last = -1;
         if ((int) held != s_last) {
             s_last = (int) held;

@@ -93,6 +93,14 @@ bool touchpad_pointer_stream_move(stream_input_t *input, float dx, float dy);
  * and the host is told the point. True when it was moved. */
 bool touchpad_pointer_stream_stick(stream_input_t *input, float dx_px, float dy_px);
 
+/* ⭐ THE CURSOR ABOVE GONE AT ONCE AS DESKTOP MODE HANDS OVER TO DS5-USBIP
+ * (rhoquinn8217, 2026-11-12: the switch between the two "needs to be seemless";
+ * ui/streaming/desktop_mode.h). From then DS5-USBIP moves Windows' own pointer, which
+ * sits under it, and this cursor would stay behind for its 4 seconds. ⓘ webOS's own
+ * pointer, when a mouse has moved it, goes by itself within 5 s: this app cannot
+ * hide it. */
+void touchpad_pointer_stream_hide(void);
+
 /* ⭐ THE TOUCHPAD'S CLICK ON AURORA'S OWN BUTTON, IN A STREAM (rhoquinn8217,
  * 2026-11-10, at a User Account Control prompt: "the touchpad's cursor goes
  * behind the overlay button and isn't able to click the button. The mouse's
@@ -116,8 +124,15 @@ bool touchpad_pointer_stream_stick(stream_input_t *input, float dx_px, float dy_
  * `touchpad_pointer_stream_press`: the pad pressed in (`down`) or let go, the
  * press `left_button` or not. `taken` is the pad's own note of whether its
  * press was Aurora's, so its release goes the same way, and only its own.
- * True when the press or release was Aurora's. */
+ * True when the press or release was Aurora's.
+ * ⭐ A RIGHT CLICK ON AURORA'S BUTTON IS NOBODY'S (rhoquinn8217, 2026-11-13,
+ * "Yes" to right clicks on Aurora's buttons staying on the TV too): not the
+ * host's, behind the button, and no press of the button either. So
+ * `touchpad_pointer_stream_press` takes a right press there (`left_button`
+ * false) and its release, and `touchpad_pointer_stream_right_tap` a two-finger
+ * tap's right click: true when taken, false and the host is told as before. */
 bool touchpad_pointer_stream_tap(void);
+bool touchpad_pointer_stream_right_tap(void);
 bool touchpad_pointer_stream_press(bool *taken, bool left_button, bool down);
 
 #endif

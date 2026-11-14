@@ -529,6 +529,67 @@ need "... and Virtual Mouse's left click there, R2's at a lock, when the right s
      src/app/stream/input/session_virt_mouse.c "touchpad_pointer_stream_press(&s_left_auroras, true, ldown)"
 need "the typing is built" \
      src/app/ctmbridge/app_sources.cmake "src/app/stream/input/lock_keys.c"
+
+# --- Desktop Mode's Window Select: Alt held by L1 and R1 (rhoquinn8217, 2026-11-11) ---
+# Anything else pressed lets it go (stream/input/window_select.h). Losing one of these
+# compiles: Alt stays down on the PC after a key or a click, and the next key is Alt+key.
+need "Window Select is built" \
+     src/app/ctmbridge/app_sources.cmake "src/app/stream/input/window_select.c"
+need "a keyboard's key lets go of Window Select's Alt first" \
+     src/app/stream/input/session_keyboard.c "window_select_before_key(input, keyCode);"
+need "... a keyboard's key on webOS's own keyboard path too" \
+     src/app/stream/input/session_input.c "window_select_before_key(input, vk);"
+need "a mouse's click lets go of it after the click" \
+     src/app/stream/input/session_mouse.c "window_select_after_click();"
+need_count "... and the touchpad's press, tap and held tap" \
+     src/app/stream/input/session_gamepad.c "window_select_after_click();" 3
+# --- Press and drag at the sign-in, a prompt and in Desktop Mode (rhoquinn8217, 2026-11-13) ---
+# The left button stays down until the last finger lifts (stream/input/touchpad_drag_lock.h).
+# Losing the click's hook compiles, and a drag stops as the click comes up; losing the
+# other two leaves the button down on the PC.
+need "press and drag is built" \
+     src/app/ctmbridge/app_sources.cmake "src/app/stream/input/touchpad_drag_lock.c"
+need "the touchpad's click keeps the left button down while a finger stays on the pad" \
+     src/app/stream/input/session_gamepad.c "touchpad_drag_lock_click(state, event->type == SDL_CONTROLLERBUTTONDOWN"
+need "... the last finger lifted lets it go" \
+     src/app/stream/input/session_gamepad.c "touchpad_drag_lock_finger_up(state, state->active_fingers);"
+need "... and the touchpad's reset lets it go" \
+     src/app/stream/input/session_gamepad.c "touchpad_drag_lock_drop(state);"
+# --- A bridged pad's touchpad as the PC's mouse under the TV's controls (rhoquinn8217, 2026-11-13) ---
+# The core's reading of it is handed to the stream's own touchpad handling
+# (stream/input/bridged_touchpad.h). Losing a hook compiles, and a bridged pad's
+# touchpad does nothing under the controls again, or SDL's copy of its click clicks
+# twice, or a finger stays down on the PC as the controls end.
+need "a bridged pad's touchpad is handed to the mouse" \
+     src/app/ctmbridge/app_sources.cmake "src/app/stream/input/bridged_touchpad.c"
+need "... its touches are taken by the stream's touchpad handling" \
+     src/app/stream/input/session_gamepad.c "&& !bridged_touchpad_feeding()) {"
+need_count "... and SDL's copy of its touches and its click is not" \
+     src/app/stream/input/session_gamepad.c "if (bridged_touchpad_owns(gamepad) && !bridged_touchpad_feeding()) { return; }" 2
+need "... handed over every pass the controls are up" \
+     src/app/stream/input/lock_keys.c "bridged_touchpad_tick(input, input != NULL && !interface_has_input);"
+need "... and let go when they are off" \
+     src/app/stream/input/lock_keys.c "bridged_touchpad_tick(input, false);"
+# --- A click on Aurora's button over the stream is Aurora's alone: the stats' pin (rhoquinn8217, 2026-11-13) ---
+# Losing either compiles, and a click on the pinned stats' pin clicks the PC behind it too.
+need "the pinned stats' pin is one of Aurora's buttons over the stream" \
+     src/app/ui/streaming/lock_numpad.c "{streaming_stats_pin_shown(), \"the stats' pin\"}"
+need "... found while the stats are pinned" \
+     src/app/ui/streaming/streaming.controller.c "streaming_stats_pin_shown() {"
+# --- A right click on Aurora's button over the stream is nobody's (rhoquinn8217, 2026-11-13) ---
+# Losing either compiles, and a two-finger tap or a trigger's right click on Aurora's
+# button right-clicks the PC behind it.
+need "a two-finger tap's right click on Aurora's button is not the host's" \
+     src/app/stream/input/session_gamepad.c "if (mouse_button == BUTTON_RIGHT && touchpad_pointer_stream_right_tap()) { return; }"
+need "... nor a trigger's right press there" \
+     src/app/stream/input/session_virt_mouse.c "if (!touchpad_pointer_stream_press(&s_right_auroras, false, rdown)) {"
+# --- PS and the Xbox button to Windows, the list by a two-finger press or Share (rhoquinn8217, 2026-11-13) ---
+# Losing the first compiles, and a two-finger press right-clicks again; losing the second
+# compiles, and a bridged pad's PS button is held from the PC again.
+need "a two-finger press is the list's at a lock, a prompt and in Desktop Mode, never a right click" \
+     src/app/stream/input/session_gamepad.c "if (two_finger_press && lock_keys_active())"
+need "the PS button goes through the bridge's hold while the TV's own controls hold the pads" \
+     src/app/input/ctm_bridge_gesture.c "ctm_bridge_set_home_passes(held && prompt && !overlay_open);"
 need "the numpad is built" \
      src/app/ctmbridge/app_sources.cmake "src/app/ui/streaming/lock_numpad.c"
 need "the keyboard's place is built" \

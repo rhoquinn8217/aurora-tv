@@ -247,6 +247,11 @@ void ctm_bridge_set_input_held(bool held)
     ctm_input_set_held(held ? 1 : 0);
 }
 
+void ctm_bridge_set_home_passes(bool passes)
+{
+    ctm_input_set_home_passes(passes ? 1 : 0);
+}
+
 /* Defined below, with the pads that come straight back. */
 static void glue_pad_will_return(const ctm_controller_dev_t *dev);
 
@@ -1430,6 +1435,11 @@ int ctm_bridge_held_touches(ctm_bridge_touch_t *out, int max)
         out[count].x = HELD_TOUCH_X(w);
         out[count].y = HELD_TOUCH_Y(w);
         out[count].click = st.held_touch && HELD_TOUCH_CLICK(w);
+        const uint32_t w2 = st.held_touch ? st.held_touch_second : 0;
+        out[count].fingers2 = HELD_TOUCH_FINGERS(w2);
+        out[count].id2 = HELD_TOUCH_ID(w2);
+        out[count].x2 = HELD_TOUCH_X(w2);
+        out[count].y2 = HELD_TOUCH_Y(w2);
         ++count;
     }
     pthread_mutex_unlock(&g_sessions_mutex);
@@ -1672,6 +1682,11 @@ ctm_bridge_compat_t ctm_bridge_agent_compat(void)
 bool ctm_bridge_agent_locked(void)
 {
     return g_agent_locked != 0;
+}
+
+void ctm_bridge_set_desktop_link(bool on)
+{
+    g_desktop_link_ask = on ? 1 : 0;
 }
 
 /* ⓘ The core's kinds, in the same order. */

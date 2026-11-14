@@ -5,11 +5,13 @@
 #include "app.h"
 #include "input/app_input.h"
 #include "input/input_gamepad.h"
+#include "input/loop_watch.h"
 
 /* The page's grid in hundredths of a unit: 20 high, 20 wide, a shoulder button 24. */
 #define GRID_HIGH 2000
 #define GRID_WIDE 2000
 #define GRID_WIDE_SHOULDER 2400
+#define GRID_WIDE_TOUCHPAD 2800
 
 typedef struct {
     lv_draw_ctx_t *ctx;
@@ -61,6 +63,21 @@ static void pen_circle(const pen_t *pen, int cx, int cy, int r) {
     lv_draw_rect(pen->ctx, &dsc, &area);
 }
 
+/* A solid circle, `opa` of the mark's colour: a finger on the touchpad. */
+static void pen_disc(const pen_t *pen, int cx, int cy, int r, lv_opa_t opa) {
+    const lv_point_t centre = pen_at(pen, cx, cy);
+    const lv_coord_t h = lv_area_get_height(&pen->box);
+    const lv_coord_t radius = (lv_coord_t) LV_MAX(1, (r * h + GRID_HIGH / 2) / GRID_HIGH);
+    const lv_area_t area = {(lv_coord_t) (centre.x - radius), (lv_coord_t) (centre.y - radius),
+                            (lv_coord_t) (centre.x + radius - 1), (lv_coord_t) (centre.y + radius - 1)};
+    lv_draw_rect_dsc_t dsc;
+    lv_draw_rect_dsc_init(&dsc);
+    dsc.bg_color = pen->color;
+    dsc.bg_opa = opa;
+    dsc.radius = LV_RADIUS_CIRCLE;
+    lv_draw_rect(pen->ctx, &dsc, &area);
+}
+
 /* A filled box: one arm of the d-pad. */
 static void pen_fill(const pen_t *pen, int x1, int y1, int x2, int y2) {
     const lv_point_t low = pen_at(pen, x1, y1);
@@ -100,6 +117,44 @@ static const int16_t VIEW_FRONT[4][2] = {{560, 870}, {1200, 870}, {1200, 1390}, 
  * with LVGL's arc, showed a step where each corner met the top line. */
 static const int16_t SHOULDER[12][2] = {{110, 1890}, {110, 710}, {156, 480}, {286, 286}, {480, 156}, {710, 110},
                                         {1690, 110}, {1920, 156}, {2114, 286}, {2244, 480}, {2290, 710}, {2290, 1890}};
+/* The PS button's two letters, drawn in strokes as the shapes are: the app's small type
+ * is too large for two letters inside the circle at a legend's height. Each 800 high,
+ * the pair centred: P's stem and its bowl, a half ellipse; S as two half ellipses. */
+static const int16_t LETTER_P[10][2] = {{560, 1400}, {560, 600}, {780, 600}, {885, 628}, {962, 705},
+                                        {990, 810}, {962, 915}, {885, 992}, {780, 1020}, {560, 1020}};
+static const int16_t LETTER_S[17][2] = {{1425, 700}, {1355, 627}, {1260, 600}, {1165, 627}, {1095, 700},
+                                        {1070, 800}, {1095, 900}, {1165, 973}, {1260, 1000}, {1355, 1027},
+                                        {1425, 1100}, {1450, 1200}, {1425, 1300}, {1355, 1373}, {1260, 1400},
+                                        {1165, 1373}, {1095, 1300}};
+
+/* L3's L, and its 3: S's lower bowl under its upper one turned round. As P and S, each
+ * 800 high, the pair centred; an Xbox pad's LS is the same L with the S above. */
+static const int16_t LETTER_L[3][2] = {{560, 600}, {560, 1400}, {960, 1400}};
+static const int16_t DIGIT_3[17][2] = {{1095, 700}, {1165, 627}, {1260, 600}, {1355, 627}, {1425, 700},
+                                       {1450, 800}, {1425, 900}, {1355, 973}, {1260, 1000}, {1355, 1027},
+                                       {1425, 1100}, {1450, 1200}, {1425, 1300}, {1355, 1373}, {1260, 1400},
+                                       {1165, 1373}, {1095, 1300}};
+
+/* The touchpad, on its 28-wide grid: the approved outline's path (M4.25 2.69, its top
+ * an arc of radius 60.3 whose middle is at 1.9, its four corners of radius 2.7, the
+ * bottom straight at 17) with each arc in short straight strokes, as the shoulder
+ * button's corners are. */
+static const int16_t TOUCHPAD[27][2] = {{425, 269}, {667, 234}, {911, 210}, {1155, 195}, {1400, 190}, {1645, 195},
+                                        {1889, 210}, {2133, 234}, {2375, 269}, {2474, 306}, {2550, 378}, {2594, 475},
+                                        {2597, 580}, {2444, 1475}, {2412, 1564}, {2352, 1636}, {2271, 1683},
+                                        {2178, 1700}, {622, 1700}, {529, 1683}, {448, 1636}, {388, 1564},
+                                        {356, 1475}, {203, 580}, {206, 475}, {250, 378}, {326, 306}};
+
+static void draw_touchpad(const pen_t *pen, pad_mark_t mark) {
+    pen_path(pen, TOUCHPAD, 27, true);
+    if (mark == PAD_MARK_TOUCH_ONE) {
+        pen_disc(pen, 1400, 990, 340, LV_OPA_40);
+    } else if (mark == PAD_MARK_TOUCH_TWO) {
+        /* The right one half a unit higher, as the approved picture has it. */
+        pen_disc(pen, 1040, 1010, 289, LV_OPA_40);
+        pen_disc(pen, 1760, 960, 289, LV_OPA_40);
+    }
+}
 
 static void draw_dpad(const pen_t *pen, pad_mark_t mark) {
     pen_path(pen, DPAD, 12, true);
@@ -147,6 +202,13 @@ static void draw_round(const pen_t *pen, const lv_font_t *font, pad_mark_t mark,
                 pen_path(pen, VIEW_BACK, 5, false);
                 pen_path(pen, VIEW_FRONT, 4, true);
                 return;
+            case PAD_MARK_HOME:
+                /* No mark of its own: the circle alone (the header). */
+                return;
+            case PAD_MARK_L3:
+                pen_path(pen, LETTER_L, 3, false);
+                pen_path(pen, LETTER_S, 17, false);
+                return;
             default:
                 break;
         }
@@ -170,6 +232,14 @@ static void draw_round(const pen_t *pen, const lv_font_t *font, pad_mark_t mark,
                 pen_line(pen, 534, 770, 690, 1280);
                 pen_line(pen, 1000, 480, 1000, 1160);
                 pen_line(pen, 1466, 770, 1310, 1280);
+                return;
+            case PAD_MARK_HOME:
+                pen_path(pen, LETTER_P, 10, false);
+                pen_path(pen, LETTER_S, 17, false);
+                return;
+            case PAD_MARK_L3:
+                pen_path(pen, LETTER_L, 3, false);
+                pen_path(pen, DIGIT_3, 17, false);
                 return;
             default:
                 break;
@@ -199,12 +269,25 @@ static bool mark_is_shoulder(pad_mark_t mark) {
     return mark == PAD_MARK_L1 || mark == PAD_MARK_R1 || mark == PAD_MARK_L2 || mark == PAD_MARK_R2;
 }
 
+static bool mark_is_touchpad(pad_mark_t mark) {
+    return mark == PAD_MARK_TOUCHPAD || mark == PAD_MARK_TOUCH_ONE || mark == PAD_MARK_TOUCH_TWO;
+}
+
 static bool mark_is_dpad(pad_mark_t mark) {
     return mark == PAD_MARK_UP || mark == PAD_MARK_DOWN || mark == PAD_MARK_LEFT || mark == PAD_MARK_RIGHT ||
            mark == PAD_MARK_DPAD;
 }
 
+static void mark_draw_body(lv_event_t *event);
+
+/* Timed for input/loop_watch.h. */
 static void mark_draw(lv_event_t *event) {
+    const unsigned long long watch_at = loop_watch_now();
+    mark_draw_body(event);
+    loop_watch_add("the pad marks' drawing", loop_watch_now() - watch_at);
+}
+
+static void mark_draw_body(lv_event_t *event) {
     lv_obj_t *obj = lv_event_get_target(event);
     const intptr_t packed = (intptr_t) lv_event_get_user_data(event);
     const pad_mark_t mark = (pad_mark_t) (packed >> 8);
@@ -213,7 +296,9 @@ static void mark_draw(lv_event_t *event) {
     pen_t pen;
     pen.ctx = lv_event_get_draw_ctx(event);
     lv_obj_get_coords(obj, &pen.box);
-    pen.across = mark_is_shoulder(mark) ? GRID_WIDE_SHOULDER : GRID_WIDE;
+    pen.across = mark_is_touchpad(mark)   ? GRID_WIDE_TOUCHPAD
+                 : mark_is_shoulder(mark) ? GRID_WIDE_SHOULDER
+                                          : GRID_WIDE;
     /* The page's stroke: 1.25 of the 20, and never thinner than two pixels. */
     pen.stroke = LV_MAX(2, lv_area_get_height(&pen.box) * 125 / GRID_HIGH);
     pen.color = lv_obj_get_style_text_color(obj, LV_PART_MAIN);
@@ -225,7 +310,9 @@ static void mark_draw(lv_event_t *event) {
     pen.line.round_end = 1;
 
     const lv_font_t *font = lv_obj_get_style_text_font(obj, LV_PART_MAIN);
-    if (mark_is_dpad(mark)) {
+    if (mark_is_touchpad(mark)) {
+        draw_touchpad(&pen, mark);
+    } else if (mark_is_dpad(mark)) {
         draw_dpad(&pen, mark);
     } else if (mark_is_shoulder(mark)) {
         draw_shoulder(&pen, font, shoulder_name(mark, family));
@@ -239,7 +326,11 @@ lv_obj_t *pad_mark_create(lv_obj_t *parent, pad_mark_t mark, pad_family_t family
     lv_obj_t *obj = lv_obj_create(parent);
     lv_obj_remove_style_all(obj);
     lv_obj_clear_flag(obj, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_set_size(obj, mark_is_shoulder(mark) ? height * GRID_WIDE_SHOULDER / GRID_HIGH : height, height);
+    lv_obj_set_size(obj,
+                    mark_is_touchpad(mark)   ? height * GRID_WIDE_TOUCHPAD / GRID_HIGH
+                    : mark_is_shoulder(mark) ? height * GRID_WIDE_SHOULDER / GRID_HIGH
+                                             : height,
+                    height);
     lv_obj_set_style_text_color(obj, color, 0);
     /* The small type a legend is written in: a letter in a mark at a keyboard's
      * hint height still clears the circle. */

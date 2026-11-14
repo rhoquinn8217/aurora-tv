@@ -3,6 +3,7 @@
 #include "app.h"
 
 #include "stream/input/session_pointer_gesture.h"
+#include "stream/input/window_select.h"   /* This fork: Desktop Mode's Window Select */
 #include "stream/session.h"
 #include "stream/session_priv.h"
 
@@ -51,6 +52,10 @@ void stream_input_handle_mbutton(stream_input_t *input, const SDL_MouseButtonEve
     }
     LiSendMouseButtonEvent(event->state == SDL_PRESSED ? BUTTON_ACTION_PRESS : BUTTON_ACTION_RELEASE,
                            button);
+    /* This fork: the click first, then Window Select's Alt let go (stream/input/window_select.h). */
+    if (event->state != SDL_PRESSED) {
+        window_select_after_click();
+    }
 }
 
 void stream_input_handle_mwheel(stream_input_t *input, const SDL_MouseWheelEvent *event) {

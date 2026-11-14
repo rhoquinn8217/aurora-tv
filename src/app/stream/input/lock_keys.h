@@ -33,8 +33,11 @@
  *
  * WHEN. Only DS5-USBIP can see the lock, and it says so in its answer to the TV's
  * probe. So nothing of this happens at the first sign-in after a restart, where
- * DS5-USBIP has not started yet. A bridged pad is not read here at all: its reports
- * go straight to Windows.
+ * DS5-USBIP has not started yet. ⭐ Every controller, a bridged one too since
+ * 2026-11-11, its reports to the PC held at rest meanwhile, as at a prompt below
+ * (rhoquinn8217, a bridged DualSense at a lock: "triangle is opening aurora-tv keyboard
+ * when it should be the numpad"). Until then a bridged pad was left to type the PIN
+ * with Windows' own map, which a lock reached by a new stream ignores.
  *
  * ⛔ WHAT IS TYPED IS NEVER LOGGED, and there is no way to read it back: only a
  * count, on the control port.
@@ -86,7 +89,43 @@
  * OK and Circle its Cancel (A and B on an Xbox pad), no other button does anything, and
  * the triggers do not click. The sticks and the touchpad go on as the mouse.
  * ⓘ While this is on, a bridge raises no Virtual Mouse pop-up
- * (ui/streaming/bridge_prompt.h): this turns Virtual Mouse on itself. */
+ * (ui/streaming/bridge_prompt.h): this turns Virtual Mouse on itself.
+ *
+ * ⭐⭐ AND DESKTOP MODE, BY HAND, UNTIL IT IS TURNED OFF (rhoquinn8217, 2026-11-11:
+ * "Desktop Mode rebinds the controller on the TV side using the same rebinds as the
+ * UAC mode but it persists until you turn it off"). A switch for the stream, turned on
+ * and off in the overlay or from a pop-up, and since 2026-11-12 started by itself at a
+ * stream's start without DS5-USBIP and handed over to it when it comes up
+ * (ui/streaming/desktop_mode.h). The prompt's controls, on every controller, bridged
+ * ones too ("doesn't mean you wouldn't want to use Desktop Mode over a config"), their
+ * reports held at rest from the PC. Needs nothing from DS5-USBIP, so it is the way
+ * through the first sign-in after a restart, where DS5-USBIP is not running yet.
+ *   - It is NOT the prompt's mode with another name: no Close ("UAC mode has the close
+ *     button and options rebind to close when held"). Options held 2 s turns Desktop
+ *     Mode itself off, at once ("Options: hold to turn off Desktop Mode";
+ *     ui/streaming/desktop_mode.h). L1 and R1 are Window Select, Windows' window picker
+ *     with Alt held (stream/input/window_select.h); the PS button shows its list over
+ *     the screen; Triangle turns the TV cursor off, or on with its alignment bar up.
+ *   - A lock or a prompt takes over with its own controls and list, and Desktop Mode
+ *     comes back when it is gone ("Windows lock or UAC should override Desktop Mode").
+ *   - Their Close turns their controls off; with Desktop Mode on, Desktop Mode comes
+ *     back at once ("closing implies you need the controller plain. unless you had
+ *     desktop mode already on, then bring it back").
+ *   - Virtual Mouse is lent to it as to a lock, and given back OFF: turning Desktop
+ *     Mode on turns Virtual Mouse off. */
+
+/* ⭐⭐ ONE SET OF CONTROLS FOR ALL THREE SINCE 2026-11-12 (rhoquinn8217: "Lets
+ * consolidate windows lock, UAC and Desktop mode. It doesn't make sense to make them
+ * different."), on every controller: the right stick and the touchpad the mouse, R2 a
+ * left click and L2 a right one, L1 and R1 Window Select, the d-pad the arrows, Create
+ * Tab, Cross Enter, Circle Esc, Square the Full Keyboard, Triangle the numpad, L3 the
+ * TV cursor's alignment ("Lets move the cursor->alignment button to L3"), a
+ * DualSense's two-finger press and an Xbox pad's Share button the list, PS and the Xbox
+ * button Windows' own (2026-11-13: "PS button should go to windows(start steam)"; the
+ * PS button was the list's until then), and Options held 2 s the rebinds off, after its
+ * question. Only the
+ * list's heading and the question's words say which of the three it is. Where the
+ * notes above and below say a control is one mode's alone, this replaces them. */
 
 #pragma once
 
@@ -113,9 +152,14 @@ typedef enum {
     LOCK_KEYS_LOCK,              /* Windows is locked */
     LOCK_KEYS_PROMPT,            /* a User Account Control prompt, Yes or No */
     LOCK_KEYS_PROMPT_PASSWORD,   /* one that can ask for a password or PIN */
+    LOCK_KEYS_DESKTOP,           /* Desktop Mode, by hand: neither of the others */
 } lock_keys_mode_t;
 
 lock_keys_mode_t lock_keys_mode(void);
+
+/* Is Desktop Mode switched on, whether or not a lock or a prompt has the controls
+ * now? */
+bool lock_keys_desktop_wanted(void);
 
 /* Are the bridged controllers' reports to be held at rest from the PC? While a
  * prompt is up, and after it until what was down on them is let go. */
@@ -135,20 +179,35 @@ void lock_keys_dismiss(const char *how);
 /* Turned off by hand, and the lock or prompt it was turned off at still there? */
 bool lock_keys_dismissed(void);
 
-/* A close: Close clicked, or Options held 2 s, with how in the log. It asks first
- * whether to turn this off (the header). Nothing while off, turned off already, or
- * asking already. */
+/* Options held 2 s, with how in the log: it asks first whether to turn this off (the
+ * header), in Desktop Mode as well since 2026-11-12, where the OK turns Desktop Mode
+ * off. Until then the list's Close asked too; it is Hide now, and asks nothing. Nothing
+ * while off, turned off already, or asking already. */
 void lock_keys_ask_dismiss(const char *how);
 
 /* Is the question a close raises waiting for its answer? */
 bool lock_keys_asking(void);
 
 /* Its answer, with what gave it in the log: OK turns this off by hand
- * (lock_keys_dismiss), Cancel leaves it as it was. Nothing while no question waits. */
+ * (lock_keys_dismiss), or Desktop Mode off; Cancel leaves it as it was. Nothing while
+ * no question waits. */
 void lock_keys_answer(bool ok, const char *by);
 
-/* Is the numpad open? A lock starts with it closed. */
+/* Is the numpad open? Each lock, prompt and Desktop Mode starts with it closed;
+ * Triangle opens it in all three since 2026-11-12. */
 bool lock_keys_numpad_open(void);
+
+/* ⭐ THE LIST OF WHAT THE BUTTONS DO, the same at a lock, at a prompt and in Desktop
+ * Mode since 2026-11-12, under its own heading (ui/streaming/lock_numpad.h): over the
+ * screen as each begins, and hidden by its Hide, a DualSense's two-finger press or an
+ * Xbox pad's Share button, the two that bring it back too (rhoquinn8217: "close need to
+ * change to hide"; 2026-11-13: "DualSense two finger press in brings up the legend",
+ * "xbox share button in brings up the legend"; the PS button's until then). Hiding it
+ * changes nothing a button does. With how in the log; nothing
+ * while off. */
+bool lock_keys_list_hidden(void);
+void lock_keys_list_toggle(const char *how);
+void lock_keys_list_hide(const char *how);
 
 /* A button of a pad on the stream went down or up. True: it was taken here, and the
  * stream's handling of it does not run. */

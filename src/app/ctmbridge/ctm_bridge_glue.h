@@ -58,6 +58,12 @@ void ctm_bridge_set_mic_capture(bool on);
  * dropped -- a held button is released rather than left stuck. */
 void ctm_bridge_set_input_held(bool held);
 
+/* ⭐ While the TV's own controls hold the bridged pads (a Windows lock, a User Account
+ * Control prompt, Desktop Mode: stream/input/lock_keys.h), their PS button still goes to
+ * the PC (rhoquinn8217, 2026-11-13: "PS button should go to windows(start steam)"): the
+ * core keeps it in each held report's blank. Not while the overlay holds input. */
+void ctm_bridge_set_home_passes(bool passes);
+
 /* Who to tell when a bridged keyboard presses the overlay's shortcut,
  * Ctrl+Alt+Shift+S. ⚠️ Called on the keyboard's input thread. */
 void bridge_set_overlay_request(void (*cb)(void));
@@ -151,6 +157,12 @@ bool ctm_bridge_agent_online(void);
 /* ⭐ Is Windows locked on the PC, as DS5-USBIP says (rhoquinn8217, 2026-11-01)? It
  * takes no new bridge while it is. False when it has not said, or is offline. */
 bool ctm_bridge_agent_locked(void);
+
+/* ⭐ DESKTOP MODE HANDED OVER TO DS5-USBIP (rhoquinn8217, 2026-11-12;
+ * ui/streaming/desktop_mode.h): while on, each bridge asks DS5-USBIP for its desktop
+ * config, default_windows_config, for that bridge alone ("desktop_link=1", the core's
+ * g_desktop_link_ask). Off by default. */
+void ctm_bridge_set_desktop_link(bool on);
 
 /* ⭐ A User Account Control prompt up on the PC, and its kind, as DS5-USBIP last
  * said (rhoquinn8217, 2026-11-09: "insure that the controller will be able to
@@ -264,7 +276,13 @@ int ctm_bridge_held_sticks(ctm_bridge_stick_t *out, int max);
  * held_touch.inl): how many fingers, 0 to 2; the touch's contact count, which
  * a new touch changes; the first touch's X, 0 to 1919, and Y, 0 to 1079; and
  * the click. `reading` false: nothing read since the overlay opened, or a pad
- * whose touch the core does not read. Returns how many. */
+ * whose touch the core does not read. Returns how many.
+ * ⭐ Under the TV's own controls too, a lock, a prompt and Desktop Mode, for the
+ * PC's mouse (stream/input/bridged_touchpad.h), which needs where each finger
+ * is: the second touch alone as well (the core's held_touch_ds5_second), its
+ * count and place, and `fingers2` 0 while it is up, 1 while it is down alone, 2
+ * while both are. As both count the fingers, two that disagree were read a
+ * report apart. */
 typedef struct {
     char node[64];
     bool reading;
@@ -272,6 +290,9 @@ typedef struct {
     int id;
     int x, y;
     bool click;
+    int fingers2;
+    int id2;
+    int x2, y2;
 } ctm_bridge_touch_t;
 int ctm_bridge_held_touches(ctm_bridge_touch_t *out, int max);
 
