@@ -340,7 +340,8 @@ static lv_obj_t *toggle_half(lv_obj_t *parent, const char *words, bool chosen, l
     lv_obj_add_flag(half, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_set_size(half, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
     lv_obj_set_style_pad_hor(half, LV_DPX(10), 0);
-    lv_obj_set_style_pad_ver(half, LV_DPX(2), 0);
+    lv_obj_set_style_pad_ver(half, LV_DPX(1), 0);
+    lv_obj_set_style_radius(half, LV_RADIUS_CIRCLE, 0);
     lv_obj_set_style_bg_color(half, NUMPAD_MARK, 0);
     lv_obj_set_style_bg_opa(half, chosen ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
     lv_obj_set_style_bg_color(half, NUMPAD_KEY_BG, LV_STATE_PRESSED);
@@ -358,10 +359,35 @@ static void toggle_create(lv_obj_t *parent) {
     lv_obj_set_flex_align(pill, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_border_color(pill, NUMPAD_MARK, 0);
     lv_obj_set_style_border_width(pill, LV_DPX(1), 0);
-    lv_obj_set_style_radius(pill, LV_DPX(12), 0);
-    lv_obj_set_style_clip_corner(pill, true, 0);
+    lv_obj_set_style_radius(pill, LV_RADIUS_CIRCLE, 0);
+    /* The chosen half's highlight is a rounded block inside the pill's border, so it
+     * does not cover the pill's curved ends (rhoquinn8217, 2026-11-14, from the TV's own
+     * photo of build 718: "the highlighted toggle puts a square block over the curved
+     * edge"). */
+    lv_obj_set_style_pad_all(pill, LV_DPX(2), 0);
     s_tog_touch = toggle_half(pill, locstr("Touchpad"), !s_stick, toggle_touch_clicked);
     s_tog_stick = toggle_half(pill, locstr("Stick"), s_stick, toggle_stick_clicked);
+}
+
+/* ⭐ A CATEGORY IN TWO COLUMNS (rhoquinn8217, 2026-11-14: "use two columns for the
+ * category", "2 columns for Mouse"): two stacks of rows side by side. */
+static lv_obj_t *column_create(lv_obj_t *parent) {
+    lv_obj_t *column = box_create(parent);
+    lv_obj_set_size(column, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(column, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(column, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
+    lv_obj_set_style_pad_row(column, NUMPAD_LIST_GAP, 0);
+    return column;
+}
+
+static void columns_create(lv_obj_t *parent, lv_obj_t **left, lv_obj_t **right) {
+    lv_obj_t *row = box_create(parent);
+    lv_obj_set_size(row, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
+    lv_obj_set_style_pad_column(row, LV_DPX(26), 0);
+    *left = column_create(row);
+    *right = column_create(row);
 }
 
 /* A category's name in the list, and its choice if it has one. */
@@ -435,35 +461,39 @@ static lv_obj_t *list_create(pad_family_t family, lock_keys_mode_t mode) {
     if (family != PAD_FAMILY_XBOX) {
         toggle_create(mouse_head);
     }
+    lv_obj_t *left, *right;
+    columns_create(panel, &left, &right);
     if (stick) {
         const piece_t mouse[] = {PIECE_MARK(PAD_MARK_STICK_R), PIECE_WORDS(locstr("tilt - mouse"))};
         const piece_t scroll[] = {PIECE_MARK(PAD_MARK_STICK_L), PIECE_WORDS(locstr("tilt - scroll"))};
-        const piece_t drag[] = {PIECE_MARK(PAD_MARK_R2), PIECE_WORDS(locstr("hold - drag"))};
-        pieces_row_create(panel, family, mouse, 2);
-        pieces_row_create(panel, family, scroll, 2);
-        mark_row_create(panel, PAD_MARK_R2, family, locstr("- left click"));
-        mark_row_create(panel, PAD_MARK_L2, family, locstr("- right click"));
-        pieces_row_create(panel, family, drag, 2);
+        pieces_row_create(left, family, mouse, 2);
+        mark_row_create(left, PAD_MARK_R2, family, locstr("- left click"));
+        pieces_row_create(right, family, scroll, 2);
+        mark_row_create(right, PAD_MARK_L2, family, locstr("- right click"));
     } else {
         const piece_t mouse[] = {PIECE_MARK(PAD_MARK_TOUCH_ONE), PIECE_WORDS(locstr("slide - mouse"))};
         const piece_t scroll[] = {PIECE_MARK(PAD_MARK_TOUCH_TWO), PIECE_WORDS(locstr("swipe - scroll"))};
-        const piece_t left[] = {PIECE_MARK(PAD_MARK_TOUCH_ONE), PIECE_WORDS(locstr("tap - left click"))};
-        const piece_t right[] = {PIECE_MARK(PAD_MARK_TOUCH_TWO), PIECE_WORDS(locstr("tap - right click"))};
+        const piece_t tap_left[] = {PIECE_MARK(PAD_MARK_TOUCH_ONE), PIECE_WORDS(locstr("tap - left click"))};
+        const piece_t tap_right[] = {PIECE_MARK(PAD_MARK_TOUCH_TWO), PIECE_WORDS(locstr("tap - right click"))};
         const piece_t drag[] = {PIECE_MARK(PAD_MARK_TOUCH_ONE), PIECE_WORDS(locstr("press, hold touch - drag"))};
-        pieces_row_create(panel, family, mouse, 2);
-        pieces_row_create(panel, family, scroll, 2);
-        pieces_row_create(panel, family, left, 2);
-        pieces_row_create(panel, family, right, 2);
+        pieces_row_create(left, family, mouse, 2);
+        pieces_row_create(left, family, tap_left, 2);
+        pieces_row_create(right, family, scroll, 2);
+        pieces_row_create(right, family, tap_right, 2);
+        /* The drag row spans both columns: it is the list's own row under them. No "hold R2
+         * - drag" in the stick's: "this is intuitive already just like hold L2 would be". */
         pieces_row_create(panel, family, drag, 2);
     }
-    category_create(panel, locstr("KEYS"));
-    mark_row_create(panel, PAD_MARK_DPAD, family, locstr("- arrow keys"));
-    mark_row_create(panel, PAD_MARK_VIEW, family, locstr("- Tab"));
-    mark_row_create(panel, PAD_MARK_SOUTH, family, locstr("- Enter"));
-    mark_row_create(panel, PAD_MARK_EAST, family, locstr("- Esc"));
-    mark_row_create(panel, PAD_MARK_WEST, family, locstr("- Full Keyboard"));
-    mark_row_create(panel, PAD_MARK_NORTH, family, locstr("- numpad"));
-    category_create(panel, locstr("OTHER"));
+    category_create(panel, locstr("BUTTONS"));
+    lv_obj_t *keys_left, *keys_right;
+    columns_create(panel, &keys_left, &keys_right);
+    mark_row_create(keys_left, PAD_MARK_DPAD, family, locstr("- arrow keys"));
+    mark_row_create(keys_left, PAD_MARK_VIEW, family, locstr("- Tab"));
+    mark_row_create(keys_left, PAD_MARK_SOUTH, family, locstr("- Enter"));
+    mark_row_create(keys_right, PAD_MARK_EAST, family, locstr("- Esc"));
+    mark_row_create(keys_right, PAD_MARK_WEST, family, locstr("- Full Keyboard"));
+    mark_row_create(keys_right, PAD_MARK_NORTH, family, locstr("- numpad"));
+    category_create(panel, locstr("SHORTCUTS"));
     const piece_t window[] = {PIECE_MARK(PAD_MARK_L1), PIECE_WORDS("|"), PIECE_MARK(PAD_MARK_R1),
                               PIECE_WORDS(locstr("- Window Select"))};
     pieces_row_create(panel, family, window, 4);
