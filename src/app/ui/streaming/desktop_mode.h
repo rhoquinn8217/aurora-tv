@@ -85,6 +85,8 @@ void desktop_mode_handover_end(const char *why);
  * stream/input/lock_keys.h). Off: on, and the alignment bar up
  * (ui/streaming/cursor_align.h), where the d-pad moves its tip, Cross keeps it and
  * Circle puts back what was there, the cursor staying on ("on cancel cursor stays up").
- * On: off. The same saved switch as Ctrl+Alt+Shift+M (input/tv_cursor.h). */
+ * On: the alignment bar alone, and L3 again closes it, kept (2026-11-14, their "A":
+ * switching the cursor off and on froze webOS, desktop_mode.c says how). Off is
+ * Ctrl+Alt+Shift+M's alone now (input/tv_cursor.h). */
 void desktop_mode_cursor_toggle(void);
 

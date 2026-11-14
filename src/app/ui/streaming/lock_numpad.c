@@ -384,7 +384,7 @@ static lv_obj_t *list_create(pad_family_t family, lock_keys_mode_t mode) {
     mark_row_create(panel, PAD_MARK_EAST, family, locstr("- Esc"));
     mark_row_create(panel, PAD_MARK_WEST, family, locstr("- Full Keyboard"));
     mark_row_create(panel, PAD_MARK_NORTH, family, locstr("- numpad"));
-    mark_row_create(panel, PAD_MARK_L3, family, locstr("- Toggle Cursor"));
+    mark_row_create(panel, PAD_MARK_L3, family, locstr("- Align Cursor"));
     options_row_create(panel, family);
     /* ⭐ THE LIST AS WIDE AS ITS WIDEST LINE, THE HEADING WITH CLOSE AMONG THEM
      * (rhoquinn8217, 2026-11-10, at build 669, where Close sat over the heading's last

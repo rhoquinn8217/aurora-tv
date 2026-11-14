@@ -57,10 +57,17 @@ bool desktop_mode_on(void) {
 }
 
 void desktop_mode_cursor_toggle(void) {
+    /* ⭐ L3 OPENS THE ALIGNMENT BAR AND NO LONGER SWITCHES THE TV CURSOR OFF
+     * (rhoquinn8217, 2026-11-14, "A"; L3 again closes the bar, cursor_align.c).
+     * Switching the TV cursor off and on, the stream's mouse to movements alone and
+     * back, left the B4 freezing the app's screen for seconds at a time until it was
+     * unplugged: the bar opened from the keyboard was quick, after L3 twice it froze.
+     * And L3 took two such switches to open the bar. Off, the cursor still comes on
+     * with the bar, the one switch; Ctrl+Alt+Shift+M switches it either way
+     * (input/tv_cursor.h). */
     if (tv_cursor_mode_on()) {
-        if (tv_cursor_set_mode(false)) {
-            desktop_note("the TV cursor off (L3)");
-        }
+        desktop_note("the TV cursor's alignment bar (L3)");
+        cursor_align_request();
         return;
     }
     /* ⓘ Refused without a word on the screen, as a bridged mouse is

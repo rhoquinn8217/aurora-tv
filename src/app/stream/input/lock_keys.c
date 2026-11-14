@@ -72,7 +72,7 @@ typedef enum {
     LOCK_ACT_WINDOW_BACK,   /* L1: Window Select, back */
     LOCK_ACT_WINDOW_NEXT,   /* R1: Window Select, forward */
     LOCK_ACT_LEGEND,        /* an Xbox pad's Share button: the list over the screen, or hidden */
-    LOCK_ACT_CURSOR,        /* L3: the TV cursor on, with its alignment, or off */
+    LOCK_ACT_CURSOR,        /* L3: the TV cursor's alignment bar, the cursor on with it if off */
     LOCK_ACT_LET_GO,        /* any other button: Window Select's Alt let go */
 } lock_act_t;
 
@@ -514,8 +514,8 @@ static lock_act_t action_for(uint8_t what, bool numpad_open, short *key) {
              * lock's alone, and Triangle the TV cursor in Desktop Mode. */
             return LOCK_ACT_NUMPAD_OPEN;
         case SDL_CONTROLLER_BUTTON_LEFTSTICK:
-            /* L3 the TV cursor: off, or on with its alignment bar up ("Lets move the
-             * cursor->alignment button to L3"; ui/streaming/desktop_mode.h). */
+            /* L3 the TV cursor's alignment bar, the cursor on with it if it is off ("Lets
+             * move the cursor->alignment button to L3"; ui/streaming/desktop_mode.h). */
             return LOCK_ACT_CURSOR;
         case SDL_CONTROLLER_BUTTON_MISC1:
             /* ⭐ An Xbox pad's Share button the list, over the screen or hidden

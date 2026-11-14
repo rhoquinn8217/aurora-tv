@@ -443,7 +443,7 @@ static void cmd_desktop(control_job_t *job, const char *args)
          * screen, or hidden. */
         lock_keys_list_toggle("the control port");
     } else if (args != NULL && strcasecmp(args, "cursor") == 0) {
-        /* L3's turn: the TV cursor off, or on with its alignment bar. */
+        /* L3's turn: the TV cursor's alignment bar, the cursor on with it if off. */
         desktop_mode_cursor_toggle();
     } else if (args != NULL && args[0] != '\0') {
         reply(job, "ERR try on, off, start on, start off, legend or cursor\n");

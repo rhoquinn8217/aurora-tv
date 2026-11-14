@@ -119,7 +119,7 @@
  * different."), on every controller: the right stick and the touchpad the mouse, R2 a
  * left click and L2 a right one, L1 and R1 Window Select, the d-pad the arrows, Create
  * Tab, Cross Enter, Circle Esc, Square the Full Keyboard, Triangle the numpad, L3 the
- * TV cursor and its alignment ("Lets move the cursor->alignment button to L3"), a
+ * TV cursor's alignment ("Lets move the cursor->alignment button to L3"), a
  * DualSense's two-finger press and an Xbox pad's Share button the list, PS and the Xbox
  * button Windows' own (2026-11-13: "PS button should go to windows(start steam)"; the
  * PS button was the list's until then), and Options held 2 s the rebinds off, after its

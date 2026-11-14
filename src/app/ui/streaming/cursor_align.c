@@ -160,6 +160,12 @@ static SDL_JoystickID s_touch_pad = -1;
 static int s_touch_finger = -1;
 static float s_touch_x = 0, s_touch_y = 0, s_touch_aspect = ALIGN_PS5_ASPECT;
 static float s_touch_dx = 0, s_touch_dy = 0;   /* gathered, in the pad's widths */
+/* ⭐ L3 closes the bar it opens, kept as Cross keeps it (rhoquinn8217, 2026-11-14, "A":
+ * L3 opens and closes the bar, ui/streaming/desktop_mode.h). The bar has the input, so
+ * the TV's controls never see it: it is caught here, with the touchpad. */
+static bool s_l3_close = false;
+
+static void bar_close(bool keep);
 
 static float pad_aspect(SDL_JoystickID which) {
     SDL_GameController *pad = SDL_GameControllerFromInstanceID(which);
@@ -196,6 +202,11 @@ static int SDLCALL align_touch_watch(void *userdata, SDL_Event *event) {
             if (event->ctouchpad.which == s_touch_pad && event->ctouchpad.finger == s_touch_finger) {
                 s_touch_pad = -1;
                 s_touch_finger = -1;
+            }
+            break;
+        case SDL_CONTROLLERBUTTONDOWN:
+            if (event->cbutton.button == SDL_CONTROLLER_BUTTON_LEFTSTICK) {
+                s_l3_close = true;
             }
             break;
         default:
@@ -256,6 +267,12 @@ static void touch_cb(lv_timer_t *timer) {
     if (!s_aligning || global == NULL || global->session == NULL) {
         return;
     }
+    if (s_l3_close) {
+        s_l3_close = false;
+        tv_cursor_log("align bar: L3, closed and kept");
+        bar_close(true);
+        return;
+    }
 #if defined(TARGET_WEBOS)
     bridged_touch_gather();
 #endif
@@ -268,6 +285,7 @@ static void touch_cb(lv_timer_t *timer) {
 }
 
 static void touch_start(void) {
+    s_l3_close = false;
     s_touch_pad = -1;
     s_touch_finger = -1;
     s_touch_dx = s_touch_dy = 0.0f;
