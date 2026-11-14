@@ -69,7 +69,8 @@ typedef enum {
      * stick but solid arrow", "the same as the text color"). The same on every pad. */
     PAD_MARK_STICK_R,
     PAD_MARK_STICK_L,
-    PAD_MARK_STICK_PRESS,
+    PAD_MARK_STICK_PRESS,     /* L3 (an Xbox pad's LS), its name inside the cap */
+    PAD_MARK_STICK_PRESS_R,   /* R3 (RS) */
 } pad_mark_t;
 
 /* The mark, `height` pixels high, as an object in `parent` that takes no input.

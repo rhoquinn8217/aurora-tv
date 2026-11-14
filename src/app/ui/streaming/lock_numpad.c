@@ -167,7 +167,8 @@ static lv_obj_t *row_create(lv_obj_t *parent) {
 #define NUMPAD_MARK_CELL_W (NUMPAD_LEGEND_MARK * 7 / 5)
 
 static lv_coord_t mark_height(pad_mark_t mark) {
-    return (mark == PAD_MARK_STICK_R || mark == PAD_MARK_STICK_L || mark == PAD_MARK_STICK_PRESS)
+    return (mark == PAD_MARK_STICK_R || mark == PAD_MARK_STICK_L || mark == PAD_MARK_STICK_PRESS ||
+            mark == PAD_MARK_STICK_PRESS_R)
                    ? NUMPAD_STICK_MARK
                    : NUMPAD_LEGEND_MARK;
 }
@@ -224,7 +225,7 @@ static void pieces_row_create(lv_obj_t *parent, pad_family_t family, const piece
 static void options_row_create(lv_obj_t *parent, pad_family_t family) {
     /* ⭐ "- hold to turn off rebinds" since 2026-11-12 (rhoquinn8217: "options: hold to
      * turn off rebinds"), in all three lists and the numpad's. */
-    mark_row_create(parent, PAD_MARK_MENU, family, locstr("- hold to turn off rebinds"));
+    mark_row_create(parent, PAD_MARK_MENU, family, locstr("- hold to stop rebinds"));
 }
 
 /* The list's own row, in every list and the numpad's (rhoquinn8217, 2026-11-13): a
@@ -385,7 +386,7 @@ static void columns_create(lv_obj_t *parent, lv_obj_t **left, lv_obj_t **right) 
     lv_obj_set_size(row, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
     lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
-    lv_obj_set_style_pad_column(row, LV_DPX(26), 0);
+    lv_obj_set_style_pad_column(row, LV_DPX(40), 0);
     *left = column_create(row);
     *right = column_create(row);
 }
@@ -497,10 +498,15 @@ static lv_obj_t *list_create(pad_family_t family, lock_keys_mode_t mode) {
     const piece_t window[] = {PIECE_MARK(PAD_MARK_L1), PIECE_WORDS("|"), PIECE_MARK(PAD_MARK_R1),
                               PIECE_WORDS(locstr("- Window Select"))};
     pieces_row_create(panel, family, window, 4);
-    const piece_t align[] = {PIECE_MARK(PAD_MARK_STICK_PRESS),
-                             PIECE_WORDS(family == PAD_FAMILY_XBOX ? locstr("LS - Align Cursor")
-                                                                   : locstr("L3 - Align Cursor"))};
+    /* L3 and R3 with their names inside the cap ("The L3 symbol needs L3 inside of it",
+     * "add the R3 symbol to the legend <R3 symbol> - toggle mouse legend"); an Xbox pad
+     * has no touchpad and no choice, so no R3 row. */
+    const piece_t align[] = {PIECE_MARK(PAD_MARK_STICK_PRESS), PIECE_WORDS(locstr("- Align Cursor"))};
     pieces_row_create(panel, family, align, 2);
+    if (family != PAD_FAMILY_XBOX) {
+        const piece_t choice[] = {PIECE_MARK(PAD_MARK_STICK_PRESS_R), PIECE_WORDS(locstr("- toggle mouse legend"))};
+        pieces_row_create(panel, family, choice, 2);
+    }
     legend_toggle_row_create(panel, family);
     options_row_create(panel, family);
     /* ⭐ THE LIST AS WIDE AS ITS WIDEST LINE, THE HEADING WITH CLOSE AMONG THEM
@@ -509,6 +515,15 @@ static lv_obj_t *list_create(pad_family_t family, lock_keys_mode_t mode) {
      * legend as well"). Measured off the lines themselves: the list's own width, read
      * straight after a first layout, still had the heading as wide as its words alone.
      * And the list set to it as well, not left to follow its heading. */
+    /* ⭐ THE SECOND COLUMNS OF MOUSE AND BUTTONS START AT THE SAME PLACE, and the columns are
+     * wider (rhoquinn8217, 2026-11-14: "Widen the columns and aligned the second columns
+     * of Mouse and Buttons sections"): the first column of both as wide as the wider. */
+    lv_obj_update_layout(panel);
+    {
+        const lv_coord_t first = (lv_coord_t) LV_MAX(lv_obj_get_width(left), lv_obj_get_width(keys_left));
+        lv_obj_set_width(left, first);
+        lv_obj_set_width(keys_left, first);
+    }
     lv_obj_update_layout(panel);
     lv_coord_t widest = (lv_coord_t) (lv_obj_get_width(title) +
                                       (s_hide != NULL ? NUMPAD_HEADING_GAP + lv_obj_get_width(s_hide) : 0));
