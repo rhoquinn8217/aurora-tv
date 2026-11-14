@@ -73,6 +73,9 @@ bool tv_cursor_adjust(int shift_x, int shift_y, int thin);
  * right and down. */
 void tv_cursor_get_shift(int *shift_x, int *shift_y);
 
+/* How many of the TV's own pixels one point of the app's is: 2 on a 4K set. */
+double tv_cursor_scale(void);
+
 /* Saves the shift that stands now as this TV's for the cursor showing, at
  * once. From the align bar's Enter or A. */
 bool tv_cursor_keep(void);

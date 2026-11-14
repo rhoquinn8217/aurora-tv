@@ -679,6 +679,10 @@ void tv_cursor_get_shift(int *shift_x, int *shift_y) {
     if (shift_y != NULL) *shift_y = s_shift[s_look].y;
 }
 
+double tv_cursor_scale(void) {
+    return s_scale;
+}
+
 bool tv_cursor_keep(void) {
     if (!s_ready || app_configuration == NULL) {
         return false;
@@ -803,6 +807,10 @@ bool tv_cursor_adjust(int shift_x, int shift_y, int thin) {
 void tv_cursor_get_shift(int *shift_x, int *shift_y) {
     if (shift_x != NULL) *shift_x = 0;
     if (shift_y != NULL) *shift_y = 0;
+}
+
+double tv_cursor_scale(void) {
+    return 1.0;
 }
 
 bool tv_cursor_keep(void) {
