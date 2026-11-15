@@ -156,6 +156,58 @@ static void draw_touchpad(const pen_t *pen, pad_mark_t mark) {
     }
 }
 
+/* A stick tilted: the stick's outline, an inner ring, and its letter in strokes, as the
+ * PS button's are (the app's small type is too large for a letter inside the ring). */
+static const int16_t LETTER_STICK_L[3][2] = {{860, 660}, {860, 1340}, {1150, 1340}};
+static const int16_t LETTER_STICK_R[10][2] = {{860, 1340}, {860, 660}, {1030, 660}, {1120, 695}, {1160, 775},
+                                              {1120, 855}, {1030, 890}, {860, 890}, {1030, 890}, {1180, 1340}};
+
+static void draw_stick(const pen_t *pen, pad_mark_t mark) {
+    pen_circle(pen, 1000, 1000, 900);
+    pen_circle(pen, 1000, 1000, 650);
+    if (mark == PAD_MARK_STICK_R) {
+        pen_path(pen, LETTER_STICK_R, 10, false);
+    } else {
+        pen_path(pen, LETTER_STICK_L, 3, false);
+    }
+}
+
+/* A stick pressed: a solid flat arrow, pointing down, over an outline of the stick's
+ * cap. The arrow's head is filled in short horizontal strokes, as the display has no
+ * filled triangle. */
+static const int16_t STICK_CAP[10][2] = {{400, 840}, {1600, 840}, {1860, 1060}, {1860, 1240}, {1600, 1240},
+                                         {1600, 1860}, {400, 1860}, {400, 1240}, {140, 1240}, {140, 1060}};
+
+/* ⭐ ITS NAME INSIDE THE CAP (rhoquinn8217, 2026-11-14: "The L3 symbol needs L3 inside of
+ * it"; "add the R3 symbol"): L3 or R3, an Xbox pad's LS or RS, in strokes, the two
+ * letters centred and 660 high. */
+static const int16_t PRESS_L3_A[3][2] = {{658, 1060}, {658, 1720}, {939, 1720}};
+static const int16_t PRESS_L3_B[17][2] = {{1049, 1142}, {1107, 1082}, {1185, 1060}, {1264, 1082}, {1322, 1142}, {1342, 1225}, {1322, 1308}, {1264, 1368}, {1185, 1390}, {1264, 1412}, {1322, 1472}, {1342, 1555}, {1322, 1638}, {1264, 1698}, {1185, 1720}, {1107, 1698}, {1049, 1638}};
+static const int16_t PRESS_LS_A[3][2] = {{648, 1060}, {648, 1720}, {929, 1720}};
+static const int16_t PRESS_LS_B[17][2] = {{1332, 1142}, {1274, 1082}, {1196, 1060}, {1117, 1082}, {1060, 1142}, {1039, 1225}, {1060, 1308}, {1117, 1368}, {1196, 1390}, {1274, 1412}, {1332, 1472}, {1352, 1555}, {1332, 1638}, {1274, 1698}, {1196, 1720}, {1117, 1698}, {1060, 1638}};
+static const int16_t PRESS_R3_A[10][2] = {{643, 1720}, {643, 1060}, {808, 1060}, {896, 1094}, {934, 1172}, {896, 1249}, {808, 1283}, {643, 1283}, {808, 1283}, {954, 1720}};
+static const int16_t PRESS_R3_B[17][2] = {{1064, 1142}, {1122, 1082}, {1200, 1060}, {1278, 1082}, {1336, 1142}, {1357, 1225}, {1336, 1308}, {1278, 1368}, {1200, 1390}, {1278, 1412}, {1336, 1472}, {1357, 1555}, {1336, 1638}, {1278, 1698}, {1200, 1720}, {1122, 1698}, {1064, 1638}};
+static const int16_t PRESS_RS_A[10][2] = {{633, 1720}, {633, 1060}, {798, 1060}, {885, 1094}, {924, 1172}, {885, 1249}, {798, 1283}, {633, 1283}, {798, 1283}, {944, 1720}};
+static const int16_t PRESS_RS_B[17][2] = {{1346, 1142}, {1289, 1082}, {1210, 1060}, {1132, 1082}, {1074, 1142}, {1054, 1225}, {1074, 1308}, {1132, 1368}, {1210, 1390}, {1289, 1412}, {1346, 1472}, {1367, 1555}, {1346, 1638}, {1289, 1698}, {1210, 1720}, {1132, 1698}, {1074, 1638}};
+
+static void draw_stick_press(const pen_t *pen, pad_mark_t mark, pad_family_t family) {
+    pen_fill(pen, 880, 220, 1120, 360);
+    for (int y = 360; y <= 690; y += 40) {
+        const int half = (690 - y) * 460 / 330;
+        pen_line(pen, 1000 - half, y, 1000 + half, y);
+    }
+    pen_path(pen, STICK_CAP, 10, true);
+    const bool right = mark == PAD_MARK_STICK_PRESS_R;
+    const bool xbox = family == PAD_FAMILY_XBOX;
+    if (!right) {
+        pen_path(pen, xbox ? PRESS_LS_A : PRESS_L3_A, 3, false);
+        pen_path(pen, xbox ? PRESS_LS_B : PRESS_L3_B, 17, false);
+    } else {
+        pen_path(pen, xbox ? PRESS_RS_A : PRESS_R3_A, 10, false);
+        pen_path(pen, xbox ? PRESS_RS_B : PRESS_R3_B, 17, false);
+    }
+}
+
 static void draw_dpad(const pen_t *pen, pad_mark_t mark) {
     pen_path(pen, DPAD, 12, true);
     switch (mark) {
@@ -269,6 +321,11 @@ static bool mark_is_shoulder(pad_mark_t mark) {
     return mark == PAD_MARK_L1 || mark == PAD_MARK_R1 || mark == PAD_MARK_L2 || mark == PAD_MARK_R2;
 }
 
+static bool mark_is_stick(pad_mark_t mark) {
+    return mark == PAD_MARK_STICK_R || mark == PAD_MARK_STICK_L || mark == PAD_MARK_STICK_PRESS ||
+           mark == PAD_MARK_STICK_PRESS_R;
+}
+
 static bool mark_is_touchpad(pad_mark_t mark) {
     return mark == PAD_MARK_TOUCHPAD || mark == PAD_MARK_TOUCH_ONE || mark == PAD_MARK_TOUCH_TWO;
 }
@@ -310,7 +367,13 @@ static void mark_draw_body(lv_event_t *event) {
     pen.line.round_end = 1;
 
     const lv_font_t *font = lv_obj_get_style_text_font(obj, LV_PART_MAIN);
-    if (mark_is_touchpad(mark)) {
+    if (mark_is_stick(mark)) {
+        if (mark == PAD_MARK_STICK_PRESS || mark == PAD_MARK_STICK_PRESS_R) {
+            draw_stick_press(&pen, mark, family);
+        } else {
+            draw_stick(&pen, mark);
+        }
+    } else if (mark_is_touchpad(mark)) {
         draw_touchpad(&pen, mark);
     } else if (mark_is_dpad(mark)) {
         draw_dpad(&pen, mark);

@@ -24,6 +24,7 @@
 #include "ui/common/pad_marks.h"
 #include "ui/root.h"
 #include "ui/streaming/desktop_mode.h"
+#include "ui/streaming/lock_numpad.h"
 #include "util/bus.h"
 #include "util/user_event.h"
 #if defined(TARGET_WEBOS)
@@ -73,6 +74,7 @@ typedef enum {
     LOCK_ACT_WINDOW_NEXT,   /* R1: Window Select, forward */
     LOCK_ACT_LEGEND,        /* an Xbox pad's Share button: the list over the screen, or hidden */
     LOCK_ACT_CURSOR,        /* L3: the TV cursor's alignment bar, the cursor on with it if off */
+    LOCK_ACT_MOUSE_CHOICE,  /* R3: the list's Mouse category between the touchpad's rows and the stick's */
     LOCK_ACT_LET_GO,        /* any other button: Window Select's Alt let go */
 } lock_act_t;
 
@@ -517,6 +519,11 @@ static lock_act_t action_for(uint8_t what, bool numpad_open, short *key) {
             /* L3 the TV cursor's alignment bar, the cursor on with it if it is off ("Lets
              * move the cursor->alignment button to L3"; ui/streaming/desktop_mode.h). */
             return LOCK_ACT_CURSOR;
+        case SDL_CONTROLLER_BUTTON_RIGHTSTICK:
+            /* ⭐ R3 switches the list's Mouse category between the touchpad's rows and the
+             * stick's (rhoquinn8217, 2026-11-14: "lets use R3"), as a click on its choice
+             * does (ui/streaming/lock_numpad.h). Nothing else of the pad's. */
+            return LOCK_ACT_MOUSE_CHOICE;
         case SDL_CONTROLLER_BUTTON_MISC1:
             /* ⭐ An Xbox pad's Share button the list, over the screen or hidden
              * (rhoquinn8217, 2026-11-13: "xbox share button in brings up the legend";
@@ -590,6 +597,9 @@ static void act(stream_input_t *input, const lock_press_t *press) {
             break;
         case LOCK_ACT_CURSOR:
             desktop_mode_cursor_toggle();
+            break;
+        case LOCK_ACT_MOUSE_CHOICE:
+            lock_numpad_mouse_choice_toggle();
             break;
         case LOCK_ACT_LET_GO:
             /* Window Select's Alt, above: nothing more. */

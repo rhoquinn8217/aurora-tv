@@ -37,6 +37,10 @@
 #define NUMPAD_KEY_MARK LV_DPX(19)
 #define NUMPAD_KEY_INSET LV_DPX(3)
 #define NUMPAD_LEGEND_MARK LV_DPX(18)
+/* The sticks' marks a fifth larger than the rest ("make them a little bigger"). */
+#define NUMPAD_STICK_MARK (NUMPAD_LEGEND_MARK * 6 / 5)
+/* A category's name, dimmer than the rows under it. */
+#define NUMPAD_CAT lv_color_hex(0x9FB3C8)
 #define NUMPAD_LIST_GAP LV_DPX(3)
 /* A digit sits a little left of the middle and below it: the mark has the corner.
  * A word is wider, so it sits along the foot of the key, under the mark. */
@@ -92,6 +96,10 @@
 
 static lv_obj_t *s_after;
 static lv_obj_t *s_hide;         /* the list's, gone with it; none with the numpad */
+static lv_obj_t *s_tog_touch;    /* the Mouse category's two choices, gone with the list */
+static lv_obj_t *s_tog_stick;
+static bool s_stick;             /* which of the two the list shows; the touchpad's until chosen */
+static bool s_shown_stick;
 static lv_obj_t *s_question;
 static pad_family_t s_question_family;
 static lv_coord_t s_after_y = -1;   /* the list's foot plus the gap; -1 until a list is up */
@@ -158,6 +166,13 @@ static lv_obj_t *row_create(lv_obj_t *parent) {
  * the words of every row line up. A shoulder button's was the widest until 2026-11-13. */
 #define NUMPAD_MARK_CELL_W (NUMPAD_LEGEND_MARK * 7 / 5)
 
+static lv_coord_t mark_height(pad_mark_t mark) {
+    return (mark == PAD_MARK_STICK_R || mark == PAD_MARK_STICK_L || mark == PAD_MARK_STICK_PRESS ||
+            mark == PAD_MARK_STICK_PRESS_R)
+                   ? NUMPAD_STICK_MARK
+                   : NUMPAD_LEGEND_MARK;
+}
+
 /* A row of the list: a button's mark, in its cell, then what it does. ⓘ Nothing in bold
  * since 2026-11-12 (rhoquinn8217: "no more bold anything", and on 2026-11-13 of a bold
  * |, "unbold it"); Desktop Mode's list had its clicks and the Full Keyboard in bold until
@@ -165,8 +180,8 @@ static lv_obj_t *row_create(lv_obj_t *parent) {
 static void mark_row_create(lv_obj_t *parent, pad_mark_t mark, pad_family_t family, const char *words) {
     lv_obj_t *row = row_create(parent);
     lv_obj_t *cell = box_create(row);
-    lv_obj_set_size(cell, NUMPAD_MARK_CELL_W, NUMPAD_LEGEND_MARK);
-    lv_obj_t *drawn = pad_mark_create(cell, mark, family, NUMPAD_LEGEND_MARK, NUMPAD_MARK);
+    lv_obj_set_size(cell, NUMPAD_MARK_CELL_W, mark_height(mark));
+    lv_obj_t *drawn = pad_mark_create(cell, mark, family, mark_height(mark), NUMPAD_MARK);
     lv_obj_center(drawn);
     words_create(row, words, lv_theme_get_font_small(parent));
 }
@@ -194,10 +209,10 @@ static void pieces_row_create(lv_obj_t *parent, pad_family_t family, const piece
         }
         if (i == 0) {
             lv_obj_t *cell = box_create(row);
-            lv_obj_set_size(cell, NUMPAD_MARK_CELL_W, NUMPAD_LEGEND_MARK);
-            lv_obj_center(pad_mark_create(cell, pieces[i].mark, family, NUMPAD_LEGEND_MARK, NUMPAD_MARK));
+            lv_obj_set_size(cell, NUMPAD_MARK_CELL_W, mark_height(pieces[i].mark));
+            lv_obj_center(pad_mark_create(cell, pieces[i].mark, family, mark_height(pieces[i].mark), NUMPAD_MARK));
         } else {
-            pad_mark_create(row, pieces[i].mark, family, NUMPAD_LEGEND_MARK, NUMPAD_MARK);
+            pad_mark_create(row, pieces[i].mark, family, mark_height(pieces[i].mark), NUMPAD_MARK);
         }
     }
 }
@@ -210,7 +225,7 @@ static void pieces_row_create(lv_obj_t *parent, pad_family_t family, const piece
 static void options_row_create(lv_obj_t *parent, pad_family_t family) {
     /* ⭐ "- hold to turn off rebinds" since 2026-11-12 (rhoquinn8217: "options: hold to
      * turn off rebinds"), in all three lists and the numpad's. */
-    mark_row_create(parent, PAD_MARK_MENU, family, locstr("- hold to turn off rebinds"));
+    mark_row_create(parent, PAD_MARK_MENU, family, locstr("- hold to stop rebinds"));
 }
 
 /* The list's own row, in every list and the numpad's (rhoquinn8217, 2026-11-13): a
@@ -300,6 +315,92 @@ static lv_obj_t *hide_create(lv_obj_t *parent) {
     return button;
 }
 
+/* ⭐ THE MOUSE CATEGORY'S CHOICE (rhoquinn8217, 2026-11-14: "Mouse should have a toggle
+ * button next to it. Toggle between stick and touchpad. Default is touchpad"): two
+ * halves of one pill, the chosen one filled. It changes which of the two sets of rows the
+ * list shows and nothing a controller does; the list is rebuilt on the next pass
+ * (lock_numpad_tick). Not saved: the touchpad's again at every lock, prompt and
+ * Desktop Mode. Clicked as Hide is. */
+static void toggle_touch_clicked(lv_event_t *event) {
+    LV_UNUSED(event);
+    s_stick = false;
+}
+
+static void toggle_stick_clicked(lv_event_t *event) {
+    LV_UNUSED(event);
+    s_stick = true;
+}
+
+/* R3 (stream/input/lock_keys.h): the other of the two. */
+void lock_numpad_mouse_choice_toggle(void) {
+    s_stick = !s_stick;
+}
+
+static lv_obj_t *toggle_half(lv_obj_t *parent, const char *words, bool chosen, lv_event_cb_t clicked) {
+    lv_obj_t *half = box_create(parent);
+    lv_obj_add_flag(half, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_size(half, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+    lv_obj_set_style_pad_hor(half, LV_DPX(10), 0);
+    lv_obj_set_style_pad_ver(half, LV_DPX(1), 0);
+    lv_obj_set_style_radius(half, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_bg_color(half, NUMPAD_MARK, 0);
+    lv_obj_set_style_bg_opa(half, chosen ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
+    lv_obj_set_style_bg_color(half, NUMPAD_KEY_BG, LV_STATE_PRESSED);
+    lv_obj_set_style_bg_opa(half, LV_OPA_COVER, LV_STATE_PRESSED);
+    lv_obj_t *label = words_create(half, words, lv_theme_get_font_small(half));
+    lv_obj_set_style_text_color(label, chosen ? lv_color_hex(0x111111) : NUMPAD_TEXT, 0);
+    lv_obj_add_event_cb(half, clicked, LV_EVENT_CLICKED, NULL);
+    return half;
+}
+
+static void toggle_create(lv_obj_t *parent) {
+    lv_obj_t *pill = box_create(parent);
+    lv_obj_set_size(pill, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(pill, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(pill, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_border_color(pill, NUMPAD_MARK, 0);
+    lv_obj_set_style_border_width(pill, LV_DPX(1), 0);
+    lv_obj_set_style_radius(pill, LV_RADIUS_CIRCLE, 0);
+    /* The chosen half's highlight is a rounded block inside the pill's border, so it
+     * does not cover the pill's curved ends (rhoquinn8217, 2026-11-14, from the TV's own
+     * photo of build 718: "the highlighted toggle puts a square block over the curved
+     * edge"). */
+    lv_obj_set_style_pad_all(pill, LV_DPX(2), 0);
+    s_tog_touch = toggle_half(pill, locstr("Touchpad"), !s_stick, toggle_touch_clicked);
+    s_tog_stick = toggle_half(pill, locstr("Stick"), s_stick, toggle_stick_clicked);
+}
+
+/* ⭐ A CATEGORY IN TWO COLUMNS (rhoquinn8217, 2026-11-14: "use two columns for the
+ * category", "2 columns for Mouse"): two stacks of rows side by side. */
+static lv_obj_t *column_create(lv_obj_t *parent) {
+    lv_obj_t *column = box_create(parent);
+    lv_obj_set_size(column, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(column, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(column, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
+    lv_obj_set_style_pad_row(column, NUMPAD_LIST_GAP, 0);
+    return column;
+}
+
+static void columns_create(lv_obj_t *parent, lv_obj_t **left, lv_obj_t **right) {
+    lv_obj_t *row = box_create(parent);
+    lv_obj_set_size(row, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
+    lv_obj_set_style_pad_column(row, LV_DPX(40), 0);
+    *left = column_create(row);
+    *right = column_create(row);
+}
+
+/* A category's name in the list, and its choice if it has one. */
+static lv_obj_t *category_create(lv_obj_t *parent, const char *name) {
+    lv_obj_t *row = row_create(parent);
+    lv_obj_set_style_pad_top(row, LV_DPX(6), 0);
+    lv_obj_set_style_pad_column(row, LV_DPX(10), 0);
+    lv_obj_t *label = words_create(row, name, lv_theme_get_font_small(parent));
+    lv_obj_set_style_text_color(label, NUMPAD_CAT, 0);
+    return row;
+}
+
 /* The numpad closed: every button that does something, as the configs window's rows
  * read: a mark, a plain hyphen, what it does.
  * ⭐ At a User Account Control prompt, the same list under its own heading, without
@@ -349,42 +450,64 @@ static lv_obj_t *list_create(pad_family_t family, lock_keys_mode_t mode) {
     /* ⭐ THE SAME ROWS IN ALL THREE since 2026-11-12 (rhoquinn8217: "Lets consolidate
      * windows lock, UAC and Desktop mode. It doesn't make sense to make them
      * different."; stream/input/lock_keys.h), only the heading says which. */
-    /* ⭐ THE LIST'S OWN ROW FIRST, then the touchpad and the stick or trigger that do the
-     * same thing, one row each, a | between (rhoquinn8217, 2026-11-13: the fifth draft,
-     * with "unbold it"; then "remove the "hold R2" this is intuitive already just like hold
-     * L2 would be" and "remove up/down. scroll implies it"). The left stick's scroll was
-     * there all along and is written now. An Xbox pad has no touchpad: its half of each
-     * row is left out. */
-    legend_toggle_row_create(panel, family);
-    if (family == PAD_FAMILY_XBOX) {
-        words_create(panel, locstr("Right stick - mouse"), font);
-        mark_row_create(panel, PAD_MARK_R2, family, locstr("- left click"));
-        mark_row_create(panel, PAD_MARK_L2, family, locstr("- right click"));
-        words_create(panel, locstr("Left stick - scroll"), font);
-    } else {
-        const piece_t mouse[] = {PIECE_MARK(PAD_MARK_TOUCH_ONE), PIECE_WORDS(locstr("| Right stick - mouse"))};
-        const piece_t left[] = {PIECE_MARK(PAD_MARK_TOUCH_ONE), PIECE_WORDS(locstr("tap |")), PIECE_MARK(PAD_MARK_R2),
-                                PIECE_WORDS(locstr("- left click"))};
-        const piece_t right[] = {PIECE_MARK(PAD_MARK_TOUCH_TWO), PIECE_WORDS(locstr("tap |")),
-                                 PIECE_MARK(PAD_MARK_L2), PIECE_WORDS(locstr("- right click"))};
-        const piece_t drag[] = {PIECE_MARK(PAD_MARK_TOUCH_ONE), PIECE_WORDS(locstr("press, hold touch - drag"))};
-        const piece_t scroll[] = {PIECE_MARK(PAD_MARK_TOUCH_TWO), PIECE_WORDS(locstr("swipe | Left stick - scroll"))};
-        pieces_row_create(panel, family, mouse, 2);
-        pieces_row_create(panel, family, left, 4);
-        pieces_row_create(panel, family, right, 4);
-        pieces_row_create(panel, family, drag, 2);
-        pieces_row_create(panel, family, scroll, 2);
+    /* ⭐ IN THREE CATEGORIES since 2026-11-14 (rhoquinn8217: "separate the items into
+     * categories", "combine Windows, Cursor, Legend and rebinds into one category", "Mouse
+     * should have a toggle button next to it ... default is touchpad", "move scroll after
+     * mouse and add "tilt" after the stick symbol followed by the dash"): Mouse, with its
+     * choice between the touchpad's rows and the stick's; Keys; and Other. An Xbox pad has
+     * no touchpad: its list is the stick's, with no choice. The sticks' marks are plain
+     * ("remove the arrow on the stick for mouse and scroll"). */
+    const bool stick = family == PAD_FAMILY_XBOX || s_stick;
+    lv_obj_t *mouse_head = category_create(panel, locstr("MOUSE"));
+    if (family != PAD_FAMILY_XBOX) {
+        toggle_create(mouse_head);
     }
+    lv_obj_t *left, *right;
+    columns_create(panel, &left, &right);
+    if (stick) {
+        const piece_t mouse[] = {PIECE_MARK(PAD_MARK_STICK_R), PIECE_WORDS(locstr("tilt - mouse"))};
+        const piece_t scroll[] = {PIECE_MARK(PAD_MARK_STICK_L), PIECE_WORDS(locstr("tilt - scroll"))};
+        pieces_row_create(left, family, mouse, 2);
+        mark_row_create(left, PAD_MARK_R2, family, locstr("- left click"));
+        pieces_row_create(right, family, scroll, 2);
+        mark_row_create(right, PAD_MARK_L2, family, locstr("- right click"));
+    } else {
+        const piece_t mouse[] = {PIECE_MARK(PAD_MARK_TOUCH_ONE), PIECE_WORDS(locstr("slide - mouse"))};
+        const piece_t scroll[] = {PIECE_MARK(PAD_MARK_TOUCH_TWO), PIECE_WORDS(locstr("swipe - scroll"))};
+        const piece_t tap_left[] = {PIECE_MARK(PAD_MARK_TOUCH_ONE), PIECE_WORDS(locstr("tap - left click"))};
+        const piece_t tap_right[] = {PIECE_MARK(PAD_MARK_TOUCH_TWO), PIECE_WORDS(locstr("tap - right click"))};
+        const piece_t drag[] = {PIECE_MARK(PAD_MARK_TOUCH_ONE), PIECE_WORDS(locstr("press, hold touch - drag"))};
+        pieces_row_create(left, family, mouse, 2);
+        pieces_row_create(left, family, tap_left, 2);
+        pieces_row_create(right, family, scroll, 2);
+        pieces_row_create(right, family, tap_right, 2);
+        /* The drag row spans both columns: it is the list's own row under them. No "hold R2
+         * - drag" in the stick's: "this is intuitive already just like hold L2 would be". */
+        pieces_row_create(panel, family, drag, 2);
+    }
+    category_create(panel, locstr("BUTTONS"));
+    lv_obj_t *keys_left, *keys_right;
+    columns_create(panel, &keys_left, &keys_right);
+    mark_row_create(keys_left, PAD_MARK_DPAD, family, locstr("- arrow keys"));
+    mark_row_create(keys_left, PAD_MARK_VIEW, family, locstr("- Tab"));
+    mark_row_create(keys_left, PAD_MARK_SOUTH, family, locstr("- Enter"));
+    mark_row_create(keys_right, PAD_MARK_EAST, family, locstr("- Esc"));
+    mark_row_create(keys_right, PAD_MARK_WEST, family, locstr("- Full Keyboard"));
+    mark_row_create(keys_right, PAD_MARK_NORTH, family, locstr("- numpad"));
+    category_create(panel, locstr("SHORTCUTS"));
     const piece_t window[] = {PIECE_MARK(PAD_MARK_L1), PIECE_WORDS("|"), PIECE_MARK(PAD_MARK_R1),
                               PIECE_WORDS(locstr("- Window Select"))};
     pieces_row_create(panel, family, window, 4);
-    mark_row_create(panel, PAD_MARK_DPAD, family, locstr("- arrow keys"));
-    mark_row_create(panel, PAD_MARK_VIEW, family, locstr("- Tab"));
-    mark_row_create(panel, PAD_MARK_SOUTH, family, locstr("- Enter"));
-    mark_row_create(panel, PAD_MARK_EAST, family, locstr("- Esc"));
-    mark_row_create(panel, PAD_MARK_WEST, family, locstr("- Full Keyboard"));
-    mark_row_create(panel, PAD_MARK_NORTH, family, locstr("- numpad"));
-    mark_row_create(panel, PAD_MARK_L3, family, locstr("- Align Cursor"));
+    /* L3 and R3 with their names inside the cap ("The L3 symbol needs L3 inside of it",
+     * "add the R3 symbol to the legend <R3 symbol> - toggle mouse legend"); an Xbox pad
+     * has no touchpad and no choice, so no R3 row. */
+    const piece_t align[] = {PIECE_MARK(PAD_MARK_STICK_PRESS), PIECE_WORDS(locstr("- Align Cursor"))};
+    pieces_row_create(panel, family, align, 2);
+    if (family != PAD_FAMILY_XBOX) {
+        const piece_t choice[] = {PIECE_MARK(PAD_MARK_STICK_PRESS_R), PIECE_WORDS(locstr("- toggle mouse legend"))};
+        pieces_row_create(panel, family, choice, 2);
+    }
+    legend_toggle_row_create(panel, family);
     options_row_create(panel, family);
     /* ⭐ THE LIST AS WIDE AS ITS WIDEST LINE, THE HEADING WITH CLOSE AMONG THEM
      * (rhoquinn8217, 2026-11-10, at build 669, where Close sat over the heading's last
@@ -392,6 +515,15 @@ static lv_obj_t *list_create(pad_family_t family, lock_keys_mode_t mode) {
      * legend as well"). Measured off the lines themselves: the list's own width, read
      * straight after a first layout, still had the heading as wide as its words alone.
      * And the list set to it as well, not left to follow its heading. */
+    /* ⭐ THE SECOND COLUMNS OF MOUSE AND BUTTONS START AT THE SAME PLACE, and the columns are
+     * wider (rhoquinn8217, 2026-11-14: "Widen the columns and aligned the second columns
+     * of Mouse and Buttons sections"): the first column of both as wide as the wider. */
+    lv_obj_update_layout(panel);
+    {
+        const lv_coord_t first = (lv_coord_t) LV_MAX(lv_obj_get_width(left), lv_obj_get_width(keys_left));
+        lv_obj_set_width(left, first);
+        lv_obj_set_width(keys_left, first);
+    }
     lv_obj_update_layout(panel);
     lv_coord_t widest = (lv_coord_t) (lv_obj_get_width(title) +
                                       (s_hide != NULL ? NUMPAD_HEADING_GAP + lv_obj_get_width(s_hide) : 0));
@@ -510,6 +642,8 @@ static void take_down(void) {
         s_up = NULL;
     }
     s_hide = NULL;
+    s_tog_touch = NULL;
+    s_tog_stick = NULL;
 }
 
 static bool after_sign_in(void) {
@@ -545,6 +679,9 @@ void lock_numpad_tick(void) {
      * legend should always be in the overlay when its turned on. Even if it's hidden, it
      * should still be in the overlay when Desktop mode is turned on"), as it was before
      * it went over the screen; not over a panel the overlay opened. */
+    if (mode == LOCK_KEYS_OFF) {
+        s_stick = false;   /* the touchpad's rows again at the next lock, prompt or Desktop Mode */
+    }
     const bool up = lock_keys_active() && !ui_should_block_input();
     const bool in_overlay =
         mode == LOCK_KEYS_DESKTOP && streaming_overlay_shown() && !ctm_panel_shown() && !bt_panel_shown();
@@ -561,12 +698,14 @@ void lock_numpad_tick(void) {
     }
     const bool open = lock_keys_numpad_open();
     const pad_family_t family = pad_family_current();
-    if (s_up == NULL || s_up_open != open || s_shown_family != family || s_shown_mode != mode) {
+    if (s_up == NULL || s_up_open != open || s_shown_family != family || s_shown_mode != mode ||
+        s_shown_stick != s_stick) {
         take_down();
         s_up = open ? numpad_create(family) : list_create(family, mode);
         s_up_open = open;
         s_shown_family = family;
         s_shown_mode = mode;
+        s_shown_stick = s_stick;
         if (!open) {
             /* Its rows are laid out now, so its foot is known. */
             lv_obj_update_layout(s_up);
@@ -607,7 +746,11 @@ static const char *button_at(lv_coord_t x, lv_coord_t y) {
     const struct {
         lv_obj_t *obj;
         const char *name;
-    } asks[] = {{s_question, "the question"}, {s_hide, "Hide"}, {streaming_stats_pin_shown(), "the stats' pin"}};
+    } asks[] = {{s_question, "the question"},
+                {s_hide, "Hide"},
+                {s_tog_touch, "the Touchpad choice"},
+                {s_tog_stick, "the Stick choice"},
+                {streaming_stats_pin_shown(), "the stats' pin"}};
     for (int i = 0; i < (int) (sizeof asks / sizeof asks[0]); ++i) {
         if (asks[i].obj == NULL) {
             continue;

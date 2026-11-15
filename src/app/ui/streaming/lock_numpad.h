@@ -39,6 +39,10 @@
 /* Once a pass of the app's loop. */
 void lock_numpad_tick(void);
 
+/* The list's Mouse category, from the touchpad's rows to the stick's or back: R3 does it
+ * (stream/input/lock_keys.h), as a click on the choice does. */
+void lock_numpad_mouse_choice_toggle(void);
+
 /* What it shows, for the control port: "off", "open" (the numpad) or "closed" (the
  * list of what the buttons do). */
 const char *lock_numpad_state(void);
@@ -53,7 +57,8 @@ bool lock_numpad_hide_up(void);
 /* Is the question a close raises up? For the control port. */
 bool lock_numpad_question_up(void);
 
-/* Is this point of the screen on what asks to be clicked: Close, or the question (all
+/* Is this point of the screen on what asks to be clicked: Hide, the Mouse category's two
+ * choices (the Touchpad's and the Stick's), or the question (all
  * of it, so a click on its words reaches nothing behind)? For the touchpad's click in a
  * stream, which only Aurora's own pointer can bring there (input/touchpad_pointer.h),
  * and a mouse's (lock_numpad_mouse_takes). */

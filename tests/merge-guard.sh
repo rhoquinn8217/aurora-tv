@@ -583,6 +583,17 @@ need "a two-finger tap's right click on Aurora's button is not the host's" \
      src/app/stream/input/session_gamepad.c "if (mouse_button == BUTTON_RIGHT && touchpad_pointer_stream_right_tap()) { return; }"
 need "... nor a trigger's right press there" \
      src/app/stream/input/session_virt_mouse.c "if (!touchpad_pointer_stream_press(&s_right_auroras, false, rdown)) {"
+# --- The legend's categories, its Touchpad | Stick choice and the sticks' marks (rhoquinn8217, 2026-11-14) ---
+# Losing the first compiles, and the legend is one long list again; losing the second, and
+# a click on the choice clicks the PC behind it; losing the third, and the sticks have no marks.
+need "the legend's Mouse category has its Touchpad | Stick choice" \
+     src/app/ui/streaming/lock_numpad.c "toggle_create(mouse_head);"
+need "... a click on either half is Aurora's alone" \
+     src/app/ui/streaming/lock_numpad.c "{s_tog_stick, \"the Stick choice\"}"
+need "the sticks are drawn" \
+     src/app/ui/common/pad_marks.c "draw_stick_press(&pen, mark, family);"
+need "R3 switches the Mouse category's choice" \
+     src/app/stream/input/lock_keys.c "lock_numpad_mouse_choice_toggle();"
 # --- PS and the Xbox button to Windows, the list by a two-finger press or Share (rhoquinn8217, 2026-11-13) ---
 # Losing the first compiles, and a two-finger press right-clicks again; losing the second
 # compiles, and a bridged pad's PS button is held from the PC again.
