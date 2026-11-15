@@ -52,8 +52,8 @@ to bridge controllers.
 **Set up rhoquinn8217/aurora-tv**
 
 1. Set up your streaming host ([Vibepollo](https://github.com/Nonary/Vibepollo), [Vibeshine](https://github.com/Nonary/vibeshine), [Apollo](https://github.com/ClassicOldSong/Apollo) or [Sunshine](https://github.com/LizardByte/Sunshine)).
-2. Download the rhoquinn8217/aurora-tv client `.ipk` from the [releases page](https://github.com/rhoquinn8217/aurora-tv/releases) and [install it on your webOS TV/monitor](https://www.webosbrew.org/devmode/).
-3. Open rhoquinn8217/aurora-tv on your webOS TV then [pair and confirm your pin with your streaming host](https://github.com/moonlight-stream/moonlight-docs/wiki/Setup-Guide).
+2. Download the rhoquinn8217/aurora-tv client `.ipk` from the [releases page](https://github.com/rhoquinn8217/aurora-tv/releases) and [install it on your webOS TV/monitor](https://www.reddit.com/r/MoonlightStreaming/comments/1s1cfb7/lg_tv_4k_120_fps_hdr_tutorial/).
+3. Open rhoquinn8217/aurora-tv on your webOS TV then [pair and confirm your pin with your streaming host](https://www.joeysretrohandhelds.com/guides/vibepollo-setup-guide/).
 
 **Stream, bridge and play**
 
