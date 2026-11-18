@@ -91,7 +91,11 @@ typedef struct {
 
 static bool s_ready = false;           /* the cursor is Aurora's */
 static double s_scale = 1.0;           /* how much the TV enlarges the app */
+#if defined(AURORA_SHARP_CURSOR)
 static int s_look = LOOK_DROP;         /* which cursor shows */
+#else
+static int s_look = LOOK_REGULAR;      /* the only one in a build people download (tv_cursor.h) */
+#endif
 static shift_t s_shift[2];             /* each cursor's shift that stands, right and down */
 static int s_thin = TV_CURSOR_THIN;
 static SDL_Surface *s_regular = NULL;  /* webOS's picture, as read */
@@ -129,6 +133,10 @@ void tv_cursor_log(const char *fmt, ...) {
     fputc('\n', f);
     fclose(f);
 }
+
+#if defined(AURORA_SHARP_CURSOR)
+/* ⓘ The drop's drawing, down to draw_drop, is in a test build alone
+ * (tv_cursor.h). */
 
 /* How far q is from the segment a-b. */
 static double seg_dist(double qx, double qy, double ax, double ay, double bx, double by) {
@@ -199,6 +207,7 @@ static SDL_Surface *draw_drop(double width) {
     SDL_UnlockSurface(s);
     return s;
 }
+#endif /* AURORA_SHARP_CURSOR */
 
 /* ⭐ SMALLER, BY AS MUCH AS THE TV ENLARGES AURORA (rhoquinn8217, 2026-10-11,
  * on the first try: "make it smaller and sharper"). An app's cursor is
@@ -436,11 +445,15 @@ static bool build(void) {
             return false;
         }
     } else {
+#if defined(AURORA_SHARP_CURSOR)
         picture = draw_drop(width);
         if (picture == NULL) {
             tv_cursor_log("the drop could not be drawn (%s)", SDL_GetError());
             return false;
         }
+#else
+        return false;   /* no drop in a build people download: the look is always the regular one */
+#endif
     }
     /* The picture placed the shift over in a clear canvas, the hot spot where
      * its tip was before the shift. */
@@ -551,7 +564,11 @@ void tv_cursor_init(SDL_Window *window) {
         s_shift[LOOK_DROP].y = clamp_shift(saved->tv_cursor_y);
         s_shift[LOOK_REGULAR].x = clamp_shift(saved->tv_cursor_regular_x);
         s_shift[LOOK_REGULAR].y = clamp_shift(saved->tv_cursor_regular_y);
+#if defined(AURORA_SHARP_CURSOR)
         s_look = saved->tv_cursor_regular ? LOOK_REGULAR : LOOK_DROP;
+#endif
+        /* ⓘ In a build without AURORA_SHARP_CURSOR the saved look is not
+         * read: the regular cursor shows, whatever it says (tv_cursor.h). */
     }
     /* How much the TV enlarges Aurora: the panel against the window. */
     int win_w = 0, win_h = 0, panel_w = 0, panel_h = 0;
@@ -564,8 +581,13 @@ void tv_cursor_init(SDL_Window *window) {
     tv_cursor_log("the %s for a window %dx%d on a %dx%d panel, shrunk %.2f times",
                   s_look == LOOK_REGULAR ? "regular cursor" : "drop", win_w, win_h, panel_w, panel_h, s_scale);
     if (s_look == LOOK_REGULAR && !load_regular()) {
+#if defined(AURORA_SHARP_CURSOR)
         tv_cursor_log("the regular cursor cannot be shown: the drop instead, this run");
         s_look = LOOK_DROP;
+#else
+        tv_cursor_log("the regular cursor cannot be shown: webOS's own pointer stays");
+        return;
+#endif
     }
     if (!build()) {
         tv_cursor_log("webOS's own pointer stays");
@@ -666,6 +688,7 @@ bool tv_cursor_regular(void) {
     return s_look == LOOK_REGULAR;
 }
 
+#if defined(AURORA_SHARP_CURSOR)
 bool tv_cursor_set_look(bool regular) {
     if (regular && !load_regular()) {
         tv_cursor_log("the regular cursor cannot be shown: the %s stays",
@@ -690,6 +713,7 @@ bool tv_cursor_set_look(bool regular) {
 bool tv_cursor_toggle_look(void) {
     return tv_cursor_set_look(s_look != LOOK_REGULAR);
 }
+#endif /* AURORA_SHARP_CURSOR */
 
 void tv_cursor_describe(char *out, size_t len) {
     const char *mode = tv_cursor_mode_on() ? "on" : (tv_cursor_mode_switchable() ? "off" : "off(hardware-mouse)");
@@ -772,6 +796,7 @@ bool tv_cursor_regular(void) {
     return false;
 }
 
+#if defined(AURORA_SHARP_CURSOR)
 bool tv_cursor_set_look(bool regular) {
     (void) regular;
     return false;
@@ -780,6 +805,7 @@ bool tv_cursor_set_look(bool regular) {
 bool tv_cursor_toggle_look(void) {
     return false;
 }
+#endif
 
 void tv_cursor_describe(char *out, size_t len) {
     snprintf(out, len, "tv_cursor=%s, not on webOS", tv_cursor_mode_on() ? "on" : "off");

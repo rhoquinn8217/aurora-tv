@@ -151,7 +151,9 @@ typedef struct bridge_settings_t {
     int tv_cursor_y;
     /* ⭐ WHICH TV CURSOR SHOWS: false, the drop Aurora draws; true, the regular
      * one, webOS's own picture (rhoquinn8217, 2026-10-12). Switched by
-     * Ctrl+Alt+Shift+C and kept, as the TV cursor's on and off are. */
+     * Ctrl+Alt+Shift+C and kept, as the TV cursor's on and off are. ⓘ A build
+     * people download has the regular one alone: it does not read this, and
+     * leaves it in the file as it is (input/tv_cursor.h). */
     bool tv_cursor_regular;
     /* Where the regular one draws its tip, kept apart from the drop's ("The
      * regular cursor should be adjustable as well", and one alignment per

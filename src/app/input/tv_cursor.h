@@ -35,6 +35,18 @@
  * is kept as the on and off are. ⓘ C is upstream's "show the mouse", which
  * does nothing else in this app, and the host answers only N and F1 to F13.
  *
+ * ⭐⭐ THE DROP IS IN TEST BUILDS ONLY (rhoquinn8217, 2026-11-17: "handle sharp
+ * cursor only in development like port controls. Remove sharp cursor feature
+ * on release builds"): kept for them, not shipped, as it could fail on TVs
+ * nobody here can test. AURORA_SHARP_CURSOR comes with the command port
+ * (src/app/ctmbridge/app_sources.cmake). Without it, in a build people
+ * download, the regular cursor is the only one: a saved "sharp" is ignored
+ * and left in the file as it is, and where the regular cursor cannot be made,
+ * webOS's own pointer stays. Ctrl+Alt+Shift+C is upstream's again there: a
+ * log line on the TV's own keyboard, the host's keys on a bridged one. ⓘ The
+ * on and off (Ctrl+Alt+Shift+M) and the align bar (Ctrl+Alt+Shift+A) are the
+ * same in both builds.
+ *
  * ⓘ An SDL that refuses the cursor keeps webOS's own pointer, and
  * logs/tv-cursor.log says so. */
 
@@ -78,15 +90,17 @@ void tv_cursor_get_shift(int *shift_x, int *shift_y);
 bool tv_cursor_keep(void);
 
 /* Which cursor shows: true for the regular one, webOS's own picture; false for
- * the drop Aurora draws. */
+ * the drop Aurora draws. Always true in a build without AURORA_SHARP_CURSOR. */
 bool tv_cursor_regular(void);
 
+#if defined(AURORA_SHARP_CURSOR)
 /* Show the regular cursor or the drop, with its own shift, and keep the choice
  * at once. False when that cursor cannot be made, and the one that stood
  * stays. ⓘ From Ctrl+Alt+Shift+C on every keyboard, and from the control port
- * (`cursor regular`, `cursor sharp`). */
+ * (`cursor regular`, `cursor sharp`). Test builds only (see the top). */
 bool tv_cursor_set_look(bool regular);
 bool tv_cursor_toggle_look(void);
+#endif
 
 /* The cursor's picture as it shows now, red, green, blue and alpha bytes, and
  * its hot spot in it, as SDL has it: the point it stands for, with the tip
