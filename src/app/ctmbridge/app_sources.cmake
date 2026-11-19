@@ -72,4 +72,11 @@ target_link_libraries(moonlight-lib PRIVATE ${MBEDX509_LIBRARY} ${MBEDCRYPTO_LIB
 option(AURORA_TERMINAL_CONTROL "Listen on 127.0.0.1 for commands from a terminal on the TV" ON)
 if (AURORA_TERMINAL_CONTROL)
     target_compile_definitions(moonlight-lib PUBLIC AURORA_TERMINAL_CONTROL=1)
+    # ⭐ The sharp TV cursor goes with the port (2026-11-17): rhoquinn8217 keeps
+    # it for test builds and does not ship it, as it could fail on TVs nobody
+    # here can test. A build people download shows the TV's regular cursor
+    # alone, has no Ctrl+Alt+Shift+C to switch to the sharp one and ignores a
+    # saved "sharp" (src/app/input/tv_cursor.h). ⓘ One switch for both, so a
+    # release build cannot leave either of them on.
+    target_compile_definitions(moonlight-lib PUBLIC AURORA_SHARP_CURSOR=1)
 endif ()
