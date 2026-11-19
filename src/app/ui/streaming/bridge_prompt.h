@@ -107,6 +107,11 @@ void bridge_prompt_say_desktop_on(void);
  * message (above). Nothing outside a stream or while a pop-up is up. */
 void bridge_prompt_say_ds5usbip_stopped(void);
 
+/* The loop's fail-safe tripped (input/auto_bridge.h): said in the place of the fourth
+ * "DS5-USBIP has stopped" in a row, as Auto Bridge turns off until the stream ends.
+ * Nothing outside a stream or while a pop-up is up. */
+void bridge_prompt_say_auto_bridge_off(void);
+
 /* For the control port: the pop-up's words, "" when it is not up. */
 const char *bridge_prompt_words(void);
 
