@@ -5,13 +5,11 @@
 ![transport](https://img.shields.io/badge/transport-USB%2FIP-2ea44f)
 ![fork of GuiDev1994/aurora-tv](https://img.shields.io/badge/fork%20of-GuiDev1994%2Faurora--tv-lightgrey)
 
-> **NOTICE:** If you want to use a DualSense with audio-based rumble on your
-> webOS TV, [GuiDev1994's aurora-tv](https://github.com/GuiDev1994/aurora-tv)
-> and [Vibepollo](https://github.com/Nonary/Vibepollo) already support it and
-> will likely support speaker audio eventually. This fork and
-> [DS5-USBIP](https://github.com/rhoquinn8217/DS5-USBIP) already have both, with
-> DS5-USBIP working alongside Vibepollo, however controllers require a bridging
-> step which can mostly be automated.
+> **NOTICE:** Vibepollo can send a DualSense's audio-based rumble to clients
+> built for it, but none of them runs on webOS. This fork and
+> [DS5-USBIP](https://github.com/rhoquinn8217/DS5-USBIP) carry audio-based rumble
+> and speaker audio from a webOS TV, with DS5-USBIP working alongside Vibepollo.
+> Controllers need a bridging step, which can mostly be automated.
 
 This fork of aurora-tv carries a modified version of [ciprianmisaila's
 ctm-bridge-webos](https://github.com/CTM-Bridge/ctm-bridge-webos) controller
@@ -99,7 +97,7 @@ Located at **Settings (⚙️) → USB Bridge**.
 | **DualSense and DS4 audio over the TV's USB port** | A wired DualSense presents a sound card to webOS alongside its input device. This fork works out which card belongs to which controller, opens it, and carries the speaker and rumble audio out and the microphone in beside the input reports. More than one wired controller can be bridged at a time, each holding its own card. Speaker and headset audio features are also supported for the later version of the DS4 (CUH-ZCT2) connected via USB. |
 | **DualSense Edge support** | An Edge's reports are shaped exactly like a DualSense's, so it shares the same handling rather than duplicating it. What it needed was its own identity: it is claimed as an Edge rather than folded into the DualSense, and reported as one, which is what lets DS5-USBIP rebuild it with the Edge's own descriptor. |
 | **DS5Dongle support** | A [DS5Dongle](https://github.com/awalol/DS5Dongle) presents over USB as the controller you've paired it to, so it uses the USB path like a wired pad. Identity comes from the controller's MAC address rather than the adapter's serial number, so when set to auto bridge, the app sees the same controller whether it's connected via Bluetooth, USB or with the DS5Dongle. |
-| **DS4Dongle support** | A [DS4Dongle](https://github.com/snipem/DS4Dongle) presents the DS4 paired to it as a wired DS4 (CUH-ZCT2), so either model of DS4 uses the USB path with speaker and headset audio. Identity comes from the controller's MAC address, so when set to auto bridge, the app sees the same controller whether it's connected via Bluetooth or with the DS4Dongle. To use the speaker without a headset plugged in, set `audio_follow_jack=0` with the [DS4Dongle's config tool](https://github.com/snipem/DS4Dongle#configuring). |
+| **DS4Dongle support** | A [DS4Dongle](https://github.com/snipem/DS4Dongle) presents the DS4 paired to it as a wired DS4 (CUH-ZCT2), so either model of DS4 uses the USB path with speaker and headset audio. Identity comes from the controller's MAC address, so when set to auto bridge, the app sees the same controller whether it's connected via Bluetooth or with the DS4Dongle. Audio plays through the headset or the speaker without extra setup. |
 | **Easier bridging** | The original bridging panel is replaced by the USB Bridge panel, which presents a simple list of connected devices with quick bridge and release controls. Per DualSense settings for audio mode, headset and speaker volume, latency and haptics gain have moved to the DS5-USBIP config, and a DS5-USBIP button in the streaming overlay opens the **Controller Configs** window on the host for whichever device is bridged. |
 | **Auto bridge control** | New setting allows you to select specific devices or all devices to auto bridge on stream start. |
 | **DualSense and DS4 bridge gesture** | DualSense and DS4 only: a two finger press and hold on the DualSense or DS4 touchpad. One second for quick bridging, four seconds for releasing, without opening the USB Bridge panel. |
@@ -112,7 +110,7 @@ Located at **Settings (⚙️) → USB Bridge**.
 | **Streaming menu** | Vibepollo's host controls (Resume, Terminate, Remote Input, Remote Monitor) leave the game grid for one **Streaming** button in the launcher's top bar, which also says what is streaming. Terminate asks first. |
 | **Global DualSense and DS4 touchpad as mouse** | Use DualSense or DS4 touchpad as mouse in Dashboard and Streaming Overlay. |
 | **Volume controls** | Control webOS volume with right controller stick in the app dashboard and streaming overlay.<br>• **R-stick up**: volume up<br>• **R-stick down**: volume down<br>• **R-stick press**: mute/unmute |
-| **In-stream cursor options** | • **Ctrl+Alt+Shift+M**: Turns the TV's cursor on or off; off is for games where the mouse moves past the edge of the screen.<br>• **Ctrl+Alt+Shift+C**: Switches between Aurora's small, sharp cursor and the TV's regular one.<br>• **Ctrl+Alt+Shift+A**: Opens manual cursor alignment that you control with a controller d-pad or keyboard arrow keys. |
+| **In-stream cursor options** | • **Ctrl+Alt+Shift+M**: Turns the TV's cursor on or off; off is for games where the mouse moves past the edge of the screen.<br>• **Ctrl+Alt+Shift+A**: Opens manual cursor alignment that you control with a controller d-pad or keyboard arrow keys. |
 | **Bluetooth Devices panel** | A more convenient way to manage Bluetooth devices than webOS's buried Bluetooth menu. |
 | **Cancel pairing and connecting** | Connecting and PIN pairing processes can be cancelled mid run. |
 | **Windows Sign In controller rebinds** | If DS5-USBIP has started on the host while your Windows system is locked, aurora-tv will know to provide special controller functionality and present it over the stream so you can sign in without keyboard, mouse or remote. |
