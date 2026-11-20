@@ -544,6 +544,16 @@ void bridge_prompt_say_ds5usbip_stopped(void) {
     bridge_prompt_note(locstr("DS5-USBIP has stopped. All bridged devices have been released."));
 }
 
+/* ⭐ Their words, with "until the next stream" (rhoquinn8217, 2026-11-19: "Auto bridge
+ * disabled to prevent possible bridge/release loop", and yes to saying how it comes back). */
+void bridge_prompt_say_auto_bridge_off(void) {
+    if (global == NULL || global->session == NULL) {
+        return;
+    }
+    commons_log_info("Streaming", "bridge prompt: Auto Bridge off until the next stream, a bridge/release loop");
+    bridge_prompt_note(locstr("Auto Bridge disabled until the next stream to prevent a possible bridge/release loop."));
+}
+
 bool bridge_prompt_shown(void) {
     return s_mbox != NULL;
 }

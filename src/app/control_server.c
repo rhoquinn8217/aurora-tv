@@ -520,6 +520,9 @@ static void cmd_status(control_job_t *job)
     reply(job, " bridge=%s listener=%s protocol=%s agent=\"%s\" core=%s locked=%s uac=%d",
           ctm_bridge_active() ? "running" : "stopped", listener, protocol, agent, bridge_core_commit(),
           ctm_bridge_agent_locked() ? "yes" : "no", (int) ctm_bridge_agent_uac());
+    /* ⓘ Auto Bridge's loop fail-safe (input/auto_bridge.h): `off` once it has tripped, until
+     * the stream ends, and DS5-USBIP's quick stops in a row so far. */
+    reply(job, " ab_loop=%s ab_stops=%d", auto_bridge_off_for_loop() ? "off" : "on", auto_bridge_quick_stops());
 #endif
     reply(job, "\n");
 }

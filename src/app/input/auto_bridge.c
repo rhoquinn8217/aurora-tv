@@ -493,6 +493,8 @@ int auto_bridge_run(const bridge_settings_t *s)
 #define AB_SDL_WAIT_MS    6000   /* the longest a controller waits for SDL to open it */
 #define AB_APPEARED_MAX     16
 #define AB_WAITING_MAX       8
+#define AB_LOOP_STOPS        3   /* quick stops of DS5-USBIP said as usual; the next turns Auto Bridge off */
+#define AB_LOOP_HOLD_MS  30000   /* a bridge that held this long ends a run of quick stops */
 
 static SDL_atomic_t s_start_armed;      /* set by a stream's start, from its thread */
 static uint32_t s_start_since;          /* when the loop first saw it armed */
@@ -504,6 +506,9 @@ static bool s_streaming;                /* the loop's own view: a stream, with b
 static uint32_t s_lost_since;           /* when the loop first saw what DS5-USBIP dropped */
 static uint32_t s_lost_looked;          /* when it last looked to bridge that again */
 static bool s_appeared_said;            /* arrivals waiting for DS5-USBIP are in the log */
+static int s_loop_stops;                /* DS5-USBIP's stops in a row, each soon after Auto Bridge bridged */
+static uint32_t s_loop_bridged_at;      /* when Auto Bridge last asked for a bridge, 0 for not yet */
+static bool s_loop_off;                 /* the fail-safe: Auto Bridge off until the stream ends */
 
 /* Nodes that appeared during the stream and have not been looked at. */
 static char s_appeared[AB_APPEARED_MAX][64];
@@ -546,6 +551,23 @@ static void ab_forget(void)
     s_appeared_count = 0;
     s_waiting_count = 0;
     s_appeared_said = false;
+}
+
+/* Auto Bridge has just asked for a bridge: DS5-USBIP stopping soon after counts toward
+ * the loop's fail-safe. */
+static void ab_loop_bridged(uint32_t now)
+{
+    s_loop_bridged_at = now != 0 ? now : 1;
+}
+
+bool auto_bridge_off_for_loop(void)
+{
+    return s_loop_off;
+}
+
+int auto_bridge_quick_stops(void)
+{
+    return s_loop_stops;
 }
 
 static bool ab_appeared(const char *node)
@@ -684,6 +706,9 @@ static void ab_look(uint32_t now)
             asked++;
         }
     }
+    if (asked > 0) {
+        ab_loop_bridged(now);
+    }
     ctm_bridge_gesture_note("auto bridge: looked at %d device(s) for %d new node(s) in %u ms; asked %d, "
                             "%d waiting for SDL",
                             count, s_appeared_count, (unsigned) took, asked, s_waiting_count);
@@ -732,6 +757,9 @@ static bool ab_take_back(uint32_t waited)
     if (!again) {
         ctm_bridge_lost_forget();
     }
+    if (asked > 0) {
+        ab_loop_bridged(SDL_GetTicks());
+    }
     if (asked > 0 || !again) {
         ctm_bridge_gesture_note("auto bridge: DS5-USBIP answered %u ms after it stopped; asked for %d part(s) "
                                 "again%s", (unsigned) waited, asked, again ? ", one still releasing" : "");
@@ -758,6 +786,13 @@ void auto_bridge_poll(bool streaming)
         s_start_since = 0;
         s_lost_since = 0;
         s_after_sign_in = false;
+        /* The fail-safe lasts until the stream ends: the next one starts with Auto Bridge on. */
+        if (s_loop_off) {
+            s_loop_off = false;
+            ctm_bridge_gesture_note("auto bridge: on again -- the stream it was turned off in has ended");
+        }
+        s_loop_stops = 0;
+        s_loop_bridged_at = 0;
         return;   /* ⓘ Armed stays armed: only the stream's stop disarms it */
     }
     if (!s_streaming) {
@@ -802,12 +837,28 @@ void auto_bridge_poll(bool streaming)
         ab_forget();   /* what connected meanwhile, this run takes */
         ab_handover_begin(now, "DS5-USBIP answered at the stream's start");
         const int n = auto_bridge_run(&app_configuration->bridge);
+        if (n > 0) {
+            ab_loop_bridged(now);
+        }
         ctm_bridge_gesture_note("auto bridge at the stream's start: asked for %d part(s), DS5-USBIP "
                                 "answered after %u ms", n, (unsigned) waited);
         return;
     }
 
     s_after_sign_in = false;   /* only a stream's start, or a refused bridge's, waits for the sign in */
+
+    /* ⭐⭐ THE LOOP'S FAIL-SAFE, TRIPPED (rhoquinn8217, 2026-11-19; counted in 1b below).
+     * Until the stream ends Auto Bridge takes nothing: not what DS5-USBIP drops, not what
+     * connects. A bridge by hand still works, and the setting is left as it is. */
+    if (s_loop_off) {
+        if (ctm_bridge_lost_pending()) {
+            ctm_bridge_lost_forget();
+            ctm_bridge_gesture_note("auto bridge: off until the stream ends -- what DS5-USBIP dropped stays "
+                                    "with the TV");
+        }
+        ab_forget();
+        return;
+    }
 
     /* ⭐ 1b. WHAT DS5-USBIP DROPPED, BRIDGED AGAIN ONCE IT ANSWERS (rhoquinn8217,
      * 2026-11-05: "Can aurora-tv trigger autobridge when the DS5-USBIP is detected
@@ -819,10 +870,38 @@ void auto_bridge_poll(bool streaming)
      * hand: only what the PC dropped is on that list. */
     if (ctm_bridge_lost_pending()) {
         if (s_lost_since == 0) {
+            /* ⭐⭐ THE LOOP'S FAIL-SAFE, COUNTED (rhoquinn8217, 2026-11-19: "if the
+             * 'DS5-USBIP has stopped' happens 3 times a new message comes up the instead
+             * of the 4th time saying that 'Auto bridge disabled to prevent possible
+             * bridge/release loop'"). A fresh PC, 2026-11-18: its DS5-USBIP could not
+             * give Windows any pad (every attach failed), so each bridge ended about four
+             * seconds in, and this took it back two seconds later: every six seconds,
+             * for five minutes, with the tones and this message each time.
+             * ⓘ A stop counts when it comes within 30 s of Auto Bridge's last bridge; a
+             * bridge that held that long ends the run, so DS5-USBIP restarted now and
+             * then over a long stream never turns it off. The stops are counted, not the
+             * messages: a message is not shown while a pop-up is up. */
+            if (s_loop_bridged_at == 0 || now - s_loop_bridged_at >= AB_LOOP_HOLD_MS) {
+                s_loop_stops = 0;
+            }
+            s_loop_stops++;
+            if (s_loop_stops > AB_LOOP_STOPS) {
+                s_loop_off = true;
+                ctm_bridge_lost_forget();
+                ctm_bridge_gesture_note("auto bridge: OFF until the stream ends -- DS5-USBIP stopped %d times in "
+                                        "a row, each within %u s of a bridge: a bridge/release loop; bridging by "
+                                        "hand still works", s_loop_stops, (unsigned) (AB_LOOP_HOLD_MS / 1000));
+                bridge_prompt_say_auto_bridge_off();
+                ab_forget();
+                return;
+            }
             s_lost_since = now;
             s_lost_looked = 0;
             ctm_bridge_gesture_note("auto bridge: DS5-USBIP stopped answering -- what it held bridges again once "
                                     "it answers");
+            ctm_bridge_gesture_note("auto bridge: stop %d in a row within %u s of a bridge (the fail-safe turns "
+                                    "Auto Bridge off at %d)", s_loop_stops, (unsigned) (AB_LOOP_HOLD_MS / 1000),
+                                    AB_LOOP_STOPS + 1);
             /* ⭐ And said on the screen (ui/streaming/bridge_prompt.h): "it should be
              * noticed". */
             bridge_prompt_say_ds5usbip_stopped();
@@ -848,6 +927,7 @@ void auto_bridge_poll(bool streaming)
         ctm_bridge_gesture_note("auto bridge: %s connected -- bridging %s%s", d->name, d->node,
                                 opened ? "" : " (SDL never opened it)");
         (void) bridge_request_device(d);
+        ab_loop_bridged(now);
         s_waiting[i] = s_waiting[s_waiting_count - 1];
         s_waiting_since[i] = s_waiting_since[s_waiting_count - 1];
         s_waiting_count--;

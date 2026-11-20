@@ -122,6 +122,14 @@ void auto_bridge_poll(bool streaming);
  * as it is (ui/streaming/lock_numpad.h). */
 bool auto_bridge_after_sign_in(void);
 
+/* ⭐ THE LOOP'S FAIL-SAFE (rhoquinn8217, 2026-11-19: "we also need fail safe on the TV
+ * side so that if a continous bridge unbridge happens auto bridge turns it self off").
+ * DS5-USBIP stopping again and again, each time soon after Auto Bridge bridged, is a
+ * bridge/release loop: the fourth such stop in a row turns Auto Bridge off until the
+ * stream ends. For the control port: whether it is off, and the stops in a row so far. */
+bool auto_bridge_off_for_loop(void);
+int auto_bridge_quick_stops(void);
+
 #else
 #define auto_bridge_stream_started() ((void) 0)
 #define auto_bridge_stream_stopped() ((void) 0)
