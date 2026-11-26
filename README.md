@@ -35,7 +35,7 @@ to bridge controllers.
 |:---|:---|
 | **DualSense** | Your controller |
 | **Windows** | Your host machine's operating system |
-| **Moonlight-compatible host** | Streaming software on that Windows machine:<br>[Sunshine](https://github.com/LizardByte/Sunshine), [Apollo](https://github.com/ClassicOldSong/Apollo), [Vibepollo](https://github.com/Nonary/Vibepollo), [Vibeshine](https://github.com/Nonary/vibeshine), etc. |
+| **Moonlight-compatible host** | Streaming software on that Windows machine:<br>[Sunshine](https://github.com/LizardByte/Sunshine), [Apollo](https://github.com/ClassicOldSong/Apollo), [Vibepollo](https://github.com/Nonary/Vibepollo), [Vibeshine](https://github.com/Nonary/vibeshine), [Rubylight](https://github.com/RamazanKara/Rubylight), etc. |
 | **[rhoquinn8217/aurora-tv](https://github.com/rhoquinn8217/aurora-tv/releases)** | The streaming client for your webOS TV/monitor |
 
 **Set up DS5-USBIP**
@@ -49,7 +49,7 @@ to bridge controllers.
 
 **Set up rhoquinn8217/aurora-tv**
 
-1. Set up your streaming host ([Vibepollo](https://github.com/Nonary/Vibepollo), [Vibeshine](https://github.com/Nonary/vibeshine), [Apollo](https://github.com/ClassicOldSong/Apollo) or [Sunshine](https://github.com/LizardByte/Sunshine)).
+1. Set up your streaming host ([Vibepollo](https://github.com/Nonary/Vibepollo), [Rubylight](https://github.com/RamazanKara/Rubylight), [Vibeshine](https://github.com/Nonary/vibeshine), [Apollo](https://github.com/ClassicOldSong/Apollo) or [Sunshine](https://github.com/LizardByte/Sunshine)).
 2. Download the rhoquinn8217/aurora-tv client `.ipk` from the [releases page](https://github.com/rhoquinn8217/aurora-tv/releases) and [install it on your webOS TV/monitor](https://www.reddit.com/r/MoonlightStreaming/comments/1s1cfb7/lg_tv_4k_120_fps_hdr_tutorial/).
 3. Open rhoquinn8217/aurora-tv on your webOS TV then [pair and confirm your pin with your streaming host](https://www.joeysretrohandhelds.com/guides/vibepollo-setup-guide/).
 
